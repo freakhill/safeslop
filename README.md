@@ -495,6 +495,64 @@ For project dependencies:
 
 ## How-to
 
+### Unified isolation config
+
+`slop-isolate` compiles a single CUE policy to per-tool configs (sandbox-exec, docker-compose, squid, envoy + coredns + notifier, lulu, pf, claude-code-settings, opencode-settings, ag2-executor, tart, orbstack). Ten presets ship: `any-agent`, `claude-code`, `opencode`, `crewai`, `pydantic-ai`, `ag2`, `openclaw`, `zeroclaw`, `nous-hermes-local`, `nous-hermes-remote`. Authors keep one `isolation.cue`; the compiler emits the config every adapter actually understands. Where an adapter cannot enforce a primitive (e.g. pf cannot match by domain), the emitted output records the gap as a comment (or fails with `--strict`).
+
+The Envoy adapter additionally compiles a runnable docker-compose stack (envoy + CoreDNS + a notifier sidecar). It runs SNI-only by default, opts into MITM with `--mitm`, surfaces blocked flows as macOS notifications via `terminal-notifier` or `alerter`, and accepts `slop-isolate approve --once` (10-min TTL) or `--always` (logs the approval; user adds it to `extras.allow-domains`).
+
+1. Install dependencies:
+
+```fish
+brew install cue-lang/tap/cue
+brew install --cask terminal-notifier   # optional: macOS deny notifications
+```
+
+2. Pick a preset and validate it:
+
+```fish
+source scripts/slop-isolate.fish
+slop-isolate presets list
+slop-isolate presets show claude-code
+```
+
+3. Author your config (extend a preset via the `extras` struct):
+
+```fish
+cat > .isolation.cue <<'CUE'
+package isolation
+import "slop.dev/isolation/presets"
+isolation: presets.#ClaudeCode & {
+    extras: "allow-domains": ["github.example.internal"]
+    tool: pf: "domain-fallback": "fail"
+}
+CUE
+slop-isolate validate .isolation.cue
+```
+
+4. Compile to one or every adapter:
+
+```fish
+slop-isolate compile .isolation.cue --adapter sandbox-exec --out ./out
+slop-isolate compile .isolation.cue --adapter envoy --out ./out
+slop-isolate compile .isolation.cue   # uses adapters.enabled list
+```
+
+5. Apply (bounded — never touches sudo/pf/lulu):
+
+```fish
+slop-isolate apply .isolation.cue --yes
+```
+
+6. Boot the interactive proxy and approve flows on the fly:
+
+```fish
+slop-isolate proxy start
+slop-isolate approve --once api.example.com
+slop-isolate denials --since 10m
+slop-isolate proxy stop
+```
+
 ### How to run any agent behind Docker + URL allowlist proxy
 
 1. Create stack files from this repo:

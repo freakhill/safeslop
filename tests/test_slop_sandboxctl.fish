@@ -35,6 +35,7 @@ function test_list_subcommand
     assert_status "slop-sandboxctl list status" $rc 0
     assert_contains "slop-sandboxctl list shows docker mapping" "$out" "slop-agent-sandbox.fish"
     assert_contains "slop-sandboxctl list shows pinning mapping" "$out" "slop-pinning.fish"
+    assert_contains "slop-sandboxctl list shows isolate mapping" "$out" "slop-isolate.fish"
 end
 
 function test_tutorial_known_topic
