@@ -204,15 +204,23 @@ function slop-agent-sandbox-tools --description "Run commands in tool-preinstall
 
     switch "$cmd"
         case run
-            __agent_sandbox_tools_compose_cmd "$policy" build agent-tools
+            # Build BOTH services: Dockerfile.agent.tools starts with
+            # `FROM local/agent-sandbox:latest`, so the base image (built
+            # by the `agent` service) must exist before `agent-tools`
+            # can build. `docker compose build` does not auto-walk the
+            # FROM-dependency chain, so listing both services explicitly
+            # is the cheap, correct fix. Without this the user gets a
+            # confusing "pull access denied for local/agent-sandbox" from
+            # docker, as if it were a registry-auth issue.
+            __agent_sandbox_tools_compose_cmd "$policy" build agent agent-tools
             and __agent_sandbox_tools_compose_cmd "$policy" up -d proxy
             and __agent_sandbox_tools_compose_cmd "$policy" run --rm agent-tools $argv
         case shell
-            __agent_sandbox_tools_compose_cmd "$policy" build agent-tools
+            __agent_sandbox_tools_compose_cmd "$policy" build agent agent-tools
             and __agent_sandbox_tools_compose_cmd "$policy" up -d proxy
             and __agent_sandbox_tools_compose_cmd "$policy" run --rm agent-tools
         case up
-            __agent_sandbox_tools_compose_cmd "$policy" build agent-tools
+            __agent_sandbox_tools_compose_cmd "$policy" build agent agent-tools
             and __agent_sandbox_tools_compose_cmd "$policy" up -d proxy
         case down
             __agent_sandbox_tools_compose_cmd "$policy" down

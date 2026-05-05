@@ -58,6 +58,46 @@ function test_help_advertises_tui_and_examples
     assert_contains "slop-agent-sandbox-tools help mentions Examples" "$out" "Examples"
 end
 
+function test_build_includes_base_agent_for_from_dependency
+    # Regression: Dockerfile.agent.tools begins with
+    #   FROM local/agent-sandbox:latest
+    # so the `agent` service (which produces that tag) must be built
+    # before `agent-tools`. `docker compose build` does NOT walk the
+    # FROM-dependency chain across services, so building only
+    # `agent-tools` failed with a confusing "pull access denied" from
+    # docker.io as if it were a registry-auth issue. Fix is to list both
+    # services in every build invocation. Static check: every `compose_cmd
+    # ... build` line in the script must build `agent` alongside
+    # `agent-tools`, never `agent-tools` alone.
+    set -l content (cat "$SCRIPT")
+    # Catch any line of the form `compose_cmd ... build agent-tools` that
+    # is NOT also building `agent`. Use grep -E so the pattern is readable.
+    set -l bad (grep -nE 'compose_cmd .* build agent-tools$' "$SCRIPT")
+    if test -n "$bad"
+        __test_record_fail "every build includes the base 'agent' service" \
+            "lone agent-tools build: $bad"
+        return
+    end
+    __test_record_pass "every build includes the base 'agent' service"
+    # Sanity check: the rewritten lines explicitly mention both services.
+    set -l count (grep -cE 'compose_cmd .* build agent agent-tools' "$SCRIPT")
+    if test "$count" -lt 3
+        __test_record_fail "build agent agent-tools appears for run/shell/up" \
+            "expected ≥3 occurrences, got $count"
+    else
+        __test_record_pass "build agent agent-tools appears for run/shell/up"
+    end
+    # Confirm Dockerfile.agent.tools really has the FROM-dep — if someone
+    # rewrites it to a plain alpine base, this test becomes meaningless
+    # and should be removed.
+    set -l df "$REPO_ROOT/examples/Dockerfile.agent.tools"
+    if test -f "$df"
+        set -l dfc (cat "$df")
+        assert_contains "Dockerfile.agent.tools still depends on local/agent-sandbox" \
+            "$dfc" "FROM local/agent-sandbox"
+    end
+end
+
 function test_tui_without_gum_prints_install_hint
     set -l tmp (mk_tmpdir)
     mkdir -p "$tmp/bin"
