@@ -93,4 +93,13 @@ if test (count $argv) -gt 0
 end
 
 __slop_require_uv; or exit 1
+
+# UV_NATIVE_TLS=1 makes uv use the OS trust store instead of its bundled
+# rustls. Without it, uv fails on machines behind a TLS-intercepting proxy
+# (Cloudflare WARP, Zscaler, corporate MITM) with "invalid peer certificate:
+# UnknownIssuer" when fetching Textual on first run.
+if not set -q UV_NATIVE_TLS
+    set -gx UV_NATIVE_TLS 1
+end
+
 exec uv run --script "$SLOP_TUI_PY"

@@ -91,4 +91,13 @@ function test_python_tui_has_pep723_textual_pin
     assert_contains "slop_tui.py pins textual" "$content" "textual"
 end
 
+function test_wrapper_sets_uv_native_tls
+    # uv's bundled rustls fails on machines behind a TLS-intercepting proxy
+    # (Cloudflare/Zscaler/corporate MITM) when fetching Textual on first run.
+    # The wrapper must opt into the OS trust store via UV_NATIVE_TLS so the
+    # first-run install does not bounce on UnknownIssuer.
+    set -l content (cat "$SCRIPT")
+    assert_contains "slop.fish enables UV_NATIVE_TLS" "$content" "UV_NATIVE_TLS"
+end
+
 run_tests_in_file (basename (status filename))
