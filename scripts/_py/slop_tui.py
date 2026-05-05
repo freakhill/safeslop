@@ -411,8 +411,51 @@ def build_brew_vm_actions() -> list[Action]:
     ]
 
 
+def build_agent_launcher_actions() -> list[Action]:
+    """Launch Claude Code / OpenCode with the repo's bundled defaults
+    applied. The fish helper resolves which settings file wins (cwd >
+    repo root > user-level) and cd's there before exec'ing the agent
+    binary, so the agent's own per-project precedence does the rest.
+    Container-side launches stay under slop-agent-sandbox-tools — these
+    actions are for the host."""
+    return [
+        Action(
+            key="c",
+            label="Launch Claude Code (apply defaults if no override)",
+            fish_tool="slop-agents",
+            fish_sub=["claude"],
+            equivalent_cli="slop-agents claude",
+        ),
+        Action(
+            key="o",
+            label="Launch OpenCode (apply defaults if no override)",
+            fish_tool="slop-agents",
+            fish_sub=["opencode"],
+            equivalent_cli="slop-agents opencode",
+        ),
+        Action(
+            key="s",
+            label="Seed default settings into repo root (claude + opencode)",
+            fish_tool="slop-agents",
+            fish_sub=["seed", "all"],
+            equivalent_cli="slop-agents seed all",
+            confirm=(
+                "Write .claude/settings.json and opencode.json at the repo root?",
+                True,
+            ),
+        ),
+    ]
+
+
 def build_top_actions() -> list[Action]:
     return [
+        Action(
+            key="a",
+            label="Agents (Claude Code, OpenCode) — launch with defaults",
+            description="Drop into Claude Code or OpenCode in the right cwd, with the repo's bundled defaults applied if no per-project override is present.",
+            submenu=build_agent_launcher_actions(),
+            equivalent_cli="(Agent launcher sub-menu)",
+        ),
         Action(
             key="g",
             label="GitHub deploy keys (here = current repo)",

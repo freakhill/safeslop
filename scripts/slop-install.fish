@@ -25,6 +25,7 @@ set -g __ift_snippet_basename "agentic_tactical_boots.fish"
 set -g __ift_module_scripts \
     slop-agent-sandbox \
     slop-agent-sandbox-tools \
+    slop-agents \
     slop-macos-sandbox \
     slop-brew-vm \
     slop-gh-key \

@@ -620,6 +620,51 @@ or use hub command:
 scripts/slop-sandboxctl.fish docker-tools shell
 ```
 
+### Launch agents with defaults
+
+`slop-agents` drops you into Claude Code or OpenCode in the right cwd,
+applying the bundled defaults the first time you opt in. The bundled
+JSON is the compile output of the matching CUE presets in
+`examples/isolation/presets/`, mirrored as fixtures.
+
+1. Source the helper:
+
+```fish
+source scripts/slop-agents.fish
+```
+
+2. One-time, write secure defaults to the repo root:
+
+```fish
+slop-agents seed all
+```
+
+3. Drop into Claude Code with those defaults applied:
+
+```fish
+slop-agents claude
+```
+
+4. Drop into OpenCode with those defaults applied:
+
+```fish
+slop-agents opencode
+```
+
+`seed` writes `<repo-root>/.claude/settings.json` and
+`<repo-root>/opencode.json`. It never overwrites an existing override
+file — edit the resulting JSON to take control. Settings precedence,
+first hit wins:
+
+1. `<cwd>/.claude/settings.json` (or `<cwd>/opencode.json`)
+2. `<repo_root>/.claude/settings.json` (or `<repo_root>/opencode.json`)
+3. user-level `~/.claude/settings.json` if present, else nothing
+
+`slop` (the Textual TUI) exposes the same flow under key `a` ("Agents").
+
+For container-side use, drop into the agent-tools shell first and type
+`claude` or `opencode` once inside (`slop-agent-sandbox-tools shell`).
+
 ### How to lock down OpenCode on macOS
 
 1. Use restrictive config:

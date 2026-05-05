@@ -129,7 +129,7 @@ function test_sourced_snippet_exposes_commands
     # snippet. Prior to the slop- rename's tail commit, three modules were
     # named in the install list under their old llm-/safe-uv- aliases and
     # silently skipped because the files no longer exist on disk.
-    for fn in slop-gh-key slop-forgejo-key slop-safe-uv slop-isolate
+    for fn in slop-gh-key slop-forgejo-key slop-safe-uv slop-isolate slop-agents
         set -l body3 "source '$snippet'; functions -q $fn; and echo $fn:OK"
         set -l out3 (command fish -N -c "$body3" 2>&1)
         assert_contains "snippet exposes $fn module function" "$out3" "$fn:OK"
