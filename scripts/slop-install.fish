@@ -27,11 +27,12 @@ set -g __ift_module_scripts \
     slop-agent-sandbox-tools \
     slop-macos-sandbox \
     slop-brew-vm \
-    llm-github-keys \
-    llm-forgejo-keys \
+    slop-gh-key \
+    slop-forgejo-key \
     slop-radicle \
     slop-safe-npm \
-    safe-uv-install
+    slop-safe-uv \
+    slop-isolate
 
 # Standalone scripts: have top-level code that runs immediately, so they
 # cannot be sourced. Each gets a thin wrapper function in the snippet.
@@ -53,6 +54,7 @@ set -g __ift_legacy_bin_cmds \
 
 function __ift_examples
     # BEGIN AUTOGEN: examples section="Install fish command shims"
+    echo '  ./install'
     echo '  scripts/slop-install.fish install'
     echo '  scripts/slop-install.fish install --conf-dir /path/to/conf.d'
     echo '  scripts/slop-install.fish status'

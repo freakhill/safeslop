@@ -1,0 +1,89 @@
+#!/usr/bin/env fish
+
+# One-shot installer for agentic_tactical_boots.
+#
+# Cleans up legacy bin shims from earlier installer revisions, writes the
+# fish conf.d snippet that sources every slop-* command into fresh fish
+# sessions, prints a status summary, and execs into a new fish so the
+# commands are immediately on PATH.
+#
+# Usage:
+#   ./install                  # full install + exec fish
+#   ./install --no-exec        # install without spawning a new shell
+#   ./install --dry-run        # preview without writing anything
+#   ./install --help
+
+set -g repo_root (path resolve (dirname (status filename)))
+set -g do_exec true
+set -g extra_args
+
+for arg in $argv
+    switch "$arg"
+        case --no-exec
+            set do_exec false
+        case --help -h help
+            echo "install — bootstrap agentic_tactical_boots into fish conf.d"
+            echo ""
+            echo "Description:"
+            echo "  Cleans up legacy installs, writes the fish conf.d snippet,"
+            echo "  prints status, then execs a fresh fish so all slop-* commands"
+            echo "  are available without restarting your shell."
+            echo ""
+            echo "Usage:"
+            echo "  ./install                  # full install + exec fish"
+            echo "  ./install --no-exec        # install without spawning a new shell"
+            echo "  ./install --dry-run        # preview, no writes"
+            echo "  ./install --help"
+            echo ""
+            echo "Notes:"
+            echo "  - This is a thin wrapper over scripts/slop-install.fish install."
+            echo "  - Pre-flight checks: fish, uv, cue. Missing uv/cue prints an"
+            echo "    install hint and continues; missing fish stops with an error."
+            echo "  - Re-run any time to refresh the snippet."
+            exit 0
+        case '*'
+            set -a extra_args $arg
+    end
+end
+
+# Pre-flight: fish must be present (we are running on it, so this is mostly
+# defensive — covers users who copy the script around without its shebang).
+if not command -sq fish
+    echo "Error: fish is required but not found on PATH." 1>&2
+    echo "Install: brew install fish    # macOS" 1>&2
+    echo "         apt install fish     # Debian/Ubuntu" 1>&2
+    exit 1
+end
+
+# Pre-flight: uv (used by every Python helper). Warn but continue.
+if not command -sq uv
+    echo "Warning: 'uv' not found. Python helpers (slop-isolate, slop-gh-key) will fail until installed." 1>&2
+    echo "  Install: brew install uv" 1>&2
+end
+
+# Pre-flight: cue (only needed for slop-isolate). Warn but continue.
+if not command -sq cue
+    echo "Warning: 'cue' not found. slop-isolate validate/compile will fail until installed." 1>&2
+    echo "  Install: brew install cue-lang/tap/cue" 1>&2
+end
+
+# Delegate to the inner installer. It handles legacy cleanup and writes
+# the conf.d snippet; passing through --dry-run keeps that opt-in flag
+# working from the bootstrap.
+command fish "$repo_root/scripts/slop-install.fish" install $extra_args
+or exit $status
+
+# Show the resulting status so the user can see the snippet path and any
+# leftover legacy artifacts that are now cleaned up.
+command fish "$repo_root/scripts/slop-install.fish" status
+
+# In dry-run mode there is nothing to load, so do not exec into a new fish.
+if contains -- --dry-run $extra_args
+    exit 0
+end
+
+if test "$do_exec" = "true"
+    echo ""
+    echo "Reloading shell — slop-* commands will be available next prompt."
+    exec fish
+end

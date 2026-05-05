@@ -124,6 +124,16 @@ function test_sourced_snippet_exposes_commands
     set -l body2 "source '$snippet'; functions -q slop-sandboxctl; and echo WRAPPER_OK"
     set -l out2 (command fish -N -c "$body2" 2>&1)
     assert_contains "snippet exposes slop-sandboxctl wrapper" "$out2" "WRAPPER_OK"
+
+    # Regression: every shipped slop-* module function must be exposed by the
+    # snippet. Prior to the slop- rename's tail commit, three modules were
+    # named in the install list under their old llm-/safe-uv- aliases and
+    # silently skipped because the files no longer exist on disk.
+    for fn in slop-gh-key slop-forgejo-key slop-safe-uv slop-isolate
+        set -l body3 "source '$snippet'; functions -q $fn; and echo $fn:OK"
+        set -l out3 (command fish -N -c "$body3" 2>&1)
+        assert_contains "snippet exposes $fn module function" "$out3" "$fn:OK"
+    end
 end
 
 function test_uninstall_removes_managed_snippet

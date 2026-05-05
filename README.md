@@ -41,7 +41,15 @@ slop-gh-key tui                 # per-tool TUI; soft-deps on gum
 
 ## Install fish command shims
 
-Install writes a single fish auto-loaded snippet:
+One-shot install — cleans up legacy artifacts, writes the conf.d snippet, then execs into a fresh fish so every `slop-*` command is immediately on PATH:
+
+```fish
+./install
+```
+
+Variants: `./install --no-exec` (write snippet, do not replace shell), `./install --dry-run` (preview, no writes), `./install --help`. The bootstrap pre-flights `fish`/`uv`/`cue`; missing `uv`/`cue` warn and continue.
+
+Or invoke the inner installer directly (does not exec fish):
 
 ```fish
 scripts/slop-install.fish install
