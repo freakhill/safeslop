@@ -21,19 +21,19 @@ This document defines the assumptions for `scripts/slop-brew-vm.fish`.
 
 ```fish
 source scripts/slop-brew-vm.fish
-slop-brew-vm-create-base
-slop-brew-vm-init
-slop-brew-vm-run brew --version
-slop-brew-vm-destroy
+slop-brew-vm create-base
+slop-brew-vm init
+slop-brew-vm run brew --version
+slop-brew-vm destroy
 ```
 
 If the base image does not include Homebrew, install it once in the base template:
 
 ```fish
 source scripts/slop-brew-vm.fish
-slop-brew-vm-init
-slop-brew-vm-run /bin/bash -lc 'NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
-slop-brew-vm-run brew --version
+slop-brew-vm init
+slop-brew-vm run /bin/bash -lc 'NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+slop-brew-vm run brew --version
 ```
 
 Then stop the VM, keep it as your trusted base template, and run disposable clones for each suspicious formula evaluation.

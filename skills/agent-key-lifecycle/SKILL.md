@@ -131,5 +131,5 @@ If you change key/identity script behavior, update in the same task:
 - this skill file
 - any other affected skill under `skills/*/SKILL.md`
 - `skills/README.md` when installation/usage guidance changes
-- `tests/test_llm_*.fish` and `tests/test_py_helpers.fish` for changed argv or error paths
+- `tests/test_slop_gh_key.fish`, `tests/test_slop_forgejo_key.fish`, `tests/test_slop_radicle.fish`, and `tests/test_py_helpers.fish` for changed argv or error paths
 - `scripts/_py/llm_*.py` if the JSON / state / datetime contract changes (and never reintroduce bare `python3` — keep things uv-managed)

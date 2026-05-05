@@ -6,9 +6,10 @@ Thanks for contributing.
 
 Before editing code or docs, read:
 
-1. `agents.md`
+1. `AGENTS.md`
 2. `scripts/CONVENTIONS.md`
 3. `README.md`
+4. `CLAUDE.md` (if you're an LLM agent — repo-specific landmines and workflows)
 
 ## Script Standards
 

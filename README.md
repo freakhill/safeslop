@@ -8,23 +8,28 @@ that passed CI.
 
 Local scripts and docs for running agent workflows with stronger isolation defaults:
 
-- container sandbox helpers
-- VM-backed Homebrew evaluation
-- strict installer wrappers
-- ephemeral key/identity lifecycle helpers (GitHub, Forgejo, Radicle)
+- container sandbox helpers (`slop-agent-sandbox`, `slop-agent-sandbox-tools`)
+- VM-backed Homebrew evaluation (`slop-brew-vm`)
+- strict installer wrappers (`slop-safe-npm`, `slop-safe-uv`)
+- ephemeral key/identity lifecycle helpers (`slop-gh-key`, `slop-forgejo-key`, `slop-radicle`)
+- unified isolation policy compiler (`slop-isolate`: one CUE file → per-tool configs for sandbox-exec, docker-compose, envoy, claude-code, opencode, …)
+- host-side agent launchers with bundled defaults (`slop-agents claude`, `slop-agents opencode`)
+- a single Textual TUI hub (`slop`) wrapping every action above
 
 ## Quick start
 
+After installing the shims (see *Install fish command shims* below), every
+`slop-*` command is on PATH in any new fish shell:
+
 ```fish
-source .venv/bin/activate.fish
-scripts/slop-sandboxctl.fish help
+scripts/slop-sandboxctl.fish help    # hub: lists every tool and what it does
 ```
 
 For an interactive launcher across every tool in this repo:
 
 ```fish
-brew install gum    # one-time, hard dependency for the global TUI
-slop                # menu-driven entry; each action prints its equivalent CLI
+slop          # Textual TUI; auto-installs Textual on first run via uv + PEP-723.
+slop --check  # diagnose the first-run install path (useful behind TLS-intercepting proxies).
 ```
 
 For the most common workflow (managing deploy keys for the current repo) you
@@ -36,7 +41,15 @@ slop-gh-key here list           # list keys for current repo
 slop-gh-key here revoke 12345   # revoke by id
 slop-gh-key here cleanup        # revoke-expired --yes
 slop-gh-key here revoke-all     # revoke-by-title '^llm-agent:' --yes (destructive)
-slop-gh-key tui                 # per-tool TUI; soft-deps on gum
+slop-gh-key tui                 # per-tool TUI; soft-deps on gum (the global slop is Textual, no gum needed)
+```
+
+To launch Claude Code or OpenCode with the repo's bundled defaults applied:
+
+```fish
+slop-agents seed all            # one-time: write .claude/settings.json + opencode.json at repo root
+slop-agents claude              # drop into Claude Code from the seeded cwd
+slop-agents opencode            # drop into OpenCode from the seeded cwd
 ```
 
 ## Install fish command shims
