@@ -1116,7 +1116,7 @@ class SlopApp(App):
             print()
             rc = 0
             try:
-                rc = subprocess.call(argv)
+                rc = _spawn_with_ctty(argv)
             except KeyboardInterrupt:
                 rc = 130
             print()
@@ -1127,6 +1127,80 @@ class SlopApp(App):
                 input("Press Enter to return to slop… ")
             except (EOFError, KeyboardInterrupt):
                 pass
+
+
+def _spawn_with_ctty(argv: list[str]) -> int:
+    """Fork a child, place it in its own process group, hand it the
+    foreground of the controlling terminal, exec argv, wait, and return
+    the child's exit status.
+
+    Why we don't just use `subprocess.call`: when an interactive child
+    (zsh, vi, less) tries to claim the terminal foreground with
+    `tcsetpgrp(stdin, getpgrp())`, the kernel returns EPERM unless the
+    child is already a process-group leader of its own pgrp. Plain
+    subprocess.call inherits the parent's pgrp, so on macOS zsh prints
+    `can't set tty pgrp: operation not permitted` and immediately drops
+    back. The fix mirrors what shells do for foreground children:
+    setpgid the child into its own group, tcsetpgrp that group to
+    foreground, exec. Parent restores the saved foreground pgrp on the
+    way out so Textual can resume cleanly.
+
+    SIGTTOU is ignored during the parent's tcsetpgrp because the parent
+    is no longer in the foreground pgrp by the time we restore — the
+    write would otherwise stop the parent.
+
+    No setsid: a fresh session would lose the ctty, and re-acquiring it
+    via /dev/tty fails with ENXIO on macOS the moment the session leader
+    has no ctty. Staying in the same session keeps the terminal usable
+    for both interactive (zsh) and non-interactive (gh api) children.
+
+    Falls back to subprocess.call on platforms without fork (Windows).
+    """
+    if not hasattr(os, "fork"):
+        return subprocess.call(argv)
+    import signal
+    try:
+        saved_pgrp: int | None = os.tcgetpgrp(0)
+    except OSError:
+        saved_pgrp = None
+    saved_sigttou = signal.signal(signal.SIGTTOU, signal.SIG_IGN)
+    try:
+        pid = os.fork()
+        if pid == 0:
+            try:
+                os.setpgid(0, 0)
+                if saved_pgrp is not None:
+                    try:
+                        os.tcsetpgrp(0, os.getpgrp())
+                    except OSError:
+                        pass
+                # Reset SIGTTOU in the child so the exec'd program sees
+                # default handling. (signal.signal in the child does not
+                # affect the parent.)
+                signal.signal(signal.SIGTTOU, signal.SIG_DFL)
+                os.execvp(argv[0], argv)
+            except Exception as e:
+                sys.stderr.write(f"slop: exec failed: {e!r}\n")
+                os._exit(127)
+        # Parent also does setpgid to avoid a race where the child's
+        # setpgid hasn't run by the time we tcsetpgrp from outside.
+        try:
+            os.setpgid(pid, pid)
+        except OSError:
+            pass
+        _, status = os.waitpid(pid, 0)
+        if saved_pgrp is not None:
+            try:
+                os.tcsetpgrp(0, saved_pgrp)
+            except OSError:
+                pass
+    finally:
+        signal.signal(signal.SIGTTOU, saved_sigttou)
+    if os.WIFEXITED(status):
+        return os.WEXITSTATUS(status)
+    if os.WIFSIGNALED(status):
+        return 128 + os.WTERMSIG(status)
+    return 1
 
 
 def _walk_actions(actions: list[Action]) -> Iterable[tuple[list[str], Action]]:

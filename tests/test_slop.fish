@@ -207,6 +207,64 @@ function test_interactive_launch_env_resolves_textual
     assert_contains "self-check confirms textual import" "$out" "textual import OK"
 end
 
+function test_spawn_with_ctty_propagates_exit_codes
+    # Regression: the previous run_subprocess used subprocess.call, which
+    # left the child in the parent's process group. Interactive children
+    # like `slop-macos-sandbox shell` (zsh) hit
+    #   "zsh: can't set tty pgrp: operation not permitted"
+    # and dropped back to the menu before the user could type anything.
+    # The fix is _spawn_with_ctty: fork → setpgid the child into its own
+    # group → tcsetpgrp it to foreground → exec. We can't exercise the
+    # interactive zsh path from CI (no real ctty under fish-c), but we
+    # can pin the helper's exit-code propagation for non-interactive
+    # children — which is the more common case anyway and would break
+    # silently if a future refactor reverted to subprocess.call without
+    # the WIFEXITED/WTERMSIG handling.
+    if not command -sq uv
+        __test_record_pass "_spawn_with_ctty (skipped: uv missing)"
+        return 0
+    end
+    if not curl -fsSL --max-time 5 -o /dev/null https://pypi.org/simple/ 2>/dev/null
+        __test_record_pass "_spawn_with_ctty (skipped: pypi.org unreachable)"
+        return 0
+    end
+    set -l envs UV_NATIVE_TLS=1
+    if test -f /etc/ssl/cert.pem
+        set -a envs SSL_CERT_FILE=/etc/ssl/cert.pem
+    end
+    set -l py "
+import sys
+sys.path.insert(0, 'scripts/_py')
+from slop_tui import _spawn_with_ctty
+assert _spawn_with_ctty(['true']) == 0, 'true should exit 0'
+assert _spawn_with_ctty(['false']) == 1, 'false should exit 1'
+assert _spawn_with_ctty(['sh', '-c', 'exit 42']) == 42, 'exit-42 should propagate'
+print('OK')
+"
+    set -l out (env $envs uv run --quiet --with 'textual>=0.79' python -c "$py" 2>&1)
+    set -l rc $status
+    if test $rc -ne 0
+        __test_record_fail "_spawn_with_ctty propagates exit codes" "rc=$rc, out=$out"
+        return
+    end
+    __test_record_pass "_spawn_with_ctty propagates exit codes"
+    assert_contains "_spawn_with_ctty asserts all passed" "$out" "OK"
+end
+
+function test_run_subprocess_uses_spawn_with_ctty_not_subprocess_call
+    # Static guard: run_subprocess in scripts/_py/slop_tui.py must invoke
+    # _spawn_with_ctty, not subprocess.call. If a future refactor swaps
+    # back to subprocess.call, the interactive shell action breaks again
+    # — and CI without a real ctty would not catch it dynamically.
+    set -l content (cat "$SLOP_TUI_PY")
+    assert_contains "run_subprocess delegates to _spawn_with_ctty" \
+        "$content" "_spawn_with_ctty(argv)"
+    # The previous bug shape: a bare `subprocess.call(argv)` inside
+    # run_subprocess. Such a line should no longer exist.
+    set -l hits (grep -c 'rc = subprocess.call(argv)' "$SLOP_TUI_PY")
+    assert_eq "no bare subprocess.call(argv) on the run_subprocess path" "$hits" "0"
+end
+
 function test_self_check_marker_proves_textual_imported
     # The Python module imports textual at module top, so reaching the
     # `--self-check` print statement proves the dependency was both fetched
