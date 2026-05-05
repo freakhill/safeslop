@@ -172,7 +172,7 @@ function __llm_forgejo_resolve_connection --argument-names instance forgejo_url 
             return 1
         end
 
-        set -l parts (string split "\t" -- "$line")
+        set -l parts (string split \t -- "$line")
         set resolved_url "$parts[1]"
         if test -z "$resolved_env"
             set resolved_env "$parts[2]"
@@ -240,6 +240,13 @@ function __llm_forgejo_generate_key --argument-names access name expiry
     set -g __llm_forgejo_last_key_path "$base"
     set -g __llm_forgejo_last_key_title "$title"
     set -g __llm_forgejo_last_key_pub (string trim -- (string collect < "$base.pub"))
+    # Explicit return 0: see the matching comment in slop-gh-key.fish's
+    # __llm_gh_generate_key. `string trim` exits 1 when there is nothing
+    # to trim, propagating through `set -g` and falsely failing the
+    # function — which then bubbles up to skip the gh/forgejo POST and
+    # leak the local keypair on disk. Same root cause across all three
+    # *_generate_key helpers in this repo.
+    return 0
 end
 
 function __llm_forgejo_create_deploy_key --argument-names repo title pub access
@@ -276,6 +283,9 @@ function __llm_forgejo_create_one --argument-names repo access ttl name
 
     set -l key_id (__llm_forgejo_create_deploy_key "$repo" "$title" "$pub" "$access")
     if test $status -ne 0; or test -z "$key_id"
+        # Clean up the local keypair on upload failure so retries do not
+        # leak orphan files into ~/.ssh/ (same fix as in slop-gh-key.fish).
+        rm -f "$key_path" "$key_path.pub"
         echo "Failed to create Forgejo deploy key for $repo" 1>&2
         return 1
     end
@@ -419,7 +429,7 @@ function __llm_forgejo_tui
     set -l profile (__llm_forgejo_instance_for_host "$host")
     set -l instance_name ""
     if test -n "$profile"
-        set instance_name (string split "\t" -- "$profile")[1]
+        set instance_name (string split \t -- "$profile")[1]
     end
 
     while true
@@ -634,7 +644,7 @@ function slop-forgejo-key --description "Manage ephemeral Forgejo deploy keys fo
             echo "  slop-forgejo-key instance-set --name <label> --url https://$host --token-env <ENV>" 1>&2
             return 1
         end
-        set -l parts (string split "\t" -- "$profile")
+        set -l parts (string split \t -- "$profile")
         set -l inferred_instance "$parts[1]"
 
         set -l prepend --instance "$inferred_instance" --repo "$inferred_repo"
@@ -811,7 +821,9 @@ function slop-forgejo-key --description "Manage ephemeral Forgejo deploy keys fo
             __llm_forgejo_require_tools; or return 1
             __llm_forgejo_validate_repo "$repo"; or return 1
             __llm_forgejo_resolve_connection "$instance" "$forgejo_url" "$token_env"; or return 1
-            echo "id\taccess\tcreated_at\ttitle"
+            # printf, not echo: fish's echo prints \t literally; the body
+            # below emits real tabs, so the header has to too.
+            printf 'id\taccess\tcreated_at\ttitle\n'
             __llm_forgejo_list "$repo"
 
         case revoke

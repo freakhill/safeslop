@@ -203,6 +203,17 @@ function __llm_gh_generate_key --argument-names access name expiry
     set -g __llm_gh_last_key_path "$base"
     set -g __llm_gh_last_key_title "$title"
     set -g __llm_gh_last_key_pub (string trim -- (string collect < "$base.pub"))
+    # Explicit return 0: fish's `string trim` exits 1 when there is nothing
+    # to trim, and `string collect < file` strips the file's trailing
+    # newline first — so the typical ssh-keygen .pub file (no extra
+    # whitespace after collect) yields a no-op trim that returns 1. That
+    # 1 propagates through the surrounding command substitution, making
+    # `set -g` fail, and the function reports failure even though the
+    # keypair was generated and the globals were populated correctly.
+    # __llm_gh_create_one would then bail before calling gh api, leaking
+    # the local keypair and never attempting the RW upload — the
+    # user-visible "Create + List shows nothing" symptom.
+    return 0
 end
 
 function __llm_gh_create_deploy_key --argument-names repo title pub access
@@ -241,6 +252,13 @@ function __llm_gh_create_one --argument-names repo access ttl name
 
     set -l key_id (__llm_gh_create_deploy_key "$repo" "$title" "$pub" "$access")
     if test $status -ne 0
+        # Clean up the locally generated keypair so retries do not leak
+        # orphan files into ~/.ssh/. Without this, a flaky `gh api POST`
+        # (SAML/SSO challenge, 422 duplicate, network glitch) ends up
+        # leaving a fresh ed25519 keypair on disk for every retry while
+        # GitHub still has zero keys — the user-visible "create + list
+        # shows nothing" symptom.
+        rm -f "$key_path" "$key_path.pub"
         echo "Failed to create deploy key on GitHub for $repo" 1>&2
         return 1
     end
@@ -707,7 +725,10 @@ function slop-gh-key --description "Manage ephemeral GitHub deploy keys for LLM 
                 return 1
             end
             __llm_gh_validate_repo "$repo"; or return 1
-            echo "id\taccess\tcreated_at\ttitle"
+            # printf, not echo: fish's echo prints \t literally; the body
+            # below (gh api --jq) emits real tabs, so the header has to too
+            # or column alignment breaks.
+            printf 'id\taccess\tcreated_at\ttitle\n'
             __llm_gh_list "$repo"
 
         case revoke
