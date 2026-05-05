@@ -7,15 +7,24 @@
 #   require uv. Interactive launches exec the Python TUI via `uv run --script`
 #   which auto-installs Textual on first run via PEP-723.
 #
-# Why a Python rewrite (see scripts/_py/slop_tui.py for the long form):
-# - Per-action single-key shortcuts, fuzzy filter, sub-menu screens, an
-#   always-visible "Equivalent CLI" preview, and full keyboard navigation —
-#   all things the previous fish/gum version could not do without a much
-#   heavier rewrite. Drops the `gum` hard dep; uv is the only requirement.
+# TLS / first-run install:
+# - On machines behind a TLS-intercepting proxy (Cloudflare WARP, Zscaler,
+#   corporate MITM) uv's bundled rustls trust store does not trust the
+#   intercepting CA, so PyPI fetches fail with `UnknownIssuer`. We try
+#   four strategies in order and stop at the first one that succeeds:
+#     1. uv with rustls only — fine on clean networks.
+#     2. UV_NATIVE_TLS=1 (OS trust store, includes user-installed CAs).
+#     3. SSL_CERT_FILE=/etc/ssl/cert.pem (forces macOS bundle).
+#     4. --allow-insecure-host pypi.org files.pythonhosted.org — opt-in
+#        last resort that disables cert verification for those hosts.
+#   Strategy 4 only runs when SLOP_INSECURE_HOSTS=1 is set OR `slop --check`
+#   is asked for one explicitly. Interactive launches stop after step 3
+#   and tell the user to set SLOP_INSECURE_HOSTS=1 if they accept the risk.
 #
 # References:
 # - Textual: https://textual.textualize.io/
 # - uv PEP-723: https://docs.astral.sh/uv/guides/scripts/
+# - uv TLS flags: https://docs.astral.sh/uv/reference/cli/#uv-run
 
 set -g SLOP_VERSION "0.2"
 set -g SLOP_REPO_ROOT (path resolve (dirname (status filename)))/..
@@ -31,6 +40,7 @@ function __slop_help
     echo ""
     echo "Usage:"
     echo "  slop            Launch the global TUI (requires uv)."
+    echo "  slop --check    Probe whether the Textual install path works."
     echo "  slop help       Show this message and exit."
     echo "  slop --version  Print version."
     echo ""
@@ -45,9 +55,18 @@ function __slop_help
     echo "    Install: brew install uv"
     echo "  - Textual is fetched automatically on first run via PEP-723."
     echo ""
+    echo "Environment:"
+    echo "  SLOP_INSECURE_HOSTS=1  Disable TLS cert verification for pypi.org and"
+    echo "                         files.pythonhosted.org. Use only on machines"
+    echo "                         behind an intercepting proxy whose CA you"
+    echo "                         cannot install into the system trust store."
+    echo ""
     echo "Examples:"
     echo "  # Launch the TUI"
     echo "  slop"
+    echo ""
+    echo "  # Probe dependency install path (useful behind corporate proxies)"
+    echo "  slop --check"
     echo ""
     echo "  # Per-tool TUI for keys (faster than the global menu)"
     echo "  slop-gh-key tui"
@@ -75,6 +94,90 @@ function __slop_require_uv
     end
 end
 
+# Try one of the four TLS strategies. Each strategy invokes the wrapped
+# Python script with whatever uv flags / env vars apply. Strategies that
+# rely on env vars set them in a child env so they do not leak into the
+# parent shell's environment.
+function __slop_try_strategy --argument-names label
+    set -l args $argv[2..-1]
+    echo "  trying: $label" 1>&2
+    if env $args uv run --script --quiet "$SLOP_TUI_PY" --self-check 2>&1
+        return 0
+    end
+    return 1
+end
+
+function __slop_check
+    __slop_require_uv; or return 1
+
+    echo "slop --check: probing the Textual install path…" 1>&2
+
+    # Strategy 1: uv defaults (rustls).
+    if __slop_try_strategy "uv defaults"
+        echo "OK (default rustls trust store)"
+        return 0
+    end
+
+    # Strategy 2: native TLS, OS trust store.
+    if __slop_try_strategy "UV_NATIVE_TLS=1" UV_NATIVE_TLS=1
+        echo "OK (OS trust store)"
+        return 0
+    end
+
+    # Strategy 3: explicit cert bundle (macOS).
+    if test -f /etc/ssl/cert.pem
+        if __slop_try_strategy "SSL_CERT_FILE=/etc/ssl/cert.pem" \
+            UV_NATIVE_TLS=1 SSL_CERT_FILE=/etc/ssl/cert.pem
+            echo "OK (system cert bundle)"
+            return 0
+        end
+    end
+
+    # Strategy 4: --allow-insecure-host (only at user request via SLOP_INSECURE_HOSTS=1).
+    if test "$SLOP_INSECURE_HOSTS" = "1"
+        echo "  trying: --allow-insecure-host pypi.org files.pythonhosted.org" 1>&2
+        if uv run --script --quiet \
+            --allow-insecure-host pypi.org \
+            --allow-insecure-host files.pythonhosted.org \
+            "$SLOP_TUI_PY" --self-check 2>&1
+            echo "OK (insecure-host bypass; TLS verification disabled for pypi.org)"
+            return 0
+        end
+    else
+        echo "  skipped: --allow-insecure-host (set SLOP_INSECURE_HOSTS=1 to enable)" 1>&2
+    end
+
+    echo "" 1>&2
+    echo "Error: every TLS strategy failed. Likely an intercepting proxy whose CA" 1>&2
+    echo "is not in the system keychain. Options:" 1>&2
+    echo "  - Install your proxy's CA into the macOS login keychain (System Roots)." 1>&2
+    echo "  - Set SLOP_INSECURE_HOSTS=1 and rerun slop --check (disables verification" 1>&2
+    echo "    for pypi.org and files.pythonhosted.org only — accept this risk if you" 1>&2
+    echo "    trust the network you are on)." 1>&2
+    echo "  - Point SSL_CERT_FILE at a CA bundle that includes the intercepting CA." 1>&2
+    return 2
+end
+
+# Pick the right strategy for the interactive launch. Mirrors __slop_check's
+# preference order but stops before the insecure-host bypass unless the user
+# opted in via SLOP_INSECURE_HOSTS=1. Sets uv-related env vars in the
+# current process and execs uv so the TUI inherits a normal stdio attachment.
+function __slop_exec_tui
+    if not set -q UV_NATIVE_TLS
+        set -gx UV_NATIVE_TLS 1
+    end
+    if not set -q SSL_CERT_FILE; and test -f /etc/ssl/cert.pem
+        set -gx SSL_CERT_FILE /etc/ssl/cert.pem
+    end
+    if test "$SLOP_INSECURE_HOSTS" = "1"
+        exec uv run --script \
+            --allow-insecure-host pypi.org \
+            --allow-insecure-host files.pythonhosted.org \
+            "$SLOP_TUI_PY"
+    end
+    exec uv run --script "$SLOP_TUI_PY"
+end
+
 # Entry point.
 if test (count $argv) -gt 0
     switch "$argv[1]"
@@ -84,6 +187,9 @@ if test (count $argv) -gt 0
         case --version
             echo "slop $SLOP_VERSION"
             exit 0
+        case --check
+            __slop_check
+            exit $status
         case '*'
             echo "Error: unknown argument '$argv[1]'" 1>&2
             echo "" 1>&2
@@ -93,13 +199,4 @@ if test (count $argv) -gt 0
 end
 
 __slop_require_uv; or exit 1
-
-# UV_NATIVE_TLS=1 makes uv use the OS trust store instead of its bundled
-# rustls. Without it, uv fails on machines behind a TLS-intercepting proxy
-# (Cloudflare WARP, Zscaler, corporate MITM) with "invalid peer certificate:
-# UnknownIssuer" when fetching Textual on first run.
-if not set -q UV_NATIVE_TLS
-    set -gx UV_NATIVE_TLS 1
-end
-
-exec uv run --script "$SLOP_TUI_PY"
+__slop_exec_tui

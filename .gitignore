@@ -6,3 +6,7 @@ examples/agent-tools.env
 
 # Claude Code per-machine settings (project-wide settings.json is fine to commit)
 .claude/settings.local.json
+
+# Python bytecode caches from `uv run --script` of repo helpers (slop_tui.py etc.)
+scripts/_py/__pycache__/
+**/__pycache__/
