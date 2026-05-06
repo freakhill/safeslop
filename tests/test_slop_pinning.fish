@@ -100,4 +100,117 @@ function test_detects_unpinned_latest_for_openclaw_and_zeroclaw
     end
 end
 
+function test_detects_latest_tag_in_slop_cue_image_base
+    # Once users start declaring `image: base: "registry/foo:latest"`
+    # in slop.cue (the new orchestrator surface), the pinning gate has
+    # to flag it the same way it flags `=latest` in env files.
+    set -l tmp (mk_tmpdir)
+    mkdir -p "$tmp/library/layer/container"
+    cp "$REPO_ROOT/library/layer/container/Dockerfile.agent.tools" "$tmp/library/layer/container/"
+    cp "$REPO_ROOT/library/layer/container/docker-compose.yml" "$tmp/library/layer/container/"
+    cp "$REPO_ROOT/library/layer/container/agent-tools.env.example" "$tmp/library/layer/container/agent-tools.env"
+    cp "$REPO_ROOT/library/layer/container/agent-tools.env.example" "$tmp/library/layer/container/agent-tools.env.example"
+    # The offending file: a slop.cue at the tmp repo root.
+    echo 'package slop
+import "slop.dev/isolation/schema"
+profiles: bad: schema.#Profile & {
+    agent:       "claude"
+    environment: "container"
+    image: base: "registry.example/foo:latest"
+}' > "$tmp/slop.cue"
+
+    set -l saved $PWD
+    cd "$tmp"
+    set -l out (run_fish $CHECK 2>&1)
+    set -l rc $status
+    cd "$saved"
+
+    assert_eq "slop-pinning fails on :latest in slop.cue" $rc 1
+    assert_contains "slop-pinning names the slop.cue location" "$out" "slop.cue"
+    assert_contains "slop-pinning flags the latest tag" "$out" ":latest"
+end
+
+function test_detects_at_latest_in_extra_npm
+    set -l tmp (mk_tmpdir)
+    mkdir -p "$tmp/library/layer/container"
+    cp "$REPO_ROOT/library/layer/container/Dockerfile.agent.tools" "$tmp/library/layer/container/"
+    cp "$REPO_ROOT/library/layer/container/docker-compose.yml" "$tmp/library/layer/container/"
+    cp "$REPO_ROOT/library/layer/container/agent-tools.env.example" "$tmp/library/layer/container/agent-tools.env"
+    cp "$REPO_ROOT/library/layer/container/agent-tools.env.example" "$tmp/library/layer/container/agent-tools.env.example"
+    echo 'package slop
+import "slop.dev/isolation/schema"
+profiles: bad: schema.#Profile & {
+    agent:       "claude"
+    environment: "container"
+    image: "extra-npm": ["@anthropic-ai/sdk@latest"]
+}' > "$tmp/slop.cue"
+
+    set -l saved $PWD
+    cd "$tmp"
+    set -l out (run_fish $CHECK 2>&1)
+    set -l rc $status
+    cd "$saved"
+
+    assert_eq "slop-pinning fails on @latest in extra-npm" $rc 1
+    assert_contains "slop-pinning flags @latest" "$out" "@latest"
+end
+
+function test_detects_double_eq_latest_in_extra_pip
+    set -l tmp (mk_tmpdir)
+    mkdir -p "$tmp/library/layer/container"
+    cp "$REPO_ROOT/library/layer/container/Dockerfile.agent.tools" "$tmp/library/layer/container/"
+    cp "$REPO_ROOT/library/layer/container/docker-compose.yml" "$tmp/library/layer/container/"
+    cp "$REPO_ROOT/library/layer/container/agent-tools.env.example" "$tmp/library/layer/container/agent-tools.env"
+    cp "$REPO_ROOT/library/layer/container/agent-tools.env.example" "$tmp/library/layer/container/agent-tools.env.example"
+    echo 'package slop
+import "slop.dev/isolation/schema"
+profiles: bad: schema.#Profile & {
+    agent:       "claude"
+    environment: "container"
+    image: "extra-pip": ["ruff==latest"]
+}' > "$tmp/slop.cue"
+
+    set -l saved $PWD
+    cd "$tmp"
+    set -l out (run_fish $CHECK 2>&1)
+    set -l rc $status
+    cd "$saved"
+
+    assert_eq "slop-pinning fails on ==latest in extra-pip" $rc 1
+    assert_contains "slop-pinning flags ==latest" "$out" "==latest"
+end
+
+function test_passes_against_pinned_slop_cue
+    # A slop.cue with properly pinned versions must NOT trip the
+    # check. Uses the bundled sample's shape (no image extras) plus
+    # a fancy second profile with concrete pinned versions, to make
+    # sure pinned `extra-pip`/`extra-npm` entries aren't false-flagged.
+    set -l tmp (mk_tmpdir)
+    mkdir -p "$tmp/library/layer/container"
+    cp "$REPO_ROOT/library/layer/container/Dockerfile.agent.tools" "$tmp/library/layer/container/"
+    cp "$REPO_ROOT/library/layer/container/docker-compose.yml" "$tmp/library/layer/container/"
+    cp "$REPO_ROOT/library/layer/container/agent-tools.env.example" "$tmp/library/layer/container/agent-tools.env"
+    cp "$REPO_ROOT/library/layer/container/agent-tools.env.example" "$tmp/library/layer/container/agent-tools.env.example"
+    echo 'package slop
+import "slop.dev/isolation/schema"
+profiles: pinned: schema.#Profile & {
+    agent:       "claude"
+    environment: "container"
+    image: {
+        base: "local/agent-sandbox-tools:slop-abc123"
+        "extra-pip": ["ruff==0.6.0", "mypy==1.10.0"]
+        "extra-npm": ["gh@2.0.0", "@anthropic-ai/sdk@0.30.0"]
+    }
+}' > "$tmp/slop.cue"
+
+    set -l saved $PWD
+    cd "$tmp"
+    set -l out (run_fish $CHECK 2>&1)
+    set -l rc $status
+    cd "$saved"
+
+    assert_status "slop-pinning passes on pinned slop.cue" $rc 0
+    assert_contains "slop-pinning success message" "$out" "pinning check passed"
+end
+
 run_tests_in_file (basename (status filename))

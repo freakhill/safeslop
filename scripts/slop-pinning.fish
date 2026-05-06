@@ -19,10 +19,10 @@ function __check_pinning_help
     echo "slop-pinning — CI/local gate that fails on unpinned tool versions"
     echo ""
     echo "Description:"
-    echo "  Walks the four pinning-relevant files in library/ and fails if any"
-    echo "  CLI version is set to 'latest' (env file, Dockerfile ARG default,"
-    echo "  compose build arg) or if library/layer/container/Dockerfile.agent.tools contains a"
-    echo "  'uv pip install' without an exact ==version pin."
+    echo "  Walks the pinning-relevant files in library/ + any *.cue under the repo"
+    echo "  and fails on unpinned tool versions: 'latest' tags / defaults in"
+    echo "  agent-tools env+Dockerfile+compose, 'uv pip install' without ==,"
+    echo "  and ':latest' / '@latest' / '==latest' inside slop.cue image specs."
     echo ""
     echo "Usage:"
     echo "  ./scripts/slop-pinning.fish"
@@ -33,6 +33,8 @@ function __check_pinning_help
     echo "  - library/layer/container/Dockerfile.agent.tools: no ARG <CLI>_VERSION=latest"
     echo "  - library/layer/container/docker-compose.yml: no '\${VAR:-latest}' default"
     echo "  - library/layer/container/Dockerfile.agent.tools: every 'uv pip install' has =="
+    echo "  - **/*.cue (excluding cue.mod/, .generated/): no ':latest', '@latest',"
+    echo "    or '==latest' in image.base / image.extra-{npm,pip}"
     echo ""
     echo "Examples (synced from README → 'Artifact pinning and attestation reference'):"
     __check_pinning_examples
@@ -102,6 +104,36 @@ if test (count $unpinned_uv_lines) -gt 0
         echo $line 1>&2
     end
     set failed 1
+end
+
+# slop.cue scan: the orchestrator reads `image.extra-{apt,pip,npm}` and
+# `image.base` from any *.cue file declaring profile shapes. Three
+# user-authored leaks to catch:
+#   1. `:latest"` in `base:` tags (use a digest or pinned tag instead).
+#   2. `@latest` in npm specs (pin to a numeric version).
+#   3. `==latest` in pip specs (pin to a numeric version).
+# Scoped to *.cue files under the repo, excluding cue.mod/ (modules are
+# version-pinned by the CUE tooling separately) and the .generated/
+# tree (slop-isolate compile output).
+set -l cue_files
+for f in (find . -type f -name '*.cue' \
+        -not -path './library/layer/policy/cue.mod/*' \
+        -not -path './library/.generated/*' \
+        -not -path './.git/*' 2>/dev/null)
+    set -a cue_files "$f"
+end
+
+if test (count $cue_files) -gt 0
+    set -l unpinned_cue_lines (grep -nHE ':latest"|@latest"|==latest' $cue_files)
+    if test (count $unpinned_cue_lines) -gt 0
+        echo "unpinned versions in slop.cue / preset .cue files:" 1>&2
+        for line in $unpinned_cue_lines
+            echo "  $line" 1>&2
+        end
+        echo "  (pin image.base to a digest or numeric tag; pin extra-pip/npm" 1>&2
+        echo "   entries to exact versions like 'ruff==0.6.0' / 'gh@2.0.0')" 1>&2
+        set failed 1
+    end
 end
 
 if test $failed -eq 1
