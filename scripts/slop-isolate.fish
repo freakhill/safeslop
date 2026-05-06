@@ -25,7 +25,7 @@ function __slop_isolate_examples
     # BEGIN AUTOGEN: examples section="Unified isolation config"
     echo 'Install dependencies:'
     echo '  brew install cue-lang/tap/cue'
-    echo '  brew install --cask terminal-notifier   # optional: macOS deny notifications'
+    echo '  brew install terminal-notifier   # optional: macOS deny notifications'
     echo
     echo 'Pick a preset and validate it:'
     echo '  source scripts/slop-isolate.fish'

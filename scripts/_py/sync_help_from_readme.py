@@ -34,7 +34,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 _HEADING_RX = re.compile(r"^(#{1,6})\s+(.*?)\s*$")
-_FENCE_OPEN_RX = re.compile(r"^```(\w*)\s*$")
+_FENCE_OPEN_RX = re.compile(r"^```([\w-]*)\s*$")
 _FENCE_CLOSE = "```"
 _BEGIN_RX = re.compile(
     r"^(?P<indent>\s*)#\s*BEGIN AUTOGEN:\s*examples\s+section=\"(?P<section>[^\"]+)\"\s*$"
@@ -57,20 +57,32 @@ def normalize_title(title: str) -> str:
 
 
 def parse_sections(readme_path: Path) -> dict[str, Section]:
-    """Index the README by normalized heading title."""
+    """Index the README by normalized heading title.
+
+    Track fenced-code-block state so shell-style `# comment` lines
+    inside ```fish / ```ssh-config / ```bash blocks are not mistaken
+    for Markdown headings — the heading regex would otherwise terminate
+    a section at the first `# foo` it sees inside a code fence."""
     sections: dict[str, Section] = {}
     lines = readme_path.read_text().splitlines()
 
     current: Section | None = None
+    in_fence = False
     for line in lines:
-        m = _HEADING_RX.match(line)
-        if m:
-            level = len(m.group(1))
-            title = normalize_title(m.group(2))
-            new_section = Section(level=level, title=title, body=[])
-            sections[title] = new_section
-            current = new_section
+        if _FENCE_OPEN_RX.match(line):
+            in_fence = not in_fence
+            if current is not None:
+                current.body.append(line)
             continue
+        if not in_fence:
+            m = _HEADING_RX.match(line)
+            if m:
+                level = len(m.group(1))
+                title = normalize_title(m.group(2))
+                new_section = Section(level=level, title=title, body=[])
+                sections[title] = new_section
+                current = new_section
+                continue
         if current is not None:
             current.body.append(line)
     return sections

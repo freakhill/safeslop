@@ -154,6 +154,13 @@ function __sandboxctl_tutorial_github_keys
     echo 'Create RO + RW key pair for one repo (default TTL 24h):'
     echo '  slop-gh-key create-pair --repo <owner>/<repo> --name session-1 --ttl 24h'
     echo '  slop-gh-key create-pair --repo <owner>/<repo> --name session-1 --ttl 24h --install-ssh-config --host-prefix github-llm'
+    echo '  # Read-only: clone, fetch, pull'
+    echo '  git clone git@github-llm-ro:<owner>/<repo>.git'
+    echo '  git -C <repo> remote set-url origin git@github-llm-ro:<owner>/<repo>.git'
+    echo '  '
+    echo '  # Read-write: same repo, different alias → gets the RW key'
+    echo '  git -C <repo> remote set-url --push origin git@github-llm-rw:<owner>/<repo>.git'
+    echo '  git -C <repo> push'
     echo
     echo 'List deploy keys on repo:'
     echo '  slop-gh-key list --repo <owner>/<repo>'
