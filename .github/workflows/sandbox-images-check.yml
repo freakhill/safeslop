@@ -9,33 +9,58 @@ on:
 jobs:
   build-images:
     runs-on: ubuntu-latest
+    env:
+      # Force the legacy daemon-side builder. modern docker uses
+      # buildkit by default, which keeps tags in buildkit's own image
+      # store rather than the daemon's. Dockerfile.agent.tools starts
+      # with `FROM local/agent-sandbox:latest`; with buildkit, that
+      # tag isn't visible to a subsequent build (buildkit isolates
+      # them), so the second build's FROM resolution falls through
+      # to docker.io and 404s. The legacy builder tags directly into
+      # the daemon, where the second build finds it.
+      DOCKER_BUILDKIT: "0"
+      COMPOSE_DOCKER_CLI_BUILD: "0"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Deliberately NOT using docker/setup-buildx-action. Buildx's
-      # buildkit driver doesn't share intermediate local/* tags between
-      # targets, so `compose build agent agent-tools` fails when
-      # agent-tools resolves `FROM local/agent-sandbox:latest` (the
-      # tag agent just produced doesn't exist in buildkit's image
-      # store, only in the daemon's). The legacy daemon-side builder
-      # (which `docker compose build` falls back to without buildx)
-      # tags into the daemon and the second build's FROM lookup hits.
+      # Sanity-check the parse before building anything.
+      - name: Validate compose file
+        run: docker compose -f library/layer/container/docker-compose.yml config >/dev/null
+
+      - name: Build base sandbox image
+        run: docker build -t local/agent-sandbox:latest -f library/layer/container/Dockerfile.agent .
 
       # agent-tools.env is gitignored (the user's local override of
-      # .example). Seed it from the example so compose's --env-file
-      # finds something to read; the build's pinned versions come from
-      # the .example values either way.
+      # .example). Seed it from the example so the build args have
+      # pinned defaults; the build args could also flow through
+      # `--build-arg` here, but using the env file keeps the workflow
+      # mirror-image of how a developer's local build resolves them.
       - name: Seed agent-tools.env from example
         run: cp library/layer/container/agent-tools.env.example library/layer/container/agent-tools.env
 
-      # Build agent + agent-tools together. Dockerfile.agent.tools begins
-      # with `FROM local/agent-sandbox:latest`, and with buildx as the
-      # builder (set up above), separate `docker compose build` calls
-      # don't share intermediate tags — the second invocation can't
-      # resolve `local/agent-sandbox:latest` and treats it as a missing
-      # registry image. Listing both services in one invocation forces
-      # the FROM-dep to be satisfied within the same buildkit run.
-      # Same fix as scripts/slop-agent-sandbox-tools.fish (commit 8c9f244).
-      - name: Build base + tools sandbox images
-        run: docker compose --env-file library/layer/container/agent-tools.env -f library/layer/container/docker-compose.yml build agent agent-tools
+      - name: Build tools sandbox image
+        run: |
+          set -a
+          # Source the .env so its KEY=value lines turn into
+          # process-environment vars, which the next docker build
+          # picks up as defaults for the matching ARGs in the
+          # Dockerfile (CLAUDE_CODE_VERSION, OPENCODE_VERSION,
+          # CREWAI_VERSION, etc.).
+          . library/layer/container/agent-tools.env
+          set +a
+          docker build \
+            -t local/agent-sandbox-tools:latest \
+            -f library/layer/container/Dockerfile.agent.tools \
+            --build-arg CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-}" \
+            --build-arg OPENCODE_VERSION="${OPENCODE_VERSION:-}" \
+            --build-arg CREWAI_VERSION="${CREWAI_VERSION:-}" \
+            --build-arg PYDANTIC_AI_VERSION="${PYDANTIC_AI_VERSION:-}" \
+            --build-arg PYDANTIC_AI_HARNESS_VERSION="${PYDANTIC_AI_HARNESS_VERSION:-}" \
+            --build-arg AG2_VERSION="${AG2_VERSION:-}" \
+            --build-arg ENABLE_CLAUDE_CODE="${ENABLE_CLAUDE_CODE:-false}" \
+            --build-arg ENABLE_OPENCODE="${ENABLE_OPENCODE:-false}" \
+            --build-arg ENABLE_CREWAI="${ENABLE_CREWAI:-true}" \
+            --build-arg ENABLE_PYDANTICAI="${ENABLE_PYDANTICAI:-true}" \
+            --build-arg ENABLE_AG2="${ENABLE_AG2:-true}" \
+            .
