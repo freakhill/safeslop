@@ -998,9 +998,74 @@ def _launch_vm(
     return _fish_exec(SLOP_BREW_VM, "run", profile.agent)
 
 
-def _on_exit_hooks(profile: Profile, state: ProfileState) -> None:
+def _snapshot_state(
+    profile: Profile,
+    state: ProfileState,
+    repo_root: Path,
+    state_dir: str,
+) -> Path:
+    """Write a post-mortem-friendly snapshot of the resolved profile +
+    its captured state to <state-dir>/snapshots/<utc-stamp>.json before
+    teardown wipes the runtime dir. Useful when a session goes wrong
+    and you want to know what was provisioned: the captured key_ids,
+    the agent + env, the on-exit hooks declared.
+
+    Snapshots are append-only — we never delete them on `slop down`,
+    only on the user explicitly removing `.slop/`. They're gitignored
+    via the `.slop/` rule already in place."""
+    snap_dir = repo_root / state_dir / "snapshots"
+    snap_dir.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y-%m-%dT%H-%M-%SZ", time.gmtime())
+    out = snap_dir / f"{profile.name}-{stamp}.json"
+    payload = {
+        "snapshotted_at": stamp,
+        "profile": {
+            "name": profile.name,
+            "agent": profile.agent,
+            "environment": profile.environment,
+            "credentials": profile.credentials,
+            "on_exit": profile.on_exit,
+            "image": profile.image,
+        },
+        "state": {
+            "started_at": state.started_at,
+            "credentials": state.credentials,
+        },
+    }
+    out.write_text(json.dumps(payload, indent=2) + "\n")
+    return out
+
+
+def _on_exit_hooks(
+    profile: Profile,
+    state: ProfileState,
+    repo_root: Path | None = None,
+    state_dir: str | None = None,
+) -> None:
     """Run profile.on_exit hooks idempotently. Errors print but don't
-    abort the chain so partial cleanup still happens."""
+    abort the chain so partial cleanup still happens.
+
+    `snapshot-state` runs *first* in declaration order regardless,
+    because users typically declare it alongside teardown hooks
+    (revoke-credentials / stop-container) — capturing what was
+    provisioned needs to happen before cleanup destroys the evidence.
+    """
+    # Run snapshot-state first, regardless of where it appears in the
+    # declaration list — the alternative is forcing users to remember
+    # to put it before revoke-credentials, which is footgun-prone.
+    if "snapshot-state" in profile.on_exit:
+        if repo_root is not None and state_dir is not None:
+            try:
+                out = _snapshot_state(profile, state, repo_root, state_dir)
+                print(f"slop: snapshotted state → {out}")
+            except OSError as e:
+                sys.stderr.write(f"slop: snapshot-state failed: {e}\n")
+        else:
+            sys.stderr.write(
+                "slop: snapshot-state requested but no state-dir context "
+                "(orchestrator was invoked with the on-exit chain detached "
+                "from a repo). Skipping.\n"
+            )
     for hook in profile.on_exit:
         if hook == "revoke-credentials":
             _revoke_credentials(state)
@@ -1040,8 +1105,8 @@ def _on_exit_hooks(profile: Profile, state: ProfileState) -> None:
                     f"{proc.stderr.rstrip()}\n"
                 )
         elif hook == "snapshot-state":
-            # Phase D: snapshot just leaves the existing state.json in
-            # place; Phase E will copy it to .slop/snapshots/<utc-stamp>.json
+            # Already handled before the loop, in declaration-order-
+            # independent fashion. Nothing more to do.
             pass
         else:
             sys.stderr.write(f"slop: unknown on-exit hook {hook!r}; skipping\n")
@@ -1179,7 +1244,12 @@ def cmd_run(args: argparse.Namespace) -> int:
     # runs in another tty don't lose each other's snapshots.
     state = _load_state(repo_root, cfg.state_dir)
     if profile.name in state:
-        _on_exit_hooks(profile, state[profile.name])
+        _on_exit_hooks(
+            profile,
+            state[profile.name],
+            repo_root=repo_root,
+            state_dir=cfg.state_dir,
+        )
         del state[profile.name]
         _save_state(repo_root, cfg.state_dir, state)
     # Always wipe the per-profile runtime staging dir (.ssh/ + override)
@@ -1203,7 +1273,12 @@ def cmd_down(_args: argparse.Namespace) -> int:
             )
             continue
         print(f"slop: cleaning up profile {name!r}")
-        _on_exit_hooks(cfg.profiles[name], s)
+        _on_exit_hooks(
+            cfg.profiles[name],
+            s,
+            repo_root=repo_root,
+            state_dir=cfg.state_dir,
+        )
         _wipe_runtime_dir(repo_root, cfg.state_dir, name)
         del state[name]
     _save_state(repo_root, cfg.state_dir, state)

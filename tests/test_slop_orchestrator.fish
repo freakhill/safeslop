@@ -252,6 +252,119 @@ profiles: "vm-claude-creds": schema.#Profile & {
     assert_contains "dry-run announces scp transport" "$out" "scp"
 end
 
+function test_snapshot_state_writes_json_payload
+    # snapshot-state on-exit hook should drop a JSON file under
+    # .slop/snapshots/<utc>.json with the resolved profile + the
+    # captured state. Used for post-mortem when a session goes wrong.
+    if not __have_uv_and_cue
+        __test_record_pass "snapshot-state writes payload (skipped: uv/cue missing)"
+        return 0
+    end
+    set -l tmp (mk_tmpdir)
+    set -l py "
+import sys, json
+from pathlib import Path
+sys.path.insert(0, 'scripts/_py')
+import slop_orchestrator as orch
+
+profile = orch.Profile(
+    name='review',
+    agent='claude',
+    environment='container',
+    credentials={'github': 'ephemeral-rw'},
+    on_exit=['snapshot-state', 'revoke-credentials'],
+    image={'extra-pip': ['ruff==0.6.0']},
+)
+state = orch.ProfileState(
+    started_at='2026-05-06T00:00:00Z',
+    credentials={'github': {'mode': 'ephemeral-rw', 'key_ids': [12345, 12346]}},
+)
+out = orch._snapshot_state(profile, state, Path('$tmp'), '.slop')
+assert out.is_file(), out
+assert out.parent == Path('$tmp/.slop/snapshots'), out.parent
+data = json.loads(out.read_text())
+assert data['profile']['name'] == 'review'
+assert data['profile']['agent'] == 'claude'
+assert data['profile']['environment'] == 'container'
+assert data['profile']['credentials'] == {'github': 'ephemeral-rw'}
+assert data['profile']['on_exit'] == ['snapshot-state', 'revoke-credentials']
+assert data['profile']['image'] == {'extra-pip': ['ruff==0.6.0']}
+assert data['state']['credentials']['github']['key_ids'] == [12345, 12346]
+assert data['snapshotted_at'].endswith('Z')
+print('OK snapshot:', out.name)
+"
+    set -l out (env UV_NATIVE_TLS=1 SSL_CERT_FILE=/etc/ssl/cert.pem \
+        uv run --quiet python -c "$py" 2>&1)
+    set -l rc $status
+    if test $rc -ne 0
+        __test_record_fail "snapshot-state writes JSON payload" "rc=$rc, out=$out"
+        return
+    end
+    __test_record_pass "snapshot-state writes JSON payload to .slop/snapshots/"
+end
+
+function test_snapshot_state_runs_before_destructive_hooks
+    # If snapshot-state appears AFTER revoke-credentials in the user's
+    # on_exit list, we still want it to run first — by then the keys
+    # have been revoked and the snapshot would lose context. The
+    # orchestrator hoists snapshot-state to run before destructive
+    # hooks regardless of declaration order.
+    if not __have_uv_and_cue
+        __test_record_pass "snapshot-state hoist (skipped: uv/cue missing)"
+        return 0
+    end
+    set -l tmp (mk_tmpdir)
+    set -l py "
+import sys
+from pathlib import Path
+sys.path.insert(0, 'scripts/_py')
+import slop_orchestrator as orch
+
+# Trace order of side effects: snapshot file created vs revoke-credentials
+# fish call. snapshot-state should always come first.
+events = []
+
+class FakeProc:
+    returncode = 0
+    stdout = ''
+    stderr = ''
+def fake_run(script, *cmd):
+    events.append(('fish_run', script.name, list(cmd)))
+    return FakeProc()
+orch._fish_run = fake_run
+
+orig_snapshot = orch._snapshot_state
+def trace_snapshot(profile, state, repo, sd):
+    events.append(('snapshot',))
+    return orig_snapshot(profile, state, repo, sd)
+orch._snapshot_state = trace_snapshot
+
+profile = orch.Profile(
+    name='back',
+    agent='claude',
+    environment='host',
+    credentials={'github': 'ephemeral-rw'},
+    # snapshot-state declared LAST — should still hoist to first.
+    on_exit=['revoke-credentials', 'stop-proxy', 'snapshot-state'],
+)
+state = orch.ProfileState(started_at='now', credentials={'github': {'key_ids': [1]}})
+orch._on_exit_hooks(profile, state, repo_root=Path('$tmp'), state_dir='.slop')
+
+snap_idx   = next(i for i, e in enumerate(events) if e[0] == 'snapshot')
+revoke_idx = next(i for i, e in enumerate(events) if e[0] == 'fish_run' and 'revoke' in e[2])
+assert snap_idx < revoke_idx, (snap_idx, revoke_idx, events)
+print('OK hoist:', events[:5])
+"
+    set -l out (env UV_NATIVE_TLS=1 SSL_CERT_FILE=/etc/ssl/cert.pem \
+        uv run --quiet python -c "$py" 2>&1)
+    set -l rc $status
+    if test $rc -ne 0
+        __test_record_fail "snapshot hoists before revoke" "rc=$rc, out=$out"
+        return
+    end
+    __test_record_pass "snapshot-state hoists before destructive hooks"
+end
+
 function test_create_pair_id_parser_extracts_two_ids
     # The fish gh/forgejo create-pair commands print "Created <access>
     # deploy key" then "  id: <num>" per access mode. The orchestrator
