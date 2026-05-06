@@ -157,13 +157,26 @@ package schema
 #OnExitHook: "revoke-credentials" | "stop-container" | "stop-proxy" |
 	"snapshot-state" | "destroy-vm"
 
-// Optional image override for environment="container". The runtime never
-// builds a tailored image in this iteration — `base` must be a tag that
-// either already exists locally or that `docker pull` can fetch. When
-// omitted, the runtime uses local/agent-sandbox-tools:latest (built by
-// `slop-agent-sandbox-tools up` on first launch).
+// Optional image override for environment="container".
+//
+// `base` overrides the source tag; defaults to local/agent-sandbox-tools:latest
+// when omitted. Must be a tag the local Docker daemon already has or
+// can pull.
+//
+// `extra-apt` / `extra-pip` / `extra-npm` declare extra packages to
+// layer on top of the base. The runtime hashes the spec, generates a
+// per-profile Dockerfile under <state-dir>/runtime/<profile>/, builds
+// the tailored image once, and tags it `local/agent-sandbox-tools:slop-<hash>`.
+// Subsequent runs with the same spec reuse the cached tag.
+//
+// Pin every package by exact version (e.g. "rad==1.2.3"). The `slop-pinning`
+// gate flags `=latest` in slop.cue at build time; deferring pin checks to
+// the slop runtime would let drift slip into shipped recipes.
 #ImageSpec: {
-	base?: string
+	base?:        string
+	"extra-apt"?: [...string]
+	"extra-pip"?: [...string]
+	"extra-npm"?: [...string]
 }
 
 #Profile: {

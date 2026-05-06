@@ -611,6 +611,176 @@ print('OK no-marker → no stage')
     __test_record_pass "forgejo skips when no marker block"
 end
 
+function test_image_spec_hash_is_order_insensitive_for_packages
+    # Two profiles that ask for the same packages in a different order
+    # must hash to the same tag (so the docker build cache hits). The
+    # base tag is asymmetric — different bases must produce different
+    # hashes even with identical packages.
+    if not __have_uv_and_cue
+        __test_record_pass "image hash determinism (skipped: uv/cue missing)"
+        return 0
+    end
+    set -l py "
+import sys
+sys.path.insert(0, 'scripts/_py')
+from slop_orchestrator import _image_spec_hash, DEFAULT_IMAGE_BASE
+a = {'extra-pip': ['ruff==0.6.0', 'mypy==1.10.0'], 'extra-npm': ['gh@2.0.0']}
+b = {'extra-pip': ['mypy==1.10.0', 'ruff==0.6.0'], 'extra-npm': ['gh@2.0.0']}
+assert _image_spec_hash(a, DEFAULT_IMAGE_BASE) == _image_spec_hash(b, DEFAULT_IMAGE_BASE), 'list order should not matter'
+empty = {}
+assert _image_spec_hash(a, DEFAULT_IMAGE_BASE) != _image_spec_hash(empty, DEFAULT_IMAGE_BASE)
+# Asymmetric: base tag is part of the hash.
+assert _image_spec_hash(a, 'other:tag') != _image_spec_hash(a, DEFAULT_IMAGE_BASE), 'base tag should change hash'
+print('OK hash deterministic + base-sensitive')
+"
+    set -l out (env UV_NATIVE_TLS=1 SSL_CERT_FILE=/etc/ssl/cert.pem \
+        uv run --quiet python -c "$py" 2>&1)
+    set -l rc $status
+    if test $rc -ne 0
+        __test_record_fail "image hash determinism" "rc=$rc, out=$out"
+        return
+    end
+    __test_record_pass "image hash is order-insensitive + base-sensitive"
+end
+
+function test_render_tailored_dockerfile_layers_apt_pip_npm
+    if not __have_uv_and_cue
+        __test_record_pass "render tailored dockerfile (skipped: uv/cue missing)"
+        return 0
+    end
+    set -l tmp (mk_tmpdir)
+    set -l py "
+import sys
+from pathlib import Path
+sys.path.insert(0, 'scripts/_py')
+from slop_orchestrator import _render_tailored_dockerfile
+target = Path('$tmp/Dockerfile.tailored')
+spec = {
+    'extra-apt': ['ripgrep', 'jq'],
+    'extra-pip': ['ruff==0.6.0'],
+    'extra-npm': ['gh@2.0.0'],
+}
+_render_tailored_dockerfile(target, 'local/agent-sandbox-tools:latest', spec)
+text = target.read_text()
+assert 'FROM local/agent-sandbox-tools:latest' in text, text
+assert 'apt-get install -y --no-install-recommends ripgrep jq' in text, text
+assert 'uv pip install --system --no-cache ruff==0.6.0' in text, text
+assert 'npm install -g gh@2.0.0' in text, text
+# Empty spec should produce just FROM.
+target2 = Path('$tmp/Dockerfile.empty')
+_render_tailored_dockerfile(target2, 'local/agent-sandbox-tools:latest', {})
+empty_text = target2.read_text()
+assert empty_text.strip() == 'FROM local/agent-sandbox-tools:latest', empty_text
+print('OK dockerfile')
+"
+    set -l out (env UV_NATIVE_TLS=1 SSL_CERT_FILE=/etc/ssl/cert.pem \
+        uv run --quiet python -c "$py" 2>&1)
+    set -l rc $status
+    if test $rc -ne 0
+        __test_record_fail "render tailored dockerfile" "rc=$rc, out=$out"
+        return
+    end
+    __test_record_pass "tailored dockerfile layers apt + pip + npm"
+end
+
+function test_resolve_image_tag_returns_none_when_no_spec
+    # Plain profile without image: → orchestrator stays on the default
+    # local/agent-sandbox-tools:latest path (no override needed).
+    if not __have_uv_and_cue
+        __test_record_pass "resolve no-spec (skipped: uv/cue missing)"
+        return 0
+    end
+    set -l tmp (mk_tmpdir)
+    set -l py "
+import sys
+from pathlib import Path
+sys.path.insert(0, 'scripts/_py')
+import slop_orchestrator as orch
+profile = orch.Profile(name='no-image', agent='claude', environment='container')
+tag, dockerfile = orch._resolve_image_tag(profile, Path('$tmp'), '.slop')
+assert tag is None, tag
+assert dockerfile is None, dockerfile
+print('OK no-spec → (None, None)')
+"
+    set -l out (env UV_NATIVE_TLS=1 SSL_CERT_FILE=/etc/ssl/cert.pem \
+        uv run --quiet python -c "$py" 2>&1)
+    set -l rc $status
+    if test $rc -ne 0
+        __test_record_fail "resolve no-spec" "rc=$rc, out=$out"
+        return
+    end
+    __test_record_pass "resolve_image_tag returns None when no spec"
+end
+
+function test_resolve_image_tag_returns_tailored_with_extras
+    if not __have_uv_and_cue
+        __test_record_pass "resolve tailored (skipped: uv/cue missing)"
+        return 0
+    end
+    set -l tmp (mk_tmpdir)
+    set -l py "
+import sys
+from pathlib import Path
+sys.path.insert(0, 'scripts/_py')
+import slop_orchestrator as orch
+profile = orch.Profile(
+    name='custom',
+    agent='claude',
+    environment='container',
+    image={'extra-pip': ['ruff==0.6.0']},
+)
+tag, dockerfile = orch._resolve_image_tag(profile, Path('$tmp'), '.slop')
+assert tag is not None and tag.startswith('local/agent-sandbox-tools:slop-'), tag
+assert dockerfile is not None
+assert 'runtime/custom' in str(dockerfile), dockerfile
+print('OK tailored:', tag)
+"
+    set -l out (env UV_NATIVE_TLS=1 SSL_CERT_FILE=/etc/ssl/cert.pem \
+        uv run --quiet python -c "$py" 2>&1)
+    set -l rc $status
+    if test $rc -ne 0
+        __test_record_fail "resolve tailored" "rc=$rc, out=$out"
+        return
+    end
+    __test_record_pass "resolve_image_tag returns tailored tag for extras"
+end
+
+function test_run_tailored_image_dry_run_announces_build
+    # Container profile with image.extra-pip → dry-run output mentions
+    # the would-build tailored tag and the FROM-base. Catches the case
+    # where image extras are silently dropped.
+    if not __have_uv_and_cue
+        __test_record_pass "tailored dry-run (skipped: uv/cue missing)"
+        return 0
+    end
+    set -l tmp (mk_tmpdir)
+    echo 'package slop
+import "slop.dev/isolation/schema"
+import "slop.dev/isolation/presets"
+profiles: "fancy": schema.#Profile & {
+    agent:       "claude"
+    environment: "container"
+    isolation:   presets.#ClaudeCode
+    image: {
+        "extra-pip": ["ruff==0.6.0"]
+        "extra-apt": ["ripgrep"]
+    }
+}' > "$tmp/slop.cue"
+    set -l body "
+        cd '$tmp'
+        set -x ATB_USER_PWD '$tmp'
+        env UV_NATIVE_TLS=1 SSL_CERT_FILE=/etc/ssl/cert.pem \\
+            uv run --script --quiet '$ORCH_PY' run fancy --dry-run
+    "
+    set -l out (command fish -N -c "$body" 2>&1)
+    set -l rc $status
+    assert_status "dry-run fancy status" $rc 0
+    assert_contains "dry-run announces tailored tag" "$out" "local/agent-sandbox-tools:slop-"
+    assert_contains "dry-run announces base FROM" "$out" "FROM local/agent-sandbox-tools:latest"
+    assert_contains "dry-run announces apt extras" "$out" "ripgrep"
+    assert_contains "dry-run announces pip extras" "$out" "ruff==0.6.0"
+end
+
 function test_compose_override_renders_bind_mount
     # The override file must add a read-only volume mapping the staged
     # .ssh/ to /root/.ssh in the agent-tools service. If the path or

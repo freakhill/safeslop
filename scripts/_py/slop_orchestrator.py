@@ -31,6 +31,7 @@ running profiles is stored at `<repo>/.slop/state.json`.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -597,30 +598,169 @@ def _stage_credentials(
     return stage.resolve()
 
 
+DEFAULT_IMAGE_BASE = "local/agent-sandbox-tools:latest"
+TAILORED_TAG_PREFIX = "local/agent-sandbox-tools:slop-"
+
+
+def _image_spec_hash(spec: dict, base_tag: str) -> str:
+    """Content-hash an #ImageSpec so two profiles with the same extras
+    deduplicate to the same tailored image. Sorted to make the hash
+    order-insensitive for the package lists; the base tag is the only
+    asymmetric input so it goes last in the input string."""
+    parts = [
+        ",".join(sorted(spec.get("extra-apt") or [])),
+        ",".join(sorted(spec.get("extra-pip") or [])),
+        ",".join(sorted(spec.get("extra-npm") or [])),
+        base_tag,
+    ]
+    return hashlib.sha256("|".join(parts).encode()).hexdigest()[:12]
+
+
+def _render_tailored_dockerfile(
+    target: Path,
+    base_tag: str,
+    spec: dict,
+) -> None:
+    """Write a Dockerfile.tailored beside the staging tree that adds
+    the requested package layers on top of the base image. Each apt
+    invocation is a single RUN to keep the image small; pip and npm
+    each get their own RUN so a failure surfaces with the right
+    error context. No --no-cache flags — the docker build cache is
+    fine here, and we content-hash the inputs so a different spec
+    produces a different tag and a fresh build."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    apt = spec.get("extra-apt") or []
+    pip = spec.get("extra-pip") or []
+    npm = spec.get("extra-npm") or []
+    lines = [f"FROM {base_tag}"]
+    if apt:
+        joined = " ".join(shlex.quote(p) for p in apt)
+        lines.append(
+            "RUN apt-get update "
+            "&& apt-get install -y --no-install-recommends "
+            f"{joined} "
+            "&& rm -rf /var/lib/apt/lists/*"
+        )
+    if pip:
+        joined = " ".join(shlex.quote(p) for p in pip)
+        lines.append(f"RUN uv pip install --system --no-cache {joined}")
+    if npm:
+        joined = " ".join(shlex.quote(p) for p in npm)
+        lines.append(f"RUN npm install -g {joined}")
+    target.write_text("\n".join(lines) + "\n")
+
+
+def _docker_image_exists(tag: str) -> bool:
+    """True iff the local Docker daemon already has an image with the
+    given tag. Used so repeated runs with the same spec skip the
+    docker build round-trip."""
+    if not shutil.which("docker"):
+        return False
+    proc = subprocess.run(
+        ["docker", "image", "inspect", tag],
+        capture_output=True,
+    )
+    return proc.returncode == 0
+
+
+def _resolve_image_tag(
+    profile: Profile,
+    repo_root: Path,
+    state_dir: str,
+) -> tuple[str | None, Path | None]:
+    """Return the image tag to point the agent-tools service at.
+
+    - No image spec / no extras → (None, None); caller uses the default
+      compose-built tag.
+    - Spec with `base` only → (base, None); just the override.
+    - Spec with extras → (tailored-tag, dockerfile-path); the caller
+      docker-builds the dockerfile if the tag isn't already cached
+      locally."""
+    spec = profile.image or {}
+    base = spec.get("base") or DEFAULT_IMAGE_BASE
+    has_extras = any(
+        spec.get(k) for k in ("extra-apt", "extra-pip", "extra-npm")
+    )
+    if not has_extras and not spec.get("base"):
+        return (None, None)
+    if not has_extras:
+        return (base, None)
+    digest = _image_spec_hash(spec, base)
+    tag = f"{TAILORED_TAG_PREFIX}{digest}"
+    dockerfile = _stage_runtime_dir(repo_root, state_dir, profile.name) / "Dockerfile.tailored"
+    return (tag, dockerfile)
+
+
+def _build_tailored_image(
+    tag: str,
+    dockerfile: Path,
+    base_tag: str,
+    spec: dict,
+) -> None:
+    """Write the Dockerfile and run `docker build` to produce the
+    tailored tag. Idempotent: if the tag already exists locally we
+    skip the build entirely."""
+    if _docker_image_exists(tag):
+        return
+    _render_tailored_dockerfile(dockerfile, base_tag, spec)
+    proc = subprocess.run(
+        [
+            "docker", "build",
+            "-t", tag,
+            "-f", str(dockerfile),
+            str(dockerfile.parent),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        raise OrchestratorError(
+            f"docker build of tailored image {tag} failed "
+            f"(exit {proc.returncode}):\n{proc.stderr.rstrip()}"
+        )
+
+
 def _render_compose_override(
-    stage_ssh: Path,
+    stage_ssh: Path | None,
+    image_tag: str | None = None,
     target_service: str = "agent-tools",
+    parent_dir: Path | None = None,
 ) -> Path:
-    """Generate a docker-compose.override.yml beside the staged .ssh/
-    that mounts it read-only at /root/.ssh inside the chosen service.
+    """Generate a docker-compose.override.yml that may:
+
+      - bind-mount staged SSH keys at /root/.ssh (when stage_ssh is set),
+      - swap the agent-tools image: field to a tailored tag (when
+        image_tag is set).
+
     Returns the override file path so the caller can pass it as a
     second `-f` flag to docker compose.
 
-    Why an override file instead of editing the committed compose
-    yaml: keeps the bind mount strictly per-profile and per-run, and
-    docker-compose's natural -f chaining merges service.volumes lists
-    without us having to round-trip yaml ourselves."""
-    parent = stage_ssh.parent  # .slop/runtime/<profile>/
-    override = parent / "docker-compose.override.yml"
-    override.write_text(
-        "# Generated by slop-orchestrator. Adds the staged ephemeral\n"
-        "# SSH keys as a read-only bind mount so agent pushes from\n"
-        "# inside the sandbox can resolve the github-llm-{ro,rw} aliases.\n"
-        "services:\n"
-        f"  {target_service}:\n"
-        "    volumes:\n"
-        f"      - {stage_ssh}:{CONTAINER_SSH_HOME}:ro\n"
-    )
+    `parent_dir` controls where the override is written. Defaults to
+    stage_ssh.parent for back-compat with the credential-only path;
+    pass it explicitly when there is no stage_ssh (image-only
+    overrides) so the file lands under the per-profile runtime dir.
+    """
+    if parent_dir is None:
+        if stage_ssh is None:
+            raise OrchestratorError(
+                "_render_compose_override needs either stage_ssh or parent_dir"
+            )
+        parent_dir = stage_ssh.parent
+    override = parent_dir / "docker-compose.override.yml"
+    lines = [
+        "# Generated by slop-orchestrator. Layered patches to the",
+        "# committed library/layer/container/docker-compose.yml so the",
+        "# committed file stays untouched while a profile gets its own",
+        "# isolation knobs (staged SSH keys + tailored image tag).",
+        "services:",
+        f"  {target_service}:",
+    ]
+    if image_tag is not None:
+        lines.append(f"    image: {image_tag}")
+    if stage_ssh is not None:
+        lines.append("    volumes:")
+        lines.append(f"      - {stage_ssh}:{CONTAINER_SSH_HOME}:ro")
+    override.write_text("\n".join(lines) + "\n")
     return override
 
 
@@ -675,11 +815,28 @@ def _launch_container(
     # Stage credentials before announcing the equivalent CLI so the
     # printed command line reflects what will actually run.
     stage_ssh: Path | None = None
+    image_tag: str | None = None
+    dockerfile: Path | None = None
     override: Path | None = None
-    if repo_root is not None and state_dir is not None and not dry_run:
+    have_runtime = repo_root is not None and state_dir is not None
+    if have_runtime and not dry_run:
         stage_ssh = _stage_credentials(profile, repo_root, state_dir)
-        if stage_ssh is not None:
-            override = _render_compose_override(stage_ssh)
+        image_tag, dockerfile = _resolve_image_tag(
+            profile, repo_root, state_dir
+        )
+        if dockerfile is not None and image_tag is not None:
+            base_tag = profile.image.get("base") or DEFAULT_IMAGE_BASE
+            _build_tailored_image(image_tag, dockerfile, base_tag, profile.image)
+        if stage_ssh is not None or image_tag is not None:
+            parent = (
+                stage_ssh.parent
+                if stage_ssh is not None
+                else _stage_runtime_dir(repo_root, state_dir, profile.name)
+            )
+            parent.mkdir(parents=True, exist_ok=True)
+            override = _render_compose_override(
+                stage_ssh, image_tag, parent_dir=parent
+            )
 
     cli_up = "slop-agent-sandbox-tools up"
     if override is not None:
@@ -691,8 +848,8 @@ def _launch_container(
         cli_run = f"slop-agent-sandbox-tools run {profile.agent}"
     print(f"slop: equivalent CLI: {cli_up} && {cli_run}")
     if dry_run:
-        # Dry-run path mirrors the credential-gated branch by
-        # describing what *would* be staged.
+        # Dry-run path mirrors the credential-gated + image-tailored
+        # branches by describing what *would* be staged.
         cred = profile.credentials or {}
         families = [
             family for family in ("github", "forgejo")
@@ -703,6 +860,17 @@ def _launch_container(
                 f"slop: would stage ephemeral {' + '.join(families)} keys at "
                 "<state-dir>/runtime/<profile>/.ssh/ and bind-mount them "
                 f"at {CONTAINER_SSH_HOME} in the agent-tools service."
+            )
+        spec = profile.image or {}
+        if any(spec.get(k) for k in ("extra-apt", "extra-pip", "extra-npm")):
+            base = spec.get("base") or DEFAULT_IMAGE_BASE
+            digest = _image_spec_hash(spec, base)
+            print(
+                f"slop: would build tailored image "
+                f"{TAILORED_TAG_PREFIX}{digest} "
+                f"FROM {base} layering apt={spec.get('extra-apt') or []} "
+                f"pip={spec.get('extra-pip') or []} "
+                f"npm={spec.get('extra-npm') or []}."
             )
         return 0
     if not shutil.which("docker"):
