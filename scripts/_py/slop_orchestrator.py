@@ -391,85 +391,179 @@ def _stage_runtime_dir(repo_root: Path, state_dir: str, profile_name: str) -> Pa
     return repo_root / state_dir / "runtime" / profile_name
 
 
-def _stage_github_credentials(profile: Profile, repo_root: Path, state_dir: str) -> Path | None:
-    """Copy the most-recent ephemeral GitHub keypair into a per-profile
-    staging dir and write a fresh SSH config that maps the
-    `github-llm-{ro,rw}` aliases to the staged filenames. The directory
-    becomes the bind-mount source for the container's /root/.ssh/.
+def _newest_keypair(ssh_dir: Path, prefix: str) -> tuple[Path, Path] | None:
+    """Find the most-recent (priv, pub) pair matching prefix*. Returns
+    None when either side is missing (mismatched key files indicate a
+    half-finished create-pair run; safer to skip than guess)."""
+    privs = [
+        p for p in ssh_dir.glob(f"{prefix}*")
+        if not p.name.endswith(".pub")
+    ]
+    if not privs:
+        return None
+    priv = max(privs, key=lambda p: p.stat().st_mtime)
+    pub = priv.with_name(priv.name + ".pub")
+    if not pub.exists():
+        return None
+    return priv, pub
 
-    Returns the absolute staging dir path (the .ssh/ subdir specifically
-    — that's what gets mounted), or None when there is nothing to
-    plumb (no github creds requested, or no keys on disk yet).
 
-    Why we stage instead of mounting ~/.ssh/ directly: the user's
-    ~/.ssh/ contains permanent identities (id_ed25519, id_rsa, …) that
-    we deliberately keep out of the sandbox per the isolation policy.
-    Staging filters down to only the llm_agent_github_* files this
-    profile created.
+def _read_forgejo_hostname(ssh_dir: Path, ro_key_name: str) -> str | None:
+    """Parse ~/.ssh/config to find the HostName declared for the most
+    recent slop-forgejo-key marker block whose IdentityFile matches
+    `ro_key_name`. Returns None if no matching block is found.
+
+    The host-side `slop-forgejo-key here create-pair --install-ssh-config`
+    writes a marker-fenced block per repo+session containing the real
+    forgejo-instance hostname. We can't hardcode "forgejo.com" the way
+    we do "github.com" — Codeberg, self-hosted forgejos, and gitea
+    instances all coexist."""
+    config_path = ssh_dir / "config"
+    if not config_path.is_file():
+        return None
+    in_block = False
+    matched_block = False
+    candidate_host: str | None = None
+    for raw in config_path.read_text().splitlines():
+        line = raw.strip()
+        if line.startswith("# BEGIN slop-forgejo-key:"):
+            in_block = True
+            matched_block = False
+            candidate_host = None
+            continue
+        if line.startswith("# END slop-forgejo-key:") and matched_block:
+            return candidate_host
+        if in_block and line.startswith("# END slop-forgejo-key:"):
+            in_block = False
+            continue
+        if not in_block:
+            continue
+        if line.startswith("HostName "):
+            candidate_host = line.split(maxsplit=1)[1]
+        if ro_key_name in line:
+            matched_block = True
+    return None
+
+
+def _stage_credentials(
+    profile: Profile,
+    repo_root: Path,
+    state_dir: str,
+) -> Path | None:
+    """Copy the ephemeral keypairs declared by `profile.credentials`
+    into a per-profile staging dir and emit a container-local SSH
+    config that maps the same `<host>-llm-{ro,rw}` aliases the host
+    has, but with paths pointing at the in-container mount.
+
+    Today: github and forgejo. Both follow the same on-disk pattern
+    (`llm_agent_<host>_{ro,rw}_*` under ~/.ssh/) so the staging logic
+    is shared. `HostName` differs:
+
+      - github: hardcoded `github.com`.
+      - forgejo: parsed from the host's ~/.ssh/config marker block,
+        because Forgejo / Codeberg / self-hosted instances vary.
+
+    Radicle uses an identity-model rather than an SSH-key model and
+    is not staged here; if/when needed it would land in its own
+    helper because the resulting in-container artifact differs.
+
+    Returns the staging dir path (the .ssh/ subdir specifically — that
+    becomes the bind-mount source) or None when nothing was staged.
+
+    The staged dir contains *only* files this orchestrator just
+    provisioned. The host's permanent identities (id_ed25519, id_rsa,
+    …) are deliberately excluded so the container never sees them.
     """
-    gh = profile.credentials.get("github")
-    if not gh or gh == "none":
+    cred = profile.credentials or {}
+    gh = cred.get("github") or "none"
+    fj = cred.get("forgejo") or "none"
+    if gh == "none" and fj == "none":
         return None
 
     ssh_dir = Path.home() / ".ssh"
     if not ssh_dir.is_dir():
         return None
 
-    def _newest(prefix: str) -> Path | None:
-        candidates = [
-            p for p in ssh_dir.glob(f"{prefix}*")
-            if not p.name.endswith(".pub")
-        ]
-        if not candidates:
-            return None
-        return max(candidates, key=lambda p: p.stat().st_mtime)
-
-    ro_priv = _newest("llm_agent_github_ro_")
-    rw_priv = _newest("llm_agent_github_rw_")
-    if ro_priv is None or rw_priv is None:
-        sys.stderr.write(
-            "slop: credentials.github requested but llm_agent_github_{ro,rw}_* "
-            "files not found under ~/.ssh/. Skipping container ssh-mount.\n"
-        )
-        return None
-
     base = _stage_runtime_dir(repo_root, state_dir, profile.name)
     stage = base / ".ssh"
     if stage.exists():
-        # Wipe stale staging (a prior run that wasn't cleaned up).
         shutil.rmtree(stage)
     stage.mkdir(parents=True, mode=0o700)
 
-    for src in (ro_priv, rw_priv):
-        for variant in (src, src.with_name(src.name + ".pub")):
-            if not variant.exists():
-                continue
-            dst = stage / variant.name
-            shutil.copy2(variant, dst)
-            dst.chmod(0o600 if variant.suffix != ".pub" else 0o644)
+    config_lines: list[str] = [
+        f"# Generated by slop-orchestrator for profile {profile.name!r}.",
+        "# Mirrors the host's ~/.ssh/config aliases but with paths",
+        "# pointing at the in-container mount.",
+        "",
+    ]
+    staged_anything = False
 
-    # Container-local SSH config. Uses ~/.ssh/<filename> so the same
-    # config works regardless of which user the container runs as.
+    def _stage_family(
+        family: str,
+        mode: str,
+        host_name: str | None,
+    ) -> None:
+        nonlocal staged_anything
+        if mode == "none":
+            return
+        ro = _newest_keypair(ssh_dir, f"llm_agent_{family}_ro_")
+        rw = _newest_keypair(ssh_dir, f"llm_agent_{family}_rw_")
+        if ro is None or rw is None:
+            sys.stderr.write(
+                f"slop: credentials.{family} requested but "
+                f"llm_agent_{family}_{{ro,rw}}_* files not found under "
+                "~/.ssh/. Skipping that family in the container ssh-mount.\n"
+            )
+            return
+        # Resolve HostName once per family; bail with a warning if the
+        # forgejo config block isn't there (probably means the user
+        # disabled --install-ssh-config or wiped their ~/.ssh/config).
+        if host_name is None:
+            host_name = _read_forgejo_hostname(ssh_dir, ro[0].name)
+        if host_name is None:
+            sys.stderr.write(
+                f"slop: could not resolve {family} HostName from "
+                "~/.ssh/config; skipping that family.\n"
+            )
+            return
+        # Copy private + public for both ro and rw at the right modes.
+        for priv, pub in (ro, rw):
+            for variant, mode_bits in ((priv, 0o600), (pub, 0o644)):
+                dst = stage / variant.name
+                shutil.copy2(variant, dst)
+                dst.chmod(mode_bits)
+        # Append the alias block for this family.
+        alias_prefix = f"{family}-llm" if family == "github" else f"{family}-llm"
+        # ↑ today both families share the alias-prefix shape; left
+        # explicit so a future per-host-prefix override is easy.
+        config_lines.extend([
+            f"Host {alias_prefix}-ro",
+            f"  HostName {host_name}",
+            "  User git",
+            f"  IdentityFile ~/.ssh/{ro[0].name}",
+            "  IdentitiesOnly yes",
+            "",
+            f"Host {alias_prefix}-rw",
+            f"  HostName {host_name}",
+            "  User git",
+            f"  IdentityFile ~/.ssh/{rw[0].name}",
+            "  IdentitiesOnly yes",
+            "",
+        ])
+        staged_anything = True
+
+    _stage_family("github", gh, "github.com")
+    _stage_family("forgejo", fj, None)  # HostName parsed lazily
+
+    if not staged_anything:
+        # Tear down the empty stage dir so the override doesn't bind
+        # an empty .ssh/ over the container's default $HOME/.ssh.
+        shutil.rmtree(stage, ignore_errors=True)
+        return None
+
     config = stage / "config"
-    config.write_text(
-        f"# Generated by slop-orchestrator for profile {profile.name!r}.\n"
-        f"# Mirrors the host's ~/.ssh/config aliases but with paths\n"
-        f"# pointing at the in-container mount.\n"
-        f"\n"
-        f"Host github-llm-ro\n"
-        f"  HostName github.com\n"
-        f"  User git\n"
-        f"  IdentityFile ~/.ssh/{ro_priv.name}\n"
-        f"  IdentitiesOnly yes\n"
-        f"\n"
-        f"Host github-llm-rw\n"
-        f"  HostName github.com\n"
-        f"  User git\n"
-        f"  IdentityFile ~/.ssh/{rw_priv.name}\n"
-        f"  IdentitiesOnly yes\n"
-    )
+    config.write_text("\n".join(config_lines).rstrip() + "\n")
     config.chmod(0o644)
-
     return stage.resolve()
 
 
@@ -553,7 +647,7 @@ def _launch_container(
     stage_ssh: Path | None = None
     override: Path | None = None
     if repo_root is not None and state_dir is not None and not dry_run:
-        stage_ssh = _stage_github_credentials(profile, repo_root, state_dir)
+        stage_ssh = _stage_credentials(profile, repo_root, state_dir)
         if stage_ssh is not None:
             override = _render_compose_override(stage_ssh)
 
@@ -569,10 +663,14 @@ def _launch_container(
     if dry_run:
         # Dry-run path mirrors the credential-gated branch by
         # describing what *would* be staged.
-        gh = profile.credentials.get("github")
-        if gh and gh != "none":
+        cred = profile.credentials or {}
+        families = [
+            family for family in ("github", "forgejo")
+            if cred.get(family) and cred[family] != "none"
+        ]
+        if families:
             print(
-                "slop: would stage ephemeral GitHub keys at "
+                f"slop: would stage ephemeral {' + '.join(families)} keys at "
                 "<state-dir>/runtime/<profile>/.ssh/ and bind-mount them "
                 f"at {CONTAINER_SSH_HOME} in the agent-tools service."
             )

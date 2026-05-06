@@ -258,7 +258,7 @@ profile = slop_orchestrator.Profile(
     environment='container',
     credentials={'github': 'ephemeral-rw'},
 )
-stage = slop_orchestrator._stage_github_credentials(profile, Path('$tmp'), '.slop')
+stage = slop_orchestrator._stage_credentials(profile, Path('$tmp'), '.slop')
 assert stage is not None, 'stage returned None'
 assert stage.is_dir(), f'stage not a dir: {stage}'
 files = sorted(p.name for p in stage.iterdir())
@@ -287,6 +287,136 @@ print('OK staging copied only ephemeral keys')
     __test_record_pass "credential staging filters out permanent keys"
     assert_contains "stage produced expected file list" "$out" "config"
     assert_not_contains "stage did NOT include id_ed25519" "$out" "PERMANENT"
+end
+
+function test_credential_staging_handles_forgejo_with_real_hostname
+    # Same shape as the github test, plus the wrinkle that forgejo's
+    # HostName must come from the user's existing ~/.ssh/config marker
+    # block (Codeberg vs self-hosted vs Gitea — varies). The staged
+    # config file's `HostName` line must match what the marker block
+    # in the host config declared, NOT a hardcoded fallback.
+    if not __have_uv_and_cue
+        __test_record_pass "forgejo staging (skipped: uv/cue missing)"
+        return 0
+    end
+    set -l tmp (mk_tmpdir)
+    set -l fake_ssh "$tmp/fake-ssh"
+    mkdir -p "$fake_ssh"
+    chmod 700 "$fake_ssh"
+    set -l ro_name "llm_agent_forgejo_ro_session-1_20260506T020000Z"
+    set -l rw_name "llm_agent_forgejo_rw_session-1_20260506T020000Z"
+    echo "fake-ro-priv" > "$fake_ssh/$ro_name"
+    echo "fake-ro-pub"  > "$fake_ssh/$ro_name.pub"
+    echo "fake-rw-priv" > "$fake_ssh/$rw_name"
+    echo "fake-rw-pub"  > "$fake_ssh/$rw_name.pub"
+    chmod 600 "$fake_ssh/$ro_name" "$fake_ssh/$rw_name"
+    # The marker block format `slop-forgejo-key here create-pair
+    # --install-ssh-config` writes when the user runs it on the host:
+    echo '# BEGIN slop-forgejo-key:owner-repo:session-1:20260506T020000Z
+Host forgejo-llm-ro
+  HostName codeberg.example.org
+  User git
+  IdentityFile '"$fake_ssh/$ro_name"'
+  IdentitiesOnly yes
+
+Host forgejo-llm-rw
+  HostName codeberg.example.org
+  User git
+  IdentityFile '"$fake_ssh/$rw_name"'
+  IdentitiesOnly yes
+# END slop-forgejo-key:owner-repo:session-1:20260506T020000Z
+' > "$fake_ssh/config"
+    set -l py "
+import sys, os
+from pathlib import Path
+os.environ['HOME'] = '$tmp'
+home = Path('$tmp')
+ssh = home / '.ssh'
+if ssh.exists():
+    import shutil; shutil.rmtree(ssh)
+os.symlink('$fake_ssh', ssh)
+sys.path.insert(0, 'scripts/_py')
+import slop_orchestrator
+profile = slop_orchestrator.Profile(
+    name='codeberg-session',
+    agent='claude',
+    environment='container',
+    credentials={'forgejo': 'ephemeral-rw'},
+)
+stage = slop_orchestrator._stage_credentials(profile, Path('$tmp'), '.slop')
+assert stage is not None
+files = sorted(p.name for p in stage.iterdir())
+assert '$ro_name' in files, files
+assert '$rw_name' in files, files
+config = (stage / 'config').read_text()
+assert 'Host forgejo-llm-ro' in config
+assert 'Host forgejo-llm-rw' in config
+assert 'codeberg.example.org' in config, 'forgejo HostName missing'
+assert 'github.com'   not in config, 'github HostName leaked'
+print('OK forgejo staging picked HostName from marker block')
+"
+    set -l out (env UV_NATIVE_TLS=1 SSL_CERT_FILE=/etc/ssl/cert.pem \
+        uv run --quiet python -c "$py" 2>&1)
+    set -l rc $status
+    if test $rc -ne 0
+        __test_record_fail "forgejo staging picks HostName" "rc=$rc, out=$out"
+        return
+    end
+    __test_record_pass "forgejo staging picks HostName from marker block"
+end
+
+function test_credential_staging_skips_forgejo_with_no_marker
+    # If the user requested credentials.forgejo but never installed
+    # the marker block (e.g. ran create-pair with --no-install-config),
+    # we don't have a HostName to write — must skip cleanly with a
+    # warning rather than guessing.
+    if not __have_uv_and_cue
+        __test_record_pass "forgejo no-marker skip (skipped: uv/cue missing)"
+        return 0
+    end
+    set -l tmp (mk_tmpdir)
+    set -l fake_ssh "$tmp/fake-ssh"
+    mkdir -p "$fake_ssh"
+    chmod 700 "$fake_ssh"
+    set -l ro_name "llm_agent_forgejo_ro_session-1_20260506T030000Z"
+    set -l rw_name "llm_agent_forgejo_rw_session-1_20260506T030000Z"
+    for n in $ro_name $rw_name
+        echo "fake" > "$fake_ssh/$n"
+        echo "fake-pub" > "$fake_ssh/$n.pub"
+        chmod 600 "$fake_ssh/$n"
+    end
+    # No ~/.ssh/config at all → no marker block → forgejo skipped.
+    set -l py "
+import sys, os
+from pathlib import Path
+os.environ['HOME'] = '$tmp'
+home = Path('$tmp')
+ssh = home / '.ssh'
+if ssh.exists():
+    import shutil; shutil.rmtree(ssh)
+os.symlink('$fake_ssh', ssh)
+sys.path.insert(0, 'scripts/_py')
+import slop_orchestrator
+profile = slop_orchestrator.Profile(
+    name='no-config',
+    agent='claude',
+    environment='container',
+    credentials={'forgejo': 'ephemeral-rw'},
+)
+stage = slop_orchestrator._stage_credentials(profile, Path('$tmp'), '.slop')
+# With no other family asking for staging and forgejo skipped, the
+# helper returns None (no .ssh/ to mount).
+assert stage is None, f'expected None when forgejo cant be staged; got {stage}'
+print('OK no-marker → no stage')
+"
+    set -l out (env UV_NATIVE_TLS=1 SSL_CERT_FILE=/etc/ssl/cert.pem \
+        uv run --quiet python -c "$py" 2>&1)
+    set -l rc $status
+    if test $rc -ne 0
+        __test_record_fail "forgejo no-marker skip" "rc=$rc, out=$out"
+        return
+    end
+    __test_record_pass "forgejo skips when no marker block"
 end
 
 function test_compose_override_renders_bind_mount
