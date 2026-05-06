@@ -215,6 +215,43 @@ profiles: "vm-claude": schema.#Profile & {
     assert_contains "dry-run prints slop-brew-vm run claude" "$out" "slop-brew-vm run claude"
 end
 
+function test_run_vm_with_credentials_dry_run_announces_copy_in
+    # When a vm profile declares credentials.github != "none", the
+    # orchestrator should plumb keys via `slop-brew-vm copy-in <stage>
+    # ~/.ssh` between init and run. The dry-run output must surface
+    # both the copy-in step in the equivalent CLI and the staging
+    # explanation, so users reading dry-run output see exactly what
+    # would happen.
+    if not __have_uv_and_cue
+        __test_record_pass "orch run vm-with-creds dry-run (skipped: uv/cue missing)"
+        return 0
+    end
+    set -l tmp (mk_tmpdir)
+    echo 'package slop
+import "slop.dev/isolation/schema"
+import "slop.dev/isolation/presets"
+profiles: "vm-claude-creds": schema.#Profile & {
+    agent:       "claude"
+    environment: "vm"
+    isolation:   presets.#ClaudeCode
+    credentials: github: "ephemeral-rw"
+    "on-exit":   ["revoke-credentials", "destroy-vm"]
+}' > "$tmp/slop.cue"
+    set -l body "
+        cd '$tmp'
+        set -x ATB_USER_PWD '$tmp'
+        env UV_NATIVE_TLS=1 SSL_CERT_FILE=/etc/ssl/cert.pem \\
+            uv run --script --quiet '$ORCH_PY' run vm-claude-creds --dry-run
+    "
+    set -l out (command fish -N -c "$body" 2>&1)
+    set -l rc $status
+    assert_status "orch run vm-with-creds --dry-run status" $rc 0
+    # In dry-run, the actual stage path is not allocated (no side effects),
+    # but the announcement must still mention copy-in semantics.
+    assert_contains "dry-run announces vm copy-in path" "$out" "~/.ssh"
+    assert_contains "dry-run announces scp transport" "$out" "scp"
+end
+
 function test_credential_staging_copies_only_ephemeral_keys
     # When a container profile declares credentials.github != "none",
     # the orchestrator should stage llm_agent_github_{ro,rw}_* into

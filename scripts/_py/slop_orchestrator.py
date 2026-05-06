@@ -700,12 +700,19 @@ def _launch_container(
     return subprocess.call(argv)
 
 
-def _launch_vm(profile: Profile, dry_run: bool = False) -> int:
+def _launch_vm(
+    profile: Profile,
+    dry_run: bool = False,
+    repo_root: Path | None = None,
+    state_dir: str | None = None,
+) -> int:
     """Provision a disposable Tart VM and run the agent inside.
 
     Composes:
-      slop-brew-vm init                # clone + boot the session VM
-      slop-brew-vm run <agent>         # exec the agent inside
+      slop-brew-vm init                          # clone + boot the session VM
+      <stage credentials>                        # if profile asks
+      slop-brew-vm copy-in <stage> ~/.ssh        # plumb keys into the guest
+      slop-brew-vm run <agent>                   # exec the agent inside
 
     The VM (`brew-sandbox-session` by default) is expected to have the
     agent pre-installed — typically via a one-time
@@ -716,19 +723,55 @@ def _launch_vm(profile: Profile, dry_run: bool = False) -> int:
     run` fails with "command not found"; on-exit destroy-vm still
     runs to leave no stale state.
 
-    `credentials.<host>` is created on the host as before (slop-gh-key
-    here create-pair etc.); plumbing them into the VM is a follow-up
-    sub-phase, not part of Phase G."""
+    Credential plumbing: same staging logic as the container path.
+    The staged .ssh/ goes into the guest via `slop-brew-vm copy-in`
+    rather than a bind mount; scp -r preserves the 0600/0644 mode
+    bits the staging helper set, so the guest's ssh client accepts
+    the IdentityFile entries without complaint. The guest path is
+    `~/.ssh`, which scp expands to the BREW_VM_SSH_USER's home
+    regardless of the guest OS (macOS Tart base images use /Users/<user>;
+    Linux guests use /home/<user>)."""
     if profile.agent not in ("claude", "opencode"):
         raise OrchestratorError(
             f"agent {profile.agent!r} not yet supported on environment=vm. "
             "Pre-install your agent in the brew-vm trusted base template "
             "(`slop-brew-vm install <agent>`) and rerun."
         )
-    cli_init = "slop-brew-vm init"
-    cli_run = f"slop-brew-vm run {profile.agent}"
-    print(f"slop: equivalent CLI: {cli_init} && {cli_run}")
+
+    stage_ssh: Path | None = None
+    if repo_root is not None and state_dir is not None and not dry_run:
+        stage_ssh = _stage_credentials(profile, repo_root, state_dir)
+
+    # Predict whether we would stage credentials for the dry-run path
+    # so the printed equivalent CLI reflects what would happen.
+    cred = profile.credentials or {}
+    would_stage = any(
+        cred.get(family) and cred[family] != "none"
+        for family in ("github", "forgejo")
+    )
+
+    cli_parts = ["slop-brew-vm init"]
+    if stage_ssh is not None:
+        cli_parts.append(f"slop-brew-vm copy-in {stage_ssh} ~/.ssh")
+    elif dry_run and would_stage:
+        cli_parts.append(
+            "slop-brew-vm copy-in <state-dir>/runtime/<profile>/.ssh ~/.ssh"
+        )
+    cli_parts.append(f"slop-brew-vm run {profile.agent}")
+    print(f"slop: equivalent CLI: {' && '.join(cli_parts)}")
+
     if dry_run:
+        cred = profile.credentials or {}
+        families = [
+            family for family in ("github", "forgejo")
+            if cred.get(family) and cred[family] != "none"
+        ]
+        if families:
+            print(
+                f"slop: would stage ephemeral {' + '.join(families)} keys at "
+                "<state-dir>/runtime/<profile>/.ssh/ and copy-in to ~/.ssh "
+                "inside the VM via slop-brew-vm copy-in (scp -r)."
+            )
         return 0
     if not shutil.which("tart"):
         raise OrchestratorError(
@@ -741,6 +784,19 @@ def _launch_vm(profile: Profile, dry_run: bool = False) -> int:
             f"slop-brew-vm init failed (exit {proc.returncode}):\n"
             f"{proc.stderr.rstrip()}"
         )
+    if stage_ssh is not None:
+        proc = _fish_run(
+            SLOP_BREW_VM, "copy-in", str(stage_ssh), "~/.ssh"
+        )
+        if proc.returncode != 0:
+            # Don't raise — VM is up and the agent might not need git.
+            # Surface the failure and continue so the user sees what
+            # happened in their terminal.
+            sys.stderr.write(
+                f"slop: slop-brew-vm copy-in failed ({proc.returncode}); "
+                "agent will not see the staged keys. "
+                f"{proc.stderr.rstrip()}\n"
+            )
     return _fish_exec(SLOP_BREW_VM, "run", profile.agent)
 
 
@@ -900,7 +956,11 @@ def cmd_run(args: argparse.Namespace) -> int:
             state_dir=cfg.state_dir,
         )
     else:
-        rc = _launch_vm(profile)
+        rc = _launch_vm(
+            profile,
+            repo_root=repo_root,
+            state_dir=cfg.state_dir,
+        )
     # Run on-exit hooks once the agent exits. Reload state so concurrent
     # runs in another tty don't lose each other's snapshots.
     state = _load_state(repo_root, cfg.state_dir)
