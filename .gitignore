@@ -5,7 +5,8 @@ library/layer/container/agent-tools.env
 .DS_Store
 
 # Claude Code per-machine settings (project-wide settings.json is fine to commit)
-.claude/settings.local.json
+.claude/
+opencode.json
 
 # Python bytecode caches from `uv run --script` of repo helpers (slop_tui.py etc.)
 scripts/_py/__pycache__/
