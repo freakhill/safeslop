@@ -19,5 +19,12 @@ jobs:
       - name: Build base sandbox image
         run: docker compose -f library/layer/container/docker-compose.yml build agent
 
+      # agent-tools.env is gitignored (the user's local override of
+      # .example). Seed it from the example so compose's --env-file
+      # finds something to read; the build's pinned versions come from
+      # the .example values either way.
+      - name: Seed agent-tools.env from example
+        run: cp library/layer/container/agent-tools.env.example library/layer/container/agent-tools.env
+
       - name: Build tools sandbox image
         run: docker compose --env-file library/layer/container/agent-tools.env -f library/layer/container/docker-compose.yml build agent-tools

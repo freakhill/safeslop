@@ -779,6 +779,14 @@ What `slop run review` does, in order:
 - Always wipes `<repo>/.slop/runtime/<profile>/` so the staged private
   keys do not survive the session.
 
+Inside the container, the user's repo root is mounted read-write at
+`/workspace`. The agent's cwd defaults there, so file edits land in the
+host's repo without further plumbing. The mount is transitively
+`docker-compose.yml`'s `../../..:/workspace` (compose file → container/
+→ layer/ → library/ → repo root); change the override emitted under
+`<repo>/.slop/runtime/<profile>/docker-compose.override.yml` if you need
+a different mount path.
+
 ### How to lock down OpenCode on macOS
 
 1. Use restrictive config:

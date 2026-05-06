@@ -67,7 +67,12 @@ When operating one of the supported agent runtimes, apply the matching policy te
 
 ### File sharing workflow
 
-- Docker: use `/workspace` mount.
+- Docker: `/workspace` mount = repo root. `library/layer/container/docker-compose.yml`
+  resolves `../../..` from its own location to the repo top, so any
+  `agent`/`agent-tools` container sees the user's project there with no
+  per-run plumbing. The orchestrator (`slop run`) layers a
+  per-profile override that adds `/root/.ssh:ro` for the staged
+  ephemeral keypair when `credentials.<host>` is declared.
 - VM: use `slop-brew-vm copy-in <host-path> <guest-path>` and `slop-brew-vm copy-out <guest-path> <host-path>`.
 - Recommended guest temp path: `/tmp/llm-share`.
 
