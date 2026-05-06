@@ -99,12 +99,17 @@ function __llm_gh_install_config --argument-names repo name ro_key rw_key host_p
     set -l safe_name (string replace -ra '[^a-zA-Z0-9._-]' '-' -- "$name")
     set -l marker "slop-gh-key:$slug:$safe_name:$stamp"
 
-    {
+    # `begin; ...; end > file` works on fish 3.x and 4.x. The
+    # `{ ...; } > file` shorthand only landed in fish 4.0 — Ubuntu
+    # 24.04's apt fish is still 3.7 and silently parses it as brace
+    # expansion + a redirect on the empty `}` line, leaving the marker
+    # block unwritten.
+    begin
         echo ""
         echo "# BEGIN $marker"
         __llm_gh_render_config "$ro_key" "$rw_key" "$host_prefix"
         echo "# END $marker"
-    } >> "$config_file"
+    end >> "$config_file"
 
     echo "Added SSH aliases to $config_file"
     echo "  RO host alias: $host_prefix-ro"

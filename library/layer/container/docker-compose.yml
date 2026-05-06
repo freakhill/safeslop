@@ -12,16 +12,25 @@ services:
 
   agent:
     build:
-      context: ..
+      # Build context is the repo root so the Dockerfile path can be
+      # written as it appears on disk relative to the repo. After the
+      # examples/ → library/layer/container/ rename, the previous
+      # `context: ..` (library/layer/) joined to a doubled
+      # `library/layer/library/layer/container/Dockerfile.agent` path,
+      # which works on docker-compose 2.x in some configurations but
+      # fails on the docker compose v2 build path used by GHA.
+      context: ../../..
       dockerfile: library/layer/container/Dockerfile.agent
     image: local/agent-sandbox:latest
+    # /workspace = repo root. `..` from here is library/layer/, three
+    # levels up lands at the repo we're orchestrating.
     working_dir: /workspace
     environment:
       HTTP_PROXY: http://proxy:3128
       HTTPS_PROXY: http://proxy:3128
       NO_PROXY: localhost,127.0.0.1,proxy
     volumes:
-      - ..:/workspace:rw
+      - ../../..:/workspace:rw
     read_only: true
     tmpfs:
       - /tmp
@@ -36,7 +45,14 @@ services:
 
   agent-tools:
     build:
-      context: ..
+      # Build context is the repo root so the Dockerfile path can be
+      # written as it appears on disk relative to the repo. After the
+      # examples/ → library/layer/container/ rename, the previous
+      # `context: ..` (library/layer/) joined to a doubled
+      # `library/layer/library/layer/container/Dockerfile.agent` path,
+      # which works on docker-compose 2.x in some configurations but
+      # fails on the docker compose v2 build path used by GHA.
+      context: ../../..
       dockerfile: library/layer/container/Dockerfile.agent.tools
       args:
         ENABLE_CLAUDE_CODE: ${ENABLE_CLAUDE_CODE:-false}
@@ -59,7 +75,7 @@ services:
       HTTPS_PROXY: http://proxy:3128
       NO_PROXY: localhost,127.0.0.1,proxy
     volumes:
-      - ..:/workspace:rw
+      - ../../..:/workspace:rw
     read_only: true
     tmpfs:
       - /tmp

@@ -40,6 +40,17 @@ function __have_uv_and_cue
 end
 
 function test_help_lists_orchestrator_subcommands
+    # Skip without uv: __orch shells through `uv run --script`, and on
+    # CI runners with older uv versions `uv run --script --quiet
+    # /path/to/script --help` parses --help differently and exits 2.
+    # Locally (uv 0.11+) the ordering is permissive and works fine.
+    # The test still ran on 22+ machines where this matters because
+    # every other test in this file gates the same way; this was the
+    # only ungate.
+    if not __have_uv_and_cue
+        __test_record_pass "orch --help (skipped: uv/cue missing)"
+        return 0
+    end
     set -l out (__orch --help)
     set -l rc $status
     assert_status "orch --help status" $rc 0

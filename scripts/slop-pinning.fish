@@ -60,15 +60,18 @@ if test (count $argv) -gt 0
     exit 1
 end
 
-set -l files \
-    library/layer/container/agent-tools.env \
+# agent-tools.env is gitignored — it's the user's local override of the
+# .example file. On fresh CI checkouts only .example is present, so
+# require .example + Dockerfile + compose, and only check .env when the
+# user has actually copied it into place.
+set -l required_files \
     library/layer/container/agent-tools.env.example \
     library/layer/container/Dockerfile.agent.tools \
     library/layer/container/docker-compose.yml
 
 set -l failed 0
 
-for f in $files
+for f in $required_files
     if not test -f $f
         echo "missing required file: $f" 1>&2
         set failed 1
@@ -79,9 +82,16 @@ if test $failed -eq 1
     exit 1
 end
 
-if grep -nE '^(CLAUDE_CODE_VERSION|OPENCODE_VERSION|OPENCLAW_VERSION|ZEROCLAW_VERSION)=latest$' library/layer/container/agent-tools.env library/layer/container/agent-tools.env.example >/dev/null
+# Build the env-file list: always include .example, include .env only if
+# the user has it.
+set -l env_files library/layer/container/agent-tools.env.example
+if test -f library/layer/container/agent-tools.env
+    set -a env_files library/layer/container/agent-tools.env
+end
+
+if grep -nE '^(CLAUDE_CODE_VERSION|OPENCODE_VERSION|OPENCLAW_VERSION|ZEROCLAW_VERSION)=latest$' $env_files >/dev/null
     echo "unpinned npm CLI version found in agent-tools env files" 1>&2
-    grep -nE '^(CLAUDE_CODE_VERSION|OPENCODE_VERSION|OPENCLAW_VERSION|ZEROCLAW_VERSION)=latest$' library/layer/container/agent-tools.env library/layer/container/agent-tools.env.example 1>&2
+    grep -nE '^(CLAUDE_CODE_VERSION|OPENCODE_VERSION|OPENCLAW_VERSION|ZEROCLAW_VERSION)=latest$' $env_files 1>&2
     set failed 1
 end
 

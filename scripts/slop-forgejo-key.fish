@@ -544,12 +544,15 @@ function __llm_forgejo_install_config --argument-names repo name host_name ro_ke
     set -l safe_name (string replace -ra '[^a-zA-Z0-9._-]' '-' -- "$name")
     set -l marker "slop-forgejo-key:$slug:$safe_name:$stamp"
 
-    {
+    # `begin; ...; end > file` works on fish 3.x and 4.x. The
+    # `{ ...; } > file` shorthand only landed in fish 4.0 — see the
+    # matching comment in slop-gh-key.fish.
+    begin
         echo ""
         echo "# BEGIN $marker"
         __llm_forgejo_render_config "$host_name" "$ro_key" "$rw_key" "$host_prefix"
         echo "# END $marker"
-    } >> "$config_file"
+    end >> "$config_file"
 
     echo "Added SSH aliases to $config_file"
     echo "  RO host alias: $host_prefix-ro"
