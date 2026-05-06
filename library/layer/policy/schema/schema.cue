@@ -111,3 +111,76 @@ package schema
 	tool?:    #AdapterOverrides
 	extras?:  #Extras
 }
+
+// ---------------------------------------------------------------------------
+// Orchestrator schema (slop.cue)
+// ---------------------------------------------------------------------------
+//
+// An author drops a slop.cue at the root of a repo (or any directory). The
+// slop runtime reads it and starts the agents declared, doing setup
+// (containers, ephemeral creds, proxy) and cleanup automatically. Authors
+// extend an existing #Isolation preset rather than rewriting one from
+// scratch — see library/layer/policy/samples/isolation/user-config.cue for the
+// pattern. The #Slop schema is the contract; the runtime lives in
+// scripts/_py/slop_orchestrator.py (next phase).
+
+// Agent names mirror the preset filenames under library/layer/policy/presets/.
+#Agent: "claude" | "opencode" | "ag2" | "openclaw" | "zeroclaw" |
+	"crewai" | "pydantic-ai" | "nous-hermes-local" | "nous-hermes-remote"
+
+// Where the agent runs.
+//   host:      directly on the host (e.g. `slop-agents claude` flow).
+//   container: inside the agent-tools Docker stack.
+//   vm:        inside a disposable Tart VM (slop-brew-vm-style).
+#Environment: "host" | "container" | "vm"
+
+// Per-host credential mode. The runtime maps each non-"none" value to the
+// matching `slop-<host>-key here ...` (or `slop-radicle ...`) flow on
+// launch and to the matching cleanup on exit.
+#GitHostCredential:  *"none" | "ephemeral-ro" | "ephemeral-rw" | "ephemeral-pair"
+#RadicleCredential:  *"none" | "ephemeral"
+
+#Credentials: {
+	github?:  #GitHostCredential
+	forgejo?: #GitHostCredential
+	radicle?: #RadicleCredential
+}
+
+// Hooks the runtime executes on profile exit, in declaration order.
+//   revoke-credentials: revoke any ephemeral keys created on launch
+//                       (gh `cleanup` + `revoke-all` for ephemeral-pair, etc.).
+//   stop-container:     `slop-agent-sandbox-tools down`-equivalent.
+//   stop-proxy:         `slop-isolate proxy stop`.
+//   destroy-vm:         `slop-brew-vm destroy`.
+//   snapshot-state:     write the resolved profile + resource ids to
+//                       .slop/snapshots/<utc-stamp>.json before tearing down.
+#OnExitHook: "revoke-credentials" | "stop-container" | "stop-proxy" |
+	"snapshot-state" | "destroy-vm"
+
+// Optional image override for environment="container". The runtime never
+// builds a tailored image in this iteration — `base` must be a tag that
+// either already exists locally or that `docker pull` can fetch. When
+// omitted, the runtime uses local/agent-sandbox-tools:latest (built by
+// `slop-agent-sandbox-tools up` on first launch).
+#ImageSpec: {
+	base?: string
+}
+
+#Profile: {
+	agent:       #Agent
+	environment: #Environment
+	isolation:   #Isolation
+	credentials?: #Credentials
+	"on-exit"?:  [...#OnExitHook]
+	image?:      #ImageSpec
+}
+
+// Top-level slop.cue shape. `default` (when set) names the profile that
+// runs when the user types bare `slop` in a repo containing this file.
+// `state-dir` overrides the runtime's per-repo state directory; the
+// default ".slop" is gitignored at the repo root.
+#Slop: {
+	profiles: [string]: #Profile
+	default?:    string
+	"state-dir": *".slop" | string
+}

@@ -30,7 +30,8 @@ What an agent is allowed to do — schemas, presets, golden fixtures, and per-ap
 - `schema/schema.cue` — CUE schema defining `#Isolation` (network / filesystem / process / adapters).
 - `presets/*.cue` — ten built-in presets (`any-agent`, `claude-code`, `opencode`, `crewai`, `pydantic-ai`, `ag2`, `openclaw`, `zeroclaw`, `nous-hermes-local`, `nous-hermes-remote`).
 - `fixtures/<adapter>/` — golden compile output per adapter. Used by tests; safe to copy verbatim into a target host.
-- `samples/user-config.cue` — a worked example of extending a preset via `extras`.
+- `samples/isolation/user-config.cue` — a worked example of extending an `#Isolation` preset via `extras`.
+- `samples/slop/slop.cue` — a worked example of the orchestrator schema (`#Slop` / `#Profile`); shows multi-profile + `default`, host/container envs, ephemeral creds, and on-exit hooks.
 - `cue.mod/module.cue` — the CUE module declaration (`module: "slop.dev/isolation"`). Imports inside this tree use that module name, so the directory is movable without breaking imports.
 - `claude-code.settings.json` — drop-in defaults for Claude Code, also referenced by [`slop-agents seed claude`](../../../scripts/slop-agents.fish).
 - `opencode.restrictive.json` — strict OpenCode permission policy.

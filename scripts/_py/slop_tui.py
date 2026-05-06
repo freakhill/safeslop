@@ -553,13 +553,13 @@ def build_top_actions() -> list[Action]:
                 ),
                 Action(
                     key="v",
-                    label="Validate library/layer/policy/samples/user-config.cue",
+                    label="Validate library/layer/policy/samples/isolation/user-config.cue",
                     fish_tool="slop-isolate",
                     fish_sub=[
                         "validate",
-                        str(REPO_ROOT / "library/layer/policy/samples/user-config.cue"),
+                        str(REPO_ROOT / "library/layer/policy/samples/isolation/user-config.cue"),
                     ],
-                    equivalent_cli="slop-isolate validate library/layer/policy/samples/user-config.cue",
+                    equivalent_cli="slop-isolate validate library/layer/policy/samples/isolation/user-config.cue",
                 ),
                 Action(
                     key="p",
