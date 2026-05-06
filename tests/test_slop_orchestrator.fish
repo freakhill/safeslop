@@ -133,12 +133,13 @@ function test_run_unknown_profile_fails_with_helpful_error
     assert_contains "error lists available profiles" "$out" "review"
 end
 
-function test_run_container_profile_rejects_with_phase_e_hint
-    # The bundled sample's "review" profile is environment=container.
-    # Phase D only supports host. The error message must point at
-    # Phase E so users know it's intentional, not a bug.
+function test_run_container_profile_dry_run
+    # Phase E: container profiles run end-to-end. The test uses
+    # --dry-run so it does not require docker on the test runner.
+    # The orchestrator should print the equivalent CLI for both the
+    # `up` (image build + proxy start) and the `run <agent>` step.
     if not __have_uv_and_cue
-        __test_record_pass "orch run container rejected (skipped: uv/cue missing)"
+        __test_record_pass "orch run container dry-run (skipped: uv/cue missing)"
         return 0
     end
     set -l tmp (mk_tmpdir)
@@ -147,13 +148,66 @@ function test_run_container_profile_rejects_with_phase_e_hint
         cd '$tmp'
         set -x ATB_USER_PWD '$tmp'
         env UV_NATIVE_TLS=1 SSL_CERT_FILE=/etc/ssl/cert.pem \\
-            uv run --script --quiet '$ORCH_PY' run review
+            uv run --script --quiet '$ORCH_PY' run review --dry-run
     "
     set -l out (command fish -N -c "$body" 2>&1)
     set -l rc $status
-    assert_eq "orch run review (container) fails" $rc 1
-    assert_contains "error mentions environment=container" "$out" "container"
-    assert_contains "error mentions Phase E" "$out" "Phase E"
+    assert_status "orch run review --dry-run status" $rc 0
+    assert_contains "dry-run announces container env" "$out" "env=container"
+    assert_contains "dry-run prints agent-sandbox-tools up" "$out" "slop-agent-sandbox-tools up"
+    assert_contains "dry-run prints run agent" "$out" "slop-agent-sandbox-tools run claude"
+    assert_contains "dry-run notes credentials would be provisioned" "$out" "credentials"
+    assert_contains "dry-run says provisioning is skipped" "$out" "skipped"
+end
+
+function test_run_host_profile_dry_run
+    # Same shape, host environment. The "explore" profile in the
+    # bundled sample is environment=host, agent=opencode.
+    if not __have_uv_and_cue
+        __test_record_pass "orch run host dry-run (skipped: uv/cue missing)"
+        return 0
+    end
+    set -l tmp (mk_tmpdir)
+    cp "$REPO_ROOT/library/layer/policy/samples/slop/slop.cue" "$tmp/slop.cue"
+    set -l body "
+        cd '$tmp'
+        set -x ATB_USER_PWD '$tmp'
+        env UV_NATIVE_TLS=1 SSL_CERT_FILE=/etc/ssl/cert.pem \\
+            uv run --script --quiet '$ORCH_PY' run explore --dry-run
+    "
+    set -l out (command fish -N -c "$body" 2>&1)
+    set -l rc $status
+    assert_status "orch run explore --dry-run status" $rc 0
+    assert_contains "dry-run announces host env" "$out" "env=host"
+    assert_contains "dry-run prints slop-agents opencode" "$out" "slop-agents opencode"
+end
+
+function test_run_vm_profile_still_rejects_with_phase_g_hint
+    # vm landed in Phase G of the plan; the orchestrator should still
+    # bail with a recognizable error rather than silently passing.
+    if not __have_uv_and_cue
+        __test_record_pass "orch run vm rejected (skipped: uv/cue missing)"
+        return 0
+    end
+    set -l tmp (mk_tmpdir)
+    echo 'package slop
+import "slop.dev/isolation/schema"
+import "slop.dev/isolation/presets"
+profiles: "evil": schema.#Profile & {
+    agent:       "claude"
+    environment: "vm"
+    isolation:   presets.#ClaudeCode
+}' > "$tmp/slop.cue"
+    set -l body "
+        cd '$tmp'
+        set -x ATB_USER_PWD '$tmp'
+        env UV_NATIVE_TLS=1 SSL_CERT_FILE=/etc/ssl/cert.pem \\
+            uv run --script --quiet '$ORCH_PY' run evil
+    "
+    set -l out (command fish -N -c "$body" 2>&1)
+    set -l rc $status
+    assert_eq "orch run vm fails" $rc 1
+    assert_contains "error mentions Phase G" "$out" "Phase G"
 end
 
 function test_down_with_no_state_is_a_no_op

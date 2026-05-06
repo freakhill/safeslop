@@ -280,6 +280,10 @@ SLOP_GH_KEY = SOURCE_REPO_ROOT / "scripts" / "slop-gh-key.fish"
 SLOP_FORGEJO_KEY = SOURCE_REPO_ROOT / "scripts" / "slop-forgejo-key.fish"
 SLOP_RADICLE = SOURCE_REPO_ROOT / "scripts" / "slop-radicle.fish"
 SLOP_AGENTS = SOURCE_REPO_ROOT / "scripts" / "slop-agents.fish"
+SLOP_AGENT_SANDBOX_TOOLS = (
+    SOURCE_REPO_ROOT / "scripts" / "slop-agent-sandbox-tools.fish"
+)
+SLOP_ISOLATE = SOURCE_REPO_ROOT / "scripts" / "slop-isolate.fish"
 
 
 def _fish_run(script: Path, *cmd: str) -> subprocess.CompletedProcess[str]:
@@ -339,16 +343,66 @@ def _provision_credentials(profile: Profile) -> dict[str, dict[str, Any]]:
     return snapshot
 
 
-def _launch_host(profile: Profile) -> int:
+def _launch_host(profile: Profile, dry_run: bool = False) -> int:
     """Exec the agent REPL in the user's cwd. Composes slop-agents."""
     if profile.agent == "claude":
-        return _fish_exec(SLOP_AGENTS, "claude")
-    if profile.agent == "opencode":
-        return _fish_exec(SLOP_AGENTS, "opencode")
-    raise OrchestratorError(
-        f"agent {profile.agent!r} not yet supported on environment=host. "
-        f"Use environment=container in Phase E, or contribute a launcher."
-    )
+        cli = "slop-agents claude"
+    elif profile.agent == "opencode":
+        cli = "slop-agents opencode"
+    else:
+        raise OrchestratorError(
+            f"agent {profile.agent!r} not yet supported on environment=host. "
+            f"Add it to scripts/slop-agents.fish or use environment=container."
+        )
+    print(f"slop: equivalent CLI: {cli}")
+    if dry_run:
+        return 0
+    return _fish_exec(SLOP_AGENTS, profile.agent)
+
+
+def _launch_container(profile: Profile, dry_run: bool = False) -> int:
+    """Bring the agent-tools stack up (idempotent build + proxy start)
+    via the existing slop-agent-sandbox-tools flow, then drop the user
+    into the agent REPL inside the container.
+
+    Composes:
+      slop-agent-sandbox-tools up    # build agent + agent-tools, start proxy
+      slop-agent-sandbox-tools run <agent>
+
+    The image-presence check, FROM-dependency build order, and proxy
+    lifecycle are all handled by slop-agent-sandbox-tools — see
+    scripts/slop-agent-sandbox-tools.fish. We never reach into docker
+    directly.
+
+    `credentials.<host>` is honored at the host layer (created via
+    slop-<host>-key here create-pair) but the container does not
+    currently mount the resulting `~/.ssh/llm_agent_*` keys; agent
+    pushes from inside the container will not yet see them. A future
+    sub-phase plumbs the keys into the container as a read-only
+    volume."""
+    if profile.agent not in ("claude", "opencode"):
+        raise OrchestratorError(
+            f"agent {profile.agent!r} not yet supported on environment=container. "
+            "The container ships claude + opencode preinstalled; for other "
+            "agents, drop into `slop-agent-sandbox-tools shell` and run them by hand."
+        )
+    cli_up = "slop-agent-sandbox-tools up"
+    cli_run = f"slop-agent-sandbox-tools run {profile.agent}"
+    print(f"slop: equivalent CLI: {cli_up} && {cli_run}")
+    if dry_run:
+        return 0
+    if not shutil.which("docker"):
+        raise OrchestratorError(
+            "`docker` not found on PATH. Install Docker / OrbStack / Lima before "
+            "running container profiles, or change the profile to environment=host."
+        )
+    proc = _fish_run(SLOP_AGENT_SANDBOX_TOOLS, "up")
+    if proc.returncode != 0:
+        raise OrchestratorError(
+            f"slop-agent-sandbox-tools up failed (exit {proc.returncode}):\n"
+            f"{proc.stderr.rstrip()}"
+        )
+    return _fish_exec(SLOP_AGENT_SANDBOX_TOOLS, "run", profile.agent)
 
 
 def _on_exit_hooks(profile: Profile, state: ProfileState) -> None:
@@ -358,13 +412,28 @@ def _on_exit_hooks(profile: Profile, state: ProfileState) -> None:
         if hook == "revoke-credentials":
             _revoke_credentials(state)
         elif hook == "stop-container":
-            sys.stderr.write(
-                "slop: stop-container is a no-op for environment=host (Phase E adds it)\n"
-            )
+            if profile.environment != "container":
+                sys.stderr.write(
+                    "slop: stop-container is a no-op when environment != container\n"
+                )
+                continue
+            proc = _fish_run(SLOP_AGENT_SANDBOX_TOOLS, "down")
+            if proc.returncode != 0:
+                sys.stderr.write(
+                    f"slop: slop-agent-sandbox-tools down failed ({proc.returncode}): "
+                    f"{proc.stderr.rstrip()}\n"
+                )
         elif hook == "stop-proxy":
-            sys.stderr.write(
-                "slop: stop-proxy is a no-op for environment=host (Phase E adds it)\n"
-            )
+            # Targets the Envoy + CoreDNS + notifier stack from
+            # slop-isolate (separate from the squid sidecar that
+            # `slop-agent-sandbox-tools down` already tears down with
+            # the container stack).
+            proc = _fish_run(SLOP_ISOLATE, "proxy", "stop")
+            if proc.returncode != 0:
+                sys.stderr.write(
+                    f"slop: slop-isolate proxy stop failed ({proc.returncode}): "
+                    f"{proc.stderr.rstrip()}\n"
+                )
         elif hook == "destroy-vm":
             sys.stderr.write(
                 "slop: destroy-vm is a no-op for environment=host (Phase G adds it)\n"
@@ -443,12 +512,34 @@ def cmd_list(_args: argparse.Namespace) -> int:
 def cmd_run(args: argparse.Namespace) -> int:
     repo_root, cfg = _load_for_user()
     profile = _resolve_profile(cfg, args.profile)
-    if profile.environment != "host":
+    if profile.environment == "vm":
         raise OrchestratorError(
-            f"profile {profile.name!r} declares environment={profile.environment!r}; "
-            "only `host` is supported in Phase D. Container/vm land in Phase E/G."
+            f"profile {profile.name!r} declares environment='vm'; "
+            "VM environments land in Phase G. Use environment=container for now."
         )
-    print(f"slop: launching profile {profile.name!r} (agent={profile.agent}, env=host)")
+    if profile.environment not in ("host", "container"):
+        raise OrchestratorError(
+            f"profile {profile.name!r} declares unknown environment "
+            f"{profile.environment!r}."
+        )
+    print(
+        f"slop: launching profile {profile.name!r} "
+        f"(agent={profile.agent}, env={profile.environment})"
+    )
+    if args.dry_run:
+        # Show what would be provisioned without doing the work. Useful
+        # in CI / on machines without docker / for plan review.
+        print("slop: --dry-run set; provisioning + launch skipped.")
+        if profile.credentials and any(
+            v != "none" for v in profile.credentials.values()
+        ):
+            present = [
+                k for k, v in profile.credentials.items() if v != "none"
+            ]
+            print(f"slop: would provision credentials: {', '.join(present)}")
+        if profile.environment == "host":
+            return _launch_host(profile, dry_run=True)
+        return _launch_container(profile, dry_run=True)
     cred_snapshot = _provision_credentials(profile)
     state = _load_state(repo_root, cfg.state_dir)
     state[profile.name] = ProfileState(
@@ -456,7 +547,10 @@ def cmd_run(args: argparse.Namespace) -> int:
         credentials=cred_snapshot,
     )
     _save_state(repo_root, cfg.state_dir, state)
-    rc = _launch_host(profile)
+    if profile.environment == "host":
+        rc = _launch_host(profile)
+    else:
+        rc = _launch_container(profile)
     # Run on-exit hooks once the agent exits. Reload state so concurrent
     # runs in another tty don't lose each other's snapshots.
     state = _load_state(repo_root, cfg.state_dir)
@@ -500,12 +594,20 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("validate", help="Validate slop.cue against the bundled schema.")
     sub.add_parser("list", help="List declared profiles + their state.")
-    p_run = sub.add_parser("run", help="Run a profile (host-only in this phase).")
+    p_run = sub.add_parser(
+        "run",
+        help="Run a profile. Supports environment: host or container.",
+    )
     p_run.add_argument(
         "profile",
         nargs="?",
         default=None,
         help="Profile name. Omit to use `default`, or the only profile if there's one.",
+    )
+    p_run.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print what would be provisioned + launched, without side effects.",
     )
     sub.add_parser("down", help="Run on-exit hooks for active profiles.")
     return p
