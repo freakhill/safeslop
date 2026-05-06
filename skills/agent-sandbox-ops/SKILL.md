@@ -29,17 +29,17 @@ Before executing this skill, read:
 ## Default policy
 
 1. Prefer `strict-egress` network policy.
-2. Keep domain access allowlisted via `examples/allowlist.domains`.
+2. Keep domain access allowlisted via `library/allowlist.domains`.
 3. Use explicit file transfer for VM (`copy-in`, `copy-out`) and avoid secret transfer.
 
 ## Per-framework restrictive policies
 
 When operating one of the supported agent runtimes, apply the matching policy template before launch:
 
-- Claude Code → `examples/claude-code.settings.json`
-- OpenCode → `examples/opencode.restrictive.json`
-- OpenClaw → `examples/openclaw.restrictive.md` (channels disabled by default; workspace overridden away from `~/.openclaw`; `SOUL.md` treated as untrusted input)
-- ZeroClaw → `examples/zeroclaw.restrictive.md` (workspace boundary, supervised autonomy, signed tool receipts kept on; OS sandbox layer is defense-in-depth — still run inside the `agent` container)
+- Claude Code → `library/claude-code.settings.json`
+- OpenCode → `library/opencode.restrictive.json`
+- OpenClaw → `library/openclaw.restrictive.md` (channels disabled by default; workspace overridden away from `~/.openclaw`; `SOUL.md` treated as untrusted input)
+- ZeroClaw → `library/zeroclaw.restrictive.md` (workspace boundary, supervised autonomy, signed tool receipts kept on; OS sandbox layer is defense-in-depth — still run inside the `agent` container)
 
 ## Workflows
 

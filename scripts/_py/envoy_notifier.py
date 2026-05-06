@@ -24,7 +24,7 @@ If neither is installed, denies are still logged; only the visual prompt
 is missing.
 
 This script is the lifecycle entry point. `proxy start` boots the
-docker compose stack from examples/.generated/docker-compose.yml; the
+docker compose stack from library/.generated/docker-compose.yml; the
 real envoy/coredns process is supplied by that stack. The notifier
 itself runs in the foreground after start and writes its state under
 $XDG_STATE_HOME/agentic-tactical-boots/isolate/.
@@ -47,7 +47,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-GENERATED_DIR = REPO_ROOT / "examples" / ".generated"
+GENERATED_DIR = REPO_ROOT / "library" / ".generated"
 COMPOSE_FILE = GENERATED_DIR / "docker-compose.yml"
 
 

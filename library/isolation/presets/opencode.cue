@@ -1,7 +1,7 @@
 // Preset for the OpenCode npm CLI.
-// Mirrors examples/opencode.restrictive.json semantics.
+// Mirrors library/opencode.restrictive.json semantics.
 //
-// Extend via the `extras` struct (see examples/user-config.cue).
+// Extend via the `extras` struct (see library/user-config.cue).
 
 package presets
 

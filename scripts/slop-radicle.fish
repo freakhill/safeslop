@@ -17,7 +17,7 @@ set -g LLM_RADICLE_KEY_DIR "$HOME/.ssh"
 set -g LLM_RADICLE_TTL "24h"
 set -g LLM_RADICLE_CONFIG_DIR "$HOME/.config/llm-key-tools"
 set -g LLM_RADICLE_STATE_FILE "$LLM_RADICLE_CONFIG_DIR/radicle-access.json"
-set -g LLM_RADICLE_TEMPLATE_FILE (path resolve (dirname (status filename)))/../examples/radicle-access-policy.example.json
+set -g LLM_RADICLE_TEMPLATE_FILE (path resolve (dirname (status filename)))/../library/radicle-access-policy.example.json
 # Python helpers run via uv with PEP-723 inline metadata. See scripts/_py/.
 set -g LLM_RADICLE_PY (path resolve (dirname (status filename)))"/_py/llm_radicle_access.py"
 

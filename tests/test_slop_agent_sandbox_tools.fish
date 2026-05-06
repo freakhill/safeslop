@@ -90,7 +90,7 @@ function test_build_includes_base_agent_for_from_dependency
     # Confirm Dockerfile.agent.tools really has the FROM-dep — if someone
     # rewrites it to a plain alpine base, this test becomes meaningless
     # and should be removed.
-    set -l df "$REPO_ROOT/examples/Dockerfile.agent.tools"
+    set -l df "$REPO_ROOT/library/Dockerfile.agent.tools"
     if test -f "$df"
         set -l dfc (cat "$df")
         assert_contains "Dockerfile.agent.tools still depends on local/agent-sandbox" \

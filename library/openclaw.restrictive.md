@@ -43,9 +43,9 @@ with a single-purpose credential.
 
 ## Network
 
-- Run inside the `agent` service from `examples/docker-compose.yml`
+- Run inside the `agent` service from `library/docker-compose.yml`
   so all egress flows through the proxy.
-- Add channel API endpoints to `examples/allowlist.domains` only
+- Add channel API endpoints to `library/allowlist.domains` only
   while the channel is enabled. Remove when the session ends.
 - Do not add bulk messaging-platform domains "in case we need them".
 

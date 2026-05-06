@@ -1,5 +1,5 @@
 # Local environment override (copied from example)
-examples/agent-tools.env
+library/agent-tools.env
 
 # macOS metadata
 .DS_Store

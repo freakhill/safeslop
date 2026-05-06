@@ -47,9 +47,9 @@ from typing import Callable, Iterable
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-ISOLATION_DIR = REPO_ROOT / "examples" / "isolation"
+ISOLATION_DIR = REPO_ROOT / "library" / "isolation"
 PRESETS_DIR = ISOLATION_DIR / "presets"
-GENERATED_DIR = REPO_ROOT / "examples" / ".generated"
+GENERATED_DIR = REPO_ROOT / "library" / ".generated"
 
 PRESET_DEFINITIONS = {
     "any-agent": "#AnyAgent",
@@ -787,7 +787,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
 
     if not args.yes:
         sys.stderr.write(
-            "Error: apply requires --yes (writes to ~/.config/* and examples/.generated/).\n"
+            "Error: apply requires --yes (writes to ~/.config/* and library/.generated/).\n"
         )
         return 2
 

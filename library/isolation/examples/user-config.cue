@@ -1,6 +1,6 @@
 // Demo end-user config. Pick a preset, extend via the `extras` struct.
 // Compile with:
-//   slop-isolate compile examples/user-config.cue --adapter <name>
+//   slop-isolate compile library/user-config.cue --adapter <name>
 
 package isolation
 

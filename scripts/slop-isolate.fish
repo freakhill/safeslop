@@ -9,7 +9,7 @@
 # Safety/model notes:
 # - Default network policy in every preset is strict-egress.
 # - `apply` is bounded: it never touches sudo, pf, lulu, or /etc.
-#   It writes generated files under examples/.generated/ and may install
+#   It writes generated files under library/.generated/ and may install
 #   ~/.config/{claude-code,opencode}/settings.json with a .bak backup.
 # - sandbox-exec, tart, orbstack get printed Equivalent CLI lines instead
 #   of being executed by `apply`.
@@ -134,7 +134,7 @@ function __slop_isolate_here
     set -l candidate "$root/.isolation.cue"
     if not test -f "$candidate"
         echo "Error: no .isolation.cue at $root" 1>&2
-        echo "Create one (see examples/isolation/examples/user-config.cue)." 1>&2
+        echo "Create one (see library/isolation/examples/user-config.cue)." 1>&2
         return 1
     end
     echo "$candidate"

@@ -10,7 +10,7 @@ source (dirname (status filename))/helpers.fish
 
 set -g SCRIPT "$SCRIPTS_DIR/slop-isolate.fish"
 set -g ISOLATION_PY "$SCRIPTS_DIR/_py/isolation.py"
-set -g PRESET_USER_CONFIG "$REPO_ROOT/examples/isolation/examples/user-config.cue"
+set -g PRESET_USER_CONFIG "$REPO_ROOT/library/isolation/examples/user-config.cue"
 
 function __invoke
     command fish -c "source '$SCRIPT'; slop-isolate $argv" 2>&1

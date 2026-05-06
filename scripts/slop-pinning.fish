@@ -19,9 +19,9 @@ function __check_pinning_help
     echo "slop-pinning — CI/local gate that fails on unpinned tool versions"
     echo ""
     echo "Description:"
-    echo "  Walks the four pinning-relevant files in examples/ and fails if any"
+    echo "  Walks the four pinning-relevant files in library/ and fails if any"
     echo "  CLI version is set to 'latest' (env file, Dockerfile ARG default,"
-    echo "  compose build arg) or if examples/Dockerfile.agent.tools contains a"
+    echo "  compose build arg) or if library/Dockerfile.agent.tools contains a"
     echo "  'uv pip install' without an exact ==version pin."
     echo ""
     echo "Usage:"
@@ -29,10 +29,10 @@ function __check_pinning_help
     echo "  ./scripts/slop-pinning.fish help"
     echo ""
     echo "Checks:"
-    echo "  - examples/agent-tools.env(.example): no <CLI>_VERSION=latest"
-    echo "  - examples/Dockerfile.agent.tools: no ARG <CLI>_VERSION=latest"
-    echo "  - examples/docker-compose.yml: no '\${VAR:-latest}' default"
-    echo "  - examples/Dockerfile.agent.tools: every 'uv pip install' has =="
+    echo "  - library/agent-tools.env(.example): no <CLI>_VERSION=latest"
+    echo "  - library/Dockerfile.agent.tools: no ARG <CLI>_VERSION=latest"
+    echo "  - library/docker-compose.yml: no '\${VAR:-latest}' default"
+    echo "  - library/Dockerfile.agent.tools: every 'uv pip install' has =="
     echo ""
     echo "Examples (synced from README → 'Artifact pinning and attestation reference'):"
     __check_pinning_examples
@@ -59,10 +59,10 @@ if test (count $argv) -gt 0
 end
 
 set -l files \
-    examples/agent-tools.env \
-    examples/agent-tools.env.example \
-    examples/Dockerfile.agent.tools \
-    examples/docker-compose.yml
+    library/agent-tools.env \
+    library/agent-tools.env.example \
+    library/Dockerfile.agent.tools \
+    library/docker-compose.yml
 
 set -l failed 0
 
@@ -77,27 +77,27 @@ if test $failed -eq 1
     exit 1
 end
 
-if grep -nE '^(CLAUDE_CODE_VERSION|OPENCODE_VERSION|OPENCLAW_VERSION|ZEROCLAW_VERSION)=latest$' examples/agent-tools.env examples/agent-tools.env.example >/dev/null
+if grep -nE '^(CLAUDE_CODE_VERSION|OPENCODE_VERSION|OPENCLAW_VERSION|ZEROCLAW_VERSION)=latest$' library/agent-tools.env library/agent-tools.env.example >/dev/null
     echo "unpinned npm CLI version found in agent-tools env files" 1>&2
-    grep -nE '^(CLAUDE_CODE_VERSION|OPENCODE_VERSION|OPENCLAW_VERSION|ZEROCLAW_VERSION)=latest$' examples/agent-tools.env examples/agent-tools.env.example 1>&2
+    grep -nE '^(CLAUDE_CODE_VERSION|OPENCODE_VERSION|OPENCLAW_VERSION|ZEROCLAW_VERSION)=latest$' library/agent-tools.env library/agent-tools.env.example 1>&2
     set failed 1
 end
 
-if grep -nE '^ARG (CLAUDE_CODE_VERSION|OPENCODE_VERSION|OPENCLAW_VERSION|ZEROCLAW_VERSION)=latest$' examples/Dockerfile.agent.tools >/dev/null
-    echo "unpinned npm CLI ARG default found in examples/Dockerfile.agent.tools" 1>&2
-    grep -nE '^ARG (CLAUDE_CODE_VERSION|OPENCODE_VERSION|OPENCLAW_VERSION|ZEROCLAW_VERSION)=latest$' examples/Dockerfile.agent.tools 1>&2
+if grep -nE '^ARG (CLAUDE_CODE_VERSION|OPENCODE_VERSION|OPENCLAW_VERSION|ZEROCLAW_VERSION)=latest$' library/Dockerfile.agent.tools >/dev/null
+    echo "unpinned npm CLI ARG default found in library/Dockerfile.agent.tools" 1>&2
+    grep -nE '^ARG (CLAUDE_CODE_VERSION|OPENCODE_VERSION|OPENCLAW_VERSION|ZEROCLAW_VERSION)=latest$' library/Dockerfile.agent.tools 1>&2
     set failed 1
 end
 
-if grep -nE '(CLAUDE_CODE_VERSION|OPENCODE_VERSION|OPENCLAW_VERSION|ZEROCLAW_VERSION): \$\{\1:-latest\}' examples/docker-compose.yml >/dev/null
-    echo "unpinned compose build arg default found in examples/docker-compose.yml" 1>&2
-    grep -nE '(CLAUDE_CODE_VERSION|OPENCODE_VERSION|OPENCLAW_VERSION|ZEROCLAW_VERSION): \$\{\1:-latest\}' examples/docker-compose.yml 1>&2
+if grep -nE '(CLAUDE_CODE_VERSION|OPENCODE_VERSION|OPENCLAW_VERSION|ZEROCLAW_VERSION): \$\{\1:-latest\}' library/docker-compose.yml >/dev/null
+    echo "unpinned compose build arg default found in library/docker-compose.yml" 1>&2
+    grep -nE '(CLAUDE_CODE_VERSION|OPENCODE_VERSION|OPENCLAW_VERSION|ZEROCLAW_VERSION): \$\{\1:-latest\}' library/docker-compose.yml 1>&2
     set failed 1
 end
 
-set -l unpinned_uv_lines (grep -n 'uv pip install' examples/Dockerfile.agent.tools | grep -v '==')
+set -l unpinned_uv_lines (grep -n 'uv pip install' library/Dockerfile.agent.tools | grep -v '==')
 if test (count $unpinned_uv_lines) -gt 0
-    echo "found uv pip install without exact pins in examples/Dockerfile.agent.tools" 1>&2
+    echo "found uv pip install without exact pins in library/Dockerfile.agent.tools" 1>&2
     for line in $unpinned_uv_lines
         echo $line 1>&2
     end

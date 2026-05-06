@@ -10,11 +10,11 @@
 function __agent_sandbox_tools_examples
     # BEGIN AUTOGEN: examples section="How to run with preinstalled CLIs/frameworks"
     echo 'Copy env template and pin versions:'
-    echo '  cp examples/agent-tools.env.example examples/agent-tools.env'
+    echo '  cp library/agent-tools.env.example library/agent-tools.env'
     echo
     echo 'Build and run the tools image:'
-    echo '  docker compose --env-file examples/agent-tools.env -f examples/docker-compose.yml build agent-tools'
-    echo '  docker compose --env-file examples/agent-tools.env -f examples/docker-compose.yml run --rm agent-tools'
+    echo '  docker compose --env-file library/agent-tools.env -f library/docker-compose.yml build agent-tools'
+    echo '  docker compose --env-file library/agent-tools.env -f library/docker-compose.yml run --rm agent-tools'
     echo
     echo 'Optional convenience wrapper:'
     echo '  source scripts/slop-agent-sandbox-tools.fish'
@@ -28,8 +28,8 @@ function __agent_sandbox_tools_help
     echo ""
     echo "Description:"
     echo "  Same UX as slop-agent-sandbox but targets the tool-preinstalled image"
-    echo "  ('agent-tools' service in examples/docker-compose.yml). Picks up"
-    echo "  pinned versions from examples/agent-tools.env when present."
+    echo "  ('agent-tools' service in library/docker-compose.yml). Picks up"
+    echo "  pinned versions from library/agent-tools.env when present."
     echo ""
     echo "Usage:"
     echo "  source scripts/slop-agent-sandbox-tools.fish"
@@ -49,7 +49,7 @@ function __agent_sandbox_tools_help
     echo ""
     echo "Notes:"
     echo "  - Host project is mounted at /workspace inside the container."
-    echo "  - examples/agent-tools.env (when present) pins CLI versions for the build."
+    echo "  - library/agent-tools.env (when present) pins CLI versions for the build."
     echo "  - For the bare agent without preinstalled tools, use 'slop-agent-sandbox' instead."
     echo "  - Full reference: README.md → 'How to run with preinstalled CLIs/frameworks'."
 end
@@ -64,8 +64,8 @@ end
 
 # Keep compose file checks centralized so every subcommand fails consistently.
 function __agent_sandbox_tools_check_files
-    if not test -f examples/docker-compose.yml
-        echo "Error: Missing examples/docker-compose.yml (run from repo root)." 1>&2
+    if not test -f library/docker-compose.yml
+        echo "Error: Missing library/docker-compose.yml (run from repo root)." 1>&2
         echo "" 1>&2
         __agent_sandbox_tools_help_to_stderr
         return 1
@@ -103,11 +103,11 @@ function __agent_sandbox_tools_tui
     while true
         echo ""
         gum style --bold --foreground 212 "slop-agent-sandbox-tools — Docker stack ('agent-tools' service)"
-        gum style --faint "compose file: examples/docker-compose.yml"
-        if test -f examples/agent-tools.env
-            gum style --faint "env file: examples/agent-tools.env (pinned versions in use)"
+        gum style --faint "compose file: library/docker-compose.yml"
+        if test -f library/agent-tools.env
+            gum style --faint "env file: library/agent-tools.env (pinned versions in use)"
         else
-            gum style --foreground 196 "no examples/agent-tools.env — versions will be from compose defaults"
+            gum style --foreground 196 "no library/agent-tools.env — versions will be from compose defaults"
         end
         gum style --faint "(Esc on the menu to quit. Every action prints its equivalent CLI.)"
         echo ""
@@ -162,14 +162,14 @@ function __agent_sandbox_tools_tui
 end
 
 function __agent_sandbox_tools_compose_cmd --argument-names policy
-    # We intentionally preserve support for optional examples/agent-tools.env.
+    # We intentionally preserve support for optional library/agent-tools.env.
     # This keeps pinned versions configurable without changing command UX.
     set -e argv[1]
 
-    if test -f examples/agent-tools.env
-        docker compose --env-file examples/agent-tools.env -f examples/docker-compose.yml $argv
+    if test -f library/agent-tools.env
+        docker compose --env-file library/agent-tools.env -f library/docker-compose.yml $argv
     else
-        docker compose -f examples/docker-compose.yml $argv
+        docker compose -f library/docker-compose.yml $argv
     end
 end
 

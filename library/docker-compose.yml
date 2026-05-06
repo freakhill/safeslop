@@ -13,7 +13,7 @@ services:
   agent:
     build:
       context: ..
-      dockerfile: examples/Dockerfile.agent
+      dockerfile: library/Dockerfile.agent
     image: local/agent-sandbox:latest
     working_dir: /workspace
     environment:
@@ -37,7 +37,7 @@ services:
   agent-tools:
     build:
       context: ..
-      dockerfile: examples/Dockerfile.agent.tools
+      dockerfile: library/Dockerfile.agent.tools
       args:
         ENABLE_CLAUDE_CODE: ${ENABLE_CLAUDE_CODE:-false}
         ENABLE_OPENCODE: ${ENABLE_OPENCODE:-false}
