@@ -29,6 +29,32 @@
 set -g SLOP_VERSION "0.2"
 set -g SLOP_REPO_ROOT (path resolve (dirname (status filename)))/..
 set -g SLOP_TUI_PY "$SLOP_REPO_ROOT/scripts/_py/slop_tui.py"
+set -g SLOP_ORCHESTRATOR_PY "$SLOP_REPO_ROOT/scripts/_py/slop_orchestrator.py"
+
+# Where the user actually invoked us from. The conf.d wrapper sets this
+# before exec'ing slop.fish so resolve-from-cwd doesn't read scripts/.
+function __slop_user_pwd
+    if set -q ATB_USER_PWD; and test -n "$ATB_USER_PWD"
+        echo "$ATB_USER_PWD"
+    else
+        echo "$PWD"
+    end
+end
+
+# Walk up from the user's pwd looking for slop.cue. Echo the path of
+# the first match, or empty if none. We mirror the orchestrator's
+# resolve logic so `slop run` from a subdir Just Works.
+function __slop_find_cue
+    set -l cur (__slop_user_pwd)
+    while test -n "$cur"; and test "$cur" != "/"
+        if test -f "$cur/slop.cue"
+            echo "$cur/slop.cue"
+            return 0
+        end
+        set cur (dirname "$cur")
+    end
+    return 1
+end
 
 function __slop_help
     echo "slop — interactive launcher for the agentic_tactical_boots toolkit"
@@ -39,10 +65,15 @@ function __slop_help
     echo "  learn the underlying commands and copy them into scripts."
     echo ""
     echo "Usage:"
-    echo "  slop            Launch the global TUI (requires uv)."
-    echo "  slop --check    Probe whether the Textual install path works."
-    echo "  slop help       Show this message and exit."
-    echo "  slop --version  Print version."
+    echo "  slop                  If ./slop.cue exists, run its default profile;"
+    echo "                        otherwise launch the global TUI."
+    echo "  slop run [<profile>]  Run a profile declared in slop.cue."
+    echo "  slop validate         Validate slop.cue against the bundled schema."
+    echo "  slop list             List declared profiles + their state."
+    echo "  slop down             Run on-exit hooks for active profiles."
+    echo "  slop --check          Probe whether the Textual install path works."
+    echo "  slop help             Show this message and exit."
+    echo "  slop --version        Print version."
     echo ""
     echo "Per-tool TUIs (lighter, focused launchers):"
     echo "  slop-gh-key tui     GitHub deploy keys for the current repo."
@@ -190,6 +221,12 @@ if test (count $argv) -gt 0
         case --check
             __slop_check
             exit $status
+        case run validate list down
+            # Orchestrator subcommands. Always go to the orchestrator
+            # whether or not slop.cue is present — `slop validate` for
+            # instance gives a useful "no slop.cue found" error.
+            __slop_require_uv; or exit 1
+            exec uv run --script "$SLOP_ORCHESTRATOR_PY" $argv
         case '*'
             echo "Error: unknown argument '$argv[1]'" 1>&2
             echo "" 1>&2
@@ -199,4 +236,13 @@ if test (count $argv) -gt 0
 end
 
 __slop_require_uv; or exit 1
+
+# No args: if there is a slop.cue at or above the user's cwd, run the
+# default profile through the orchestrator instead of the Textual TUI.
+# Bare `slop` keeps doing the menu when no slop.cue is around — same UX
+# users had before this phase.
+if set -l cue (__slop_find_cue)
+    exec uv run --script "$SLOP_ORCHESTRATOR_PY" run
+end
+
 __slop_exec_tui
