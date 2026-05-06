@@ -447,8 +447,157 @@ def build_agent_launcher_actions() -> list[Action]:
     ]
 
 
+def _discover_slop_profiles() -> list[dict] | None:
+    """Resolve the user's slop.cue (walking up from $ATB_USER_PWD or
+    $PWD) and parse the profiles into a list of dicts:
+        [{"name", "agent", "environment", "is_default"}]
+    Returns None when no slop.cue is reachable, or [] when a slop.cue
+    exists but cannot be evaluated. Catches every exception — the TUI
+    must never crash because a user typo'd their slop.cue."""
+    try:
+        # The orchestrator's helpers do all the heavy lifting (CUE
+        # evaluation in a tempdir under the policy module, schema
+        # parsing). Import them directly rather than re-shelling out;
+        # avoids paying the uv-cold-start cost on every menu rebuild.
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        try:
+            from slop_orchestrator import (
+                _evaluate_slop_cue,
+                _parse_config,
+                _resolve_repo_root,
+                _slop_cue_path,
+            )
+        finally:
+            # Clean up sys.path so other paths-based callers in the
+            # same process don't see our injection.
+            try:
+                sys.path.remove(str(Path(__file__).resolve().parent))
+            except ValueError:
+                pass
+        repo_root = _resolve_repo_root()
+        slop_cue = _slop_cue_path(repo_root)
+        if not slop_cue.is_file():
+            return None
+        raw = _evaluate_slop_cue(slop_cue)
+        cfg = _parse_config(raw)
+        return [
+            {
+                "name": p.name,
+                "agent": p.agent,
+                "environment": p.environment,
+                "is_default": p.name == cfg.default,
+            }
+            for p in cfg.profiles.values()
+        ]
+    except Exception:
+        # slop.cue exists but cue is missing, or schema mismatch, or
+        # any other failure. Return empty list so the menu shows an
+        # error-hint entry rather than disappearing.
+        return []
+
+
+def build_orchestrator_actions() -> list[Action]:
+    """Submenu listing the profiles in the user's slop.cue.
+
+    Each row is a `slop run <profile>` action; the orchestrator does
+    credential provisioning, image build, container exec, and on-exit
+    cleanup based on what the profile declares (Phase D + Phase E).
+
+    When no slop.cue is reachable, the submenu shows a single info
+    entry pointing at the docs. When slop.cue exists but evaluation
+    fails (cue missing, schema error, …), shows a `slop validate` entry
+    so the user can see the underlying error.
+    """
+    profiles = _discover_slop_profiles()
+    slop_fish = REPO_ROOT / "scripts" / "slop.fish"
+    if profiles is None:
+        return [
+            Action(
+                key="d",
+                label="(no slop.cue here — see library/layer/policy/samples/slop/)",
+                argv=[
+                    "sh", "-c",
+                    f"head -n 50 {shlex.quote(str(REPO_ROOT / 'library/layer/policy/samples/slop/slop.cue'))}",
+                ],
+                equivalent_cli="head library/layer/policy/samples/slop/slop.cue",
+            ),
+        ]
+    if not profiles:
+        return [
+            Action(
+                key="v",
+                label="(slop.cue present but invalid — run `slop validate` for the error)",
+                argv=["fish", str(slop_fish), "validate"],
+                equivalent_cli="slop validate",
+            ),
+        ]
+    # Pick a per-profile single-key shortcut. Use the profile name's
+    # first letter where unique; fall back to digits 1-9 for collisions
+    # so every entry remains keyboard-reachable.
+    used_keys: set[str] = set()
+    actions: list[Action] = []
+    for i, prof in enumerate(profiles, start=1):
+        first = prof["name"][:1].lower()
+        if first and first not in used_keys and first.isalpha():
+            key = first
+        else:
+            key = str(i) if i < 10 else "?"
+        used_keys.add(key)
+        marker = "★ " if prof["is_default"] else "  "
+        label = (
+            f"{marker}{prof['name']}  "
+            f"(agent={prof['agent']}, env={prof['environment']})"
+        )
+        actions.append(
+            Action(
+                key=key,
+                label=label,
+                argv=["fish", str(slop_fish), "run", prof["name"]],
+                equivalent_cli=f"slop run {prof['name']}",
+            )
+        )
+    # Always include validate / list / down so the user can drive the
+    # whole orchestrator from the menu.
+    actions.append(
+        Action(
+            key="V",
+            label="Validate slop.cue against the bundled schema",
+            argv=["fish", str(slop_fish), "validate"],
+            equivalent_cli="slop validate",
+        )
+    )
+    actions.append(
+        Action(
+            key="L",
+            label="List declared profiles + last-known state",
+            argv=["fish", str(slop_fish), "list"],
+            equivalent_cli="slop list",
+        )
+    )
+    actions.append(
+        Action(
+            key="D",
+            label="Tear down active profiles (run on-exit hooks)",
+            argv=["fish", str(slop_fish), "down"],
+            equivalent_cli="slop down",
+            confirm=(
+                "Run on-exit hooks (revoke creds, stop containers/proxy) for active profiles?",
+                True,
+            ),
+        )
+    )
+    return actions
+
+
 def build_top_actions() -> list[Action]:
     return [
+        Action(
+            key="p",
+            label="Run profile (from ./slop.cue)",
+            description="Run a profile declared in the repo's slop.cue: provisions credentials + container/proxy automatically, drops into the agent, runs on-exit cleanup. Submenu also exposes validate / list / down.",
+            submenu=build_orchestrator_actions(),
+            equivalent_cli="(slop.cue orchestrator sub-menu)",
+        ),
         Action(
             key="a",
             label="Agents (Claude Code, OpenCode) — launch with defaults",

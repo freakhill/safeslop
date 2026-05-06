@@ -258,6 +258,146 @@ function test_fish_dispatch_routes_validate_to_orchestrator
     assert_contains "slop validate error names slop.cue" "$out" "slop.cue"
 end
 
+function test_tui_no_slop_cue_shows_pointer_to_sample
+    # When the user opens the TUI from a directory that has no slop.cue,
+    # the "Run profile" submenu must still exist and offer a clear hint
+    # — pointer at the bundled sample. Inspect build_top_actions()
+    # programmatically rather than driving the TUI; faster + deterministic.
+    if not __have_uv_and_cue
+        __test_record_pass "TUI no-cue submenu (skipped: uv/cue missing)"
+        return 0
+    end
+    set -l tmp (mk_tmpdir)
+    set -l py "
+import sys, os
+os.environ['ATB_USER_PWD'] = '$tmp'
+sys.path.insert(0, 'scripts/_py')
+import slop_tui
+top = slop_tui.build_top_actions()
+run_action = next((a for a in top if a.key == 'p'), None)
+assert run_action is not None, 'no key=p Run profile action'
+assert run_action.submenu is not None, 'Run profile has no submenu'
+labels = [a.label for a in run_action.submenu]
+assert any('no slop.cue' in lbl for lbl in labels), labels
+print('OK no-cue:', labels)
+"
+    set -l out (env UV_NATIVE_TLS=1 SSL_CERT_FILE=/etc/ssl/cert.pem \
+        uv run --quiet --with 'textual>=0.79' python -c "$py" 2>&1)
+    set -l rc $status
+    if test $rc -ne 0
+        __test_record_fail "TUI no-cue submenu" "rc=$rc, out=$out"
+        return
+    end
+    __test_record_pass "TUI no-cue submenu shows sample pointer"
+end
+
+function test_tui_with_slop_cue_lists_profiles_in_submenu
+    # The bundled sample has two profiles. When ATB_USER_PWD points at
+    # a dir containing it, the Run-profile submenu must list both,
+    # plus the validate / list / down helper rows.
+    if not __have_uv_and_cue
+        __test_record_pass "TUI with-cue submenu (skipped: uv/cue missing)"
+        return 0
+    end
+    set -l tmp (mk_tmpdir)
+    cp "$REPO_ROOT/library/layer/policy/samples/slop/slop.cue" "$tmp/slop.cue"
+    set -l py "
+import sys, os
+os.environ['ATB_USER_PWD'] = '$tmp'
+sys.path.insert(0, 'scripts/_py')
+import slop_tui
+top = slop_tui.build_top_actions()
+run_action = next(a for a in top if a.key == 'p')
+labels = [a.label for a in run_action.submenu]
+clis   = [a.equivalent_cli for a in run_action.submenu]
+joined = ' | '.join(labels)
+assert 'review' in joined, joined
+assert 'explore' in joined, joined
+assert any('agent=claude'  in lbl for lbl in labels), labels
+assert any('agent=opencode' in lbl for lbl in labels), labels
+assert 'slop run review'  in clis, clis
+assert 'slop run explore' in clis, clis
+assert 'slop validate' in clis, clis
+assert 'slop list'     in clis, clis
+assert 'slop down'     in clis, clis
+print('OK with-cue: profiles + helpers all present')
+"
+    set -l out (env UV_NATIVE_TLS=1 SSL_CERT_FILE=/etc/ssl/cert.pem \
+        uv run --quiet --with 'textual>=0.79' python -c "$py" 2>&1)
+    set -l rc $status
+    if test $rc -ne 0
+        __test_record_fail "TUI with-cue submenu" "rc=$rc, out=$out"
+        return
+    end
+    __test_record_pass "TUI with-cue submenu lists profiles + helpers"
+end
+
+function test_tui_default_profile_marked_with_star
+    # The orchestrator's `list` marks the default profile with `* `;
+    # the TUI uses a star (★) in the label. Either is fine — the test
+    # just checks the default profile's label has SOMETHING the
+    # non-default lacks, so users can tell at a glance.
+    if not __have_uv_and_cue
+        __test_record_pass "TUI marks default (skipped: uv/cue missing)"
+        return 0
+    end
+    set -l tmp (mk_tmpdir)
+    cp "$REPO_ROOT/library/layer/policy/samples/slop/slop.cue" "$tmp/slop.cue"
+    set -l py "
+import sys, os
+os.environ['ATB_USER_PWD'] = '$tmp'
+sys.path.insert(0, 'scripts/_py')
+import slop_tui
+top = slop_tui.build_top_actions()
+run_action = next(a for a in top if a.key == 'p')
+review_label = next(a.label for a in run_action.submenu if 'review' in a.label and 'agent=' in a.label)
+explore_label = next(a.label for a in run_action.submenu if 'explore' in a.label and 'agent=' in a.label)
+# review is the default, explore is not
+assert review_label[0] != ' ' or '★' in review_label, repr(review_label)
+print('OK marked:', review_label)
+"
+    set -l out (env UV_NATIVE_TLS=1 SSL_CERT_FILE=/etc/ssl/cert.pem \
+        uv run --quiet --with 'textual>=0.79' python -c "$py" 2>&1)
+    set -l rc $status
+    if test $rc -ne 0
+        __test_record_fail "TUI default-marker visible" "rc=$rc, out=$out"
+        return
+    end
+    __test_record_pass "TUI default-marker visible on review"
+end
+
+function test_tui_malformed_slop_cue_does_not_crash
+    # If slop.cue has a typo CUE rejects, build_top_actions() must
+    # still complete (returning a fallback "validate for the error"
+    # entry) so the user can still launch the TUI to see other tools.
+    if not __have_uv_and_cue
+        __test_record_pass "TUI tolerates broken slop.cue (skipped: uv/cue missing)"
+        return 0
+    end
+    set -l tmp (mk_tmpdir)
+    echo 'this is not valid cue!@#$' > "$tmp/slop.cue"
+    set -l py "
+import sys, os
+os.environ['ATB_USER_PWD'] = '$tmp'
+sys.path.insert(0, 'scripts/_py')
+import slop_tui
+top = slop_tui.build_top_actions()
+run_action = next(a for a in top if a.key == 'p')
+labels = [a.label for a in run_action.submenu]
+joined = ' | '.join(labels)
+assert any('invalid' in lbl.lower() or 'validate' in lbl.lower() for lbl in labels), joined
+print('OK fallback:', labels)
+"
+    set -l out (env UV_NATIVE_TLS=1 SSL_CERT_FILE=/etc/ssl/cert.pem \
+        uv run --quiet --with 'textual>=0.79' python -c "$py" 2>&1)
+    set -l rc $status
+    if test $rc -ne 0
+        __test_record_fail "TUI tolerates broken slop.cue" "rc=$rc, out=$out"
+        return
+    end
+    __test_record_pass "TUI tolerates broken slop.cue"
+end
+
 function test_fish_dispatch_unknown_arg_still_errors
     # The orchestrator subcommands shouldn't shadow the existing
     # "Unknown argument" error path for arbitrary other strings.
