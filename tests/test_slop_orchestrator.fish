@@ -252,6 +252,161 @@ profiles: "vm-claude-creds": schema.#Profile & {
     assert_contains "dry-run announces scp transport" "$out" "scp"
 end
 
+function test_create_pair_id_parser_extracts_two_ids
+    # The fish gh/forgejo create-pair commands print "Created <access>
+    # deploy key" then "  id: <num>" per access mode. The orchestrator
+    # captures these so on-exit revoke can target them by id (rather
+    # than waiting for the 24h TTL via revoke-expired --yes).
+    if not __have_uv_and_cue
+        __test_record_pass "create-pair id parser (skipped: uv/cue missing)"
+        return 0
+    end
+    set -l py "
+import sys
+sys.path.insert(0, 'scripts/_py')
+from slop_orchestrator import _parse_create_pair_ids
+sample = '''Created ro deploy key
+  repo: owner/repo
+  id: 12345
+  title: llm-agent:ro:auto-abc-20260506:exp=2026-05-07T00:00:00Z
+  private key: /home/u/.ssh/llm_agent_github_ro_auto-abc_20260506T000000Z
+  public key:  /home/u/.ssh/llm_agent_github_ro_auto-abc_20260506T000000Z.pub
+Created rw deploy key
+  repo: owner/repo
+  id: 12346
+  title: llm-agent:rw:auto-abc-20260506:exp=2026-05-07T00:00:00Z
+'''
+ids = _parse_create_pair_ids(sample)
+assert ids == [12345, 12346], ids
+empty = _parse_create_pair_ids('')
+assert empty == [], empty
+# Decoy: the parser must not match 'commit-id', 'request-id', etc.
+noisy = '''Created ro deploy key
+  commit-id: abc123
+  id: 999
+  request-id: 42
+'''
+ids2 = _parse_create_pair_ids(noisy)
+assert ids2 == [999], ids2
+print('OK parser')
+"
+    set -l out (env UV_NATIVE_TLS=1 SSL_CERT_FILE=/etc/ssl/cert.pem \
+        uv run --quiet python -c "$py" 2>&1)
+    set -l rc $status
+    if test $rc -ne 0
+        __test_record_fail "create-pair id parser" "rc=$rc, out=$out"
+        return
+    end
+    __test_record_pass "create-pair id parser extracts the two ids"
+end
+
+function test_revoke_credentials_uses_captured_ids
+    # End-to-end: stub slop-gh-key.fish on PATH so the orchestrator's
+    # _revoke_credentials function shells into our recorder. Construct
+    # a ProfileState with two captured ids and confirm _revoke_credentials
+    # invokes `here revoke <id>` once per id, not `here cleanup`.
+    if not __have_uv_and_cue
+        __test_record_pass "revoke uses captured ids (skipped: uv/cue missing)"
+        return 0
+    end
+    set -l tmp (mk_tmpdir)
+    set -l py "
+import sys, os, json
+from pathlib import Path
+from unittest.mock import patch
+
+sys.path.insert(0, 'scripts/_py')
+import slop_orchestrator as orch
+
+# Capture every _fish_run call rather than spawning real fish.
+calls = []
+class FakeProc:
+    returncode = 0
+    stdout = ''
+    stderr = ''
+def fake(script, *cmd):
+    calls.append((script.name, list(cmd)))
+    return FakeProc()
+orch._fish_run = fake
+
+state = orch.ProfileState(
+    started_at='2026-05-06T00:00:00Z',
+    credentials={
+        'github':  {'mode': 'ephemeral-rw', 'key_ids': [12345, 12346]},
+        'forgejo': {'mode': 'ephemeral-rw', 'key_ids': [99]},
+    },
+)
+orch._revoke_credentials(state)
+gh_calls  = [c for c in calls if c[0] == 'slop-gh-key.fish']
+fj_calls  = [c for c in calls if c[0] == 'slop-forgejo-key.fish']
+assert gh_calls == [
+    ('slop-gh-key.fish', ['here', 'revoke', '12345']),
+    ('slop-gh-key.fish', ['here', 'revoke', '12346']),
+], gh_calls
+assert fj_calls == [
+    ('slop-forgejo-key.fish', ['here', 'revoke', '99']),
+], fj_calls
+# No call to `here cleanup` should have happened — that would be the
+# old expired-only behavior.
+assert not any('cleanup' in c[1] for c in calls), calls
+print('OK revoke-by-id')
+"
+    set -l out (env UV_NATIVE_TLS=1 SSL_CERT_FILE=/etc/ssl/cert.pem \
+        uv run --quiet python -c "$py" 2>&1)
+    set -l rc $status
+    if test $rc -ne 0
+        __test_record_fail "revoke uses captured ids" "rc=$rc, out=$out"
+        return
+    end
+    __test_record_pass "revoke calls `here revoke <id>` per captured id"
+end
+
+function test_revoke_credentials_falls_back_to_cleanup_when_no_ids
+    # State files written by older orchestrator versions (or hand-edited
+    # ones) don't carry key_ids. The fallback must still invoke `here
+    # cleanup` so something happens — the user's keys would just live
+    # to their TTL otherwise.
+    if not __have_uv_and_cue
+        __test_record_pass "revoke fallback (skipped: uv/cue missing)"
+        return 0
+    end
+    set -l py "
+import sys
+sys.path.insert(0, 'scripts/_py')
+import slop_orchestrator as orch
+
+calls = []
+class FakeProc:
+    returncode = 0
+    stdout = ''
+    stderr = ''
+def fake(script, *cmd):
+    calls.append((script.name, list(cmd)))
+    return FakeProc()
+orch._fish_run = fake
+
+state = orch.ProfileState(
+    started_at='2026-05-06T00:00:00Z',
+    credentials={
+        'github':  {'mode': 'ephemeral-rw'},      # no key_ids
+        'forgejo': {'mode': 'ephemeral-rw'},      # no key_ids
+    },
+)
+orch._revoke_credentials(state)
+assert ('slop-gh-key.fish', ['here', 'cleanup']) in calls, calls
+assert ('slop-forgejo-key.fish', ['here', 'cleanup']) in calls, calls
+print('OK fallback to cleanup')
+"
+    set -l out (env UV_NATIVE_TLS=1 SSL_CERT_FILE=/etc/ssl/cert.pem \
+        uv run --quiet python -c "$py" 2>&1)
+    set -l rc $status
+    if test $rc -ne 0
+        __test_record_fail "revoke fallback to cleanup" "rc=$rc, out=$out"
+        return
+    end
+    __test_record_pass "revoke falls back to here cleanup when no captured ids"
+end
+
 function test_credential_staging_copies_only_ephemeral_keys
     # When a container profile declares credentials.github != "none",
     # the orchestrator should stage llm_agent_github_{ro,rw}_* into

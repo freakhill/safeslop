@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -326,22 +327,47 @@ def _fish_exec(script: Path, *cmd: str) -> int:
     return subprocess.call(["fish", "-c", inner])
 
 
+_KEY_ID_RX = re.compile(r"^\s*id:\s*(\d+)\s*$", re.MULTILINE)
+
+
+def _parse_create_pair_ids(stdout: str) -> list[int]:
+    """Pull the integer key ids out of slop-{gh,forgejo}-key
+    `here create-pair` stdout. The fish helpers print:
+        Created ro deploy key
+          repo: owner/repo
+          id: 12345
+          ...
+    one block per access mode, so a successful create-pair emits
+    exactly two ids. We return them in stdout order so the caller
+    knows ro comes first."""
+    return [int(m.group(1)) for m in _KEY_ID_RX.finditer(stdout)]
+
+
 def _provision_credentials(profile: Profile) -> dict[str, dict[str, Any]]:
     """Create ephemeral credentials per the profile's `credentials`
     field. Returns a state-snippet describing what was created so
-    cleanup can find it."""
+    cleanup can find it.
+
+    Captures the just-created key ids so the on-exit
+    `revoke-credentials` hook can revoke each one by id rather than
+    falling through to `here cleanup` (= `revoke-expired --yes`),
+    which is a no-op on freshly-issued 24h-TTL keys."""
     snapshot: dict[str, dict[str, Any]] = {}
     gh = profile.credentials.get("github")
     if gh and gh != "none":
         # ephemeral-ro / ephemeral-rw / ephemeral-pair all map to
         # `slop-gh-key here create-pair` today (the script always
-        # creates both keys; per-mode selection is a Phase E refinement).
+        # creates both keys; per-mode selection is a future refinement).
         proc = _fish_run(SLOP_GH_KEY, "here", "create-pair")
         if proc.returncode != 0:
             raise OrchestratorError(
                 f"slop-gh-key here create-pair failed (exit {proc.returncode})"
             )
-        snapshot["github"] = {"mode": gh, "via": "slop-gh-key here create-pair"}
+        snapshot["github"] = {
+            "mode": gh,
+            "via": "slop-gh-key here create-pair",
+            "key_ids": _parse_create_pair_ids(proc.stdout),
+        }
     fj = profile.credentials.get("forgejo")
     if fj and fj != "none":
         proc = _fish_run(SLOP_FORGEJO_KEY, "here", "create-pair")
@@ -349,7 +375,11 @@ def _provision_credentials(profile: Profile) -> dict[str, dict[str, Any]]:
             raise OrchestratorError(
                 f"slop-forgejo-key here create-pair failed (exit {proc.returncode})"
             )
-        snapshot["forgejo"] = {"mode": fj, "via": "slop-forgejo-key here create-pair"}
+        snapshot["forgejo"] = {
+            "mode": fj,
+            "via": "slop-forgejo-key here create-pair",
+            "key_ids": _parse_create_pair_ids(proc.stdout),
+        }
     rad = profile.credentials.get("radicle")
     if rad and rad != "none":
         # Radicle's identity creation is name-driven, not repo-driven.
@@ -850,23 +880,39 @@ def _on_exit_hooks(profile: Profile, state: ProfileState) -> None:
 
 
 def _revoke_credentials(state: ProfileState) -> None:
-    if "github" in state.credentials:
-        proc = _fish_run(SLOP_GH_KEY, "here", "cleanup")
-        if proc.returncode != 0:
-            sys.stderr.write(
-                f"slop: gh-key cleanup failed ({proc.returncode}): {proc.stderr.rstrip()}\n"
-            )
-    if "forgejo" in state.credentials:
-        proc = _fish_run(SLOP_FORGEJO_KEY, "here", "cleanup")
-        if proc.returncode != 0:
-            sys.stderr.write(
-                f"slop: forgejo-key cleanup failed ({proc.returncode}): {proc.stderr.rstrip()}\n"
-            )
+    """Run the matching `here revoke <id>` per captured key, falling
+    back to `here cleanup` if the state has no key_ids (older state
+    files, or a manual edit that dropped them). The fallback is
+    `revoke-expired --yes`, which is a no-op on freshly-issued 24h-TTL
+    keys — so without per-id revoke the on-exit hook used to leave
+    those keys live until they aged out, defeating the point of
+    per-session ephemeral creds."""
+    for family, script in (("github", SLOP_GH_KEY), ("forgejo", SLOP_FORGEJO_KEY)):
+        snap = state.credentials.get(family)
+        if not snap:
+            continue
+        ids = snap.get("key_ids") or []
+        if ids:
+            for kid in ids:
+                proc = _fish_run(script, "here", "revoke", str(kid))
+                if proc.returncode != 0:
+                    sys.stderr.write(
+                        f"slop: {family}-key revoke {kid} failed "
+                        f"({proc.returncode}): {proc.stderr.rstrip()}\n"
+                    )
+        else:
+            proc = _fish_run(script, "here", "cleanup")
+            if proc.returncode != 0:
+                sys.stderr.write(
+                    f"slop: {family}-key cleanup failed ({proc.returncode}): "
+                    f"{proc.stderr.rstrip()}\n"
+                )
     if "radicle" in state.credentials:
         proc = _fish_run(SLOP_RADICLE, "retire-expired", "--yes")
         if proc.returncode != 0:
             sys.stderr.write(
-                f"slop: radicle retire-expired failed ({proc.returncode}): {proc.stderr.rstrip()}\n"
+                f"slop: radicle retire-expired failed ({proc.returncode}): "
+                f"{proc.stderr.rstrip()}\n"
             )
 
 
