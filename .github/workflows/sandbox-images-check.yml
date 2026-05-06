@@ -17,7 +17,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build base sandbox image
-        run: docker compose -f library/docker-compose.yml build agent
+        run: docker compose -f library/layer/container/docker-compose.yml build agent
 
       - name: Build tools sandbox image
-        run: docker compose --env-file library/agent-tools.env -f library/docker-compose.yml build agent-tools
+        run: docker compose --env-file library/layer/container/agent-tools.env -f library/layer/container/docker-compose.yml build agent-tools

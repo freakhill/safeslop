@@ -24,7 +24,7 @@ with `README.md`. Read it before adding a new script or changing one.
   metadata pins versions; fish wrappers call `uv run --script <file>`.
   Never reintroduce bare `python3 -c '...'`.
 - **CUE** drives `slop-isolate`'s policy compiler (presets in
-  `library/isolation/presets/`, fixtures in `library/isolation/fixtures/`).
+  `library/layer/policy/presets/`, fixtures in `library/layer/policy/fixtures/`).
 - **Textual** is the only Python runtime dep; lives in
   `scripts/_py/slop_tui.py` (the global `slop` launcher).
 - **Tests** are fish-based in `tests/`. Run with `fish tests/run.fish`.

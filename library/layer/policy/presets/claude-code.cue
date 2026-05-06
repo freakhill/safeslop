@@ -1,5 +1,5 @@
 // Preset for the Claude Code npm CLI.
-// Mirrors library/claude-code.settings.json but emits the same intent
+// Mirrors library/layer/policy/claude-code.settings.json but emits the same intent
 // to every other adapter as well.
 //
 // To extend without rewriting the full list, set fields on `extras`.

@@ -15,7 +15,7 @@ controls used elsewhere in this repo.
 - Pin the binary by SHA-256, not by the `latest` tag. Verify the
   digest before running.
 - Run inside the `agent` service from
-  `library/docker-compose.yml`. Do not run on the host even though
+  `library/layer/container/docker-compose.yml`. Do not run on the host even though
   the binary has its own sandbox layer — on macOS that layer reduces
   to Seatbelt and is defense-in-depth only.
 
@@ -54,9 +54,9 @@ controls used elsewhere in this repo.
 
 ## Network
 
-- Egress flows through the proxy in `library/docker-compose.yml`.
+- Egress flows through the proxy in `library/layer/container/docker-compose.yml`.
 - Add LLM provider hosts and any required tool endpoints to
-  `library/allowlist.domains`. Remove them when the session ends.
+  `library/layer/container/allowlist.domains`. Remove them when the session ends.
 - Do not add channel/messaging hosts unless the corresponding
   channel is currently enabled.
 

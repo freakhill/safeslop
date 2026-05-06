@@ -1,5 +1,5 @@
 # Local environment override (copied from example)
-library/agent-tools.env
+library/layer/container/agent-tools.env
 
 # macOS metadata
 .DS_Store
@@ -10,3 +10,9 @@ library/agent-tools.env
 # Python bytecode caches from `uv run --script` of repo helpers (slop_tui.py etc.)
 scripts/_py/__pycache__/
 **/__pycache__/
+
+# Per-repo orchestrator state (slop.cue → .slop/state.json + compile/)
+.slop/
+
+# Slop-isolate compile outputs (when run with default --out)
+library/.generated/

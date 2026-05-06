@@ -5,12 +5,12 @@
 # For every preset × applicable adapter, compile the preset to a tmpdir and
 # diff against the checked-in fixture. Drift fails the test. Update with:
 #   uv run --script scripts/_py/isolation.py compile --preset <name> \
-#     --out library/isolation/fixtures/<name>
+#     --out library/layer/policy/fixtures/<name>
 
 source (dirname (status filename))/helpers.fish
 
 set -g ISOLATION_PY "$SCRIPTS_DIR/_py/isolation.py"
-set -g FIXTURES_DIR "$REPO_ROOT/library/isolation/fixtures"
+set -g FIXTURES_DIR "$REPO_ROOT/library/layer/policy/fixtures"
 
 set -g PRESETS \
     any-agent \

@@ -10,14 +10,14 @@
 function __agent_sandbox_examples
     # BEGIN AUTOGEN: examples section="How to run any agent behind Docker + URL allowlist proxy"
     echo 'Start the proxy:'
-    echo '  docker compose -f library/docker-compose.yml build agent'
-    echo '  docker compose -f library/docker-compose.yml up -d proxy'
+    echo '  docker compose -f library/layer/container/docker-compose.yml build agent'
+    echo '  docker compose -f library/layer/container/docker-compose.yml up -d proxy'
     echo
     echo 'Run agent container through proxy:'
-    echo '  docker compose -f library/docker-compose.yml run --rm agent'
+    echo '  docker compose -f library/layer/container/docker-compose.yml run --rm agent'
     echo
     echo 'Verify blocking:'
-    echo '  docker compose -f library/docker-compose.yml run --rm agent sh -lc \'curl -I https://example.com\''
+    echo '  docker compose -f library/layer/container/docker-compose.yml run --rm agent sh -lc \'curl -I https://example.com\''
     # END AUTOGEN: examples
 end
 
@@ -28,7 +28,7 @@ function __agent_sandbox_help
     echo "  Builds the agent image, brings the proxy service up, and runs the"
     echo "  agent container with the chosen network policy. The host project"
     echo "  directory is mounted at /workspace; egress goes through the proxy"
-    echo "  in strict-egress mode (default) per library/squid.conf."
+    echo "  in strict-egress mode (default) per library/layer/container/squid.conf."
     echo ""
     echo "Usage:"
     echo "  source scripts/slop-agent-sandbox.fish"
@@ -63,8 +63,8 @@ end
 
 # Keep compose file checks centralized so every subcommand fails consistently.
 function __agent_sandbox_check_files
-    if not test -f library/docker-compose.yml
-        echo "Error: Missing library/docker-compose.yml (run from repo root)." 1>&2
+    if not test -f library/layer/container/docker-compose.yml
+        echo "Error: Missing library/layer/container/docker-compose.yml (run from repo root)." 1>&2
         echo "" 1>&2
         __agent_sandbox_help_to_stderr
         return 1
@@ -102,7 +102,7 @@ function __agent_sandbox_tui
     while true
         echo ""
         gum style --bold --foreground 212 "slop-agent-sandbox — Docker stack ('agent' service)"
-        gum style --faint "compose file: library/docker-compose.yml"
+        gum style --faint "compose file: library/layer/container/docker-compose.yml"
         gum style --faint "(Esc on the menu to quit. Every action prints its equivalent CLI.)"
         echo ""
 
@@ -162,9 +162,9 @@ function __agent_sandbox_compose_cmd --argument-names policy
     set -e argv[1]
     switch "$policy"
         case strict-egress
-            docker compose -f library/docker-compose.yml $argv
+            docker compose -f library/layer/container/docker-compose.yml $argv
         case proxy-only off
-            docker compose -f library/docker-compose.yml $argv
+            docker compose -f library/layer/container/docker-compose.yml $argv
     end
 end
 

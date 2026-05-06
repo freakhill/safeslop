@@ -80,14 +80,14 @@ function __sandboxctl_tutorial_docker
     echo ""
     # BEGIN AUTOGEN: examples section="How to run any agent behind Docker + URL allowlist proxy"
     echo 'Start the proxy:'
-    echo '  docker compose -f library/docker-compose.yml build agent'
-    echo '  docker compose -f library/docker-compose.yml up -d proxy'
+    echo '  docker compose -f library/layer/container/docker-compose.yml build agent'
+    echo '  docker compose -f library/layer/container/docker-compose.yml up -d proxy'
     echo
     echo 'Run agent container through proxy:'
-    echo '  docker compose -f library/docker-compose.yml run --rm agent'
+    echo '  docker compose -f library/layer/container/docker-compose.yml run --rm agent'
     echo
     echo 'Verify blocking:'
-    echo '  docker compose -f library/docker-compose.yml run --rm agent sh -lc \'curl -I https://example.com\''
+    echo '  docker compose -f library/layer/container/docker-compose.yml run --rm agent sh -lc \'curl -I https://example.com\''
     # END AUTOGEN: examples
 end
 

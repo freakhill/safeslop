@@ -134,7 +134,7 @@ function __slop_isolate_here
     set -l candidate "$root/.isolation.cue"
     if not test -f "$candidate"
         echo "Error: no .isolation.cue at $root" 1>&2
-        echo "Create one (see library/isolation/examples/user-config.cue)." 1>&2
+        echo "Create one (see library/layer/policy/samples/user-config.cue)." 1>&2
         return 1
     end
     echo "$candidate"

@@ -15,7 +15,7 @@ set -g LLM_FORGEJO_KEY_DIR "$HOME/.ssh"
 set -g LLM_FORGEJO_KEY_TTL "24h"
 set -g LLM_FORGEJO_CONFIG_DIR "$HOME/.config/llm-key-tools"
 set -g LLM_FORGEJO_INSTANCES_FILE "$LLM_FORGEJO_CONFIG_DIR/forgejo-instances.json"
-set -g LLM_FORGEJO_TEMPLATE_FILE (path resolve (dirname (status filename)))/../library/forgejo-instances.example.json
+set -g LLM_FORGEJO_TEMPLATE_FILE (path resolve (dirname (status filename)))/../library/layer/policy/forgejo-instances.example.json
 # Python helpers run via uv with PEP-723 inline metadata. See scripts/_py/.
 set -g LLM_FORGEJO_PY (path resolve (dirname (status filename)))"/_py/llm_forgejo_keys.py"
 

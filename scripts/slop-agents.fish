@@ -14,7 +14,7 @@
 # `slop-agents seed <agent>` (or `slop-agents <agent> --seed`) writes the
 # bundled defaults — the same JSON the slop-isolate compiler emits from
 # the claude-code / opencode CUE presets, mirrored as golden fixtures
-# under library/isolation/fixtures/. We copy the fixtures verbatim so
+# under library/layer/policy/fixtures/. We copy the fixtures verbatim so
 # we do not require `cue` on PATH for first-time setup.
 #
 # References:
@@ -22,8 +22,8 @@
 # - OpenCode config:                https://opencode.ai/docs/configuration
 
 set -g LLM_AGENTS_REPO_ROOT (path resolve (dirname (status filename)))/..
-set -g LLM_AGENTS_FIXTURE_CC "$LLM_AGENTS_REPO_ROOT/library/isolation/fixtures/claude-code/claude-code.settings.json"
-set -g LLM_AGENTS_FIXTURE_OC "$LLM_AGENTS_REPO_ROOT/library/isolation/fixtures/opencode/opencode.json"
+set -g LLM_AGENTS_FIXTURE_CC "$LLM_AGENTS_REPO_ROOT/library/layer/policy/fixtures/claude-code/claude-code.settings.json"
+set -g LLM_AGENTS_FIXTURE_OC "$LLM_AGENTS_REPO_ROOT/library/layer/policy/fixtures/opencode/opencode.json"
 
 function __slop_agents_examples
     # BEGIN AUTOGEN: examples section="Launch agents with defaults"
@@ -54,7 +54,7 @@ function __slop_agents_help
     echo "  --seed copies the bundled defaults to the repo root if no"
     echo "  override is already present. The bundled JSON is the compile"
     echo "  output of the claude-code / opencode CUE presets — see"
-    echo "  library/isolation/presets/."
+    echo "  library/layer/policy/presets/."
     echo ""
     echo "Usage:"
     echo "  source scripts/slop-agents.fish"

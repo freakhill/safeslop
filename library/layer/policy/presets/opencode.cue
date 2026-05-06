@@ -1,5 +1,5 @@
 // Preset for the OpenCode npm CLI.
-// Mirrors library/opencode.restrictive.json semantics.
+// Mirrors library/layer/policy/opencode.restrictive.json semantics.
 //
 // Extend via the `extras` struct (see library/user-config.cue).
 

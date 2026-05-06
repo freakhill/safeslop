@@ -38,15 +38,15 @@ function test_unknown_arg_fails_with_help
 end
 
 function test_passes_against_repo_fixtures
-    # library/agent-tools.env is gitignored (it's a copy of .example for local
+    # library/layer/container/agent-tools.env is gitignored (it's a copy of .example for local
     # use). Make the happy path hermetic by staging all four required files in
     # a tmp dir, using the .example contents to seed the .env file.
     set -l tmp (mk_tmpdir)
-    mkdir -p "$tmp/library"
-    cp "$REPO_ROOT/library/agent-tools.env.example" "$tmp/library/agent-tools.env.example"
-    cp "$REPO_ROOT/library/agent-tools.env.example" "$tmp/library/agent-tools.env"
-    cp "$REPO_ROOT/library/Dockerfile.agent.tools"   "$tmp/library/Dockerfile.agent.tools"
-    cp "$REPO_ROOT/library/docker-compose.yml"       "$tmp/library/docker-compose.yml"
+    mkdir -p "$tmp/library/layer/container"
+    cp "$REPO_ROOT/library/layer/container/agent-tools.env.example" "$tmp/library/layer/container/agent-tools.env.example"
+    cp "$REPO_ROOT/library/layer/container/agent-tools.env.example" "$tmp/library/layer/container/agent-tools.env"
+    cp "$REPO_ROOT/library/layer/container/Dockerfile.agent.tools"   "$tmp/library/layer/container/Dockerfile.agent.tools"
+    cp "$REPO_ROOT/library/layer/container/docker-compose.yml"       "$tmp/library/layer/container/docker-compose.yml"
 
     set -l saved $PWD
     cd "$tmp"
@@ -60,13 +60,13 @@ end
 
 function test_detects_unpinned_latest_in_env
     set -l tmp (mk_tmpdir)
-    mkdir -p "$tmp/library"
+    mkdir -p "$tmp/library/layer/container"
     # Copy real reference files to keep the rest of the check satisfied.
-    cp "$REPO_ROOT/library/Dockerfile.agent.tools" "$tmp/library/"
-    cp "$REPO_ROOT/library/docker-compose.yml" "$tmp/library/"
+    cp "$REPO_ROOT/library/layer/container/Dockerfile.agent.tools" "$tmp/library/layer/container/"
+    cp "$REPO_ROOT/library/layer/container/docker-compose.yml" "$tmp/library/layer/container/"
     # Introduce an unpinned `latest` line in the env file fixture.
-    echo "CLAUDE_CODE_VERSION=latest" > "$tmp/library/agent-tools.env"
-    echo "CLAUDE_CODE_VERSION=latest" > "$tmp/library/agent-tools.env.example"
+    echo "CLAUDE_CODE_VERSION=latest" > "$tmp/library/layer/container/agent-tools.env"
+    echo "CLAUDE_CODE_VERSION=latest" > "$tmp/library/layer/container/agent-tools.env.example"
 
     set -l saved $PWD
     cd "$tmp"
@@ -83,11 +83,11 @@ function test_detects_unpinned_latest_for_openclaw_and_zeroclaw
     # If a user uncomments and sets `=latest`, the pinning gate must catch it.
     for var in OPENCLAW_VERSION ZEROCLAW_VERSION
         set -l tmp (mk_tmpdir)
-        mkdir -p "$tmp/library"
-        cp "$REPO_ROOT/library/Dockerfile.agent.tools" "$tmp/library/"
-        cp "$REPO_ROOT/library/docker-compose.yml" "$tmp/library/"
-        echo "$var=latest" > "$tmp/library/agent-tools.env"
-        echo "$var=latest" > "$tmp/library/agent-tools.env.example"
+        mkdir -p "$tmp/library/layer/container"
+        cp "$REPO_ROOT/library/layer/container/Dockerfile.agent.tools" "$tmp/library/layer/container/"
+        cp "$REPO_ROOT/library/layer/container/docker-compose.yml" "$tmp/library/layer/container/"
+        echo "$var=latest" > "$tmp/library/layer/container/agent-tools.env"
+        echo "$var=latest" > "$tmp/library/layer/container/agent-tools.env.example"
 
         set -l saved $PWD
         cd "$tmp"

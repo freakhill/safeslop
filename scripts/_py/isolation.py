@@ -47,7 +47,7 @@ from typing import Callable, Iterable
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-ISOLATION_DIR = REPO_ROOT / "library" / "isolation"
+ISOLATION_DIR = REPO_ROOT / "library" / "layer" / "policy"
 PRESETS_DIR = ISOLATION_DIR / "presets"
 GENERATED_DIR = REPO_ROOT / "library" / ".generated"
 
