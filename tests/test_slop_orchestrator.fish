@@ -215,6 +215,137 @@ profiles: "vm-claude": schema.#Profile & {
     assert_contains "dry-run prints slop-brew-vm run claude" "$out" "slop-brew-vm run claude"
 end
 
+function test_credential_staging_copies_only_ephemeral_keys
+    # When a container profile declares credentials.github != "none",
+    # the orchestrator should stage llm_agent_github_{ro,rw}_* into
+    # <state-dir>/runtime/<profile>/.ssh/ along with a fresh SSH config
+    # using the staged filenames. The user's permanent identities
+    # (id_ed25519 etc.) must NOT be copied — that would defeat the
+    # whole point of staging instead of mounting ~/.ssh/ wholesale.
+    if not __have_uv_and_cue
+        __test_record_pass "credential staging (skipped: uv/cue missing)"
+        return 0
+    end
+    set -l tmp (mk_tmpdir)
+    set -l fake_ssh "$tmp/fake-ssh"
+    mkdir -p "$fake_ssh"
+    chmod 700 "$fake_ssh"
+    # Real-shape filenames so the orchestrator's glob matches.
+    set -l ro_name "llm_agent_github_ro_session-1_20260506T010000Z"
+    set -l rw_name "llm_agent_github_rw_session-1_20260506T010000Z"
+    echo "fake-ro-priv"  > "$fake_ssh/$ro_name"
+    echo "fake-ro-pub"   > "$fake_ssh/$ro_name.pub"
+    echo "fake-rw-priv"  > "$fake_ssh/$rw_name"
+    echo "fake-rw-pub"   > "$fake_ssh/$rw_name.pub"
+    # Decoy: a permanent identity that must NOT be copied.
+    echo "PERMANENT-DO-NOT-COPY" > "$fake_ssh/id_ed25519"
+    chmod 600 "$fake_ssh/$ro_name" "$fake_ssh/$rw_name" "$fake_ssh/id_ed25519"
+    set -l py "
+import sys, os, json
+from pathlib import Path
+os.environ['HOME'] = '$tmp'   # so Path.home() points at our fake home
+# Symlink the fake-ssh into ~/.ssh so the helper finds it.
+home = Path('$tmp')
+ssh = home / '.ssh'
+if ssh.exists():
+    import shutil; shutil.rmtree(ssh)
+os.symlink('$fake_ssh', ssh)
+sys.path.insert(0, 'scripts/_py')
+import slop_orchestrator
+profile = slop_orchestrator.Profile(
+    name='review',
+    agent='claude',
+    environment='container',
+    credentials={'github': 'ephemeral-rw'},
+)
+stage = slop_orchestrator._stage_github_credentials(profile, Path('$tmp'), '.slop')
+assert stage is not None, 'stage returned None'
+assert stage.is_dir(), f'stage not a dir: {stage}'
+files = sorted(p.name for p in stage.iterdir())
+print('staged files:', files)
+assert '$ro_name'        in files, files
+assert '$rw_name'        in files, files
+assert '$ro_name.pub'    in files, files
+assert '$rw_name.pub'    in files, files
+assert 'config'          in files, files
+assert 'id_ed25519'  not in files, 'PERMANENT key was copied!'
+config = (stage / 'config').read_text()
+assert 'Host github-llm-ro' in config
+assert 'Host github-llm-rw' in config
+assert '$ro_name' in config
+assert '$rw_name' in config
+assert 'IdentitiesOnly yes' in config
+print('OK staging copied only ephemeral keys')
+"
+    set -l out (env UV_NATIVE_TLS=1 SSL_CERT_FILE=/etc/ssl/cert.pem \
+        uv run --quiet python -c "$py" 2>&1)
+    set -l rc $status
+    if test $rc -ne 0
+        __test_record_fail "credential staging filters out permanent keys" "rc=$rc, out=$out"
+        return
+    end
+    __test_record_pass "credential staging filters out permanent keys"
+    assert_contains "stage produced expected file list" "$out" "config"
+    assert_not_contains "stage did NOT include id_ed25519" "$out" "PERMANENT"
+end
+
+function test_compose_override_renders_bind_mount
+    # The override file must add a read-only volume mapping the staged
+    # .ssh/ to /root/.ssh in the agent-tools service. If the path or
+    # mode regresses, agents inside the container won't see the keys.
+    if not __have_uv_and_cue
+        __test_record_pass "compose override (skipped: uv/cue missing)"
+        return 0
+    end
+    set -l tmp (mk_tmpdir)
+    mkdir -p "$tmp/stage/.ssh"
+    set -l py "
+import sys
+from pathlib import Path
+sys.path.insert(0, 'scripts/_py')
+import slop_orchestrator
+override = slop_orchestrator._render_compose_override(Path('$tmp/stage/.ssh'))
+assert override.is_file(), f'override not written: {override}'
+text = override.read_text()
+assert 'agent-tools' in text
+assert '/root/.ssh:ro' in text
+assert '$tmp/stage/.ssh' in text or '$tmp' in text
+print('override OK')
+"
+    set -l out (env UV_NATIVE_TLS=1 SSL_CERT_FILE=/etc/ssl/cert.pem \
+        uv run --quiet python -c "$py" 2>&1)
+    set -l rc $status
+    if test $rc -ne 0
+        __test_record_fail "compose override renders" "rc=$rc, out=$out"
+        return
+    end
+    __test_record_pass "compose override renders bind mount"
+end
+
+function test_dry_run_announces_credential_mount
+    # The container dry-run should mention that credentials WOULD be
+    # staged when a profile asks for them. Without that, a user
+    # reading the dry-run output has no way to tell the credential
+    # plumbing is on.
+    if not __have_uv_and_cue
+        __test_record_pass "dry-run announces creds (skipped: uv/cue missing)"
+        return 0
+    end
+    set -l tmp (mk_tmpdir)
+    cp "$REPO_ROOT/library/layer/policy/samples/slop/slop.cue" "$tmp/slop.cue"
+    set -l body "
+        cd '$tmp'
+        set -x ATB_USER_PWD '$tmp'
+        env UV_NATIVE_TLS=1 SSL_CERT_FILE=/etc/ssl/cert.pem \\
+            uv run --script --quiet '$ORCH_PY' run review --dry-run
+    "
+    set -l out (command fish -N -c "$body" 2>&1)
+    set -l rc $status
+    assert_status "dry-run review status" $rc 0
+    assert_contains "dry-run mentions staging" "$out" "stage"
+    assert_contains "dry-run names the in-container mount path" "$out" "/root/.ssh"
+end
+
 function test_run_unknown_environment_still_rejects
     # The closed disjunction in the schema (host|container|vm) prevents
     # bogus environments from validating, but if someone bypasses cue
