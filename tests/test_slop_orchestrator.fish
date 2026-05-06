@@ -594,6 +594,71 @@ print('OK staging copied only ephemeral keys')
     assert_not_contains "stage did NOT include id_ed25519" "$out" "PERMANENT"
 end
 
+function test_credential_staging_handles_radicle_keypair
+    # Radicle uses a single-key-per-identity model (no ro/rw split) and
+    # has no SSH `Host` alias. The orchestrator stages the keypair
+    # alongside any github/forgejo files but writes a comment in the
+    # config telling the user the in-container path so they can wire
+    # rad up themselves (we don't configure rad's own state — that's
+    # rad-CLI-version-specific and varies).
+    if not __have_uv_and_cue
+        __test_record_pass "radicle staging (skipped: uv/cue missing)"
+        return 0
+    end
+    set -l tmp (mk_tmpdir)
+    set -l fake_ssh "$tmp/fake-ssh"
+    mkdir -p "$fake_ssh"
+    chmod 700 "$fake_ssh"
+    set -l rad_name "llm_agent_radicle_session-1_20260506T040000Z"
+    echo "fake-rad-priv" > "$fake_ssh/$rad_name"
+    echo "fake-rad-pub"  > "$fake_ssh/$rad_name.pub"
+    chmod 600 "$fake_ssh/$rad_name"
+    # Decoy permanent identity that must NOT be copied.
+    echo "PERMANENT-NOPE" > "$fake_ssh/id_ed25519"
+    chmod 600 "$fake_ssh/id_ed25519"
+    set -l py "
+import sys, os
+from pathlib import Path
+os.environ['HOME'] = '$tmp'
+home = Path('$tmp')
+ssh = home / '.ssh'
+if ssh.exists():
+    import shutil; shutil.rmtree(ssh)
+os.symlink('$fake_ssh', ssh)
+sys.path.insert(0, 'scripts/_py')
+import slop_orchestrator
+profile = slop_orchestrator.Profile(
+    name='radicle-only',
+    agent='claude',
+    environment='container',
+    credentials={'radicle': 'ephemeral'},
+)
+stage = slop_orchestrator._stage_credentials(profile, Path('$tmp'), '.slop')
+assert stage is not None, 'stage returned None for radicle-only profile'
+files = sorted(p.name for p in stage.iterdir())
+assert '$rad_name'        in files, files
+assert '$rad_name.pub'    in files, files
+assert 'config'           in files, files
+assert 'id_ed25519'   not in files, 'PERMANENT key was copied!'
+config = (stage / 'config').read_text()
+# No SSH Host stanza for radicle — just a comment pointing at the
+# in-container key path.
+assert 'Host github-llm' not in config
+assert 'Host forgejo-llm' not in config
+assert 'RAD_KEYS_PATH' in config, config
+assert '$rad_name' in config, config
+print('OK radicle staging')
+"
+    set -l out (env UV_NATIVE_TLS=1 SSL_CERT_FILE=/etc/ssl/cert.pem \
+        uv run --quiet python -c "$py" 2>&1)
+    set -l rc $status
+    if test $rc -ne 0
+        __test_record_fail "radicle staging" "rc=$rc, out=$out"
+        return
+    end
+    __test_record_pass "radicle staging copies keypair + writes RAD_KEYS_PATH hint"
+end
+
 function test_credential_staging_handles_forgejo_with_real_hostname
     # Same shape as the github test, plus the wrinkle that forgejo's
     # HostName must come from the user's existing ~/.ssh/config marker

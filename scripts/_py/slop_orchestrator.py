@@ -486,17 +486,23 @@ def _stage_credentials(
     config that maps the same `<host>-llm-{ro,rw}` aliases the host
     has, but with paths pointing at the in-container mount.
 
-    Today: github and forgejo. Both follow the same on-disk pattern
-    (`llm_agent_<host>_{ro,rw}_*` under ~/.ssh/) so the staging logic
-    is shared. `HostName` differs:
+    Today: github, forgejo, and radicle.
 
-      - github: hardcoded `github.com`.
-      - forgejo: parsed from the host's ~/.ssh/config marker block,
-        because Forgejo / Codeberg / self-hosted instances vary.
-
-    Radicle uses an identity-model rather than an SSH-key model and
-    is not staged here; if/when needed it would land in its own
-    helper because the resulting in-container artifact differs.
+      - github / forgejo: pair-shaped (`llm_agent_<host>_{ro,rw}_*`),
+        gets an SSH `Host <host>-llm-{ro,rw}` alias block in the
+        staged config. github HostName is hardcoded `github.com`;
+        forgejo HostName is parsed from the host's ~/.ssh/config
+        marker block since Forgejo / Codeberg / self-hosted instances
+        vary.
+      - radicle: single-key-shaped (`llm_agent_radicle_<name>_*`).
+        No SSH alias entry — radicle URLs are `rad://...`, not
+        ssh-host-aliased — but the keypair is still copied to the
+        staged dir so a `rad` CLI inside the container can pick it
+        up via `RAD_KEYS_PATH=/root/.ssh/llm_agent_radicle_<name>`
+        (set in the agent's startup config or the tailored
+        Dockerfile). The orchestrator does not configure rad itself
+        — that's the user's call once they've added rad to their
+        image.
 
     Returns the staging dir path (the .ssh/ subdir specifically — that
     becomes the bind-mount source) or None when nothing was staged.
@@ -508,7 +514,8 @@ def _stage_credentials(
     cred = profile.credentials or {}
     gh = cred.get("github") or "none"
     fj = cred.get("forgejo") or "none"
-    if gh == "none" and fj == "none":
+    rad = cred.get("radicle") or "none"
+    if gh == "none" and fj == "none" and rad == "none":
         return None
 
     ssh_dir = Path.home() / ".ssh"
@@ -585,6 +592,39 @@ def _stage_credentials(
 
     _stage_family("github", gh, "github.com")
     _stage_family("forgejo", fj, None)  # HostName parsed lazily
+
+    # Radicle has no ro/rw split — single key per identity. We stage
+    # only the most recent matching keypair; the agent inside the
+    # container sets RAD_KEYS_PATH (or equivalent) to the file path,
+    # the orchestrator does not configure rad's own state.
+    if rad != "none":
+        priv_candidates = [
+            p for p in ssh_dir.glob("llm_agent_radicle_*")
+            if not p.name.endswith(".pub")
+        ]
+        if not priv_candidates:
+            sys.stderr.write(
+                "slop: credentials.radicle requested but "
+                "llm_agent_radicle_* files not found under ~/.ssh/. "
+                "Skipping radicle in the staged dir.\n"
+            )
+        else:
+            priv = max(priv_candidates, key=lambda p: p.stat().st_mtime)
+            pub = priv.with_name(priv.name + ".pub")
+            for variant, mode_bits in ((priv, 0o600), (pub, 0o644)):
+                if not variant.exists():
+                    continue
+                dst = stage / variant.name
+                shutil.copy2(variant, dst)
+                dst.chmod(mode_bits)
+            # Append a comment block (not an SSH Host stanza) telling
+            # the user where the staged radicle key lives in-container.
+            config_lines.extend([
+                f"# radicle identity (no SSH alias — set in your agent's startup):",
+                f"#   RAD_KEYS_PATH=~/.ssh/{priv.name}",
+                "",
+            ])
+            staged_anything = True
 
     if not staged_anything:
         # Tear down the empty stage dir so the override doesn't bind
@@ -852,7 +892,7 @@ def _launch_container(
         # branches by describing what *would* be staged.
         cred = profile.credentials or {}
         families = [
-            family for family in ("github", "forgejo")
+            family for family in ("github", "forgejo", "radicle")
             if cred.get(family) and cred[family] != "none"
         ]
         if families:
@@ -961,7 +1001,7 @@ def _launch_vm(
     if dry_run:
         cred = profile.credentials or {}
         families = [
-            family for family in ("github", "forgejo")
+            family for family in ("github", "forgejo", "radicle")
             if cred.get(family) and cred[family] != "none"
         ]
         if families:
