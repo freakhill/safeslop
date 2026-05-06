@@ -17,7 +17,12 @@ ARG PYDANTIC_AI_HARNESS_VERSION=0.2.0
 ARG AG2_VERSION=0.12.1
 
 # Keep Python tooling current for framework installs.
-RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools wheel
+# --break-system-packages: the base image is node:22-bookworm whose
+# python3 ships with PEP 668 (externally-managed-environment). We're
+# inside a single-purpose container so the "might break the OS"
+# rationale for that gate doesn't apply. The flag matches what
+# `uv pip install --system` does in the steps below.
+RUN python3 -m pip install --no-cache-dir --break-system-packages --upgrade pip setuptools wheel
 
 # Optional npm-based CLIs. These are disabled/enabled via build args.
 RUN if [ "$ENABLE_CLAUDE_CODE" = "true" ]; then \
