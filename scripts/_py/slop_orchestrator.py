@@ -284,6 +284,7 @@ SLOP_AGENT_SANDBOX_TOOLS = (
     SOURCE_REPO_ROOT / "scripts" / "slop-agent-sandbox-tools.fish"
 )
 SLOP_ISOLATE = SOURCE_REPO_ROOT / "scripts" / "slop-isolate.fish"
+SLOP_BREW_VM = SOURCE_REPO_ROOT / "scripts" / "slop-brew-vm.fish"
 
 
 def _fish_run(script: Path, *cmd: str) -> subprocess.CompletedProcess[str]:
@@ -405,6 +406,50 @@ def _launch_container(profile: Profile, dry_run: bool = False) -> int:
     return _fish_exec(SLOP_AGENT_SANDBOX_TOOLS, "run", profile.agent)
 
 
+def _launch_vm(profile: Profile, dry_run: bool = False) -> int:
+    """Provision a disposable Tart VM and run the agent inside.
+
+    Composes:
+      slop-brew-vm init                # clone + boot the session VM
+      slop-brew-vm run <agent>         # exec the agent inside
+
+    The VM (`brew-sandbox-session` by default) is expected to have the
+    agent pre-installed — typically via a one-time
+    `slop-brew-vm install <agent>` against the trusted base template,
+    or by baking it into the source image. The orchestrator does not
+    auto-install: VMs are heavy and one-shot installs would surprise
+    the user. If the agent isn't on PATH inside the VM, `slop-brew-vm
+    run` fails with "command not found"; on-exit destroy-vm still
+    runs to leave no stale state.
+
+    `credentials.<host>` is created on the host as before (slop-gh-key
+    here create-pair etc.); plumbing them into the VM is a follow-up
+    sub-phase, not part of Phase G."""
+    if profile.agent not in ("claude", "opencode"):
+        raise OrchestratorError(
+            f"agent {profile.agent!r} not yet supported on environment=vm. "
+            "Pre-install your agent in the brew-vm trusted base template "
+            "(`slop-brew-vm install <agent>`) and rerun."
+        )
+    cli_init = "slop-brew-vm init"
+    cli_run = f"slop-brew-vm run {profile.agent}"
+    print(f"slop: equivalent CLI: {cli_init} && {cli_run}")
+    if dry_run:
+        return 0
+    if not shutil.which("tart"):
+        raise OrchestratorError(
+            "`tart` not found on PATH. Install: brew install cirruslabs/cli/tart, "
+            "or change the profile to environment=container."
+        )
+    proc = _fish_run(SLOP_BREW_VM, "init")
+    if proc.returncode != 0:
+        raise OrchestratorError(
+            f"slop-brew-vm init failed (exit {proc.returncode}):\n"
+            f"{proc.stderr.rstrip()}"
+        )
+    return _fish_exec(SLOP_BREW_VM, "run", profile.agent)
+
+
 def _on_exit_hooks(profile: Profile, state: ProfileState) -> None:
     """Run profile.on_exit hooks idempotently. Errors print but don't
     abort the chain so partial cleanup still happens."""
@@ -435,9 +480,17 @@ def _on_exit_hooks(profile: Profile, state: ProfileState) -> None:
                     f"{proc.stderr.rstrip()}\n"
                 )
         elif hook == "destroy-vm":
-            sys.stderr.write(
-                "slop: destroy-vm is a no-op for environment=host (Phase G adds it)\n"
-            )
+            if profile.environment != "vm":
+                sys.stderr.write(
+                    "slop: destroy-vm is a no-op when environment != vm\n"
+                )
+                continue
+            proc = _fish_run(SLOP_BREW_VM, "destroy")
+            if proc.returncode != 0:
+                sys.stderr.write(
+                    f"slop: slop-brew-vm destroy failed ({proc.returncode}): "
+                    f"{proc.stderr.rstrip()}\n"
+                )
         elif hook == "snapshot-state":
             # Phase D: snapshot just leaves the existing state.json in
             # place; Phase E will copy it to .slop/snapshots/<utc-stamp>.json
@@ -512,12 +565,7 @@ def cmd_list(_args: argparse.Namespace) -> int:
 def cmd_run(args: argparse.Namespace) -> int:
     repo_root, cfg = _load_for_user()
     profile = _resolve_profile(cfg, args.profile)
-    if profile.environment == "vm":
-        raise OrchestratorError(
-            f"profile {profile.name!r} declares environment='vm'; "
-            "VM environments land in Phase G. Use environment=container for now."
-        )
-    if profile.environment not in ("host", "container"):
+    if profile.environment not in ("host", "container", "vm"):
         raise OrchestratorError(
             f"profile {profile.name!r} declares unknown environment "
             f"{profile.environment!r}."
@@ -539,7 +587,9 @@ def cmd_run(args: argparse.Namespace) -> int:
             print(f"slop: would provision credentials: {', '.join(present)}")
         if profile.environment == "host":
             return _launch_host(profile, dry_run=True)
-        return _launch_container(profile, dry_run=True)
+        if profile.environment == "container":
+            return _launch_container(profile, dry_run=True)
+        return _launch_vm(profile, dry_run=True)
     cred_snapshot = _provision_credentials(profile)
     state = _load_state(repo_root, cfg.state_dir)
     state[profile.name] = ProfileState(
@@ -549,8 +599,10 @@ def cmd_run(args: argparse.Namespace) -> int:
     _save_state(repo_root, cfg.state_dir, state)
     if profile.environment == "host":
         rc = _launch_host(profile)
-    else:
+    elif profile.environment == "container":
         rc = _launch_container(profile)
+    else:
+        rc = _launch_vm(profile)
     # Run on-exit hooks once the agent exits. Reload state so concurrent
     # runs in another tty don't lose each other's snapshots.
     state = _load_state(repo_root, cfg.state_dir)

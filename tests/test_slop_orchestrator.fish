@@ -182,32 +182,69 @@ function test_run_host_profile_dry_run
     assert_contains "dry-run prints slop-agents opencode" "$out" "slop-agents opencode"
 end
 
-function test_run_vm_profile_still_rejects_with_phase_g_hint
-    # vm landed in Phase G of the plan; the orchestrator should still
-    # bail with a recognizable error rather than silently passing.
+function test_run_vm_profile_dry_run
+    # Phase G: vm profiles dispatch to slop-brew-vm. Use --dry-run so
+    # the test does not require Tart on the runner; we just want to
+    # confirm the orchestrator no longer bails out and prints the
+    # right equivalent CLI for the init + run pair.
     if not __have_uv_and_cue
-        __test_record_pass "orch run vm rejected (skipped: uv/cue missing)"
+        __test_record_pass "orch run vm dry-run (skipped: uv/cue missing)"
         return 0
     end
     set -l tmp (mk_tmpdir)
     echo 'package slop
 import "slop.dev/isolation/schema"
 import "slop.dev/isolation/presets"
-profiles: "evil": schema.#Profile & {
+profiles: "vm-claude": schema.#Profile & {
     agent:       "claude"
     environment: "vm"
+    isolation:   presets.#ClaudeCode
+    "on-exit":   ["destroy-vm"]
+}' > "$tmp/slop.cue"
+    set -l body "
+        cd '$tmp'
+        set -x ATB_USER_PWD '$tmp'
+        env UV_NATIVE_TLS=1 SSL_CERT_FILE=/etc/ssl/cert.pem \\
+            uv run --script --quiet '$ORCH_PY' run vm-claude --dry-run
+    "
+    set -l out (command fish -N -c "$body" 2>&1)
+    set -l rc $status
+    assert_status "orch run vm-claude --dry-run status" $rc 0
+    assert_contains "dry-run announces vm env" "$out" "env=vm"
+    assert_contains "dry-run prints slop-brew-vm init" "$out" "slop-brew-vm init"
+    assert_contains "dry-run prints slop-brew-vm run claude" "$out" "slop-brew-vm run claude"
+end
+
+function test_run_unknown_environment_still_rejects
+    # The closed disjunction in the schema (host|container|vm) prevents
+    # bogus environments from validating, but if someone bypasses cue
+    # and pokes the JSON directly the orchestrator must still fail
+    # cleanly. Build a slop.cue with an environment cue rejects, then
+    # confirm we get the schema-level rejection (cue's job) rather
+    # than the orchestrator silently launching nothing.
+    if not __have_uv_and_cue
+        __test_record_pass "orch run unknown env rejected (skipped: uv/cue missing)"
+        return 0
+    end
+    set -l tmp (mk_tmpdir)
+    echo 'package slop
+import "slop.dev/isolation/schema"
+import "slop.dev/isolation/presets"
+profiles: "weird": schema.#Profile & {
+    agent:       "claude"
+    environment: "kubernetes"
     isolation:   presets.#ClaudeCode
 }' > "$tmp/slop.cue"
     set -l body "
         cd '$tmp'
         set -x ATB_USER_PWD '$tmp'
         env UV_NATIVE_TLS=1 SSL_CERT_FILE=/etc/ssl/cert.pem \\
-            uv run --script --quiet '$ORCH_PY' run evil
+            uv run --script --quiet '$ORCH_PY' run weird
     "
     set -l out (command fish -N -c "$body" 2>&1)
     set -l rc $status
-    assert_eq "orch run vm fails" $rc 1
-    assert_contains "error mentions Phase G" "$out" "Phase G"
+    assert_eq "orch run unknown-env fails" $rc 1
+    assert_contains "error mentions kubernetes (cue rejection)" "$out" "kubernetes"
 end
 
 function test_down_with_no_state_is_a_no_op
