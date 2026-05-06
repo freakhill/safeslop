@@ -13,8 +13,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      # Deliberately NOT using docker/setup-buildx-action. Buildx's
+      # buildkit driver doesn't share intermediate local/* tags between
+      # targets, so `compose build agent agent-tools` fails when
+      # agent-tools resolves `FROM local/agent-sandbox:latest` (the
+      # tag agent just produced doesn't exist in buildkit's image
+      # store, only in the daemon's). The legacy daemon-side builder
+      # (which `docker compose build` falls back to without buildx)
+      # tags into the daemon and the second build's FROM lookup hits.
 
       # agent-tools.env is gitignored (the user's local override of
       # .example). Seed it from the example so compose's --env-file
