@@ -35,15 +35,15 @@ RUN if [ "$ENABLE_OPENCODE" = "true" ]; then \
 
 # Optional Python agent stacks.
 RUN if [ "$ENABLE_CREWAI" = "true" ]; then \
-      uv pip install --system --no-cache "crewai==${CREWAI_VERSION}"; \
+      uv pip install --system --break-system-packages --no-cache "crewai==${CREWAI_VERSION}"; \
     fi
 
 RUN if [ "$ENABLE_PYDANTICAI" = "true" ]; then \
-      uv pip install --system --no-cache "pydantic-ai==${PYDANTIC_AI_VERSION}" "pydantic-ai-harness==${PYDANTIC_AI_HARNESS_VERSION}"; \
+      uv pip install --system --break-system-packages --no-cache "pydantic-ai==${PYDANTIC_AI_VERSION}" "pydantic-ai-harness==${PYDANTIC_AI_HARNESS_VERSION}"; \
     fi
 
 RUN if [ "$ENABLE_AG2" = "true" ]; then \
-      uv pip install --system --no-cache "ag2==${AG2_VERSION}"; \
+      uv pip install --system --break-system-packages --no-cache "ag2==${AG2_VERSION}"; \
     fi
 
 WORKDIR /workspace

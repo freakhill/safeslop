@@ -9,6 +9,29 @@ source (dirname (status filename))/helpers.fish
 
 set -g CHECK "$SCRIPTS_DIR/slop-pinning.fish"
 
+function test_dockerfile_pip_lines_carry_break_system_packages
+    # Static guard: every `pip install` / `uv pip install --system` line
+    # in Dockerfile.agent.tools must carry `--break-system-packages`.
+    # The base image is node:22-bookworm whose Python ships PEP 668's
+    # externally-managed marker; without the flag the build fails on
+    # CI (and on any fresh local rebuild). The pinning gate's job is
+    # already to keep this kind of supply-chain knob from drifting.
+    set -l df "$REPO_ROOT/library/layer/container/Dockerfile.agent.tools"
+    if not test -f "$df"
+        __test_record_pass "Dockerfile pip break-system-packages (skipped: file missing)"
+        return 0
+    end
+    # Match RUN-prefixed lines so comments don't trip the assertion;
+    # the slop-pinning gate uses the same anchor.
+    set -l offending (grep -nE '^RUN .*pip install' "$df" | grep -v -- '--break-system-packages')
+    if test (count $offending) -gt 0
+        __test_record_fail "all pip install lines carry --break-system-packages" \
+            "offending: $offending"
+        return
+    end
+    __test_record_pass "all pip install lines carry --break-system-packages"
+end
+
 function test_help_flag_works
     set -l out (run_fish $CHECK --help 2>&1)
     set -l rc $status

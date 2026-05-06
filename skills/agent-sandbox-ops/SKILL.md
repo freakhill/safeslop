@@ -81,6 +81,11 @@ When operating one of the supported agent runtimes, apply the matching policy te
 - Do not mount host credential directories into containers/VMs.
 - Do not disable strict egress for untrusted installs.
 - Document every allowlist expansion with reason.
+- Inside the agent-tools image, every `pip` / `uv pip install --system`
+  line carries `--break-system-packages` because `node:22-bookworm`'s
+  Python ships PEP 668's externally-managed marker. The flag is the
+  canonical bookworm escape hatch for single-purpose containers and is
+  enforced by `tests/test_slop_pinning.fish`.
 
 ## Sync requirements after changes
 

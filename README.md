@@ -612,7 +612,12 @@ cp library/layer/container/agent-tools.env.example library/layer/container/agent
 ```
 
 2. Edit `library/layer/container/agent-tools.env` and enable only the stacks you need
-3. Keep versions pinned; avoid `latest` in automation
+3. Keep versions pinned; avoid `latest` in automation. The Dockerfile
+   passes `--break-system-packages` to every `pip` / `uv pip install
+   --system` line because the base image (`node:22-bookworm`) ships
+   PEP 668's externally-managed marker; we install into the system
+   site-packages deliberately because the container is single-purpose,
+   and the flag is the canonical Debian-bookworm escape hatch
 4. Build and run the tools image:
 
 ```fish
