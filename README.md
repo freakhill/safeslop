@@ -678,6 +678,107 @@ first hit wins:
 For container-side use, drop into the agent-tools shell first and type
 `claude` or `opencode` once inside (`slop-agent-sandbox-tools shell`).
 
+### Drive isolated agent sessions with `slop.cue`
+
+`slop-agents` is the simplest "give me a REPL with default settings"
+path. For repeatable, configurable sessions — pick the agent, choose
+the isolation environment, declare which ephemeral credentials to
+provision, list the cleanup hooks — drop a `slop.cue` at the root of
+your repo. The `slop` runtime reads it and orchestrates everything:
+
+1. Author the file. Start from the bundled sample at
+   `library/layer/policy/samples/slop/slop.cue`:
+
+```cue
+package slop
+
+import "slop.dev/isolation/schema"
+import "slop.dev/isolation/presets"
+
+profiles: {
+    "review": schema.#Profile & {
+        agent:       "claude"
+        environment: "container"
+        isolation:   presets.#ClaudeCode & {
+            extras: "allow-domains": [
+                "pypi.org",
+                "registry.npmjs.org",
+            ]
+        }
+        credentials: github: "ephemeral-rw"
+        "on-exit": [
+            "revoke-credentials",
+            "stop-container",
+            "stop-proxy",
+        ]
+    }
+    "explore": schema.#Profile & {
+        agent:       "opencode"
+        environment: "host"
+        isolation:   presets.#OpenCode
+    }
+}
+default: "review"
+```
+
+2. Validate, list, and dry-run before committing:
+
+```fish
+slop validate                   # CUE → schema check; no side effects
+slop list                       # profiles + last-known state
+slop run review --dry-run       # show what would happen, no side effects
+```
+
+3. Run a profile end-to-end:
+
+```fish
+slop run review                 # default profile if you ran a bare `slop`
+slop run explore                # explicit
+```
+
+4. Tear down on next session start (or after a crashed run):
+
+```fish
+slop down                       # run on-exit hooks for any active profiles
+```
+
+Bare `slop` in a repo containing `slop.cue` runs the `default` profile;
+elsewhere it falls back to the Textual TUI. The TUI also exposes the
+flow under key `p` ("Run profile") with profile-specific shortcuts
+generated from your `slop.cue`.
+
+What `slop run review` does, in order:
+
+- Resolves the profile and validates the CUE.
+- Reads `<repo>/.slop/state.json` (per-repo, gitignored).
+- Provisions credentials: `slop-gh-key here create-pair` for
+  `credentials.github != "none"`, similarly for `forgejo`.
+- Stages the just-created keys to `<repo>/.slop/runtime/<profile>/.ssh/`
+  with a fresh SSH config that uses just-the-filename `IdentityFile`
+  paths. The host's permanent identities (`~/.ssh/id_ed25519` etc.)
+  stay on the host — only the ephemeral keys this profile created go
+  into the staging dir.
+- For `environment: container`: invokes `slop-agent-sandbox-tools up`
+  to (re)build the image and start the [Squid](https://www.squid-cache.org/)
+  proxy, then runs `docker compose -f <main> -f <override> run --rm
+  agent-tools <agent>` with a read-only bind mount of the staged
+  `.ssh/` at `/root/.ssh/` — so `git push` from inside the container
+  resolves the `github-llm-{ro,rw}` aliases against the ephemeral keys.
+- For `environment: vm`: same staging, but `slop-brew-vm copy-in
+  <stage> ~/.ssh` (scp -r) into the disposable [Tart](https://tart.run)
+  guest after `slop-brew-vm init` brings it up.
+- For `environment: host`: defers to `slop-agents` so the agent
+  inherits the user's terminal directly.
+- Runs the agent.
+- On agent exit: invokes the declared `on-exit` hooks
+  (`revoke-credentials` → `slop-gh-key here cleanup`,
+  `stop-container` → `slop-agent-sandbox-tools down`,
+  `stop-proxy` → `slop-isolate proxy stop`,
+  `destroy-vm` → `slop-brew-vm destroy`,
+  `snapshot-state` is a no-op today; Phase E+1 plumbs it).
+- Always wipes `<repo>/.slop/runtime/<profile>/` so the staged private
+  keys do not survive the session.
+
 ### How to lock down OpenCode on macOS
 
 1. Use restrictive config:
