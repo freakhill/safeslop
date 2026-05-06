@@ -107,7 +107,10 @@ if grep -nE '(CLAUDE_CODE_VERSION|OPENCODE_VERSION|OPENCLAW_VERSION|ZEROCLAW_VER
     set failed 1
 end
 
-set -l unpinned_uv_lines (grep -n 'uv pip install' library/layer/container/Dockerfile.agent.tools | grep -v '==')
+# Anchor on `^RUN` so a `# uv pip install ...` reference inside a
+# Dockerfile comment doesn't trip the gate. Without this, even
+# documentation explaining what the next RUN does would false-flag.
+set -l unpinned_uv_lines (grep -nE '^RUN .*uv pip install' library/layer/container/Dockerfile.agent.tools | grep -v '==')
 if test (count $unpinned_uv_lines) -gt 0
     echo "found uv pip install without exact pins in library/layer/container/Dockerfile.agent.tools" 1>&2
     for line in $unpinned_uv_lines
