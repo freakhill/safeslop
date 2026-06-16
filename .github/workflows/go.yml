@@ -1,0 +1,37 @@
+name: Go
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  go:
+    # macOS so the sandbox-exec launch tests actually run (this is a macOS tool).
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l cmd internal)"
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt:"; echo "$unformatted"; exit 1
+          fi
+
+      - name: go build
+        run: CGO_ENABLED=0 go build -o slop ./cmd/slop
+
+      - name: go test
+        run: go test ./...

@@ -17,3 +17,9 @@ scripts/_py/__pycache__/
 
 # Slop-isolate compile outputs (when run with default --out)
 library/.generated/
+
+# Go build artifacts (the slop binary lives in cmd/slop; built to ./slop or ./dist)
+/slop
+/dist/
+*.test
+*.out
