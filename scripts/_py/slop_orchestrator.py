@@ -280,7 +280,6 @@ def _save_state(
 
 SLOP_GH_KEY = SOURCE_REPO_ROOT / "scripts" / "slop-gh-key.fish"
 SLOP_FORGEJO_KEY = SOURCE_REPO_ROOT / "scripts" / "slop-forgejo-key.fish"
-SLOP_RADICLE = SOURCE_REPO_ROOT / "scripts" / "slop-radicle.fish"
 SLOP_AGENTS = SOURCE_REPO_ROOT / "scripts" / "slop-agents.fish"
 SLOP_AGENT_SANDBOX_TOOLS = (
     SOURCE_REPO_ROOT / "scripts" / "slop-agent-sandbox-tools.fish"
@@ -381,18 +380,6 @@ def _provision_credentials(profile: Profile) -> dict[str, dict[str, Any]]:
             "via": "slop-forgejo-key here create-pair",
             "key_ids": _parse_create_pair_ids(proc.stdout),
         }
-    rad = profile.credentials.get("radicle")
-    if rad and rad != "none":
-        # Radicle's identity creation is name-driven, not repo-driven.
-        # Use the active profile's name as the identity label.
-        proc = _fish_run(
-            SLOP_RADICLE, "create-identity", "--name", profile.name, "--ttl", "24h"
-        )
-        if proc.returncode != 0:
-            raise OrchestratorError(
-                f"slop-radicle create-identity failed (exit {proc.returncode})"
-            )
-        snapshot["radicle"] = {"mode": rad, "name": profile.name}
     return snapshot
 
 
@@ -486,7 +473,7 @@ def _stage_credentials(
     config that maps the same `<host>-llm-{ro,rw}` aliases the host
     has, but with paths pointing at the in-container mount.
 
-    Today: github, forgejo, and radicle.
+    Today: github and forgejo.
 
       - github / forgejo: pair-shaped (`llm_agent_<host>_{ro,rw}_*`),
         gets an SSH `Host <host>-llm-{ro,rw}` alias block in the
@@ -494,15 +481,6 @@ def _stage_credentials(
         forgejo HostName is parsed from the host's ~/.ssh/config
         marker block since Forgejo / Codeberg / self-hosted instances
         vary.
-      - radicle: single-key-shaped (`llm_agent_radicle_<name>_*`).
-        No SSH alias entry — radicle URLs are `rad://...`, not
-        ssh-host-aliased — but the keypair is still copied to the
-        staged dir so a `rad` CLI inside the container can pick it
-        up via `RAD_KEYS_PATH=/root/.ssh/llm_agent_radicle_<name>`
-        (set in the agent's startup config or the tailored
-        Dockerfile). The orchestrator does not configure rad itself
-        — that's the user's call once they've added rad to their
-        image.
 
     Returns the staging dir path (the .ssh/ subdir specifically — that
     becomes the bind-mount source) or None when nothing was staged.
@@ -514,8 +492,7 @@ def _stage_credentials(
     cred = profile.credentials or {}
     gh = cred.get("github") or "none"
     fj = cred.get("forgejo") or "none"
-    rad = cred.get("radicle") or "none"
-    if gh == "none" and fj == "none" and rad == "none":
+    if gh == "none" and fj == "none":
         return None
 
     ssh_dir = Path.home() / ".ssh"
@@ -592,39 +569,6 @@ def _stage_credentials(
 
     _stage_family("github", gh, "github.com")
     _stage_family("forgejo", fj, None)  # HostName parsed lazily
-
-    # Radicle has no ro/rw split — single key per identity. We stage
-    # only the most recent matching keypair; the agent inside the
-    # container sets RAD_KEYS_PATH (or equivalent) to the file path,
-    # the orchestrator does not configure rad's own state.
-    if rad != "none":
-        priv_candidates = [
-            p for p in ssh_dir.glob("llm_agent_radicle_*")
-            if not p.name.endswith(".pub")
-        ]
-        if not priv_candidates:
-            sys.stderr.write(
-                "slop: credentials.radicle requested but "
-                "llm_agent_radicle_* files not found under ~/.ssh/. "
-                "Skipping radicle in the staged dir.\n"
-            )
-        else:
-            priv = max(priv_candidates, key=lambda p: p.stat().st_mtime)
-            pub = priv.with_name(priv.name + ".pub")
-            for variant, mode_bits in ((priv, 0o600), (pub, 0o644)):
-                if not variant.exists():
-                    continue
-                dst = stage / variant.name
-                shutil.copy2(variant, dst)
-                dst.chmod(mode_bits)
-            # Append a comment block (not an SSH Host stanza) telling
-            # the user where the staged radicle key lives in-container.
-            config_lines.extend([
-                f"# radicle identity (no SSH alias — set in your agent's startup):",
-                f"#   RAD_KEYS_PATH=~/.ssh/{priv.name}",
-                "",
-            ])
-            staged_anything = True
 
     if not staged_anything:
         # Tear down the empty stage dir so the override doesn't bind
@@ -841,7 +785,7 @@ def _launch_container(
     against the staged keys, never touching the host's permanent
     identities.
 
-    Forgejo and Radicle credential plumbing into the container is a
+    Forgejo credential plumbing into the container is a
     follow-up; today only github is staged. Forgejo follows the
     identical filename pattern and would slot in cleanly here.
     """
@@ -892,7 +836,7 @@ def _launch_container(
         # branches by describing what *would* be staged.
         cred = profile.credentials or {}
         families = [
-            family for family in ("github", "forgejo", "radicle")
+            family for family in ("github", "forgejo")
             if cred.get(family) and cred[family] != "none"
         ]
         if families:
@@ -1001,7 +945,7 @@ def _launch_vm(
     if dry_run:
         cred = profile.credentials or {}
         families = [
-            family for family in ("github", "forgejo", "radicle")
+            family for family in ("github", "forgejo")
             if cred.get(family) and cred[family] != "none"
         ]
         if families:
@@ -1180,13 +1124,6 @@ def _revoke_credentials(state: ProfileState) -> None:
                     f"slop: {family}-key cleanup failed ({proc.returncode}): "
                     f"{proc.stderr.rstrip()}\n"
                 )
-    if "radicle" in state.credentials:
-        proc = _fish_run(SLOP_RADICLE, "retire-expired", "--yes")
-        if proc.returncode != 0:
-            sys.stderr.write(
-                f"slop: radicle retire-expired failed ({proc.returncode}): "
-                f"{proc.stderr.rstrip()}\n"
-            )
 
 
 # ---------------------------------------------------------------------------
