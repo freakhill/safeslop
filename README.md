@@ -202,14 +202,21 @@ For your use case, enforce three boundaries at all times:
 
 ### macOS isolation reality in 2026
 
-- `sandbox-exec` is deprecated and not a future-proof foundation
-- macOS does not provide Linux-like namespaces/cgroups for arbitrary CLI processes
-- The most reliable modern boundary is virtualization/containerization ([VZ.framework](https://developer.apple.com/documentation/virtualization) via [OrbStack](https://orbstack.dev), [Lima](https://lima-vm.io), or [Tart](https://tart.run))
-- Per-process outbound controls are best done with a Network Extension firewall ([LuLu](https://objective-see.org/products/lulu.html))
+- `sandbox-exec` (macOS Seatbelt) is the **first-class lightweight local boundary** for the
+  common case — launching Claude Code or a shell for package work with a file boundary and
+  strict egress deny. It is built in to macOS, needs no daemon, and starts instantly.
+- Honest caveats: Apple has deprecated the `sandbox-exec` CLI (still present and working on
+  current macOS), and its network control is coarse (allow/deny, not a URL allowlist).
+- For untrusted code or real URL-allowlisting, step up to the container boundary (Docker
+  network namespace + a [Squid](https://www.squid-cache.org/) proxy allowlist) or a disposable
+  VM ([VZ.framework](https://developer.apple.com/documentation/virtualization) via
+  [OrbStack](https://orbstack.dev), [Lima](https://lima-vm.io), or [Tart](https://tart.run)).
+- Per-process outbound controls are best done with a Network Extension firewall
+  ([LuLu](https://objective-see.org/products/lulu.html)) as defense-in-depth.
 
-Practical consequence: for untrusted agent actions, run them in containers/VMs and keep host-level network controls as defense-in-depth.
-
-Optional exception: if you need a lighter local control layer, you can use `scripts/slop-macos-sandbox.fish` (`slop-sandboxctl local ...`) on systems that still provide `sandbox-exec`. Treat it as defense-in-depth only, not as a substitute for container/VM isolation.
+Practical consequence: use `sandbox-exec` as the default local boundary for everyday agent
+and package work; escalate to container/VM when you need URL-level network control or are
+running untrusted code.
 
 ### Package installer threat model
 
@@ -869,9 +876,10 @@ docker compose -f library/layer/container/docker-compose.yml run --rm \
    container's `HTTP_PROXY` / `HTTPS_PROXY` are set so any
    subprocess egress goes through the allowlist.
 
-### How to use optional local `sandbox-exec` layer on macOS
+### How to run a command under the `sandbox-exec` boundary (macOS)
 
-Use this only when full container/VM flows are not practical.
+This is the default local boundary for everyday agent and package work. Step up to
+container/VM (below) when you need URL-level network control or are running untrusted code.
 
 1. Load helper:
 
@@ -908,7 +916,7 @@ Notes:
 
 - `--repo-root-access` is an alias for `--path-scope repo-root`
 - `--network-policy strict-egress` (default) denies outbound network in profile
-- Prefer Docker/VM workflows for untrusted execution
+- Escalate to Docker/VM workflows for untrusted execution or URL-level network control
 
 ### How to lock down Claude Code
 

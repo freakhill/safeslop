@@ -90,9 +90,9 @@ function __sandboxctl_tutorial_docker
 end
 
 function __sandboxctl_tutorial_local
-    echo "Local macOS sandbox quickstart (from README → 'How to use optional local sandbox-exec layer on macOS'):"
+    echo "Local macOS sandbox quickstart (from README → 'How to run a command under the sandbox-exec boundary (macOS)'):"
     echo ""
-    # BEGIN AUTOGEN: examples section="How to use optional local sandbox-exec layer on macOS"
+    # BEGIN AUTOGEN: examples section="How to run a command under the sandbox-exec boundary (macOS)"
     echo 'Load helper:'
     echo '  source scripts/slop-macos-sandbox.fish'
     echo
