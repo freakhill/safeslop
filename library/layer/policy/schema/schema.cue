@@ -135,15 +135,13 @@ package schema
 #Environment: "host" | "container" | "vm"
 
 // Per-host credential mode. The runtime maps each non-"none" value to the
-// matching `slop-<host>-key here ...` (or `slop-radicle ...`) flow on
+// matching `slop-<host>-key here ...` flow on
 // launch and to the matching cleanup on exit.
 #GitHostCredential:  *"none" | "ephemeral-ro" | "ephemeral-rw" | "ephemeral-pair"
-#RadicleCredential:  *"none" | "ephemeral"
 
 #Credentials: {
 	github?:  #GitHostCredential
 	forgejo?: #GitHostCredential
-	radicle?: #RadicleCredential
 }
 
 // Hooks the runtime executes on profile exit, in declaration order.
