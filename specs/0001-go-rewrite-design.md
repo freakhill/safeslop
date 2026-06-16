@@ -42,7 +42,7 @@ with **ephemeral credentials revoked on exit**, shelling out to `docker`, `cue`,
 |---|---|---|
 | Language | **Go** | Embeds the CUE engine (`cuelang.org/go`) → the external `cue` binary disappears; single signed static binary immune to the WARP/uv problem; easiest read for a mixed team; the canonical language for a subprocess orchestrator. |
 | Shape | **Engine library + thin CLI emitting JSON** | A later GUI for non-technical users drives the engine with zero engine logic of its own. |
-| GUI | **Deferred, tech TBD** | When needed: native SwiftUI `.app` driving the binary, or a Go/Wails app — both sign with the Apple cert; neither touches the engine. |
+| GUI | **Deferred, tech TBD; dual role** | Not only a launch portal but also a **safe bootstrapper/installer** for non-technical users — installs agent CLIs (Claude Code …), version/tool managers (mise, nyx), runtime deps (Docker/OrbStack, `op`), and slop itself, all pinned/verified via the repo's safe-install machinery. When needed: native SwiftUI `.app` driving the binary, or a Go/Wails app — both sign with the Apple cert; neither touches the engine. |
 | Terminal TUI | **Deferred** | CLI-first is what coworkers and Claude-Code/shell launching actually need. |
 | Rollout | **Strangler — core path first** | Usable coworker binary fastest; old stack stays green during transition; Radicle is scrapped for free by never porting it. |
 | Container env | **Ships in v1 (built last)** | sandbox-exec-only is an interim alpha; the first *stable* release has both boundaries (sandbox + container URL-allowlist). The old fish container path bridges jojo during transition. |
@@ -216,9 +216,18 @@ Each sub-project = its own `specs/` plan → implementation → review.
 | **SP1** | Go engine foundation + headline launch | module skeleton, embedded CUE, **exec/ctty spike first**, `slop run/validate/list/down/doctor`, **sandbox environment (default)**, launch claude-code + shell, JSON output, signed build + notarize, testscript + unit tests, rewrite CLAUDE/AGENTS/CONVENTIONS for the Go stack. | v1 |
 | **SP2** | Credential providers in Go | `CredentialProvider` interface + gh + forgejo + **pnpm-token** + **1Password** + secrets resolver + stage/wipe lifecycle. | v1 |
 | **SP3** | Container environment | docker compose + squid URL-allowlist ported to Go (the real network boundary). Built last but **in v1**. | v1 |
-| **SP4** | Later | tart VM, terminal TUI (Bubbletea), GUI (tech TBD), niche adapters (envoy/coredns/lulu/pf). | later |
+| **SP4** | tart VM environment | Disposable Tart VM launch path ported to Go (`environment: vm`). | later |
+| **SP5** | nyx (Nix) + mise toolchains | A `toolchain:` concept in `slop.cue` (`nix` \| `mise` \| `none`), orthogonal to `environment`, that provisions pinned tools into the chosen environment and can launch mise tasks / Nix flake apps under isolation. **nyx** = Nix flakes/NixOS (pinned flake inputs = the safe-install story); **mise** = version manager + task runner (`mise.toml`, `mise run`/`mise exec`). | later |
+| **SP6** | terminal TUI | Bubbletea port of the interactive menu hub. | later |
+| **SP7** | GUI — portal + safe installer | Drives the engine's JSON API; native SwiftUI `.app` or Go/Wails (decided then). Two roles: **(a) launch portal** for profiles; **(b) safe bootstrapper/installer** for non-technical users — installs agent CLIs (Claude Code …), version managers (mise, nyx), runtime deps (Docker/OrbStack, `op`), and slop itself, each pinned/verified and sandbox/VM-evaluated using the repo's safe-install machinery (so a non-technical user can go from zero to a working sandboxed setup). | later |
+| **SP8** | niche adapters | envoy / coredns / lulu / pf isolation adapters. | later |
 
 ## 11. Execution order
 
-`SP0 → SP1 → SP2 → SP3 → SP4`. SP0 is specced first (this initiative's next artifact:
-`specs/0002-sp0-radicle-removal-and-doc-restructure.md`).
+`SP0 → SP1 → SP2 → SP3 → SP4 → SP5 → SP6 → SP7 → SP8`.
+
+SP0 is **complete** (`specs/0002-sp0-radicle-removal-and-doc-restructure.md`, PR #1).
+SP1 (Go engine foundation, starting with the ctty spike) is the next artifact. SP5
+(nyx/mise toolchains) and SP7 (the GUI portal + safe installer) were added to the roadmap
+on 2026-06-16 at the user's request; both are "later" and will get their own spec when
+their turn comes.
