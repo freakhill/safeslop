@@ -52,6 +52,32 @@ slop-agents claude              # drop into Claude Code from the seeded cwd
 slop-agents opencode            # drop into OpenCode from the seeded cwd
 ```
 
+## Common use cases
+
+The two everyday workflows this repo is built for:
+
+- **Sandboxed Claude Code** — drop into Claude Code with file, SSH, network, and installer
+  boundaries already applied:
+
+  ```fish
+  slop-agents seed all     # one-time: write .claude/settings.json at repo root
+  slop-agents claude       # launch Claude Code from the seeded cwd
+  ```
+
+- **A sandboxed shell for package work (`pnpm`/`uv`)** — run installs under a `sandbox-exec`
+  boundary that confines file access to your repo, so a malicious lifecycle script can't read
+  `~/.ssh` or your environment. Network stays open for the registry (`sandbox-exec` can't do a
+  URL allowlist — use the container boundary below for that):
+
+  ```fish
+  slop-macos-sandbox run --repo-root-access --network-policy off -- /usr/bin/env pnpm install
+  slop-macos-sandbox run --repo-root-access --network-policy off -- /usr/bin/env uv sync
+  ```
+
+Everything below is reference and how-to detail for these and the heavier container/VM
+boundaries. See the **Reference appendix** at the end for the full per-framework capability
+matrix.
+
 ## Install fish command shims
 
 One-shot install — cleans up legacy artifacts, writes the conf.d snippet, then execs into a fresh fish so every `slop-*` command is immediately on PATH:
