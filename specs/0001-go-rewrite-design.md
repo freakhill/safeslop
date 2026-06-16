@@ -220,7 +220,7 @@ Each sub-project = its own `specs/` plan → implementation → review.
 | **SP5** | nyx (Nix) + mise toolchains | A `toolchain:` concept in `slop.cue` (`nix` \| `mise` \| `none`), orthogonal to `environment`, that provisions pinned tools into the chosen environment and can launch mise tasks / Nix flake apps under isolation. **nyx** = Nix flakes/NixOS (pinned flake inputs = the safe-install story); **mise** = version manager + task runner (`mise.toml`, `mise run`/`mise exec`). | later |
 | **SP6** | terminal TUI | Bubbletea port of the interactive menu hub. | later |
 | **SP7** | GUI — portal + safe installer | Drives the engine's JSON API; native SwiftUI `.app` or Go/Wails (decided then). Two roles: **(a) launch portal** for profiles; **(b) safe bootstrapper/installer** for non-technical users — installs agent CLIs (Claude Code …), version managers (mise, nyx), runtime deps (Docker/OrbStack, `op`), and slop itself, each pinned/verified and sandbox/VM-evaluated using the repo's safe-install machinery (so a non-technical user can go from zero to a working sandboxed setup). | later |
-| **SP8** | niche adapters | envoy / coredns / lulu / pf isolation adapters. | later |
+| **SP8** | niche adapters + own egress filter | envoy / coredns / pf isolation adapters, and **our own macOS NetworkExtension egress filter à-la-LuLu** (`NEFilterDataProvider`, per-process/per-domain egress decided at the host kernel boundary — the successor to the squid allowlist, and the way to extend enforced egress to the `host`/`sandbox` environments, not just `container`). | later |
 
 ## 11. Execution order
 
