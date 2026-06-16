@@ -11,6 +11,9 @@ This repo already has detailed contracts. Skim them, don't duplicate them:
   `here` shortcuts, comment style, parameter naming, safety defaults.
 - `CONTRIBUTING.md` — contributor expectations.
 - `README.md` — user-facing reference; the source of truth for examples.
+- `specs/` — the Go rewrite: `0001` (architecture design) and `0002`+
+  (per-sub-project plans/records). The repo is migrating from this fish/Python
+  stack to a single signed Go binary; read `specs/0001` before engine work.
 
 The conventions file in particular tells you the exact help-text layout
 every script must follow and how `slop-sync-help` keeps `--help` in sync
@@ -18,6 +21,15 @@ with `README.md`. Read it before adding a new script or changing one.
 
 ## Stack at a glance
 
+This repo is mid-migration (strangler) from a fish + Python(uv) toolkit to a
+single signed **Go binary** (`slop`). Both stacks are live; new engine work goes
+into Go (see `specs/0001`). The fish/Python notes below still govern the existing
+`scripts/` stack until each piece is ported.
+
+- **Go** is the engine + CLI: `cmd/slop` (thin cobra entry) over
+  `internal/engine/*` — `policy` (embedded CUE via `cuelang.org/go`, **no external
+  `cue`**), `exec` (ctty/PTY launch), `sandbox` (sandbox-exec boundary), plus
+  `secrets`/`creds` as they land. Build with `make build`; gate with `make check`.
 - **Fish** for every CLI script in `scripts/*.fish` (sourced as conf.d
   modules, no `+x` bit, no shebang reliance).
 - **Python via `uv`** for helpers in `scripts/_py/*.py`. PEP-723 inline
@@ -40,8 +52,15 @@ fish scripts/slop-sync-help.fish check   # README ↔ --help drift gate
 fish scripts/slop-pinning.fish      # no `latest` in pinned files
 ```
 
-CI runs all four. The Textual launcher has two diagnostic entry points
-worth knowing:
+For the Go engine, also run:
+
+```bash
+make check          # go vet + gofmt + go test ./...  (CI: .github/workflows/go.yml, macOS)
+make build          # static CGO_ENABLED=0 binary -> ./slop
+```
+
+CI runs all four fish gates plus the Go workflow. The Textual launcher has two
+diagnostic entry points worth knowing:
 
 ```fish
 env UV_NATIVE_TLS=1 SSL_CERT_FILE=/etc/ssl/cert.pem \

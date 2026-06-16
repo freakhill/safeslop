@@ -29,6 +29,18 @@ dependencies are pinned and reproducible across machines.
 - New Python work follows the same pattern. Do not introduce bare
   `python3 -c '...'` snippets or list `python3` as a required tool.
 
+## Go engine
+
+The repo is migrating to a single signed Go binary (`slop`). Engine + CLI live
+in `cmd/slop` and `internal/engine/*`; the policy schema is embedded via
+`go:embed` (no external `cue`). See `specs/0001` for the design.
+
+- Format with `gofmt`; keep `go vet ./...` clean.
+- Put tests next to the code and keep them hermetic — no live network or
+  credential APIs (mirror the existing engine tests).
+- `make check` runs `go vet` + gofmt + `go test ./...` (CI on macOS so the
+  sandbox-exec tests run).
+
 ## Skills, Docs, and Tests Sync Policy
 
 When changing any script under `scripts/` that affects behavior, flags, workflows, or defaults, update all relevant docs **and tests** in the same change:
@@ -49,6 +61,8 @@ Run at least:
 fish -n scripts/*.fish
 fish tests/run.fish
 ```
+
+For Go engine changes, also run `make check` (`go vet` + gofmt + `go test ./...`).
 
 For command-surface changes, also verify help output paths still work.
 
