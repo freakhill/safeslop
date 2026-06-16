@@ -16,4 +16,16 @@ slop: profiles: {
 
 	// Sandboxed Claude Code, file-confined to the repo, egress denied.
 	review: {agent: "claude", environment: "sandbox", network: "deny"}
+
+	// A sandboxed shell with a private-registry pnpm token and an injected API
+	// key, both sourced from 1Password and wiped on exit (SP2). secrets values
+	// and the staged .npmrc never persist outside the run.
+	work: {
+		agent:   "shell"
+		network: "allow" // installs need the registry
+		secrets: {ANTHROPIC_API_KEY: "op://Private/Anthropic/credential"}
+		credentials: pnpm: [
+			{host: "npm.pkg.github.com", token: "op://Private/GH Packages/token", scope: "@myorg"},
+		]
+	}
 }

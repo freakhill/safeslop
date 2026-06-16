@@ -15,9 +15,11 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/freakhill/agentic_tactical_boots/internal/engine/creds"
 	engexec "github.com/freakhill/agentic_tactical_boots/internal/engine/exec"
 	"github.com/freakhill/agentic_tactical_boots/internal/engine/policy"
 	"github.com/freakhill/agentic_tactical_boots/internal/engine/sandbox"
+	"github.com/freakhill/agentic_tactical_boots/internal/engine/secrets"
 )
 
 // Version is overridden at build time via -ldflags "-X .../cli.Version=...".
@@ -128,6 +130,7 @@ func cmdDoctor() *cobra.Command {
 				report[t] = map[string]any{"present": err == nil, "path": p}
 			}
 			report["sandbox-exec"] = map[string]any{"present": sandbox.Available(), "path": sandbox.SandboxExecPath}
+			report["1password-signedin"] = map[string]any{"present": secrets.OpSignedIn(context.Background()), "path": ""}
 			if jsonOut {
 				emitJSON(map[string]any{"ok": true, "os": runtime.GOOS, "arch": runtime.GOARCH, "tools": report})
 				return nil
@@ -183,6 +186,12 @@ func cmdRun() *cobra.Command {
 
 			if dryRun {
 				out := map[string]any{"ok": true, "profile": name, "environment": prof.Environment, "workspace": ws, "argv": argv, "network": prof.Network}
+				if len(prof.Secrets) > 0 {
+					out["secrets"] = prof.Secrets // refs, never resolved here
+				}
+				if prof.Credentials != nil && len(prof.Credentials.Pnpm) > 0 {
+					out["pnpm"] = prof.Credentials.Pnpm // token field is a ref, not a value
+				}
 				if prof.Environment == "sandbox" {
 					out["sandbox_profile"] = sandbox.Profile(ws, prof.Network)
 				}
@@ -190,6 +199,14 @@ func cmdRun() *cobra.Command {
 					emitJSON(out)
 				} else {
 					fmt.Printf("profile %q: environment=%s workspace=%s network=%s\n  argv: %v\n", name, prof.Environment, ws, prof.Network, argv)
+					for k, ref := range prof.Secrets {
+						fmt.Printf("  secret env %s <- %s\n", k, ref)
+					}
+					if prof.Credentials != nil {
+						for _, r := range prof.Credentials.Pnpm {
+							fmt.Printf("  pnpm %s token <- %s\n", hostOr(r.Host), r.Token)
+						}
+					}
 					if prof.Environment == "sandbox" {
 						fmt.Printf("--- seatbelt profile ---\n%s", sandbox.Profile(ws, prof.Network))
 					}
@@ -197,17 +214,7 @@ func cmdRun() *cobra.Command {
 				return nil
 			}
 
-			ctx := context.Background()
-			spec := engexec.LaunchSpec{Argv: argv, Dir: ws}
-			var code int
-			switch prof.Environment {
-			case "sandbox":
-				code, err = sandbox.Launch(ctx, spec, ws, prof.Network)
-			case "host":
-				code, err = engexec.RunInTerminal(ctx, spec)
-			default:
-				return fmt.Errorf("environment %q is not implemented in SP1 (container lands in SP3, vm in SP4)", prof.Environment)
-			}
+			code, err := runProfile(name, prof, argv, ws)
 			if err != nil && code == 0 {
 				return err
 			}
@@ -220,6 +227,51 @@ func cmdRun() *cobra.Command {
 }
 
 // ---- helpers ----
+
+// runProfile stages secrets + credentials into an ephemeral dir under the
+// workspace, launches the agent under its environment, and wipes the stage on
+// exit. Returns the child's exit code.
+func runProfile(name string, prof policy.Profile, argv []string, ws string) (int, error) {
+	ctx := context.Background()
+
+	stageDir := filepath.Join(ws, ".slop", "runtime", name)
+	defer os.RemoveAll(stageDir) // wipe staged secrets/.npmrc regardless of outcome
+
+	env := os.Environ()
+
+	if len(prof.Secrets) > 0 {
+		resolved, err := secrets.ResolveMap(ctx, prof.Secrets)
+		if err != nil {
+			return 1, err
+		}
+		for k, v := range resolved {
+			env = append(env, k+"="+v)
+		}
+	}
+
+	npmrcEnv, err := creds.StagePnpm(ctx, prof.Credentials, stageDir)
+	if err != nil {
+		return 1, err
+	}
+	env = append(env, npmrcEnv...)
+
+	spec := engexec.LaunchSpec{Argv: argv, Dir: ws, Env: env}
+	switch prof.Environment {
+	case "sandbox":
+		return sandbox.Launch(ctx, spec, ws, prof.Network)
+	case "host":
+		return engexec.RunInTerminal(ctx, spec)
+	default:
+		return 1, fmt.Errorf("environment %q is not implemented yet (container lands in SP3, vm in SP4)", prof.Environment)
+	}
+}
+
+func hostOr(h string) string {
+	if h == "" {
+		return "registry.npmjs.org"
+	}
+	return h
+}
 
 func arg0(args []string) string {
 	if len(args) > 0 {

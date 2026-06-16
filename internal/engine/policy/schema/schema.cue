@@ -17,6 +17,24 @@ package slop
 // that is the container's job (specs/0001 §6.2).
 #Network: "deny" | "allow"
 
+// A secret reference resolved at launch (specs/0001 §7): a 1Password URI
+// ("op://vault/item/field") or "env:NAME" to read from the launching shell.
+// Values are never written to disk except in the ephemeral, wiped-on-exit stage.
+#SecretRef: string & =~"^(op://|env:).+"
+
+// An npm/pnpm registry to authenticate. The token is sourced from a secret ref
+// and staged into a scoped .npmrc, wiped on exit (specs/0001 §7.2).
+#PnpmRegistry: {
+	host:   string | *"registry.npmjs.org"
+	token:  #SecretRef
+	scope?: string
+}
+
+// Credential providers a profile uses (SP2: pnpm; gh/forgejo/1Password-SSH follow).
+#Credentials: {
+	pnpm?: [...#PnpmRegistry]
+}
+
 #Profile: {
 	agent:       #Agent
 	environment: #Environment | *"sandbox"
@@ -24,6 +42,10 @@ package slop
 	// directory slop was invoked from.
 	workspace?: string
 	network:    #Network | *"deny"
+	// Env var name -> secret ref; injected into the agent's environment at launch.
+	secrets?: {[string]: #SecretRef}
+	// Credentials staged before launch and wiped on exit.
+	credentials?: #Credentials
 }
 
 #Slop: {
