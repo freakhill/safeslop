@@ -177,7 +177,7 @@ must follow the same pattern (no bare `python3 -c '...'`).
 This guide is written for macOS and fish users. It follows the Diataxis model:
 
 - Explanation: why these controls matter and what macOS can/cannot do
-- Reference: capability matrix and copy/paste config snippets
+- Reference: copy/paste config snippets (the full capability matrix is in the Reference appendix at the end)
 - How-to: task-oriented procedures
 - Tutorials: end-to-end walkthroughs
 
@@ -229,45 +229,6 @@ Default stance: no installer network except approved registries, no installer sc
 ---
 
 ## Reference
-
-### Capability matrix (macOS)
-
-Columns are ordered from "what the agent can see/touch on disk" through to
-"what enforces the policy". Two columns are deliberately distinct:
-
-- **URL restrictions** — HTTP/HTTPS-layer allowlist applied to the agent's
-  fetch tools (webfetch/websearch/etc.).
-- **Network restrictions** — broader socket-/DNS-/firewall-level egress
-  control. URL allowlists do not stop a `bash -c "curl ..."` or a raw
-  socket; only network-layer controls (sandbox-exec `(deny network*)`,
-  Docker network namespace + proxy, host firewall like [LuLu](https://objective-see.org/products/lulu.html))
-  do.
-- **Process visibility limits** — whether the framework prevents the
-  agent from enumerating, inspecting, or signaling other processes on the
-  host (`ps`, `/proc/*/cmdline`, `lsof`, `kill`, etc.). Agents that can
-  read other processes can scrape secrets out of `argv`, environment
-  variables, or open file handles.
-
-| Framework | File restrictions | SSH key restrictions | URL restrictions | Network restrictions | Process visibility limits | Installer restrictions | Enforcement level |
-|---|---|---|---|---|---|---|---|
-| Claude Code | Yes (`/sandbox` filesystem policy) | Yes (`denyRead` on `~/.ssh`) | Yes (managed domain filtering/proxy) | Yes when `/sandbox` profile uses `(deny network*)`; otherwise relies on app-layer allowlist | Configurable via sandbox-exec (`(deny process-info*)`, `(deny mach-lookup)`); not enforced by default profile | Indirect via command policy + environment | OS-level sandbox + app policy |
-| OpenCode | Yes (permission rules, app-level) | Yes (pattern deny, app-level) | Partial (`webfetch/websearch`; bash needs external controls) | Not built-in (bash escape route); rely on Docker netns + proxy | Not built-in; rely on Docker PID namespace | Via command allow/deny + external sandbox | App policy (plus Docker if added) |
-| CrewAI | Not built-in | Not built-in | Not built-in | Not built-in | Not built-in | Not built-in | External controls required |
-| PydanticAI | Strong in Code Mode (Monty); otherwise not built-in | Strong in Code Mode; otherwise not built-in | Strong in Code Mode; otherwise not built-in | Strong in Code Mode (Monty isolates network); otherwise not built-in | Strong in Code Mode (Monty has no host process access); otherwise not built-in | Policy in your tool wrappers | Rust sandbox (Monty) + your controls |
-| AG2 | Yes with Docker executor (`work_dir` mount) | Yes if keys never mounted | Via Docker networking/proxy | Via Docker network policy + proxy ACL | Yes via Docker PID namespace (default); broken if `--pid=host` is set | Via container policy/wrappers | Container boundary |
-| OpenClaw | Partial (workspace defaults to `~/.openclaw/workspace`; broad by default — must be confined to a project mount) | Not built-in (requires explicit deny via container/sandbox; OpenClaw will read whatever the host process can read) | Partial (per-tool/channel allow/deny in `SOUL.md` and config; not a full HTTP allowlist) | Not built-in (messaging-channel egress is intentional; rely on container netns + proxy ACL) | Not built-in (rely on Docker PID namespace) | Via tool allowlist + external sandbox | App policy (plus Docker if added) |
-| ZeroClaw | Yes (workspace boundary in runtime; supervised autonomy denies escape by default) | Yes if keys never mounted; runtime does not auto-expose host creds | Partial (per-tool policy; HTTP tool can be gated) | Partial (OS sandbox layer: Landlock / Bubblewrap / Seatbelt / Docker — depends on host); rely on container netns + proxy ACL for full enforcement | Yes when run under Bubblewrap/Landlock/Docker; not enforced by the binary alone | Yes (medium-risk requires approval, high-risk blocked; cryptographic tool receipts) | Rust runtime policy + OS sandbox |
-
-For frameworks marked "Not built-in" or "Configurable", the practical
-defense remains the container/VM boundary plus a host firewall:
-
-- **Network**: route the agent through a proxy (`library/layer/container/squid.conf`)
-  inside a Docker network with no direct internet route, then keep a
-  host-level deny-by-default firewall ([LuLu](https://objective-see.org/products/lulu.html) or [pf](https://www.openbsd.org/faq/pf/)).
-- **Process visibility**: prefer Docker / Tart so the agent runs in its
-  own PID namespace. Avoid `--pid=host`, `docker run --privileged`, or
-  mounting `/proc`. On macOS `sandbox-exec`, add `(deny process-info*)`
-  and `(deny mach-lookup)` to the profile.
 
 ### Default best-practice recommendations per framework
 
@@ -1282,6 +1243,49 @@ If you want one default setup that works well on macOS:
 4. Force egress through allowlist proxy
 5. Keep allowlist in `library/layer/container/allowlist.domains` and verify denials regularly
 6. For risky brew installs, use disposable Tart VM first
+
+---
+
+## Reference appendix
+
+### Capability matrix (macOS)
+
+Columns are ordered from "what the agent can see/touch on disk" through to
+"what enforces the policy". Two columns are deliberately distinct:
+
+- **URL restrictions** — HTTP/HTTPS-layer allowlist applied to the agent's
+  fetch tools (webfetch/websearch/etc.).
+- **Network restrictions** — broader socket-/DNS-/firewall-level egress
+  control. URL allowlists do not stop a `bash -c "curl ..."` or a raw
+  socket; only network-layer controls (sandbox-exec `(deny network*)`,
+  Docker network namespace + proxy, host firewall like [LuLu](https://objective-see.org/products/lulu.html))
+  do.
+- **Process visibility limits** — whether the framework prevents the
+  agent from enumerating, inspecting, or signaling other processes on the
+  host (`ps`, `/proc/*/cmdline`, `lsof`, `kill`, etc.). Agents that can
+  read other processes can scrape secrets out of `argv`, environment
+  variables, or open file handles.
+
+| Framework | File restrictions | SSH key restrictions | URL restrictions | Network restrictions | Process visibility limits | Installer restrictions | Enforcement level |
+|---|---|---|---|---|---|---|---|
+| Claude Code | Yes (`/sandbox` filesystem policy) | Yes (`denyRead` on `~/.ssh`) | Yes (managed domain filtering/proxy) | Yes when `/sandbox` profile uses `(deny network*)`; otherwise relies on app-layer allowlist | Configurable via sandbox-exec (`(deny process-info*)`, `(deny mach-lookup)`); not enforced by default profile | Indirect via command policy + environment | OS-level sandbox + app policy |
+| OpenCode | Yes (permission rules, app-level) | Yes (pattern deny, app-level) | Partial (`webfetch/websearch`; bash needs external controls) | Not built-in (bash escape route); rely on Docker netns + proxy | Not built-in; rely on Docker PID namespace | Via command allow/deny + external sandbox | App policy (plus Docker if added) |
+| CrewAI | Not built-in | Not built-in | Not built-in | Not built-in | Not built-in | Not built-in | External controls required |
+| PydanticAI | Strong in Code Mode (Monty); otherwise not built-in | Strong in Code Mode; otherwise not built-in | Strong in Code Mode; otherwise not built-in | Strong in Code Mode (Monty isolates network); otherwise not built-in | Strong in Code Mode (Monty has no host process access); otherwise not built-in | Policy in your tool wrappers | Rust sandbox (Monty) + your controls |
+| AG2 | Yes with Docker executor (`work_dir` mount) | Yes if keys never mounted | Via Docker networking/proxy | Via Docker network policy + proxy ACL | Yes via Docker PID namespace (default); broken if `--pid=host` is set | Via container policy/wrappers | Container boundary |
+| OpenClaw | Partial (workspace defaults to `~/.openclaw/workspace`; broad by default — must be confined to a project mount) | Not built-in (requires explicit deny via container/sandbox; OpenClaw will read whatever the host process can read) | Partial (per-tool/channel allow/deny in `SOUL.md` and config; not a full HTTP allowlist) | Not built-in (messaging-channel egress is intentional; rely on container netns + proxy ACL) | Not built-in (rely on Docker PID namespace) | Via tool allowlist + external sandbox | App policy (plus Docker if added) |
+| ZeroClaw | Yes (workspace boundary in runtime; supervised autonomy denies escape by default) | Yes if keys never mounted; runtime does not auto-expose host creds | Partial (per-tool policy; HTTP tool can be gated) | Partial (OS sandbox layer: Landlock / Bubblewrap / Seatbelt / Docker — depends on host); rely on container netns + proxy ACL for full enforcement | Yes when run under Bubblewrap/Landlock/Docker; not enforced by the binary alone | Yes (medium-risk requires approval, high-risk blocked; cryptographic tool receipts) | Rust runtime policy + OS sandbox |
+
+For frameworks marked "Not built-in" or "Configurable", the practical
+defense remains the container/VM boundary plus a host firewall:
+
+- **Network**: route the agent through a proxy (`library/layer/container/squid.conf`)
+  inside a Docker network with no direct internet route, then keep a
+  host-level deny-by-default firewall ([LuLu](https://objective-see.org/products/lulu.html) or [pf](https://www.openbsd.org/faq/pf/)).
+- **Process visibility**: prefer Docker / Tart so the agent runs in its
+  own PID namespace. Avoid `--pid=host`, `docker run --privileged`, or
+  mounting `/proc`. On macOS `sandbox-exec`, add `(deny process-info*)`
+  and `(deny mach-lookup)` to the profile.
 
 ---
 
