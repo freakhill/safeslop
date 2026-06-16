@@ -21,12 +21,30 @@ import (
 //go:embed schema/schema.cue
 var schemaSrc string
 
+// PnpmRegistry authenticates an npm/pnpm registry by staging a scoped .npmrc
+// whose _authToken is sourced from Token (an op:// or env: secret ref).
+type PnpmRegistry struct {
+	Host  string `json:"host"`
+	Token string `json:"token"`
+	Scope string `json:"scope,omitempty"`
+}
+
+// Credentials groups the credential providers a profile uses (SP2).
+type Credentials struct {
+	Pnpm []PnpmRegistry `json:"pnpm,omitempty"`
+}
+
 // Profile is one launchable configuration from slop.cue.
 type Profile struct {
 	Agent       string `json:"agent"`
 	Environment string `json:"environment"`
 	Workspace   string `json:"workspace,omitempty"`
 	Network     string `json:"network"`
+	// Secrets maps an env var name to a secret ref (op://... or env:NAME),
+	// resolved at launch and injected into the agent's environment.
+	Secrets map[string]string `json:"secrets,omitempty"`
+	// Credentials are staged before launch and wiped on exit.
+	Credentials *Credentials `json:"credentials,omitempty"`
 }
 
 // Config is the decoded top-level `slop:` value from slop.cue.

@@ -42,3 +42,33 @@ func TestLoadMissingFile(t *testing.T) {
 		t.Fatal("expected an error for a missing file")
 	}
 }
+
+func TestLoadDecodesSecretsAndCredentials(t *testing.T) {
+	cfg, err := Load(filepath.Join("testdata", "with_creds.cue"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	work, ok := cfg.Profiles["work"]
+	if !ok {
+		t.Fatal("missing profile 'work'")
+	}
+	if got := work.Secrets["ANTHROPIC_API_KEY"]; got != "op://dev/anthropic/key" {
+		t.Errorf("secret ANTHROPIC_API_KEY = %q", got)
+	}
+	if got := work.Secrets["FOO"]; got != "env:FOO_SRC" {
+		t.Errorf("secret FOO = %q", got)
+	}
+	if work.Credentials == nil || len(work.Credentials.Pnpm) != 2 {
+		t.Fatalf("expected 2 pnpm registries, got %+v", work.Credentials)
+	}
+	gh := work.Credentials.Pnpm[1]
+	if gh.Host != "npm.pkg.github.com" || gh.Token != "env:GH_NPM_TOKEN" || gh.Scope != "@myorg" {
+		t.Errorf("pnpm[1] = %+v", gh)
+	}
+}
+
+func TestLoadRejectsBadSecretRef(t *testing.T) {
+	if _, err := Load(filepath.Join("testdata", "bad_secretref.cue")); err == nil {
+		t.Fatal("expected validation error for a non-op://, non-env: secret ref")
+	}
+}
