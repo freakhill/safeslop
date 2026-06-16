@@ -36,6 +36,5 @@ What an agent is allowed to do — schemas, presets, golden fixtures, and per-ap
 - `claude-code.settings.json` — drop-in defaults for Claude Code, also referenced by [`slop-agents seed claude`](../../../scripts/slop-agents.fish).
 - `opencode.restrictive.json` — strict OpenCode permission policy.
 - `forgejo-instances.example.json` — instance-profile template for `slop-forgejo-key`.
-- `radicle-access-policy.example.json` — bindings template for `slop-radicle`.
 
 Compiled by [`slop-isolate`](../../../scripts/slop-isolate.fish).

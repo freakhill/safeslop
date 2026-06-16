@@ -6,7 +6,7 @@ Reusable building blocks for agent isolation. Two top-level subtrees, each with 
   - [`layer/container/`](layer/container/) — Dockerfiles, compose, [Squid](https://www.squid-cache.org/) proxy, allowlist domains, env templates.
   - [`layer/host/`](layer/host/) — macOS host-side scaffolding (today: pointer to compiled `sandbox-exec` profiles under `policy/`).
   - [`layer/vm/`](layer/vm/) — disposable VM scaffolding (today: pointer to the [`slop-brew-vm`](../scripts/slop-brew-vm.fish) recipe under `task/evaluate-formulae/`).
-  - [`layer/policy/`](layer/policy/) — [CUE](https://cuelang.org/) schema, presets, fixtures, and per-app drop-in settings (Claude Code, OpenCode, Forgejo instance map, Radicle policy).
+  - [`layer/policy/`](layer/policy/) — [CUE](https://cuelang.org/) schema, presets, fixtures, and per-app drop-in settings (Claude Code, OpenCode, Forgejo instance map).
 - **[`task/`](task/)** — end-to-end recipes. Each is a short README that *references* the relevant layer artifacts; nothing is duplicated.
   - [`task/launch-agent/`](task/launch-agent/) — drop into Claude Code or OpenCode with the bundled defaults.
   - [`task/isolate-network/`](task/isolate-network/) — route the agent through Squid + an [Envoy](https://www.envoyproxy.io/) MITM stack.

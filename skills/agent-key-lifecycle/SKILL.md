@@ -1,7 +1,7 @@
 ---
 name: agent-key-lifecycle
 description: >
-  Manage ephemeral GitHub/Forgejo deploy keys and Radicle local identities
+  Manage ephemeral GitHub/Forgejo deploy keys
   with short TTLs, scoped access, and clean revocation.
 ---
 
@@ -22,7 +22,6 @@ Before executing this skill, read:
 
 - GitHub: `scripts/slop-gh-key.fish` (`slop-gh-key ...`)
 - Forgejo: `scripts/slop-forgejo-key.fish` (`slop-forgejo-key ...`)
-- Radicle: `scripts/slop-radicle.fish` (`slop-radicle ...`)
 
 The fish wrappers above delegate JSON / state / datetime work to small Python
 helpers under `scripts/_py/llm_*.py`. Each helper carries PEP-723 inline
@@ -99,24 +98,6 @@ When invoked from a Forgejo-tracked repo's working tree:
 If the host has no matching profile, the error message tells you to run
 `bootstrap-config` and `instance-set --name <label> --url https://<host> --token-env <ENV>`.
 
-### Radicle identities across multiple repos
-
-1. `source scripts/slop-radicle.fish`
-2. `slop-radicle create-identity --name session-1 --ttl 24h`
-3. `slop-radicle bind-repo --rid <rad:...> --identity-id <id> --access ro|rw`
-4. `slop-radicle retire-expired --yes`
-
-### Radicle — repo-aware shortcuts and TUI
-
-When invoked from a Radicle-tracked repo (one where `git config rad.id` is set
-or `rad inspect` returns a RID):
-
-- `slop-radicle here info` — print the inferred RID.
-- `slop-radicle here bind --identity-id <id> --access ro|rw [--note text]`
-- `slop-radicle here unbind [--identity-id <id>] [--yes]`
-- `slop-radicle here list-bindings`
-- `slop-radicle tui` — focused per-tool TUI (soft-deps on gum).
-
 ## Safety checklist
 
 - Never use long-lived RW keys unless required.
@@ -131,5 +112,5 @@ If you change key/identity script behavior, update in the same task:
 - this skill file
 - any other affected skill under `skills/*/SKILL.md`
 - `skills/README.md` when installation/usage guidance changes
-- `tests/test_slop_gh_key.fish`, `tests/test_slop_forgejo_key.fish`, `tests/test_slop_radicle.fish`, and `tests/test_py_helpers.fish` for changed argv or error paths
+- `tests/test_slop_gh_key.fish`, `tests/test_slop_forgejo_key.fish`, and `tests/test_py_helpers.fish` for changed argv or error paths
 - `scripts/_py/llm_*.py` if the JSON / state / datetime contract changes (and never reintroduce bare `python3` — keep things uv-managed)

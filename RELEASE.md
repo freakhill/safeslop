@@ -17,7 +17,7 @@ tool. A small `/tmp` security risk in `slop-brew-vm` was also fixed in passing.
   layer, not a black box. Esc on any menu exits/returns. Help and `--version`
   work without `gum` installed so the gate is informative, not silent.
 - **Per-tool TUIs (soft-dep on gum).** `slop-gh-key tui`, `slop-forgejo-key tui`,
-  `slop-radicle tui`, `slop-brew-vm tui`, `slop-agent-sandbox tui`,
+  `slop-brew-vm tui`, `slop-agent-sandbox tui`,
   `slop-agent-sandbox-tools tui`. Each shows its current operating context
   (cwd, origin, network policy, deps) at the top.
 - **Repo-aware `here` shortcuts.** Infer `--repo` (and `--instance`/`--rid`
@@ -25,8 +25,6 @@ tool. A small `/tmp` security risk in `slop-brew-vm` was also fixed in passing.
   - `slop-gh-key here create-pair | list | revoke <id> | cleanup | revoke-all`
   - `slop-forgejo-key here create-pair | list | revoke <id> | cleanup | revoke-all`
     (host → instance profile lookup)
-  - `slop-radicle here info | bind | unbind | list-bindings`
-    (RID from `git config rad.id` or `rad inspect`)
 - **Enriched help pattern across all 16 user-facing scripts.** Every script
   now follows the same layout: tagline → Description → Usage → Options →
   Examples → Notes. Every error path prints the full help to stderr (no more

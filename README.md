@@ -11,7 +11,7 @@ Local scripts and docs for running agent workflows with stronger isolation defau
 - container sandbox helpers (`slop-agent-sandbox`, `slop-agent-sandbox-tools`)
 - VM-backed Homebrew evaluation (`slop-brew-vm`)
 - strict installer wrappers (`slop-safe-npm`, `slop-safe-uv`)
-- ephemeral key/identity lifecycle helpers (`slop-gh-key`, `slop-forgejo-key`, `slop-radicle`)
+- ephemeral key lifecycle helpers (`slop-gh-key`, `slop-forgejo-key`)
 - unified isolation policy compiler (`slop-isolate`: one CUE file → per-tool configs for sandbox-exec, docker-compose, envoy, claude-code, opencode, …)
 - host-side agent launchers with bundled defaults (`slop-agents claude`, `slop-agents opencode`)
 - a single Textual TUI hub (`slop`) wrapping every action above
@@ -1128,50 +1128,6 @@ slop-forgejo-key revoke-expired --instance main --repo <owner>/<repo> --yes
 slop-forgejo-key uninstall-ssh-config --repo <owner>/<repo> --name session-1 --yes
 ```
 
-### How to manage ephemeral Radicle identities across many repos
-
-1. Load helper:
-
-```fish
-source scripts/slop-radicle.fish
-```
-
-Optional bootstrap to copy starter policy file locally:
-
-```fish
-slop-radicle bootstrap-config
-```
-
-2. Create short-lived identity:
-
-```fish
-slop-radicle create-identity --name session-1 --ttl 24h
-```
-
-3. Bind identity to current/future repositories by RID:
-
-```fish
-slop-radicle bind-repo --rid <rad:...> --identity-id <identity-id> --access ro
-slop-radicle bind-repo --rid <rad:...> --identity-id <identity-id> --access rw --note "maintainer tasks"
-```
-
-4. Inspect and retire:
-
-```fish
-slop-radicle list-identities
-slop-radicle list-bindings --all
-slop-radicle retire-expired --yes
-slop-radicle unbind-repo --rid <rad:...> --yes
-```
-
-5. Print shell export for active identity key:
-
-```fish
-slop-radicle print-env --identity-id <identity-id>
-```
-
-Reference state format: `library/layer/policy/radicle-access-policy.example.json`
-
 ---
 
 ## Tutorials
@@ -1255,15 +1211,13 @@ Host remains unchanged after VM deletion.
 - `scripts/brew-sandbox.fish`: legacy isolated-prefix helper (not a sandbox)
 - `scripts/slop-gh-key.fish`: generate/revoke ephemeral GitHub deploy keys
 - `scripts/slop-forgejo-key.fish`: generate/revoke ephemeral Forgejo deploy keys (multi-instance)
-- `scripts/slop-radicle.fish`: manage ephemeral Radicle identities and RID bindings
-- `scripts/_py/llm_*.py`: pinned-Python helpers for the three `llm-*.fish` scripts (run via `uv run --script`, PEP-723 inline metadata)
+- `scripts/_py/llm_*.py`: pinned-Python helpers for the `llm-*.fish` scripts (run via `uv run --script`, PEP-723 inline metadata)
 - `scripts/slop-skills-install.fish`: install repo-versioned skills into local runtime
 - `scripts/slop-install.fish`: install fish command shims (stow preferred, direct fallback)
 - `stow/fish-tools`: stow package for tool command shims under `.local/{bin,lib}`
 - `skills/agent-sandbox-ops/SKILL.md`: operating workflow for sandbox + network controls
 - `skills/agent-key-lifecycle/SKILL.md`: operating workflow for key and identity lifecycle
 - `library/layer/policy/forgejo-instances.example.json`: sample multi-instance Forgejo profile file
-- `library/layer/policy/radicle-access-policy.example.json`: sample Radicle identity/binding state format
 - `scripts/slop-pinning.fish`: CI/local gate for pinned tool versions
 - `scripts/slop-safe-npm.fish`: strict npm install wrapper
 - `scripts/slop-safe-uv.fish`: strict uv/pip install wrapper
