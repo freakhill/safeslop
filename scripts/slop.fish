@@ -78,7 +78,6 @@ function __slop_help
     echo "Per-tool TUIs (lighter, focused launchers):"
     echo "  slop-gh-key tui     GitHub deploy keys for the current repo."
     echo "  slop-forgejo-key tui"
-    echo "  slop-radicle tui"
     echo "  slop-isolate tui"
     echo ""
     echo "Requirements:"

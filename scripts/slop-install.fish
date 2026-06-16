@@ -30,7 +30,6 @@ set -g __ift_module_scripts \
     slop-brew-vm \
     slop-gh-key \
     slop-forgejo-key \
-    slop-radicle \
     slop-safe-npm \
     slop-safe-uv \
     slop-isolate
@@ -50,7 +49,7 @@ set -g __ift_standalone_scripts \
 # symlink that motivated this rewrite.
 set -g __ift_legacy_bin_cmds \
     slop-sandboxctl slop-agent-sandbox slop-agent-sandbox-tools slop-macos-sandbox slop-brew-vm \
-    slop-gh-key slop-forgejo-key slop-radicle slop-safe-npm slop-safe-uv \
+    slop-gh-key slop-forgejo-key slop-safe-npm slop-safe-uv \
     slop-pinning slop atb-tui
 
 function __ift_examples
