@@ -24,13 +24,12 @@ function __sandboxctl_help
     echo "  scripts/slop-sandboxctl.fish slop-brew-vm        <args...>   -> slop-brew-vm"
     echo "  scripts/slop-sandboxctl.fish github         <args...>   -> slop-gh-key"
     echo "  scripts/slop-sandboxctl.fish forgejo        <args...>   -> slop-forgejo-key"
-    echo "  scripts/slop-sandboxctl.fish radicle        <args...>   -> slop-radicle"
     echo "  scripts/slop-sandboxctl.fish safe-npm                   -> slop-safe-npm"
     echo "  scripts/slop-sandboxctl.fish slop-safe-uv        <args...>   -> slop-safe-uv"
     echo "  scripts/slop-sandboxctl.fish pinning                    -> slop-pinning"
     echo "  scripts/slop-sandboxctl.fish isolate        <args...>   -> slop-isolate"
     echo ""
-    echo "Topics: docker, local, slop-brew-vm, github-keys, forgejo-keys, radicle-access, network-limiting, file-sharing"
+    echo "Topics: docker, local, slop-brew-vm, github-keys, forgejo-keys, network-limiting, file-sharing"
     echo ""
     echo "Examples:"
     echo "  # Discover what each subcommand maps to"
@@ -46,7 +45,7 @@ function __sandboxctl_help
     echo ""
     echo "Notes:"
     echo "  - For an interactive menu across all of these tools, run: slop"
-    echo "  - Per-tool TUIs exist: slop-gh-key tui, slop-forgejo-key tui, slop-radicle tui."
+    echo "  - Per-tool TUIs exist: slop-gh-key tui, slop-forgejo-key tui."
     echo "  - Each subcommand prints its own --help when given no args or --help."
     echo "  - Full reference: README.md."
 end
@@ -63,7 +62,6 @@ function __sandboxctl_list
     echo "  slop-brew-vm        -> scripts/slop-brew-vm.fish (slop-brew-vm ...)"
     echo "  github         -> scripts/slop-gh-key.fish (slop-gh-key ...)"
     echo "  forgejo        -> scripts/slop-forgejo-key.fish (slop-forgejo-key ...)"
-    echo "  radicle        -> scripts/slop-radicle.fish (slop-radicle ...)"
     echo "  safe-npm       -> scripts/slop-safe-npm.fish (slop-safe-npm)"
     echo "  slop-safe-uv        -> scripts/slop-safe-uv.fish (slop-safe-uv ...)"
     echo "  pinning        -> scripts/slop-pinning.fish"
@@ -92,9 +90,9 @@ function __sandboxctl_tutorial_docker
 end
 
 function __sandboxctl_tutorial_local
-    echo "Local macOS sandbox quickstart (from README → 'How to use optional local sandbox-exec layer on macOS'):"
+    echo "Local macOS sandbox quickstart (from README → 'How to run a command under the sandbox-exec boundary (macOS)'):"
     echo ""
-    # BEGIN AUTOGEN: examples section="How to use optional local sandbox-exec layer on macOS"
+    # BEGIN AUTOGEN: examples section="How to run a command under the sandbox-exec boundary (macOS)"
     echo 'Load helper:'
     echo '  source scripts/slop-macos-sandbox.fish'
     echo
@@ -211,34 +209,6 @@ function __sandboxctl_tutorial_forgejo_keys
     echo "Repo-aware shortcuts: slop-forgejo-key here create-pair | here list | here revoke <id> | here cleanup | here revoke-all"
 end
 
-function __sandboxctl_tutorial_radicle_access
-    echo "Radicle access quickstart (from README → 'How to manage ephemeral Radicle identities across many repos'):"
-    echo ""
-    # BEGIN AUTOGEN: examples section="How to manage ephemeral Radicle identities across many repos"
-    echo 'Load helper:'
-    echo '  source scripts/slop-radicle.fish'
-    echo '  slop-radicle bootstrap-config'
-    echo
-    echo 'Create short-lived identity:'
-    echo '  slop-radicle create-identity --name session-1 --ttl 24h'
-    echo
-    echo 'Bind identity to current/future repositories by RID:'
-    echo '  slop-radicle bind-repo --rid <rad:...> --identity-id <identity-id> --access ro'
-    echo '  slop-radicle bind-repo --rid <rad:...> --identity-id <identity-id> --access rw --note "maintainer tasks"'
-    echo
-    echo 'Inspect and retire:'
-    echo '  slop-radicle list-identities'
-    echo '  slop-radicle list-bindings --all'
-    echo '  slop-radicle retire-expired --yes'
-    echo '  slop-radicle unbind-repo --rid <rad:...> --yes'
-    echo
-    echo 'Print shell export for active identity key:'
-    echo '  slop-radicle print-env --identity-id <identity-id>'
-    # END AUTOGEN: examples
-    echo ""
-    echo "Repo-aware shortcuts: slop-radicle here info | here bind --identity-id <id> --access ro|rw | here unbind | here list-bindings"
-end
-
 function __sandboxctl_tutorial_network_limiting
     echo "Network limiting quickstart (from README → 'How to strengthen network limiting'):"
     echo ""
@@ -267,8 +237,6 @@ function __sandboxctl_tutorial --argument-names topic
             __sandboxctl_tutorial_github_keys
         case forgejo-keys
             __sandboxctl_tutorial_forgejo_keys
-        case radicle-access
-            __sandboxctl_tutorial_radicle_access
         case network-limiting
             __sandboxctl_tutorial_network_limiting
         case file-sharing
@@ -314,8 +282,6 @@ switch "$cmd"
         fish -c "source '$script_dir/slop-gh-key.fish'; slop-gh-key $argv"
     case forgejo
         fish -c "source '$script_dir/slop-forgejo-key.fish'; slop-forgejo-key $argv"
-    case radicle
-        fish -c "source '$script_dir/slop-radicle.fish'; slop-radicle $argv"
     case safe-npm
         fish -c "source '$script_dir/slop-safe-npm.fish'; slop-safe-npm $argv"
     case slop-safe-uv

@@ -374,7 +374,6 @@ function test_python_tui_does_not_shell_into_legacy_fish_tui
     set -l content (cat "$SLOP_TUI_PY")
     assert_not_contains "no slop-gh-key tui shell-out" "$content" 'slop-gh-key tui'
     assert_not_contains "no slop-forgejo-key tui shell-out" "$content" 'slop-forgejo-key tui'
-    assert_not_contains "no slop-radicle tui shell-out" "$content" 'slop-radicle tui'
     assert_not_contains "no slop-agent-sandbox tui shell-out" "$content" 'slop-agent-sandbox tui'
     assert_not_contains "no slop-brew-vm tui shell-out" "$content" 'slop-brew-vm tui'
 end

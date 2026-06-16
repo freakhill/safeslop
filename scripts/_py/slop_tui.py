@@ -237,68 +237,6 @@ def build_forgejo_key_actions() -> list[Action]:
     ]
 
 
-def build_radicle_actions() -> list[Action]:
-    return [
-        Action(
-            key="c",
-            label="Create a new identity (24h TTL)",
-            fish_tool="slop-radicle",
-            fish_sub=["create-identity", "--name", "{0}", "--ttl", "24h"],
-            equivalent_cli="slop-radicle create-identity --name {0} --ttl 24h",
-            prompts=[("label (e.g. session-1)", "")],
-            confirm=("Create identity '{0}'?", True),
-        ),
-        Action(
-            key="l",
-            label="List active identities",
-            fish_tool="slop-radicle",
-            fish_sub=["list-identities"],
-            equivalent_cli="slop-radicle list-identities",
-        ),
-        Action(
-            key="b",
-            label="Bind THIS repo to an identity (read-only)",
-            fish_tool="slop-radicle",
-            fish_sub=["here", "bind", "--identity-id", "{0}", "--access", "ro"],
-            equivalent_cli="slop-radicle here bind --identity-id {0} --access ro",
-            prompts=[("identity id (from list)", "")],
-            confirm=("Bind current repo to identity {0} (ro)?", True),
-        ),
-        Action(
-            key="B",
-            label="Bind THIS repo to an identity (read-write)",
-            fish_tool="slop-radicle",
-            fish_sub=["here", "bind", "--identity-id", "{0}", "--access", "rw"],
-            equivalent_cli="slop-radicle here bind --identity-id {0} --access rw",
-            prompts=[("identity id (from list)", "")],
-            confirm=("Bind current repo to identity {0} (rw)?", True),
-        ),
-        Action(
-            key="u",
-            label="Unbind THIS repo (all identities)",
-            fish_tool="slop-radicle",
-            fish_sub=["here", "unbind", "--yes"],
-            equivalent_cli="slop-radicle here unbind --yes",
-            confirm=("Unbind current repo from ALL identities?", False),
-        ),
-        Action(
-            key="L",
-            label="List bindings for THIS repo",
-            fish_tool="slop-radicle",
-            fish_sub=["here", "list-bindings"],
-            equivalent_cli="slop-radicle here list-bindings",
-        ),
-        Action(
-            key="x",
-            label="Retire expired identities",
-            fish_tool="slop-radicle",
-            fish_sub=["retire-expired", "--yes"],
-            equivalent_cli="slop-radicle retire-expired --yes",
-            confirm=("Retire all expired identities?", True),
-        ),
-    ]
-
-
 def build_agent_sandbox_actions(tool: str) -> list[Action]:
     """Both slop-agent-sandbox and slop-agent-sandbox-tools share this menu;
     they only differ in which docker service the underlying CLI targets."""
@@ -618,13 +556,6 @@ def build_top_actions() -> list[Action]:
             description="Multi-instance Forgejo deploy keys (Codeberg, self-hosted, etc.).",
             submenu=build_forgejo_key_actions(),
             equivalent_cli="(Forgejo deploy-key sub-menu)",
-        ),
-        Action(
-            key="r",
-            label="Radicle access",
-            description="Per-repo Radicle identities and access policy.",
-            submenu=build_radicle_actions(),
-            equivalent_cli="(Radicle sub-menu)",
         ),
         Action(
             key="s",

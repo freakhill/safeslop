@@ -39,7 +39,7 @@ function test_list_subcommand
 end
 
 function test_tutorial_known_topic
-    for topic in docker local slop-brew-vm github-keys forgejo-keys radicle-access network-limiting file-sharing
+    for topic in docker local slop-brew-vm github-keys forgejo-keys network-limiting file-sharing
         set -l out (run_fish $SCRIPT tutorial $topic 2>&1)
         set -l rc $status
         assert_status "slop-sandboxctl tutorial $topic status" $rc 0

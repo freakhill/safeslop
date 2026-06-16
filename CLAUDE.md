@@ -149,9 +149,9 @@ main` from the prompt works for them.
   install. Don't put logic here that belongs in either Python module.
 - `scripts/slop-isolate.fish` + `scripts/_py/isolation.py` — CUE
   policy compiler. The `here` shortcut convention originated here.
-- `scripts/slop-gh-key.fish` / `slop-forgejo-key.fish` /
-  `slop-radicle.fish` — credential lifecycle. Repo-uniqueness tests
-  in `tests/test_slop_*.fish` document the three layers' scoping.
+- `scripts/slop-gh-key.fish` / `slop-forgejo-key.fish` —
+  credential lifecycle. Repo-uniqueness tests
+  in `tests/test_slop_*.fish` document the two layers' scoping.
   The orchestrator captures `here create-pair` stdout to extract the
   just-issued key ids so on-exit revoke can target them by id rather
   than waiting for the TTL.
@@ -186,9 +186,7 @@ ephemeral GitHub creds + tailored image extras:
    the user's permanent `id_ed25519` etc.) and copies them into
    `<repo>/.slop/runtime/<profile>/.ssh/` with a fresh SSH config.
    Github's `HostName` is hardcoded `github.com`; forgejo's is
-   parsed from the user's existing `~/.ssh/config` marker block;
-   radicle gets a comment-only `RAD_KEYS_PATH` hint (no `Host`
-   alias — `rad://` URLs aren't ssh-aliased).
+   parsed from the user's existing `~/.ssh/config` marker block.
 5. Resolve image: if `image.extra-{apt,pip,npm}` declared, content-
    hash the spec, generate `Dockerfile.tailored` under the runtime
    dir, `docker build -t local/agent-sandbox-tools:slop-<hash>` if

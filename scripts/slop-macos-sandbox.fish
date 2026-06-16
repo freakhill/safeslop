@@ -14,7 +14,7 @@
 # - Apple Platform Security: https://support.apple.com/guide/security/welcome/web
 
 function __macos_sandbox_examples
-    # BEGIN AUTOGEN: examples section="How to use optional local sandbox-exec layer on macOS"
+    # BEGIN AUTOGEN: examples section="How to run a command under the sandbox-exec boundary (macOS)"
     echo 'Load helper:'
     echo '  source scripts/slop-macos-sandbox.fish'
     echo
@@ -34,14 +34,14 @@ function __macos_sandbox_examples
 end
 
 function __macos_sandbox_help
-    echo "slop-macos-sandbox — optional macOS local sandbox layer (sandbox-exec)"
+    echo "slop-macos-sandbox — macOS local sandbox boundary (sandbox-exec)"
     echo ""
     echo "Description:"
     echo "  Run a command (or open a shell) under a tight sandbox-exec profile."
     echo "  Default path scope is the current working directory; default network"
     echo "  policy is strict-egress (deny network*) inside the profile."
-    echo "  This is defense-in-depth only — for untrusted execution prefer the"
-    echo "  Docker/VM workflows in this repo."
+    echo "  First-class local boundary for everyday agent and package work. For"
+    echo "  untrusted code or URL-level network control, prefer the Docker/VM workflows."
     echo ""
     echo "Usage:"
     echo "  source scripts/slop-macos-sandbox.fish"
@@ -58,14 +58,14 @@ function __macos_sandbox_help
     echo "  --allow-write <path>                 Add an extra writable subpath (also readable). Repeatable."
     echo "  --                                   End of options; everything after is the command."
     echo ""
-    echo "Examples (synced from README → 'How to use optional local sandbox-exec layer on macOS'):"
+    echo "Examples (synced from README → 'How to run a command under the sandbox-exec boundary (macOS)'):"
     __macos_sandbox_examples
     echo ""
     echo "Notes:"
-    echo "  - sandbox-exec is deprecated on macOS; treat this as defense-in-depth, not a primary boundary."
+    echo "  - sandbox-exec is Apple-deprecated (still works on current macOS); network control is coarse (no URL allowlist)."
     echo "  - print-profile is read-only — useful for auditing the generated policy before running it."
     echo "  - For broader isolation, see: scripts/slop-sandboxctl.fish docker ... or scripts/slop-sandboxctl.fish slop-brew-vm ..."
-    echo "  - Full reference: README.md → 'How to use optional local sandbox-exec layer on macOS'."
+    echo "  - Full reference: README.md → 'How to run a command under the sandbox-exec boundary (macOS)'."
 end
 
 function __macos_sandbox_help_to_stderr

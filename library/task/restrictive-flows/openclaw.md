@@ -52,9 +52,8 @@ with a single-purpose credential.
 ## Identity
 
 - Use ephemeral source-control identities from
-  `scripts/slop-gh-key.fish`,
-  `scripts/slop-forgejo-key.fish`, or
-  `scripts/slop-radicle.fish` for any repo OpenClaw touches.
+  `scripts/slop-gh-key.fish` or
+  `scripts/slop-forgejo-key.fish` for any repo OpenClaw touches.
 - Never reuse a personal SSH key for OpenClaw.
 
 ## Audit
