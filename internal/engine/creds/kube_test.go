@@ -181,3 +181,27 @@ func TestStageKubeRequiresExactlyOne(t *testing.T) {
 		t.Fatal("expected error when neither eks nor gke set")
 	}
 }
+
+func TestStageKubeTokenNotInEnv(t *testing.T) {
+	binDir := t.TempDir()
+	fakeMultiBin(t, binDir, "aws", map[string]string{
+		"get-token":        `{"kind":"ExecCredential","status":{"token":"k8s-aws-v1.SECRET"}}`,
+		"describe-cluster": `{"cluster":{"endpoint":"https://e","certificateAuthority":{"data":"Q0E"}}}`,
+	})
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+
+	env, err := StageKube(context.Background(),
+		&policy.Credentials{Kube: &policy.KubeCluster{Eks: &policy.EksCluster{Name: "prod"}}}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// the only env entry is the KUBECONFIG path; the token must never be an env value.
+	for _, kv := range env {
+		if strings.Contains(kv, "SECRET") {
+			t.Fatalf("bearer token leaked into env: %q", kv)
+		}
+	}
+	if len(env) != 1 || !strings.HasPrefix(env[0], "KUBECONFIG=") {
+		t.Fatalf("env must be exactly [KUBECONFIG=...]: %v", env)
+	}
+}

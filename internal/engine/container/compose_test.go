@@ -2,6 +2,7 @@ package container
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -104,5 +105,18 @@ func TestRenderComposeKubeconfig(t *testing.T) {
 	}
 	if strings.Contains(without, "KUBECONFIG") {
 		t.Fatalf("KUBECONFIG must be absent when no kubeconfig staged:\n%s", without)
+	}
+}
+
+// secretEnv carries only true secrets; KUBECONFIG (a non-secret path) is delivered via
+// the compose env, never written into secrets.env. Pin that invariant.
+func TestSecretsEnvExcludesKubeconfig(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := writeSecretsEnv(dir, []string{"AWS_ACCESS_KEY_ID=AKIA"}); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := os.ReadFile(filepath.Join(dir, "secrets.env"))
+	if strings.Contains(string(body), "KUBECONFIG") {
+		t.Fatalf("KUBECONFIG must never ride secrets.env:\n%s", body)
 	}
 }
