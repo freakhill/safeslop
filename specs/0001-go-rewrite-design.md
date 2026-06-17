@@ -201,9 +201,12 @@ research (`specs/research/2026-06-17-startup-usecase-prior-art.md`):
   no-host-cloud-config-mount test); `slop doctor` reports `aws`/`gcloud`.
 - A keyless **federation/OIDC** provider shape (AWS OIDC role-assumption, GCP Workload Identity
   Federation) is reserved for later — the best ephemeral cred is one that never exists as a file.
-- **kubectl** (EKS/GKE) follows as a composing provider: pre-mint a short-lived k8s bearer token on
-  the host (`aws eks get-token` / `gke-gcloud-auth-plugin`) and stage a scoped one-cluster
-  kubeconfig, so the agent's `kubectl` needs neither cloud creds nor the cloud CLI inside the boundary.
+- **kubectl** (EKS/GKE) is implemented as a composing provider (specs/0010): the host pre-mints a
+  short-lived k8s bearer token (`aws eks get-token` / `gke-gcloud-auth-plugin`) and stages a scoped
+  one-cluster kubeconfig (token inside, `0600`), so the agent's `kubectl` needs neither cloud creds
+  nor the cloud CLI inside the boundary. `KUBECONFIG` rides the per-environment path channel like
+  `.npmrc` (host path for host/sandbox; the `/slop/runtime` bind mount for container); `slop doctor`
+  reports `gke-gcloud-auth-plugin`. vm support is deferred behind a guard.
 
 ## 8. Distribution, CLI, tests
 
