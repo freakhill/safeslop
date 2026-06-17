@@ -85,3 +85,18 @@ func Launch(ctx context.Context, spec exec.LaunchSpec, workspace, network string
 	inner := exec.LaunchSpec{Argv: composeRunArgv(composeFile, spec.Argv)}
 	return exec.RunInPTY(ctx, inner)
 }
+
+// ComposeForDown writes a throwaway runtime dir + compose file so `slop down` can target
+// `docker compose down` without a live run's dir (the agent container is --rm; only squid
+// persists). Caller removes the returned dir.
+func ComposeForDown() (dir, composeFile string, err error) {
+	dir, err = os.MkdirTemp("", "slop-down-*")
+	if err != nil {
+		return "", "", err
+	}
+	cf, err := materializeRun(composeParams{RuntimeDir: dir, Workspace: "/", StageDir: dir}, false)
+	if err != nil {
+		return "", "", err
+	}
+	return dir, cf, nil
+}

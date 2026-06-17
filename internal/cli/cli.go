@@ -49,7 +49,7 @@ func newRoot() *cobra.Command {
 		SilenceErrors: true,
 	}
 	root.PersistentFlags().BoolVar(&jsonOut, "json", false, "emit machine-readable JSON output")
-	root.AddCommand(cmdValidate(), cmdList(), cmdDoctor(), cmdRun())
+	root.AddCommand(cmdValidate(), cmdList(), cmdDoctor(), cmdRun(), cmdDown())
 	return root
 }
 
@@ -132,6 +132,7 @@ func cmdDoctor() *cobra.Command {
 			}
 			report["sandbox-exec"] = map[string]any{"present": sandbox.Available(), "path": sandbox.SandboxExecPath}
 			report["1password-signedin"] = map[string]any{"present": secrets.OpSignedIn(context.Background()), "path": ""}
+			report["container-runtime"] = map[string]any{"present": container.Available(), "path": ""}
 			if jsonOut {
 				emitJSON(map[string]any{"ok": true, "os": runtime.GOOS, "arch": runtime.GOARCH, "tools": report})
 				return nil
@@ -225,6 +226,27 @@ func cmdRun() *cobra.Command {
 	}
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "print the resolved launch + sandbox profile without executing")
 	return c
+}
+
+// ---- down ----
+
+func cmdDown() *cobra.Command {
+	return &cobra.Command{
+		Use:   "down",
+		Short: "Tear down the container stack (squid proxy + networks)",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if !container.Available() {
+				return fmt.Errorf("docker + docker compose v2 required (run: slop doctor)")
+			}
+			dir, composeFile, err := container.ComposeForDown()
+			if err != nil {
+				return err
+			}
+			defer os.RemoveAll(dir)
+			return container.Down(context.Background(), composeFile)
+		},
+	}
 }
 
 // ---- helpers ----
