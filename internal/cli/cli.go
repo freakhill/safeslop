@@ -291,8 +291,11 @@ func runProfile(name string, prof policy.Profile, argv []string, ws string) (int
 	case "container":
 		// secrets go in secrets.env (sourced by the entrypoint); .npmrc is already staged in stageDir.
 		return container.Launch(ctx, engexec.LaunchSpec{Argv: argv}, ws, prof.Network, secretEnv, stageDir)
+	case "vm":
+		// secrets ride secrets.env scp'd into the VM and sourced over ssh; the VM is destroyed on exit.
+		return vm.Launch(ctx, argv, prof.Network, secretEnv, stageDir, name)
 	default:
-		return 1, fmt.Errorf("environment %q is not implemented yet (vm lands in SP4)", prof.Environment)
+		return 1, fmt.Errorf("unknown environment %q", prof.Environment)
 	}
 }
 
