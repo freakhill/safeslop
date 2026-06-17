@@ -44,11 +44,40 @@ package slop
 #GcpAdc: {
 }
 
-// Credential providers a profile uses (SP2: pnpm; SP/0009: aws/gcp; federation follows).
+// A single Kubernetes cluster to pre-authenticate for (specs/0010). Set exactly one
+// of eks/gke. The host mints a short-lived bearer token (aws eks get-token /
+// gke-gcloud-auth-plugin) and stages a one-cluster kubeconfig, so the agent's kubectl
+// needs neither cloud creds nor the cloud CLI inside the boundary. Decay-first: the
+// token expires (~15m EKS / ~1h GKE); cleanup is the stageDir wipe.
+#KubeCluster: {
+	eks?: #EksCluster
+	gke?: #GkeCluster
+}
+
+// An EKS cluster. The host resolves it with `aws eks get-token` + `aws eks
+// describe-cluster`, using the named SSO profile (or the default) — run `aws sso
+// login` first.
+#EksCluster: {
+	name:     string
+	region?:  string
+	profile?: string
+}
+
+// A GKE cluster. The host mints the token with `gke-gcloud-auth-plugin` (ADC) and
+// resolves the endpoint/CA with `gcloud container clusters describe`. `location` is
+// the cluster's zone or region (e.g. "europe-west1" or "europe-west1-b").
+#GkeCluster: {
+	name:     string
+	location: string
+	project?: string
+}
+
+// Credential providers a profile uses (SP2: pnpm; SP/0009: aws/gcp; SP/0010: kube).
 #Credentials: {
 	pnpm?: [...#PnpmRegistry]
 	aws?:  #AwsSso
 	gcp?:  #GcpAdc
+	kube?: #KubeCluster
 }
 
 // A pinned toolchain layered onto any environment (SP5), orthogonal to `environment`.

@@ -121,3 +121,41 @@ slop: profiles: cloud: {
 		t.Fatalf("gcp creds not decoded: %+v", c)
 	}
 }
+
+func TestLoadKubeEksCredentials(t *testing.T) {
+	cfg, err := loadStr(t, `package slop
+slop: profiles: deploy: {
+	agent: "claude"
+	environment: "container"
+	credentials: kube: eks: {name: "prod", region: "eu-west-1", profile: "dev-admin"}
+}`)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	c := cfg.Profiles["deploy"].Credentials
+	if c == nil || c.Kube == nil || c.Kube.Eks == nil {
+		t.Fatalf("kube.eks not parsed: %+v", c)
+	}
+	if c.Kube.Eks.Name != "prod" || c.Kube.Eks.Region != "eu-west-1" || c.Kube.Eks.Profile != "dev-admin" {
+		t.Fatalf("eks fields = %+v", c.Kube.Eks)
+	}
+	if c.Kube.Gke != nil {
+		t.Fatalf("gke must be nil when only eks set")
+	}
+}
+
+func TestLoadKubeGkeCredentials(t *testing.T) {
+	cfg, err := loadStr(t, `package slop
+slop: profiles: deploy: {
+	agent: "claude"
+	environment: "container"
+	credentials: kube: gke: {name: "prod", location: "europe-west1", project: "acme-prod"}
+}`)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	g := cfg.Profiles["deploy"].Credentials.Kube.Gke
+	if g == nil || g.Name != "prod" || g.Location != "europe-west1" || g.Project != "acme-prod" {
+		t.Fatalf("gke fields = %+v", g)
+	}
+}

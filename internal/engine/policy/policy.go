@@ -38,11 +38,37 @@ type AwsSso struct {
 // GcpAdc stages a short-lived GCP access token from ADC, refresh token stripped (specs/0009).
 type GcpAdc struct{}
 
-// Credentials groups the credential providers a profile uses (SP2; aws/gcp SP/0009).
+// EksCluster pre-authenticates an EKS cluster: the host runs `aws eks get-token`
+// (bearer) + `aws eks describe-cluster` (endpoint/CA) under Profile's SSO (specs/0010).
+type EksCluster struct {
+	Name    string `json:"name"`
+	Region  string `json:"region,omitempty"`
+	Profile string `json:"profile,omitempty"`
+}
+
+// GkeCluster pre-authenticates a GKE cluster: `gke-gcloud-auth-plugin` (bearer, via
+// ADC) + `gcloud container clusters describe` (endpoint/CA). Location is a zone or
+// region (specs/0010).
+type GkeCluster struct {
+	Name     string `json:"name"`
+	Location string `json:"location"`
+	Project  string `json:"project,omitempty"`
+}
+
+// KubeCluster stages a scoped one-cluster kubeconfig (token inside, 0600) so the
+// agent's kubectl needs no cloud CLI/creds inside the boundary. Exactly one of
+// Eks/Gke (specs/0010).
+type KubeCluster struct {
+	Eks *EksCluster `json:"eks,omitempty"`
+	Gke *GkeCluster `json:"gke,omitempty"`
+}
+
+// Credentials groups the credential providers a profile uses (SP2; aws/gcp SP/0009; kube SP/0010).
 type Credentials struct {
 	Pnpm []PnpmRegistry `json:"pnpm,omitempty"`
 	Aws  *AwsSso        `json:"aws,omitempty"`
 	Gcp  *GcpAdc        `json:"gcp,omitempty"`
+	Kube *KubeCluster   `json:"kube,omitempty"`
 }
 
 // Toolchain layers a pinned tool environment onto any environment (SP5). When Run is set,
