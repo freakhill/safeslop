@@ -20,3 +20,11 @@ func TestAvailableFalseWithoutTart(t *testing.T) {
 		t.Fatal("Available must be false when tart is not on PATH")
 	}
 }
+
+func TestBytesTrim(t *testing.T) {
+	for in, want := range map[string]string{"10.0.0.9\n": "10.0.0.9", "1.2.3.4\r\n": "1.2.3.4", "5.6.7.8": "5.6.7.8"} {
+		if got := string(bytesTrim([]byte(in))); got != want {
+			t.Fatalf("bytesTrim(%q)=%q want %q", in, got, want)
+		}
+	}
+}
