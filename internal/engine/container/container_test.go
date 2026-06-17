@@ -9,3 +9,10 @@ func TestEmbeddedAssetsPresent(t *testing.T) {
 		}
 	}
 }
+
+func TestAvailableFalseWithoutDocker(t *testing.T) {
+	t.Setenv("PATH", "")
+	if Available() {
+		t.Fatal("Available must be false when docker is not on PATH")
+	}
+}
