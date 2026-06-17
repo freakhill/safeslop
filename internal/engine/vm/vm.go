@@ -175,6 +175,26 @@ func DestroyAll(ctx context.Context) error {
 	return nil
 }
 
+// provisionToolchain installs mise/nix into the running VM if the toolchain needs it (idempotent:
+// skips when the CLI is already present). The VM is a full writable macOS. Pin the installers
+// deliberately before relying on this in anger (SP5 deferred follow-through).
+func provisionToolchain(ctx context.Context, ip, kind string) error {
+	var script string
+	switch kind {
+	case "mise":
+		script = "command -v mise >/dev/null 2>&1 || curl -fsSL https://mise.run | sh"
+	case "nix":
+		script = "command -v nix >/dev/null 2>&1 || curl --proto '=https' --tlsv1.2 -sSf -L " +
+			"https://install.determinate.systems/nix | sh -s -- install --no-confirm"
+	default:
+		return nil
+	}
+	if err := osCommand(ctx, sshArgv(ip, false, "zsh", "-lc", script)).Run(); err != nil {
+		return fmt.Errorf("provision %s toolchain in vm: %w", kind, err)
+	}
+	return nil
+}
+
 func bytesTrim(b []byte) []byte {
 	for len(b) > 0 && (b[len(b)-1] == '\n' || b[len(b)-1] == '\r' || b[len(b)-1] == ' ') {
 		b = b[:len(b)-1]

@@ -32,6 +32,21 @@ var systemReadPaths = []string{
 // under a tight workspace scope.
 var tempPaths = []string{"/tmp", "/private/tmp", "/private/var/tmp"}
 
+// toolchainReadPaths are read-allowed so a mise/nix toolchain wrapper (mise exec / nix develop)
+// can resolve its store + binaries under the seatbelt. Read-only; harmless when no toolchain is
+// used. Home-relative paths are resolved at profile-render time.
+func toolchainReadPaths() []string {
+	paths := []string{"/nix", "/opt/homebrew/bin", "/usr/local/bin"}
+	if home, err := os.UserHomeDir(); err == nil {
+		paths = append(paths,
+			filepath.Join(home, ".local", "share", "mise"),
+			filepath.Join(home, ".local", "state", "mise"),
+			filepath.Join(home, ".local", "bin"),
+		)
+	}
+	return paths
+}
+
 // Profile renders a Seatbelt profile confining writes to workspace (+ temp) and
 // applying the network policy ("allow" or, by default, "deny").
 func Profile(workspace, network string) string {
@@ -45,6 +60,9 @@ func Profile(workspace, network string) string {
 	line("(allow signal (target self))")
 
 	for _, p := range systemReadPaths {
+		line(fmt.Sprintf(`(allow file-read* (subpath "%s"))`, escape(p)))
+	}
+	for _, p := range toolchainReadPaths() {
 		line(fmt.Sprintf(`(allow file-read* (subpath "%s"))`, escape(p)))
 	}
 	line(`(allow file-read* (literal "/private/var/run/resolv.conf"))`)

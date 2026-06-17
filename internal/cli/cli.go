@@ -21,6 +21,7 @@ import (
 	"github.com/freakhill/agentic_tactical_boots/internal/engine/policy"
 	"github.com/freakhill/agentic_tactical_boots/internal/engine/sandbox"
 	"github.com/freakhill/agentic_tactical_boots/internal/engine/secrets"
+	"github.com/freakhill/agentic_tactical_boots/internal/engine/toolchain"
 	"github.com/freakhill/agentic_tactical_boots/internal/engine/vm"
 )
 
@@ -183,6 +184,9 @@ func cmdRun() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if prof.Toolchain != nil && toolchain.Wraps(prof.Toolchain.Kind) {
+				argv = toolchain.Wrap(prof.Toolchain.Kind, prof.Toolchain.Run, argv) // wrap before env switch (SP5)
+			}
 			ws := prof.Workspace
 			if ws == "" {
 				ws, _ = os.Getwd()
@@ -203,6 +207,13 @@ func cmdRun() *cobra.Command {
 					emitJSON(out)
 				} else {
 					fmt.Printf("profile %q: environment=%s workspace=%s network=%s\n  argv: %v\n", name, prof.Environment, ws, prof.Network, argv)
+					if prof.Toolchain != nil && toolchain.Wraps(prof.Toolchain.Kind) {
+						fmt.Printf("  toolchain: %s", prof.Toolchain.Kind)
+						if prof.Toolchain.Run != "" {
+							fmt.Printf(" run=%s", prof.Toolchain.Run)
+						}
+						fmt.Println()
+					}
 					for k, ref := range prof.Secrets {
 						fmt.Printf("  secret env %s <- %s\n", k, ref)
 					}
@@ -301,7 +312,11 @@ func runProfile(name string, prof policy.Profile, argv []string, ws string) (int
 		return container.Launch(ctx, engexec.LaunchSpec{Argv: argv}, ws, prof.Network, secretEnv, stageDir)
 	case "vm":
 		// secrets ride secrets.env scp'd into the VM and sourced over ssh; the VM is destroyed on exit.
-		return vm.Launch(ctx, argv, prof.Network, secretEnv, stageDir, name)
+		tk := ""
+		if prof.Toolchain != nil {
+			tk = prof.Toolchain.Kind
+		}
+		return vm.Launch(ctx, argv, prof.Network, secretEnv, stageDir, name, tk)
 	default:
 		return 1, fmt.Errorf("unknown environment %q", prof.Environment)
 	}

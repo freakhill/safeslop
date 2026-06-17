@@ -16,6 +16,9 @@ ARG PYDANTIC_AI_VERSION=1.87.0
 ARG PYDANTIC_AI_HARNESS_VERSION=0.2.0
 ARG AG2_VERSION=0.12.1
 
+# mise — pinned toolchain provisioner for `toolchain: {kind: "mise"}` (SP5).
+ARG MISE_VERSION=2026.6.11
+
 # Keep Python tooling current for framework installs.
 # --break-system-packages: the base image is node:22-bookworm whose
 # python3 ships with PEP 668 (externally-managed-environment). We're
@@ -45,6 +48,13 @@ RUN if [ "$ENABLE_PYDANTICAI" = "true" ]; then \
 RUN if [ "$ENABLE_AG2" = "true" ]; then \
       uv pip install --system --break-system-packages --no-cache "ag2==${AG2_VERSION}"; \
     fi
+
+# mise: a single static binary (arch-detected), pinned by MISE_VERSION. nix is intentionally
+# NOT installed — the agent container runs read_only:true and nix needs a writable /nix store
+# (a follow-up: nix-store volume + relaxed hardening). toolchain:nix in a container fails fast.
+RUN arch="$(uname -m)"; case "$arch" in x86_64) a=x64;; aarch64|arm64) a=arm64;; *) a="$arch";; esac; \
+    curl -fsSL "https://github.com/jdx/mise/releases/download/v${MISE_VERSION}/mise-v${MISE_VERSION}-linux-${a}" \
+      -o /usr/local/bin/mise && chmod +x /usr/local/bin/mise && mise --version
 
 WORKDIR /workspace
 CMD ["fish"]

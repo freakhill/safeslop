@@ -56,6 +56,9 @@ func Launch(ctx context.Context, spec exec.LaunchSpec, workspace, network string
 	if len(spec.Argv) == 0 {
 		return 1, exec.ErrNoArgv
 	}
+	if spec.Argv[0] == "nix" {
+		return 1, fmt.Errorf("toolchain:nix is not supported in environment:container yet (read-only container vs writable /nix store); use environment:vm or host, or toolchain:mise")
+	}
 	if err := os.MkdirAll(stageDir, 0o700); err != nil {
 		return 1, err
 	}

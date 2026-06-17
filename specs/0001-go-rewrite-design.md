@@ -226,9 +226,9 @@ Each sub-project = its own `specs/` plan → implementation → review.
 
 `SP0 → SP1 → SP2 → SP3 → SP4 → SP5 → SP6 → SP7 → SP8`.
 
-SP0–SP4 are **complete**: SP0 (`specs/0002`, PR #1), SP1 (`specs/0003`, PR #2), SP2
-(`specs/0004`, PR #3), SP3 (`specs/0005`, container environment — network-enforced squid
-egress + leak-free secrets), SP4 (`specs/0006`, disposable Tart VM `environment: vm`).
-**SP5** (nyx/mise toolchains) is the next artifact — it and SP7 (the GUI portal + safe
-installer) were added to the roadmap on 2026-06-16 at the user's request; both are "later"
-and will get their own spec when their turn comes.
+SP0–SP5 are **complete**: SP0 (`specs/0002`, PR #1), SP1 (`specs/0003`, PR #2), SP2
+(`specs/0004`, PR #3), SP3 (`specs/0005`, container — network-enforced squid + leak-free
+secrets), SP4 (`specs/0006`, disposable Tart VM `environment: vm`), SP5 (`specs/0007`, the
+`toolchain:` concept — mise/nix across all environments, nix-in-container deferred).
+**SP6** (terminal TUI) is the next artifact. SP7 (the GUI portal + safe installer) was added
+to the roadmap on 2026-06-16 at the user's request and is "later".

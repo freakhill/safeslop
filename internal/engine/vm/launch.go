@@ -13,7 +13,7 @@ import (
 // ssh -t (sourcing secrets remotely), and destroys the VM on exit. secretEnv (resolved profile
 // secrets) is written to secrets.env in stageDir; the whole stageDir is scp'd to ~/.slop-runtime.
 // network "deny" requires SLOP_VM_PROXY_URL (advisory egress); "allow" is full VM network.
-func Launch(ctx context.Context, agentArgv []string, network string, secretEnv []string, stageDir, profile string) (int, error) {
+func Launch(ctx context.Context, agentArgv []string, network string, secretEnv []string, stageDir, profile, toolchainKind string) (int, error) {
 	if !Available() {
 		return 1, fmt.Errorf("vm environment requires tart (Apple-Silicon macOS) — run: slop doctor")
 	}
@@ -43,6 +43,9 @@ func Launch(ctx context.Context, agentArgv []string, network string, secretEnv [
 	}
 	defer func() { _ = Destroy(context.Background(), profile) }() // disposable: always tear down
 
+	if err := provisionToolchain(ctx, ip, toolchainKind); err != nil {
+		return 1, err
+	}
 	if err := runScp(ctx, ip, stageDir, "~/.slop-runtime"); err != nil {
 		return 1, err
 	}
