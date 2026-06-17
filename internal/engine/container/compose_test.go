@@ -89,3 +89,20 @@ func TestComposeHasNoHostBridgeLeak(t *testing.T) {
 		t.Fatalf("agent net no longer internal-only:\n%s", yml)
 	}
 }
+
+func TestRenderComposeKubeconfig(t *testing.T) {
+	with, err := renderCompose(composeParams{RuntimeDir: "/r", Workspace: "/w", StageDir: "/r", Kubeconfig: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(with, "KUBECONFIG: /slop/runtime/kubeconfig") {
+		t.Fatalf("compose missing KUBECONFIG env:\n%s", with)
+	}
+	without, err := renderCompose(composeParams{RuntimeDir: "/r", Workspace: "/w", StageDir: "/r", Kubeconfig: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(without, "KUBECONFIG") {
+		t.Fatalf("KUBECONFIG must be absent when no kubeconfig staged:\n%s", without)
+	}
+}

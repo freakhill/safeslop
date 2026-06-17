@@ -70,6 +70,7 @@ func Launch(ctx context.Context, spec exec.LaunchSpec, workspace, network string
 		return 1, err
 	}
 	_, npmErr := os.Stat(filepath.Join(stageDir, ".npmrc"))
+	_, kubeErr := os.Stat(filepath.Join(stageDir, "kubeconfig"))
 	p := composeParams{
 		RuntimeDir:  stageDir,
 		Workspace:   workspace,
@@ -77,6 +78,7 @@ func Launch(ctx context.Context, spec exec.LaunchSpec, workspace, network string
 		SSHAuthSock: os.Getenv("SSH_AUTH_SOCK"),
 		Term:        os.Getenv("TERM"),
 		NpmConfig:   npmErr == nil,
+		Kubeconfig:  kubeErr == nil,
 	}
 	composeFile, err := materializeRun(p, network == "allow")
 	if err != nil {
