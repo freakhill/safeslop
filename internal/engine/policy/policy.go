@@ -29,9 +29,20 @@ type PnpmRegistry struct {
 	Scope string `json:"scope,omitempty"`
 }
 
-// Credentials groups the credential providers a profile uses (SP2).
+// AwsSso mints short-lived AWS creds from an SSO-configured profile (specs/0009).
+type AwsSso struct {
+	Profile string `json:"profile"`
+	Region  string `json:"region,omitempty"`
+}
+
+// GcpAdc stages a short-lived GCP access token from ADC, refresh token stripped (specs/0009).
+type GcpAdc struct{}
+
+// Credentials groups the credential providers a profile uses (SP2; aws/gcp SP/0009).
 type Credentials struct {
 	Pnpm []PnpmRegistry `json:"pnpm,omitempty"`
+	Aws  *AwsSso        `json:"aws,omitempty"`
+	Gcp  *GcpAdc        `json:"gcp,omitempty"`
 }
 
 // Toolchain layers a pinned tool environment onto any environment (SP5). When Run is set,

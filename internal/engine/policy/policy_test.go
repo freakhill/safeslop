@@ -102,3 +102,22 @@ slop: profiles: dev: {agent: "claude", toolchain: {kind: "cargo"}}`); err == nil
 		t.Fatal("expected validation error for kind \"cargo\"")
 	}
 }
+
+func TestLoadDecodesAwsGcpCredentials(t *testing.T) {
+	cfg, err := loadStr(t, `package slop
+slop: profiles: cloud: {
+	agent: "claude"
+	environment: "container"
+	credentials: {aws: {profile: "dev-admin", region: "eu-west-1"}, gcp: {}}
+}`)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	c := cfg.Profiles["cloud"].Credentials
+	if c == nil || c.Aws == nil || c.Aws.Profile != "dev-admin" || c.Aws.Region != "eu-west-1" {
+		t.Fatalf("aws creds not decoded: %+v", c)
+	}
+	if c.Gcp == nil {
+		t.Fatalf("gcp creds not decoded: %+v", c)
+	}
+}

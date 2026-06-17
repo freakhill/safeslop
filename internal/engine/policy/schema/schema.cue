@@ -30,9 +30,25 @@ package slop
 	scope?: string
 }
 
-// Credential providers a profile uses (SP2: pnpm; gh/forgejo/1Password-SSH follow).
+// AWS creds minted from an IAM Identity Center (SSO) profile. `aws configure
+// export-credentials --profile <profile>` resolves SSO to short-lived role creds;
+// the user runs `aws sso login --profile <profile>` on the host first (specs/0009).
+#AwsSso: {
+	profile: string // a named profile configured for SSO in ~/.aws/config
+	region?: string
+}
+
+// GCP creds from Application Default Credentials. A short-lived access token is
+// minted via `gcloud auth application-default print-access-token`; the long-lived
+// refresh token is never staged (specs/0009).
+#GcpAdc: {
+}
+
+// Credential providers a profile uses (SP2: pnpm; SP/0009: aws/gcp; federation follows).
 #Credentials: {
 	pnpm?: [...#PnpmRegistry]
+	aws?:  #AwsSso
+	gcp?:  #GcpAdc
 }
 
 // A pinned toolchain layered onto any environment (SP5), orthogonal to `environment`.
