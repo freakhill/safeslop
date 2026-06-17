@@ -4,10 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	osexec "os/exec"
-	"path/filepath"
-	"strings"
 
 	"github.com/freakhill/safeslop/internal/engine/policy"
 )
@@ -35,24 +32,28 @@ func parseAWSProcessCreds(out []byte) (awsCreds, error) {
 	return c, nil
 }
 
-func renderAWSCredsFile(c awsCreds, region string) string {
-	var b strings.Builder
-	b.WriteString("[default]\n")
-	fmt.Fprintf(&b, "aws_access_key_id = %s\n", c.AccessKeyID)
-	fmt.Fprintf(&b, "aws_secret_access_key = %s\n", c.SecretAccessKey)
+// awsEnv renders the short-lived creds as the standard AWS SDK/CLI env vars.
+// Env (not a credentials file) so the same values work in host/sandbox AND inside
+// container/vm without path remapping; the run's secret channel keeps them out of
+// `docker inspect`/`ps`.
+func awsEnv(c awsCreds, region string) []string {
+	env := []string{
+		"AWS_ACCESS_KEY_ID=" + c.AccessKeyID,
+		"AWS_SECRET_ACCESS_KEY=" + c.SecretAccessKey,
+	}
 	if c.SessionToken != "" {
-		fmt.Fprintf(&b, "aws_session_token = %s\n", c.SessionToken)
+		env = append(env, "AWS_SESSION_TOKEN="+c.SessionToken)
 	}
 	if region != "" {
-		fmt.Fprintf(&b, "region = %s\n", region)
+		env = append(env, "AWS_DEFAULT_REGION="+region)
 	}
-	return b.String()
+	return env
 }
 
-// StageAWS resolves the profile's SSO creds on the host (short-lived), writes a
-// 0600 credentials file into stageDir, and returns env pointing the agent at it.
-// No revoke: the creds expire (~1h) and stageDir is wiped on exit (decay-first).
-func StageAWS(ctx context.Context, creds *policy.Credentials, stageDir string) ([]string, error) {
+// StageAWS resolves the profile's SSO creds on the host (short-lived) and returns
+// them as AWS env vars. No revoke: the creds expire (~1h) and there is nothing
+// staged to wipe beyond the env — decay-first.
+func StageAWS(ctx context.Context, creds *policy.Credentials, _ string) ([]string, error) {
 	if creds == nil || creds.Aws == nil {
 		return nil, nil
 	}
@@ -65,12 +66,5 @@ func StageAWS(ctx context.Context, creds *policy.Credentials, stageDir string) (
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(stageDir, 0o700); err != nil {
-		return nil, err
-	}
-	credFile := filepath.Join(stageDir, "aws-credentials")
-	if err := os.WriteFile(credFile, []byte(renderAWSCredsFile(c, creds.Aws.Region)), 0o600); err != nil {
-		return nil, err
-	}
-	return []string{"AWS_SHARED_CREDENTIALS_FILE=" + credFile, "AWS_PROFILE=default"}, nil
+	return awsEnv(c, creds.Aws.Region), nil
 }

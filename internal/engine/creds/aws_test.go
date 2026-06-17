@@ -46,40 +46,33 @@ func TestParseAWSProcessCredsEmptyErrors(t *testing.T) {
 	}
 }
 
-func TestRenderAWSCredsFileHasSessionToken(t *testing.T) {
-	got := renderAWSCredsFile(awsCreds{AccessKeyID: "AKIA", SecretAccessKey: "sek", SessionToken: "tok"}, "eu-west-1")
-	for _, want := range []string{"[default]", "aws_access_key_id = AKIA", "aws_secret_access_key = sek", "aws_session_token = tok", "region = eu-west-1"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("creds file missing %q:\n%s", want, got)
+func TestAwsEnv(t *testing.T) {
+	full := strings.Join(awsEnv(awsCreds{AccessKeyID: "AKIA", SecretAccessKey: "sek", SessionToken: "tok"}, "eu-west-1"), "\n")
+	for _, want := range []string{"AWS_ACCESS_KEY_ID=AKIA", "AWS_SECRET_ACCESS_KEY=sek", "AWS_SESSION_TOKEN=tok", "AWS_DEFAULT_REGION=eu-west-1"} {
+		if !strings.Contains(full, want) {
+			t.Fatalf("env missing %q:\n%s", want, full)
 		}
+	}
+	// no session token / no region → only the two required vars.
+	if got := awsEnv(awsCreds{AccessKeyID: "A", SecretAccessKey: "S"}, ""); len(got) != 2 {
+		t.Fatalf("want 2 vars when no token/region, got %v", got)
 	}
 }
 
-func TestStageAWSWritesScopedFileAndEnv(t *testing.T) {
+func TestStageAWSReturnsEnv(t *testing.T) {
 	binDir := t.TempDir()
 	fakeBin(t, binDir, "aws", `{"Version":1,"AccessKeyId":"AKIA","SecretAccessKey":"sek","SessionToken":"tok"}`)
 	t.Setenv("PATH", binDir+":"+os.Getenv("PATH")) // fake `aws` wins; stub's `cat` resolves from real PATH
 
-	stage := t.TempDir()
-	env, err := StageAWS(context.Background(), &policy.Credentials{Aws: &policy.AwsSso{Profile: "dev", Region: "eu-west-1"}}, stage)
+	env, err := StageAWS(context.Background(), &policy.Credentials{Aws: &policy.AwsSso{Profile: "dev", Region: "eu-west-1"}}, t.TempDir())
 	if err != nil {
 		t.Fatalf("StageAWS: %v", err)
 	}
-	credFile := filepath.Join(stage, "aws-credentials")
-	fi, err := os.Stat(credFile)
-	if err != nil {
-		t.Fatalf("staged file: %v", err)
-	}
-	if fi.Mode().Perm() != 0o600 {
-		t.Fatalf("perm = %v want 0600", fi.Mode().Perm())
-	}
-	body, _ := os.ReadFile(credFile)
-	if !strings.Contains(string(body), "aws_session_token = tok") {
-		t.Fatalf("staged creds wrong:\n%s", body)
-	}
-	joined := strings.Join(env, " ")
-	if !strings.Contains(joined, "AWS_SHARED_CREDENTIALS_FILE="+credFile) || !strings.Contains(joined, "AWS_PROFILE=default") {
-		t.Fatalf("env = %v", env)
+	joined := strings.Join(env, "\n")
+	for _, want := range []string{"AWS_ACCESS_KEY_ID=AKIA", "AWS_SECRET_ACCESS_KEY=sek", "AWS_SESSION_TOKEN=tok", "AWS_DEFAULT_REGION=eu-west-1"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("env missing %q: %v", want, env)
+		}
 	}
 }
 
