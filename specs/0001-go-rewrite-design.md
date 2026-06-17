@@ -182,6 +182,29 @@ A registry of providers replaces today's per-family `if cred == ...` branches in
 `slop_orchestrator.py`. `Snapshot` is persisted in `.slop/state.json` so on-exit revoke can
 target creds by captured id.
 
+### 7.5 AWS / GCP cloud credentials — decay-first (specs/0009)
+
+The biggest gap for the target user (a Rust/TS/Java startup on AWS/GCP), per the cross-model
+research (`specs/research/2026-06-17-startup-usecase-prior-art.md`):
+
+- **AWS** = IAM Identity Center / SSO. `credentials: {aws: {profile: "<sso-profile>"}}`.
+  `aws configure export-credentials --profile P --format process` resolves SSO → short-lived role
+  creds; staged as the standard `AWS_ACCESS_KEY_ID`/`SECRET`/`SESSION_TOKEN` env vars (env, not a
+  `~/.aws/credentials` file — the same values then work uniformly in host/sandbox/container/vm with
+  no path remapping, riding the existing `secretEnv` channel out of `docker inspect`/`ps`).
+- **GCP** = Application Default Credentials. `credentials: {gcp: {}}`. `gcloud auth
+  application-default print-access-token` mints a short-lived access token, staged **alone** (the
+  long-lived `refresh_token` is never read or written), delivered via `CLOUDSDK_AUTH_ACCESS_TOKEN`.
+- **Decay-first** (the load-bearing lesson): short TTL is the *primary* control; there is **no
+  revoke step**, because `SIGKILL`/force-quit can skip on-exit hooks. Cleanup = the `stageDir` wipe.
+- The host's `~/.aws/credentials` / `~/.config/gcloud` **never** cross a boundary (pinned by a
+  no-host-cloud-config-mount test); `slop doctor` reports `aws`/`gcloud`.
+- A keyless **federation/OIDC** provider shape (AWS OIDC role-assumption, GCP Workload Identity
+  Federation) is reserved for later — the best ephemeral cred is one that never exists as a file.
+- **kubectl** (EKS/GKE) follows as a composing provider: pre-mint a short-lived k8s bearer token on
+  the host (`aws eks get-token` / `gke-gcloud-auth-plugin`) and stage a scoped one-cluster
+  kubeconfig, so the agent's `kubectl` needs neither cloud creds nor the cloud CLI inside the boundary.
+
 ## 8. Distribution, CLI, tests
 
 - **Build/sign**: `CGO_ENABLED=0` static binary, cross-compiled `darwin/arm64` + `darwin/amd64`

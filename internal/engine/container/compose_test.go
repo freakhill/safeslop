@@ -58,6 +58,20 @@ func TestComposeRunArgvHasNoDashE(t *testing.T) {
 	}
 }
 
+// Cloud creds are delivered as short-lived env vars via the secret channel, NEVER
+// by mounting the host's long-lived config. Pin that the compose never references it.
+func TestComposeNeverMountsHostCloudConfig(t *testing.T) {
+	yml, err := renderCompose(composeParams{RuntimeDir: "/rt", Workspace: "/ws", StageDir: "/st"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{".aws", "application_default_credentials", ".config/gcloud"} {
+		if strings.Contains(yml, bad) {
+			t.Fatalf("compose references host cloud config (%q):\n%s", bad, yml)
+		}
+	}
+}
+
 // The agent must never gain a host bridge — OrbStack/Docker Desktop can otherwise
 // route an internal container to the host loopback (host.docker.internal), defeating
 // the squid-only egress topology. Pin that none of these ever leak into the compose.

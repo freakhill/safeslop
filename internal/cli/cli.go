@@ -122,22 +122,29 @@ func cmdList() *cobra.Command {
 
 // ---- doctor ----
 
+// doctorReport probes the external tools and isolation boundaries slop can use.
+// Extracted so it is testable and reusable (e.g. a future GUI / installer).
+func doctorReport() map[string]any {
+	tools := []string{"git", "docker", "op", "claude", "opencode", "tart", "mise", "nix", "aws", "gcloud"}
+	report := map[string]any{}
+	for _, t := range tools {
+		p, err := osexec.LookPath(t)
+		report[t] = map[string]any{"present": err == nil, "path": p}
+	}
+	report["sandbox-exec"] = map[string]any{"present": sandbox.Available(), "path": sandbox.SandboxExecPath}
+	report["1password-signedin"] = map[string]any{"present": secrets.OpSignedIn(context.Background()), "path": ""}
+	report["container-runtime"] = map[string]any{"present": container.Available(), "path": ""}
+	report["vm-runtime"] = map[string]any{"present": vm.Available(), "path": ""}
+	return report
+}
+
 func cmdDoctor() *cobra.Command {
 	return &cobra.Command{
 		Use:   "doctor",
 		Short: "Report which external tools and boundaries are available",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			tools := []string{"git", "docker", "op", "claude", "opencode", "tart", "mise", "nix"}
-			report := map[string]any{}
-			for _, t := range tools {
-				p, err := osexec.LookPath(t)
-				report[t] = map[string]any{"present": err == nil, "path": p}
-			}
-			report["sandbox-exec"] = map[string]any{"present": sandbox.Available(), "path": sandbox.SandboxExecPath}
-			report["1password-signedin"] = map[string]any{"present": secrets.OpSignedIn(context.Background()), "path": ""}
-			report["container-runtime"] = map[string]any{"present": container.Available(), "path": ""}
-			report["vm-runtime"] = map[string]any{"present": vm.Available(), "path": ""}
+			report := doctorReport()
 			if jsonOut {
 				emitJSON(map[string]any{"ok": true, "os": runtime.GOOS, "arch": runtime.GOARCH, "tools": report})
 				return nil
@@ -304,6 +311,20 @@ func runProfile(name string, prof policy.Profile, argv []string, ws string) (int
 	if err != nil {
 		return 1, err
 	}
+
+	// Cloud creds are short-lived (SSO role creds / ADC access token) and delivered
+	// as env vars through the secret channel, so they ride secrets.env (container) /
+	// the scp'd env (vm) and reach host/sandbox children too. No revoke: decay-first.
+	awsEnv, err := creds.StageAWS(ctx, prof.Credentials, stageDir)
+	if err != nil {
+		return 1, err
+	}
+	gcpEnv, err := creds.StageGCP(ctx, prof.Credentials, stageDir)
+	if err != nil {
+		return 1, err
+	}
+	secretEnv = append(secretEnv, awsEnv...)
+	secretEnv = append(secretEnv, gcpEnv...)
 
 	switch prof.Environment {
 	case "sandbox":
