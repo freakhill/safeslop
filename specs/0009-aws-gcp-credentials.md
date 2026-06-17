@@ -44,6 +44,10 @@ the existing white-box + PATH-mock test style. `aws` CLI v2 (`configure export-c
    `AWS_SHARED_CREDENTIALS_FILE=<path>` + `AWS_PROFILE=default` — mirroring pnpm's
    `.npmrc`+`NPM_CONFIG_USERCONFIG`, keeping the secret values out of `docker inspect`/`ps`. (Alt:
    return the 3 keys as env vars routed through `secrets.env`. **Default: file.**)
+   **SHIPPED: env vars, not a file** — the file-pointer `AWS_SHARED_CREDENTIALS_FILE` carries a
+   *host* path that breaks inside container/vm (the stage mounts at a different path); the standard
+   `AWS_ACCESS_KEY_ID`/`SECRET`/`SESSION_TOKEN` env vars ride `secretEnv` (out of inspect/ps) and
+   work uniformly across all four environments. (Discovered during Task 5 wiring.)
 2. **GCP delivery = `CLOUDSDK_AUTH_ACCESS_TOKEN` + a staged token file; SDK-direct is a documented
    caveat.** `gcloud auth application-default print-access-token` yields a bare ~1h access token.
    gcloud CLI honors `CLOUDSDK_AUTH_ACCESS_TOKEN`; the google client libraries have **no** bare-token
