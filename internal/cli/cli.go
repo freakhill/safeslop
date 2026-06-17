@@ -125,7 +125,7 @@ func cmdList() *cobra.Command {
 // doctorReport probes the external tools and isolation boundaries slop can use.
 // Extracted so it is testable and reusable (e.g. a future GUI / installer).
 func doctorReport() map[string]any {
-	tools := []string{"git", "docker", "op", "claude", "opencode", "tart", "mise", "nix", "aws", "gcloud"}
+	tools := []string{"git", "docker", "op", "claude", "opencode", "tart", "mise", "nix", "aws", "gcloud", "gke-gcloud-auth-plugin"}
 	report := map[string]any{}
 	for _, t := range tools {
 		p, err := osexec.LookPath(t)
@@ -293,6 +293,13 @@ func runProfile(name string, prof policy.Profile, argv []string, ws string) (int
 	stageDir := filepath.Join(ws, ".slop", "runtime", name)
 	defer os.RemoveAll(stageDir) // wipe staged secrets/.npmrc regardless of outcome
 
+	// kube creds need a kubeconfig at a boundary-stable path; vm's scp'd stage path
+	// (unknown guest $HOME, single-quoted secrets.env) isn't wired yet. Fail fast,
+	// before minting any token (specs/0010).
+	if prof.Environment == "vm" && prof.Credentials != nil && prof.Credentials.Kube != nil {
+		return 1, fmt.Errorf("kube credentials are not yet supported with environment:%q — use environment:\"container\" (specs/0010)", prof.Environment)
+	}
+
 	// secretEnv = the resolved profile secrets (sensitive). The pnpm token rides a staged
 	// .npmrc file. Kept separate so the container path can deliver secrets via a sourced
 	// file (out of `ps`/`docker inspect`) rather than the whole host environment.
@@ -326,15 +333,25 @@ func runProfile(name string, prof policy.Profile, argv []string, ws string) (int
 	secretEnv = append(secretEnv, awsEnv...)
 	secretEnv = append(secretEnv, gcpEnv...)
 
+	// kubeconfig (with the bearer token inside) is staged 0600; KUBECONFIG is a
+	// non-secret path delivered per-environment like .npmrc/NPM_CONFIG_USERCONFIG —
+	// host path for host/sandbox; /slop/runtime/kubeconfig via compose for container.
+	// Kept out of secretEnv so it never lands in the container's secrets.env.
+	kubeEnv, err := creds.StageKube(ctx, prof.Credentials, stageDir)
+	if err != nil {
+		return 1, err
+	}
+
 	switch prof.Environment {
 	case "sandbox":
-		env := append(append(os.Environ(), secretEnv...), npmrcEnv...)
+		env := append(append(append(os.Environ(), secretEnv...), npmrcEnv...), kubeEnv...)
 		return sandbox.Launch(ctx, engexec.LaunchSpec{Argv: argv, Dir: ws, Env: env}, ws, prof.Network)
 	case "host":
-		env := append(append(os.Environ(), secretEnv...), npmrcEnv...)
+		env := append(append(append(os.Environ(), secretEnv...), npmrcEnv...), kubeEnv...)
 		return engexec.RunInTerminal(ctx, engexec.LaunchSpec{Argv: argv, Dir: ws, Env: env})
 	case "container":
-		// secrets go in secrets.env (sourced by the entrypoint); .npmrc is already staged in stageDir.
+		// secrets go in secrets.env (sourced by the entrypoint); .npmrc and kubeconfig
+		// are staged in stageDir and reached via the /slop/runtime bind mount.
 		return container.Launch(ctx, engexec.LaunchSpec{Argv: argv}, ws, prof.Network, secretEnv, stageDir)
 	case "vm":
 		// secrets ride secrets.env scp'd into the VM and sourced over ssh; the VM is destroyed on exit.
