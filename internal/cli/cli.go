@@ -15,6 +15,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/freakhill/agentic_tactical_boots/internal/engine/container"
 	"github.com/freakhill/agentic_tactical_boots/internal/engine/creds"
 	engexec "github.com/freakhill/agentic_tactical_boots/internal/engine/exec"
 	"github.com/freakhill/agentic_tactical_boots/internal/engine/policy"
@@ -237,15 +238,17 @@ func runProfile(name string, prof policy.Profile, argv []string, ws string) (int
 	stageDir := filepath.Join(ws, ".slop", "runtime", name)
 	defer os.RemoveAll(stageDir) // wipe staged secrets/.npmrc regardless of outcome
 
-	env := os.Environ()
-
+	// secretEnv = the resolved profile secrets (sensitive). The pnpm token rides a staged
+	// .npmrc file. Kept separate so the container path can deliver secrets via a sourced
+	// file (out of `ps`/`docker inspect`) rather than the whole host environment.
+	var secretEnv []string
 	if len(prof.Secrets) > 0 {
 		resolved, err := secrets.ResolveMap(ctx, prof.Secrets)
 		if err != nil {
 			return 1, err
 		}
 		for k, v := range resolved {
-			env = append(env, k+"="+v)
+			secretEnv = append(secretEnv, k+"="+v)
 		}
 	}
 
@@ -253,16 +256,19 @@ func runProfile(name string, prof policy.Profile, argv []string, ws string) (int
 	if err != nil {
 		return 1, err
 	}
-	env = append(env, npmrcEnv...)
 
-	spec := engexec.LaunchSpec{Argv: argv, Dir: ws, Env: env}
 	switch prof.Environment {
 	case "sandbox":
-		return sandbox.Launch(ctx, spec, ws, prof.Network)
+		env := append(append(os.Environ(), secretEnv...), npmrcEnv...)
+		return sandbox.Launch(ctx, engexec.LaunchSpec{Argv: argv, Dir: ws, Env: env}, ws, prof.Network)
 	case "host":
-		return engexec.RunInTerminal(ctx, spec)
+		env := append(append(os.Environ(), secretEnv...), npmrcEnv...)
+		return engexec.RunInTerminal(ctx, engexec.LaunchSpec{Argv: argv, Dir: ws, Env: env})
+	case "container":
+		// secrets go in secrets.env (sourced by the entrypoint); .npmrc is already staged in stageDir.
+		return container.Launch(ctx, engexec.LaunchSpec{Argv: argv}, ws, prof.Network, secretEnv, stageDir)
 	default:
-		return 1, fmt.Errorf("environment %q is not implemented yet (container lands in SP3, vm in SP4)", prof.Environment)
+		return 1, fmt.Errorf("environment %q is not implemented yet (vm lands in SP4)", prof.Environment)
 	}
 }
 
