@@ -15,6 +15,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/freakhill/agentic_tactical_boots/internal/engine/container"
 	"github.com/freakhill/agentic_tactical_boots/internal/engine/creds"
 	engexec "github.com/freakhill/agentic_tactical_boots/internal/engine/exec"
 	"github.com/freakhill/agentic_tactical_boots/internal/engine/policy"
@@ -48,7 +49,7 @@ func newRoot() *cobra.Command {
 		SilenceErrors: true,
 	}
 	root.PersistentFlags().BoolVar(&jsonOut, "json", false, "emit machine-readable JSON output")
-	root.AddCommand(cmdValidate(), cmdList(), cmdDoctor(), cmdRun())
+	root.AddCommand(cmdValidate(), cmdList(), cmdDoctor(), cmdRun(), cmdDown())
 	return root
 }
 
@@ -131,6 +132,7 @@ func cmdDoctor() *cobra.Command {
 			}
 			report["sandbox-exec"] = map[string]any{"present": sandbox.Available(), "path": sandbox.SandboxExecPath}
 			report["1password-signedin"] = map[string]any{"present": secrets.OpSignedIn(context.Background()), "path": ""}
+			report["container-runtime"] = map[string]any{"present": container.Available(), "path": ""}
 			if jsonOut {
 				emitJSON(map[string]any{"ok": true, "os": runtime.GOOS, "arch": runtime.GOARCH, "tools": report})
 				return nil
@@ -226,6 +228,27 @@ func cmdRun() *cobra.Command {
 	return c
 }
 
+// ---- down ----
+
+func cmdDown() *cobra.Command {
+	return &cobra.Command{
+		Use:   "down",
+		Short: "Tear down the container stack (squid proxy + networks)",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if !container.Available() {
+				return fmt.Errorf("docker + docker compose v2 required (run: slop doctor)")
+			}
+			dir, composeFile, err := container.ComposeForDown()
+			if err != nil {
+				return err
+			}
+			defer os.RemoveAll(dir)
+			return container.Down(context.Background(), composeFile)
+		},
+	}
+}
+
 // ---- helpers ----
 
 // runProfile stages secrets + credentials into an ephemeral dir under the
@@ -237,15 +260,17 @@ func runProfile(name string, prof policy.Profile, argv []string, ws string) (int
 	stageDir := filepath.Join(ws, ".slop", "runtime", name)
 	defer os.RemoveAll(stageDir) // wipe staged secrets/.npmrc regardless of outcome
 
-	env := os.Environ()
-
+	// secretEnv = the resolved profile secrets (sensitive). The pnpm token rides a staged
+	// .npmrc file. Kept separate so the container path can deliver secrets via a sourced
+	// file (out of `ps`/`docker inspect`) rather than the whole host environment.
+	var secretEnv []string
 	if len(prof.Secrets) > 0 {
 		resolved, err := secrets.ResolveMap(ctx, prof.Secrets)
 		if err != nil {
 			return 1, err
 		}
 		for k, v := range resolved {
-			env = append(env, k+"="+v)
+			secretEnv = append(secretEnv, k+"="+v)
 		}
 	}
 
@@ -253,16 +278,19 @@ func runProfile(name string, prof policy.Profile, argv []string, ws string) (int
 	if err != nil {
 		return 1, err
 	}
-	env = append(env, npmrcEnv...)
 
-	spec := engexec.LaunchSpec{Argv: argv, Dir: ws, Env: env}
 	switch prof.Environment {
 	case "sandbox":
-		return sandbox.Launch(ctx, spec, ws, prof.Network)
+		env := append(append(os.Environ(), secretEnv...), npmrcEnv...)
+		return sandbox.Launch(ctx, engexec.LaunchSpec{Argv: argv, Dir: ws, Env: env}, ws, prof.Network)
 	case "host":
-		return engexec.RunInTerminal(ctx, spec)
+		env := append(append(os.Environ(), secretEnv...), npmrcEnv...)
+		return engexec.RunInTerminal(ctx, engexec.LaunchSpec{Argv: argv, Dir: ws, Env: env})
+	case "container":
+		// secrets go in secrets.env (sourced by the entrypoint); .npmrc is already staged in stageDir.
+		return container.Launch(ctx, engexec.LaunchSpec{Argv: argv}, ws, prof.Network, secretEnv, stageDir)
 	default:
-		return 1, fmt.Errorf("environment %q is not implemented yet (container lands in SP3, vm in SP4)", prof.Environment)
+		return 1, fmt.Errorf("environment %q is not implemented yet (vm lands in SP4)", prof.Environment)
 	}
 }
 
