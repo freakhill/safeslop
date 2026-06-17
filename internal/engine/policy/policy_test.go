@@ -1,9 +1,20 @@
 package policy
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
+
+// loadStr writes src to a temp slop.cue and Loads it (the package's load path is file-based).
+func loadStr(t *testing.T, src string) (*Config, error) {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "slop.cue")
+	if err := os.WriteFile(p, []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return Load(p)
+}
 
 func TestLoadValidAppliesDefaults(t *testing.T) {
 	cfg, err := Load(filepath.Join("testdata", "valid.cue"))
@@ -70,5 +81,24 @@ func TestLoadDecodesSecretsAndCredentials(t *testing.T) {
 func TestLoadRejectsBadSecretRef(t *testing.T) {
 	if _, err := Load(filepath.Join("testdata", "bad_secretref.cue")); err == nil {
 		t.Fatal("expected validation error for a non-op://, non-env: secret ref")
+	}
+}
+
+func TestToolchainDecodes(t *testing.T) {
+	cfg, err := loadStr(t, `package slop
+slop: profiles: dev: {agent: "claude", toolchain: {kind: "mise", run: "build"}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tc := cfg.Profiles["dev"].Toolchain
+	if tc == nil || tc.Kind != "mise" || tc.Run != "build" {
+		t.Fatalf("toolchain decoded wrong: %+v", tc)
+	}
+}
+
+func TestToolchainRejectsBadKind(t *testing.T) {
+	if _, err := loadStr(t, `package slop
+slop: profiles: dev: {agent: "claude", toolchain: {kind: "cargo"}}`); err == nil {
+		t.Fatal("expected validation error for kind \"cargo\"")
 	}
 }

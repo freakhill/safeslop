@@ -34,6 +34,13 @@ type Credentials struct {
 	Pnpm []PnpmRegistry `json:"pnpm,omitempty"`
 }
 
+// Toolchain layers a pinned tool environment onto any environment (SP5). When Run is set,
+// slop launches that mise task / nix app instead of the agent; otherwise the agent is wrapped.
+type Toolchain struct {
+	Kind string `json:"kind"`
+	Run  string `json:"run,omitempty"`
+}
+
 // Profile is one launchable configuration from slop.cue.
 type Profile struct {
 	Agent       string `json:"agent"`
@@ -45,6 +52,8 @@ type Profile struct {
 	Secrets map[string]string `json:"secrets,omitempty"`
 	// Credentials are staged before launch and wiped on exit.
 	Credentials *Credentials `json:"credentials,omitempty"`
+	// Toolchain provisions a pinned tool environment, orthogonal to Environment (SP5).
+	Toolchain *Toolchain `json:"toolchain,omitempty"`
 }
 
 // Config is the decoded top-level `slop:` value from slop.cue.

@@ -35,6 +35,17 @@ package slop
 	pnpm?: [...#PnpmRegistry]
 }
 
+// A pinned toolchain layered onto any environment (SP5), orthogonal to `environment`.
+//   kind: which provider provisions tools — mise (version manager + task runner) or nix
+//         (flakes; pinned inputs = the safe-install story).
+//   run:  optional — a mise task name (kind=mise) or a nix app ref like ".#app" (kind=nix)
+//         to launch INSTEAD of the profile's agent. Absent => the agent is wrapped so the
+//         pinned toolchain is on PATH.
+#Toolchain: {
+	kind: "mise" | "nix" | "none"
+	run?: string
+}
+
 #Profile: {
 	agent:       #Agent
 	environment: #Environment | *"sandbox"
@@ -46,6 +57,8 @@ package slop
 	secrets?: {[string]: #SecretRef}
 	// Credentials staged before launch and wiped on exit.
 	credentials?: #Credentials
+	// Optional pinned toolchain, provisioned into the chosen environment (SP5).
+	toolchain?: #Toolchain
 }
 
 #Slop: {
