@@ -21,6 +21,7 @@ import (
 	"github.com/freakhill/agentic_tactical_boots/internal/engine/policy"
 	"github.com/freakhill/agentic_tactical_boots/internal/engine/sandbox"
 	"github.com/freakhill/agentic_tactical_boots/internal/engine/secrets"
+	"github.com/freakhill/agentic_tactical_boots/internal/engine/vm"
 )
 
 // Version is overridden at build time via -ldflags "-X .../cli.Version=...".
@@ -133,6 +134,7 @@ func cmdDoctor() *cobra.Command {
 			report["sandbox-exec"] = map[string]any{"present": sandbox.Available(), "path": sandbox.SandboxExecPath}
 			report["1password-signedin"] = map[string]any{"present": secrets.OpSignedIn(context.Background()), "path": ""}
 			report["container-runtime"] = map[string]any{"present": container.Available(), "path": ""}
+			report["vm-runtime"] = map[string]any{"present": vm.Available(), "path": ""}
 			if jsonOut {
 				emitJSON(map[string]any{"ok": true, "os": runtime.GOOS, "arch": runtime.GOARCH, "tools": report})
 				return nil
