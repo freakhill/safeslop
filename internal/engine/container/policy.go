@@ -12,6 +12,11 @@ import (
 // squid.conf.tmpl; squid is the real enforcer.
 var blockedNets = []string{"127.", "169.254.", "10.", "172.16.", "192.168."}
 
+// blockedHosts are denied in BOTH modes: the cloud metadata hostnames that resolve
+// to the link-local IP squid already blocks. Listed explicitly so the oracle (and a
+// future non-IP enforcer) refuses the name, not only the resolved address.
+var blockedHosts = []string{"metadata.google.internal", "metadata", "instance-data.ec2.internal"}
+
 // BuildAllowlist returns the embedded allowlist domains (one per line; comments/blanks dropped).
 func BuildAllowlist() ([]string, error) {
 	b, err := readAsset("allowlist.domains")
@@ -36,6 +41,11 @@ func BuildAllowlist() ([]string, error) {
 func Decide(domain, network string) bool {
 	for _, n := range blockedNets {
 		if strings.HasPrefix(domain, n) {
+			return false
+		}
+	}
+	for _, h := range blockedHosts {
+		if domain == h {
 			return false
 		}
 	}
