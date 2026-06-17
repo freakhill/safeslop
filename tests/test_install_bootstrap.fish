@@ -44,7 +44,7 @@ function test_bootstrap_dry_run_writes_nothing
     set -l rc $status
     assert_status "install --dry-run status" $rc 0
     assert_contains "install --dry-run mentions Would write" "$out" "Would write snippet"
-    if test -e "$tmp/.config/fish/conf.d/agentic_tactical_boots.fish"
+    if test -e "$tmp/.config/fish/conf.d/safeslop.fish"
         __test_record_fail "install --dry-run writes nothing" "snippet was created"
     else
         __test_record_pass "install --dry-run writes nothing"

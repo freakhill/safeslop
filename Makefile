@@ -3,7 +3,7 @@
 BINARY  := slop
 PKG     := ./cmd/slop
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-LDFLAGS := -X github.com/freakhill/agentic_tactical_boots/internal/cli.Version=$(VERSION)
+LDFLAGS := -X github.com/freakhill/safeslop/internal/cli.Version=$(VERSION)
 GOFILES := cmd internal
 
 CONTAINER_SRC := library/layer/container

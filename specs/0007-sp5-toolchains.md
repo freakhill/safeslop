@@ -246,7 +246,7 @@ git commit -m "sp5: toolchain package — pure Wrap (mise/nix, wrapper + run tar
 			argv = toolchain.Wrap(prof.Toolchain.Kind, prof.Toolchain.Run, argv)
 		}
 ```
-Add the import `"github.com/freakhill/agentic_tactical_boots/internal/engine/toolchain"`. Because
+Add the import `"github.com/freakhill/safeslop/internal/engine/toolchain"`. Because
 this runs before both the dry-run block and `runProfile`, **every** environment + the dry-run
 output get the wrapped argv for free.
 
@@ -471,7 +471,7 @@ git commit -m "sp5: provision mise/nix in the VM guest when the profile's toolch
 **Files:** Modify `specs/0001-go-rewrite-design.md`; (optionally) `internal/cli/cli.go` doctor note.
 
 - [ ] **Step 1: Doctor flake.lock note (optional, nice)** — in `cmdDoctor`, after the tool lines,
-  if a `nix` flake without a lock is the common footgun, a generic note is enough; mise/nix
+  if a `nix` flake without a lock is the common mistake, a generic note is enough; mise/nix
   presence is already reported via the `tools` list. Skip if it complicates the JSON shape.
 - [ ] **Step 2: Full Go gate** — `make check` (check-assets + vet + fmtcheck + `go test ./...`) and
   `make build`. `./slop doctor` shows `mise`/`nix`; `./slop validate` accepts a `toolchain:` profile.

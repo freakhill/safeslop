@@ -1,3 +1,3 @@
-# managed-by: agentic_tactical_boots/install-fish-tools
+# managed-by: safeslop/install-fish-tools
 
 complete -c slop-safe-npm -f

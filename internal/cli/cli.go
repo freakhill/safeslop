@@ -15,14 +15,14 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/freakhill/agentic_tactical_boots/internal/engine/container"
-	"github.com/freakhill/agentic_tactical_boots/internal/engine/creds"
-	engexec "github.com/freakhill/agentic_tactical_boots/internal/engine/exec"
-	"github.com/freakhill/agentic_tactical_boots/internal/engine/policy"
-	"github.com/freakhill/agentic_tactical_boots/internal/engine/sandbox"
-	"github.com/freakhill/agentic_tactical_boots/internal/engine/secrets"
-	"github.com/freakhill/agentic_tactical_boots/internal/engine/toolchain"
-	"github.com/freakhill/agentic_tactical_boots/internal/engine/vm"
+	"github.com/freakhill/safeslop/internal/engine/container"
+	"github.com/freakhill/safeslop/internal/engine/creds"
+	engexec "github.com/freakhill/safeslop/internal/engine/exec"
+	"github.com/freakhill/safeslop/internal/engine/policy"
+	"github.com/freakhill/safeslop/internal/engine/sandbox"
+	"github.com/freakhill/safeslop/internal/engine/secrets"
+	"github.com/freakhill/safeslop/internal/engine/toolchain"
+	"github.com/freakhill/safeslop/internal/engine/vm"
 )
 
 // Version is overridden at build time via -ldflags "-X .../cli.Version=...".

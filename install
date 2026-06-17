@@ -1,6 +1,6 @@
 #!/usr/bin/env fish
 
-# One-shot installer for agentic_tactical_boots.
+# One-shot installer for safeslop.
 #
 # Cleans up legacy bin shims from earlier installer revisions, writes the
 # fish conf.d snippet that sources every slop-* command into fresh fish
@@ -22,7 +22,7 @@ for arg in $argv
         case --no-exec
             set do_exec false
         case --help -h help
-            echo "install — bootstrap agentic_tactical_boots into fish conf.d"
+            echo "install — bootstrap safeslop into fish conf.d"
             echo ""
             echo "Description:"
             echo "  Cleans up legacy installs, writes the fish conf.d snippet,"

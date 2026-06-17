@@ -3,7 +3,7 @@ package cli
 import (
 	"testing"
 
-	"github.com/freakhill/agentic_tactical_boots/internal/engine/toolchain"
+	"github.com/freakhill/safeslop/internal/engine/toolchain"
 )
 
 // Guards the contract that cmdRun applies before the environment switch: a mise toolchain

@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/freakhill/agentic_tactical_boots/internal/engine/exec"
+	"github.com/freakhill/safeslop/internal/engine/exec"
 )
 
 // materializeRun writes the per-run runtime dir (squid.conf, allowlist.domains, compose.yml,

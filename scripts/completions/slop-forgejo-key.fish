@@ -1,4 +1,4 @@
-# managed-by: agentic_tactical_boots/install-fish-tools
+# managed-by: safeslop/install-fish-tools
 
 complete -c slop-forgejo-key -f
 complete -c slop-forgejo-key -n '__fish_use_subcommand' -a 'instance-set bootstrap-config instance-list instance-remove create create-pair list revoke revoke-by-title revoke-expired print-ssh-config install-ssh-config uninstall-ssh-config here tui help'

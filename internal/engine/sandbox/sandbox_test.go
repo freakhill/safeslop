@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/freakhill/agentic_tactical_boots/internal/engine/exec"
+	"github.com/freakhill/safeslop/internal/engine/exec"
 )
 
 func TestProfileContainsExpectedDirectives(t *testing.T) {

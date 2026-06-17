@@ -160,7 +160,7 @@ func TestAvailableFalseWithoutTart(t *testing.T) {
 ```go
 		report["vm-runtime"] = map[string]any{"present": vm.Available(), "path": ""}
 ```
-Add the import `"github.com/freakhill/agentic_tactical_boots/internal/engine/vm"` to `cli.go`.
+Add the import `"github.com/freakhill/safeslop/internal/engine/vm"` to `cli.go`.
 
 - [ ] **Step 5: Run** — `go test ./internal/engine/vm/ -v` → PASS; `go build ./...` ok; `./slop doctor | grep vm-runtime` shows the line.
 - [ ] **Step 6: Commit**
@@ -448,7 +448,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/freakhill/agentic_tactical_boots/internal/engine/exec"
+	"github.com/freakhill/safeslop/internal/engine/exec"
 )
 
 // Launch clones+boots a disposable session VM, copies the staged dir in, runs the agent over
@@ -551,7 +551,7 @@ func indexByte(s string, c byte) int {
 		return vm.Launch(ctx, argv, prof.Network, secretEnv, stageDir, name)
 ```
 Insert it between the `container` and `default` cases. Add the import
-`"github.com/freakhill/agentic_tactical_boots/internal/engine/vm"`.
+`"github.com/freakhill/safeslop/internal/engine/vm"`.
 
 - [ ] **Step 3: Guard test** (`vm_test.go`)
 ```go
@@ -583,7 +583,7 @@ version: 1
 profiles: box: {agent: "shell", environment: "vm", network: "allow"}
 ```
 ```bash
-cd /tmp/sp4 && /Users/jojo/workspace/agentic_tactical_boots/slop run box
+cd /tmp/sp4 && /Users/jojo/workspace/safeslop/slop run box
 ```
 Expected: first run clones the base (slow, one-time), boots a session VM, drops into a remote
 `zsh`; `hostname` shows the VM, `ls ~` is the VM's home; `exit` destroys the session VM (`tart

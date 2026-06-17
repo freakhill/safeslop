@@ -60,7 +60,7 @@ Modify (README restructure):
 - [ ] **Step 1: Delete the files**
 
 ```bash
-cd /Users/jojo/workspace/agentic_tactical_boots
+cd /Users/jojo/workspace/safeslop
 git rm scripts/slop-radicle.fish \
        scripts/_py/llm_radicle_access.py \
        scripts/completions/slop-radicle.fish \

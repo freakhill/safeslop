@@ -1,6 +1,6 @@
-# Local Skills
+# safeslop — local skills
 
-Repo-versioned skills live here and can be installed into `~/.claude/skills`.
+Repo-versioned skills for **safeslop** live here and can be installed into `~/.claude/skills`.
 
 ## Contributor expectations
 

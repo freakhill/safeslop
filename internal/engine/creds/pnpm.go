@@ -14,8 +14,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/freakhill/agentic_tactical_boots/internal/engine/policy"
-	"github.com/freakhill/agentic_tactical_boots/internal/engine/secrets"
+	"github.com/freakhill/safeslop/internal/engine/policy"
+	"github.com/freakhill/safeslop/internal/engine/secrets"
 )
 
 // RenderNpmrc renders .npmrc content for the registries, using the already-

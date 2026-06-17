@@ -1,4 +1,4 @@
-# managed-by: agentic_tactical_boots/install-fish-tools
+# managed-by: safeslop/install-fish-tools
 
 complete -c slop-agent-sandbox-tools -f
 complete -c slop-agent-sandbox-tools -n '__fish_use_subcommand' -a 'run shell up down tui help'

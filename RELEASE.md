@@ -34,7 +34,7 @@ tool. A small `/tmp` security risk in `slop-brew-vm` was also fixed in passing.
   rewrites AUTOGEN-marked example blocks in fish scripts. CI gate
   (`.github/workflows/help-sync-check.yml`) fails PRs that drift.
 - **`/tmp` security fix.** `slop-brew-vm` now writes the `tart run` boot log to a
-  per-user state dir (`$XDG_STATE_HOME` or `~/.local/state/agentic-tactical-boots/brew-vm/`,
+  per-user state dir (`$XDG_STATE_HOME` or `~/.local/state/safeslop/brew-vm/`,
   mode 0700) instead of `/tmp/brew-vm-<fixed-name>.log`. Eliminates a
   predictable-path symlink-attack target on multi-user systems. Other `/tmp`
   references in the repo were audited and shown to be safe (atomic

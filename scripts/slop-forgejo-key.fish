@@ -345,7 +345,7 @@ end
 # Infer (host, owner/repo) from the current working directory's git origin.
 # Echoes two lines: host on line 1, owner/repo on line 2. Returns 1 on
 # failure. Reads from $ATB_USER_PWD first (set by the bin-shim dispatcher
-# before it cds into the agentic_tactical_boots repo) and falls back to $PWD.
+# before it cds into the safeslop repo) and falls back to $PWD.
 function __llm_forgejo_repo_from_git
     set -l cwd "$ATB_USER_PWD"
     if test -z "$cwd"

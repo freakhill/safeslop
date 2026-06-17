@@ -15,10 +15,10 @@
 # References:
 # - fish init: https://fishshell.com/docs/current/language.html#initialization-files
 
-set -g __ift_marker "managed-by: agentic_tactical_boots/slop-install"
+set -g __ift_marker "managed-by: safeslop/slop-install"
 set -g __ift_repo_root (cd (dirname (status filename))/..; pwd)
 set -g __ift_default_conf_dir "$HOME/.config/fish/conf.d"
-set -g __ift_snippet_basename "agentic_tactical_boots.fish"
+set -g __ift_snippet_basename "safeslop.fish"
 
 # Module scripts: define functions with no top-level side-effects, so they
 # are safe to source into every fish session at startup.
@@ -176,7 +176,7 @@ function __ift_cleanup_legacy --argument-names target dry_run
         end
     end
 
-    set -l legacy_conf "$target/.local/share/fish/vendor_conf.d/agentic_tactical_boots.fish"
+    set -l legacy_conf "$target/.local/share/fish/vendor_conf.d/safeslop.fish"
     if test -e "$legacy_conf"
         if test "$dry_run" = "true"
             echo "[dry-run] Would remove legacy vendor_conf: $legacy_conf"
@@ -217,7 +217,7 @@ function __ift_cleanup_legacy --argument-names target dry_run
 
     # Old installer state file is no longer used; remove it so users do not
     # think there is still something half-installed under ~/.local.
-    set -l legacy_state "$target/.config/agentic_tactical_boots/fish-tools.env"
+    set -l legacy_state "$target/.config/safeslop/fish-tools.env"
     if test -f "$legacy_state"
         if test "$dry_run" = "true"
             echo "[dry-run] Would remove legacy state file: $legacy_state"

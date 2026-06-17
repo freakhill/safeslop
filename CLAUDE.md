@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Per-repo guidance for Claude Code working in `agentic_tactical_boots`.
+Per-repo guidance for Claude Code working in `safeslop`.
 
 ## Read before editing
 

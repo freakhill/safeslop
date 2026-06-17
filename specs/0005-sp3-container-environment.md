@@ -794,7 +794,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/freakhill/agentic_tactical_boots/internal/engine/exec"
+	"github.com/freakhill/safeslop/internal/engine/exec"
 )
 
 // materializeRun writes the per-run runtime dir and returns its path + compose file path.
@@ -904,7 +904,7 @@ func Launch(ctx context.Context, spec exec.LaunchSpec, workspace, network string
 		return 1, fmt.Errorf("environment %q is not implemented yet (vm lands in SP4)", prof.Environment)
 	}
 ```
-Add `"github.com/freakhill/agentic_tactical_boots/internal/engine/container"`.
+Add `"github.com/freakhill/safeslop/internal/engine/container"`.
 
 - [ ] **Step 3: Hermetic guard test** (`container_test.go`)
 ```go
@@ -926,7 +926,7 @@ version: 1
 profiles: box: {agent: "shell", environment: "container", network: "deny"}
 ```
 ```bash
-cd /tmp/sp3 && /Users/jojo/workspace/agentic_tactical_boots/slop run box
+cd /tmp/sp3 && /Users/jojo/workspace/safeslop/slop run box
 ```
 Expected: first run builds the images; drops into `fish`; `curl https://api.github.com` works,
 `curl https://example.com` is blocked, **`curl --noproxy '*' https://example.com` also fails**
