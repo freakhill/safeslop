@@ -43,7 +43,7 @@ with **ephemeral credentials revoked on exit**, shelling out to `docker`, `cue`,
 | Language | **Go** | Embeds the CUE engine (`cuelang.org/go`) → the external `cue` binary disappears; single signed static binary immune to the WARP/uv problem; easiest read for a mixed team; the canonical language for a subprocess orchestrator. |
 | Shape | **Engine library + thin CLI emitting JSON** | A later GUI for non-technical users drives the engine with zero engine logic of its own. |
 | GUI | **Deferred, tech TBD; dual role** | Not only a launch portal but also a **safe bootstrapper/installer** for non-technical users — installs agent CLIs (Claude Code …), version/tool managers (mise, nyx), runtime deps (Docker/OrbStack, `op`), and slop itself, all pinned/verified via the repo's safe-install machinery. When needed: native SwiftUI `.app` driving the binary, or a Go/Wails app — both sign with the Apple cert; neither touches the engine. |
-| Terminal TUI | **Deferred** | CLI-first is what coworkers and Claude-Code/shell launching actually need. |
+| Terminal TUI | **Dropped (2026-06-17)** | CLI-first covers coworkers + Claude-Code/shell launching; the *second* surface is the **GUI** (SP7), not a terminal TUI. Net direction: **CLI or GUI**. |
 | Rollout | **Strangler — core path first** | Usable coworker binary fastest; old stack stays green during transition; Radicle is scrapped for free by never porting it. |
 | Container env | **Ships in v1 (built last)** | sandbox-exec-only is an interim alpha; the first *stable* release has both boundaries (sandbox + container URL-allowlist). The old fish container path bridges jojo during transition. |
 
@@ -218,17 +218,18 @@ Each sub-project = its own `specs/` plan → implementation → review.
 | **SP3** | Container environment | docker compose + squid URL-allowlist ported to Go (the real network boundary). Built last but **in v1**. | v1 |
 | **SP4** | tart VM environment | Disposable Tart VM launch path ported to Go (`environment: vm`). | later |
 | **SP5** | nyx (Nix) + mise toolchains | A `toolchain:` concept in `slop.cue` (`nix` \| `mise` \| `none`), orthogonal to `environment`, that provisions pinned tools into the chosen environment and can launch mise tasks / Nix flake apps under isolation. **nyx** = Nix flakes/NixOS (pinned flake inputs = the safe-install story); **mise** = version manager + task runner (`mise.toml`, `mise run`/`mise exec`). | later |
-| **SP6** | terminal TUI | Bubbletea port of the interactive menu hub. | later |
+| ~~**SP6**~~ | ~~terminal TUI~~ — **dropped** | Bubbletea terminal-TUI port **cut 2026-06-17**: the product is **CLI + GUI**. The interactive surface for non-CLI users is the SP7 GUI portal, not a terminal menu hub. | — |
 | **SP7** | GUI — portal + safe installer | Drives the engine's JSON API; native SwiftUI `.app` or Go/Wails (decided then). Two roles: **(a) launch portal** for profiles; **(b) safe bootstrapper/installer** for non-technical users — installs agent CLIs (Claude Code …), version managers (mise, nyx), runtime deps (Docker/OrbStack, `op`), and slop itself, each pinned/verified and sandbox/VM-evaluated using the repo's safe-install machinery (so a non-technical user can go from zero to a working sandboxed setup). | later |
 | **SP8** | niche adapters + own egress filter | envoy / coredns / pf isolation adapters, and **our own macOS NetworkExtension egress filter à-la-LuLu** (`NEFilterDataProvider`, per-process/per-domain egress decided at the host kernel boundary — the successor to the squid allowlist, and the way to extend enforced egress to the `host`/`sandbox` environments, not just `container`). | later |
 
 ## 11. Execution order
 
-`SP0 → SP1 → SP2 → SP3 → SP4 → SP5 → SP6 → SP7 → SP8`.
+`SP0 → SP1 → SP2 → SP3 → SP4 → SP5 → SP7 → SP8` (**SP6 dropped 2026-06-17**).
 
 SP0–SP5 are **complete**: SP0 (`specs/0002`, PR #1), SP1 (`specs/0003`, PR #2), SP2
 (`specs/0004`, PR #3), SP3 (`specs/0005`, container — network-enforced squid + leak-free
 secrets), SP4 (`specs/0006`, disposable Tart VM `environment: vm`), SP5 (`specs/0007`, the
 `toolchain:` concept — mise/nix across all environments, nix-in-container deferred).
-**SP6** (terminal TUI) is the next artifact. SP7 (the GUI portal + safe installer) was added
-to the roadmap on 2026-06-16 at the user's request and is "later".
+SP6 (terminal TUI) was **dropped on 2026-06-17**: the direction is **CLI or GUI**, so the
+second surface is the **SP7 GUI portal + safe installer**, not a Bubbletea terminal TUI. SP7
+(added 2026-06-16 at the user's request) is now the next artifact.
