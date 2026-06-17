@@ -57,3 +57,17 @@ func TestComposeRunArgvHasNoDashE(t *testing.T) {
 		t.Fatalf("got %v want %v", got, want)
 	}
 }
+
+// Cloud creds are delivered as short-lived env vars via the secret channel, NEVER
+// by mounting the host's long-lived config. Pin that the compose never references it.
+func TestComposeNeverMountsHostCloudConfig(t *testing.T) {
+	yml, err := renderCompose(composeParams{RuntimeDir: "/rt", Workspace: "/ws", StageDir: "/st"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{".aws", "application_default_credentials", ".config/gcloud"} {
+		if strings.Contains(yml, bad) {
+			t.Fatalf("compose references host cloud config (%q):\n%s", bad, yml)
+		}
+	}
+}

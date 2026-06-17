@@ -48,3 +48,12 @@ func TestRunProfileStagesCloudCredsThenWipes(t *testing.T) {
 		t.Fatalf("stage (with gcp token file) not wiped: %v", err)
 	}
 }
+
+func TestDoctorReportsCloudTools(t *testing.T) {
+	report := doctorReport()
+	for _, tool := range []string{"aws", "gcloud"} {
+		if _, ok := report[tool]; !ok {
+			t.Fatalf("doctor omits %q", tool)
+		}
+	}
+}
