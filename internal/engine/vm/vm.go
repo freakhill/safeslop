@@ -153,6 +153,28 @@ func Destroy(ctx context.Context, profile string) error {
 // Reconcile destroys a session VM orphaned by a crashed prior run.
 func Reconcile(ctx context.Context, profile string) error { return Destroy(ctx, profile) }
 
+// DestroyAll stops+deletes every disposable slop-vm-* session (never the base template).
+// Best-effort: a missing/unusable tart yields nil so `slop down` stays graceful.
+func DestroyAll(ctx context.Context) error {
+	out, err := tartList(ctx)
+	if err != nil {
+		return nil
+	}
+	var entries []struct {
+		Name string `json:"Name"`
+	}
+	if json.Unmarshal([]byte(out), &entries) != nil {
+		return nil
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name, "slop-vm-") && e.Name != baseTemplate {
+			_ = runTart(ctx, "stop", e.Name)
+			_ = runTart(ctx, "delete", e.Name)
+		}
+	}
+	return nil
+}
+
 func bytesTrim(b []byte) []byte {
 	for len(b) > 0 && (b[len(b)-1] == '\n' || b[len(b)-1] == '\r' || b[len(b)-1] == ' ') {
 		b = b[:len(b)-1]

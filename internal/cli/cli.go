@@ -235,18 +235,26 @@ func cmdRun() *cobra.Command {
 func cmdDown() *cobra.Command {
 	return &cobra.Command{
 		Use:   "down",
-		Short: "Tear down the container stack (squid proxy + networks)",
+		Short: "Tear down the container stack (squid) and any disposable VM sessions",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			if !container.Available() {
-				return fmt.Errorf("docker + docker compose v2 required (run: slop doctor)")
+			if !container.Available() && !vm.Available() {
+				return fmt.Errorf("nothing to tear down: neither docker nor tart is available (run: slop doctor)")
 			}
-			dir, composeFile, err := container.ComposeForDown()
-			if err != nil {
-				return err
+			if container.Available() {
+				dir, composeFile, err := container.ComposeForDown()
+				if err != nil {
+					return err
+				}
+				defer os.RemoveAll(dir)
+				if err := container.Down(context.Background(), composeFile); err != nil {
+					return err
+				}
 			}
-			defer os.RemoveAll(dir)
-			return container.Down(context.Background(), composeFile)
+			if vm.Available() {
+				_ = vm.DestroyAll(context.Background())
+			}
+			return nil
 		},
 	}
 }
