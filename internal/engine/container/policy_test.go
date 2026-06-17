@@ -46,3 +46,14 @@ func TestRenderSquidConf(t *testing.T) {
 		}
 	}
 }
+
+// Decide is the test-oracle for squid; make it honest about metadata HOSTNAMES,
+// not just the resolved link-local IP (squid blocks the IP after DNS; the oracle
+// should refuse the hostname too so policy reasoning matches enforcement).
+func TestDecideBlocksMetadataHostnames(t *testing.T) {
+	for _, host := range []string{"metadata.google.internal", "metadata", "instance-data.ec2.internal"} {
+		if Decide(host, "allow") {
+			t.Fatalf("metadata hostname %q must be denied even in allow mode", host)
+		}
+	}
+}
