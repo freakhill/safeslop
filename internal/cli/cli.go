@@ -67,13 +67,15 @@ func cmdValidate() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := policy.Validate(path); err != nil {
+			warns, err := validateAndLint(path)
+			if err != nil {
 				return err
 			}
 			if jsonOut {
-				emitJSON(map[string]any{"ok": true, "path": path})
+				emitJSON(map[string]any{"ok": true, "path": path, "warnings": warns})
 			} else {
 				fmt.Printf("ok: %s is valid\n", path)
+				printWarnings(warns)
 			}
 			return nil
 		},
@@ -186,6 +188,9 @@ func cmdRun() *cobra.Command {
 			name, prof, err := selectProfile(cfg, arg0(args))
 			if err != nil {
 				return err
+			}
+			if !jsonOut {
+				printWarnings(policy.Lint(&policy.Config{Profiles: map[string]policy.Profile{name: prof}}))
 			}
 			argv, err := agentArgv(prof)
 			if err != nil {
@@ -348,6 +353,24 @@ func hostOr(h string) string {
 		return "registry.npmjs.org"
 	}
 	return h
+}
+
+// validateAndLint loads + validates the config (returning any fatal error) and
+// returns non-fatal lint warnings. Shared by `slop validate` and `slop run`.
+func validateAndLint(path string) ([]policy.Warning, error) {
+	cfg, err := policy.Load(path)
+	if err != nil {
+		return nil, err
+	}
+	return policy.Lint(cfg), nil
+}
+
+// printWarnings writes lint advisories to stderr (human mode only; JSON callers
+// embed them in their payload).
+func printWarnings(ws []policy.Warning) {
+	for _, w := range ws {
+		fmt.Fprintf(os.Stderr, "warning: profile %q %s\n", w.Profile, w.Message)
+	}
 }
 
 func arg0(args []string) string {

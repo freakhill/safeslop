@@ -71,3 +71,21 @@ func TestComposeNeverMountsHostCloudConfig(t *testing.T) {
 		}
 	}
 }
+
+// The agent must never gain a host bridge — OrbStack/Docker Desktop can otherwise
+// route an internal container to the host loopback (host.docker.internal), defeating
+// the squid-only egress topology. Pin that none of these ever leak into the compose.
+func TestComposeHasNoHostBridgeLeak(t *testing.T) {
+	yml, err := renderCompose(composeParams{RuntimeDir: "/rt", Workspace: "/ws", StageDir: "/st"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{"host.docker.internal", "host-gateway", "extra_hosts", "network_mode: host", `network_mode: "host"`} {
+		if strings.Contains(yml, bad) {
+			t.Fatalf("compose leaks a host bridge (%q):\n%s", bad, yml)
+		}
+	}
+	if !strings.Contains(yml, "internal: true") {
+		t.Fatalf("agent net no longer internal-only:\n%s", yml)
+	}
+}
