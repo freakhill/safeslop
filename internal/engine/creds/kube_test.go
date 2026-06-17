@@ -1,9 +1,14 @@
 package creds
 
 import (
+	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/freakhill/safeslop/internal/engine/policy"
 )
 
 func TestEksArgv(t *testing.T) {
@@ -87,5 +92,92 @@ func TestRenderKubeconfig(t *testing.T) {
 	usr := users[0].(map[string]any)["user"].(map[string]any)
 	if usr["token"] != "k8s-aws-v1.tok" {
 		t.Fatalf("user token = %v", usr["token"])
+	}
+}
+
+// fakeMultiBin writes an executable stub that dispatches on $2 (the subcommand) to one
+// of several heredoc outputs. Used because `aws` is invoked twice (get-token vs
+// describe-cluster) with different required stdout.
+func fakeMultiBin(t *testing.T, dir, name string, bySubcmd map[string]string) {
+	t.Helper()
+	var sb strings.Builder
+	sb.WriteString("#!/bin/sh\ncase \"$2\" in\n")
+	for sub, out := range bySubcmd {
+		sb.WriteString(sub + ") cat <<'EOF'\n" + out + "\nEOF\n;;\n")
+	}
+	sb.WriteString("esac\n")
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(sb.String()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStageKubeEks(t *testing.T) {
+	binDir := t.TempDir()
+	fakeMultiBin(t, binDir, "aws", map[string]string{
+		"get-token":        `{"kind":"ExecCredential","status":{"token":"k8s-aws-v1.TOK"}}`,
+		"describe-cluster": `{"cluster":{"endpoint":"https://EKS.example","certificateAuthority":{"data":"Q0FEQVRB"}}}`,
+	})
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH")) // fake `aws` wins; stub's `cat` resolves from real PATH
+
+	stage := t.TempDir()
+	env, err := StageKube(context.Background(),
+		&policy.Credentials{Kube: &policy.KubeCluster{Eks: &policy.EksCluster{Name: "prod", Region: "eu-west-1"}}}, stage)
+	if err != nil {
+		t.Fatalf("StageKube: %v", err)
+	}
+	kcPath := filepath.Join(stage, "kubeconfig")
+	if got := strings.Join(env, " "); got != "KUBECONFIG="+kcPath {
+		t.Fatalf("env = %v", env)
+	}
+	fi, err := os.Stat(kcPath)
+	if err != nil {
+		t.Fatalf("kubeconfig not staged: %v", err)
+	}
+	if fi.Mode().Perm() != 0o600 {
+		t.Fatalf("kubeconfig perm = %v, want 0600", fi.Mode().Perm())
+	}
+	body, _ := os.ReadFile(kcPath)
+	for _, want := range []string{`"server": "https://EKS.example"`, `"token": "k8s-aws-v1.TOK"`, `"certificate-authority-data": "Q0FEQVRB"`, `"current-context": "eks:prod"`} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("kubeconfig missing %q:\n%s", want, body)
+		}
+	}
+}
+
+func TestStageKubeGke(t *testing.T) {
+	binDir := t.TempDir()
+	fakeBin(t, binDir, "gke-gcloud-auth-plugin", `{"kind":"ExecCredential","status":{"token":"ya29.TOK"}}`) // fakeBin from aws_test.go
+	fakeBin(t, binDir, "gcloud", `{"endpoint":"34.79.12.34","masterAuth":{"clusterCaCertificate":"Q0FEQVRB"}}`)
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+
+	stage := t.TempDir()
+	env, err := StageKube(context.Background(),
+		&policy.Credentials{Kube: &policy.KubeCluster{Gke: &policy.GkeCluster{Name: "prod", Location: "europe-west1"}}}, stage)
+	if err != nil {
+		t.Fatalf("StageKube: %v", err)
+	}
+	body, _ := os.ReadFile(filepath.Join(stage, "kubeconfig"))
+	for _, want := range []string{`"server": "https://34.79.12.34"`, `"token": "ya29.TOK"`, `"current-context": "gke:prod"`} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("kubeconfig missing %q:\n%s", want, body)
+		}
+	}
+	_ = env
+}
+
+func TestStageKubeNilIsNoop(t *testing.T) {
+	env, err := StageKube(context.Background(), &policy.Credentials{}, t.TempDir())
+	if err != nil || env != nil {
+		t.Fatalf("nil kube creds must be a no-op: env=%v err=%v", env, err)
+	}
+}
+
+func TestStageKubeRequiresExactlyOne(t *testing.T) {
+	if _, err := StageKube(context.Background(),
+		&policy.Credentials{Kube: &policy.KubeCluster{Eks: &policy.EksCluster{Name: "a"}, Gke: &policy.GkeCluster{Name: "b"}}}, t.TempDir()); err == nil {
+		t.Fatal("expected error when both eks and gke set")
+	}
+	if _, err := StageKube(context.Background(), &policy.Credentials{Kube: &policy.KubeCluster{}}, t.TempDir()); err == nil {
+		t.Fatal("expected error when neither eks nor gke set")
 	}
 }

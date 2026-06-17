@@ -4,7 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	osexec "os/exec"
+	"path/filepath"
+
+	"github.com/freakhill/safeslop/internal/engine/policy"
 )
 
 // ---- argv builders ----
@@ -172,4 +176,65 @@ func runKubeCmd(ctx context.Context, argv []string, hint string) ([]byte, error)
 		return nil, fmt.Errorf("%s (%s): %w", label, hint, err)
 	}
 	return out, nil
+}
+
+// StageKube pre-mints a short-lived k8s bearer token on the host (aws eks get-token /
+// gke-gcloud-auth-plugin, using the host's SSO/ADC), resolves the cluster endpoint+CA,
+// and writes a scoped one-cluster kubeconfig (token inside, 0600) into stageDir. It
+// returns KUBECONFIG pointing at that file — the host path, correct for host/sandbox;
+// the container path is set in the compose env (see container.Launch). No revoke: the
+// token decays and the stageDir wipe removes the file (decay-first).
+func StageKube(ctx context.Context, creds *policy.Credentials, stageDir string) ([]string, error) {
+	if creds == nil || creds.Kube == nil {
+		return nil, nil
+	}
+	k := creds.Kube
+	if (k.Eks == nil) == (k.Gke == nil) {
+		return nil, fmt.Errorf("kube credentials: set exactly one of eks/gke")
+	}
+
+	var server, caData, token, ctxName string
+	switch {
+	case k.Eks != nil:
+		tOut, err := runKubeCmd(ctx, eksGetTokenArgv(k.Eks.Name, k.Eks.Region, k.Eks.Profile), "is `aws sso login` current?")
+		if err != nil {
+			return nil, err
+		}
+		if token, err = parseExecToken(tOut); err != nil {
+			return nil, err
+		}
+		dOut, err := runKubeCmd(ctx, eksDescribeArgv(k.Eks.Name, k.Eks.Region, k.Eks.Profile), "can the SSO profile describe the cluster?")
+		if err != nil {
+			return nil, err
+		}
+		if server, caData, err = parseEksDescribe(dOut); err != nil {
+			return nil, err
+		}
+		ctxName = "eks:" + k.Eks.Name
+	case k.Gke != nil:
+		tOut, err := runKubeCmd(ctx, gkeTokenArgv(), "is ADC set up? run: gcloud auth application-default login")
+		if err != nil {
+			return nil, err
+		}
+		if token, err = parseExecToken(tOut); err != nil {
+			return nil, err
+		}
+		dOut, err := runKubeCmd(ctx, gkeDescribeArgv(k.Gke.Name, k.Gke.Location, k.Gke.Project), "can gcloud describe the cluster?")
+		if err != nil {
+			return nil, err
+		}
+		if server, caData, err = parseGkeDescribe(dOut); err != nil {
+			return nil, err
+		}
+		ctxName = "gke:" + k.Gke.Name
+	}
+
+	if err := os.MkdirAll(stageDir, 0o700); err != nil {
+		return nil, err
+	}
+	kcPath := filepath.Join(stageDir, "kubeconfig")
+	if err := os.WriteFile(kcPath, renderKubeconfig(ctxName, server, caData, token), 0o600); err != nil {
+		return nil, err
+	}
+	return []string{"KUBECONFIG=" + kcPath}, nil
 }
