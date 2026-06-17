@@ -312,7 +312,11 @@ func runProfile(name string, prof policy.Profile, argv []string, ws string) (int
 		return container.Launch(ctx, engexec.LaunchSpec{Argv: argv}, ws, prof.Network, secretEnv, stageDir)
 	case "vm":
 		// secrets ride secrets.env scp'd into the VM and sourced over ssh; the VM is destroyed on exit.
-		return vm.Launch(ctx, argv, prof.Network, secretEnv, stageDir, name)
+		tk := ""
+		if prof.Toolchain != nil {
+			tk = prof.Toolchain.Kind
+		}
+		return vm.Launch(ctx, argv, prof.Network, secretEnv, stageDir, name, tk)
 	default:
 		return 1, fmt.Errorf("unknown environment %q", prof.Environment)
 	}
