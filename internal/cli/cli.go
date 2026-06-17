@@ -300,6 +300,20 @@ func runProfile(name string, prof policy.Profile, argv []string, ws string) (int
 		return 1, err
 	}
 
+	// Cloud creds are short-lived (SSO role creds / ADC access token) and delivered
+	// as env vars through the secret channel, so they ride secrets.env (container) /
+	// the scp'd env (vm) and reach host/sandbox children too. No revoke: decay-first.
+	awsEnv, err := creds.StageAWS(ctx, prof.Credentials, stageDir)
+	if err != nil {
+		return 1, err
+	}
+	gcpEnv, err := creds.StageGCP(ctx, prof.Credentials, stageDir)
+	if err != nil {
+		return 1, err
+	}
+	secretEnv = append(secretEnv, awsEnv...)
+	secretEnv = append(secretEnv, gcpEnv...)
+
 	switch prof.Environment {
 	case "sandbox":
 		env := append(append(os.Environ(), secretEnv...), npmrcEnv...)
