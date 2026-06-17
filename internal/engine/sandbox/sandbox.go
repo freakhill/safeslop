@@ -16,7 +16,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/freakhill/agentic_tactical_boots/internal/engine/exec"
+	"github.com/freakhill/safeslop/internal/engine/exec"
 )
 
 // SandboxExecPath is the macOS Seatbelt CLI.

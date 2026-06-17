@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/freakhill/agentic_tactical_boots/internal/engine/policy"
+	"github.com/freakhill/safeslop/internal/engine/policy"
 )
 
 func TestRenderNpmrcScopedAndDefault(t *testing.T) {

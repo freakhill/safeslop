@@ -7,7 +7,7 @@ Design: `specs/0001-go-rewrite-design.md` (§6–§8).
 
 ## What this delivers
 
-A single Go binary `slop` (module `github.com/freakhill/agentic_tactical_boots`), structured
+A single Go binary `slop` (module `github.com/freakhill/safeslop`), structured
 as engine library + thin CLI:
 
 ```

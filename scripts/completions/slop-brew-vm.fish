@@ -1,4 +1,4 @@
-# managed-by: agentic_tactical_boots/install-fish-tools
+# managed-by: safeslop/install-fish-tools
 
 complete -c slop-brew-vm -f
 complete -c slop-brew-vm -n '__fish_use_subcommand' -a 'help create-base init run shell install verify-network copy-in copy-out destroy tui'

@@ -27,7 +27,7 @@ This script is the lifecycle entry point. `proxy start` boots the
 docker compose stack from library/.generated/docker-compose.yml; the
 real envoy/coredns process is supplied by that stack. The notifier
 itself runs in the foreground after start and writes its state under
-$XDG_STATE_HOME/agentic-tactical-boots/isolate/.
+$XDG_STATE_HOME/safeslop/isolate/.
 """
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ COMPOSE_FILE = GENERATED_DIR / "docker-compose.yml"
 
 def _state_dir() -> Path:
     base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
-    d = Path(base) / "agentic-tactical-boots" / "isolate"
+    d = Path(base) / "safeslop" / "isolate"
     d.mkdir(parents=True, exist_ok=True)
     d.chmod(0o700)
     return d

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/freakhill/agentic_tactical_boots/internal/engine/policy"
+	"github.com/freakhill/safeslop/internal/engine/policy"
 )
 
 // TestRunProfileStagesSecretsAndNpmrcThenWipes exercises the SP2 lifecycle end

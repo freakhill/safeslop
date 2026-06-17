@@ -1,4 +1,4 @@
-module github.com/freakhill/agentic_tactical_boots
+module github.com/freakhill/safeslop
 
 go 1.26.4
 

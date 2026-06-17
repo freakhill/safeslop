@@ -324,7 +324,7 @@ end
 # For any other custom alias, the user can still pass --repo explicitly.
 function __llm_gh_repo_from_git
     # Prefer ATB_USER_PWD when set by the bin-shim dispatcher, since the
-    # dispatcher cds into the agentic_tactical_boots repo before invoking us.
+    # dispatcher cds into the safeslop repo before invoking us.
     # Falls back to $PWD when sourced directly by the user.
     set -l cwd "$ATB_USER_PWD"
     if test -z "$cwd"

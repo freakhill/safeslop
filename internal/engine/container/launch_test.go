@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/freakhill/agentic_tactical_boots/internal/engine/exec"
+	"github.com/freakhill/safeslop/internal/engine/exec"
 )
 
 func TestLaunchRejectsWhenUnavailable(t *testing.T) {

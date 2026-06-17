@@ -1,4 +1,4 @@
-# managed-by: agentic_tactical_boots/install-fish-tools
+# managed-by: safeslop/install-fish-tools
 
 complete -c slop-gh-key -f
 complete -c slop-gh-key -n '__fish_use_subcommand' -a 'create create-pair print-ssh-config install-ssh-config uninstall-ssh-config list revoke revoke-by-title revoke-expired here tui help'

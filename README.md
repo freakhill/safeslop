@@ -1,6 +1,8 @@
-# Appropriate footwear for Agentic workflows
+# safeslop
 
-[![Tests](https://github.com/freakhill/agentic_tactical_boots/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/freakhill/agentic_tactical_boots/actions/workflows/tests.yml?query=branch%3Amain+is%3Asuccess)
+> **Practice safe slop** — run agentic workflows behind stronger isolation defaults.
+
+[![Tests](https://github.com/freakhill/safeslop/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/freakhill/safeslop/actions/workflows/tests.yml?query=branch%3Amain+is%3Asuccess)
 
 The badge shows the current state of the test suite on `main`. Click it to see
 the list of successful runs on `main` — the topmost entry is the last commit
@@ -96,7 +98,7 @@ scripts/slop-install.fish install
 
 What this does:
 
-- Generates `~/.config/fish/conf.d/agentic_tactical_boots.fish`. Fish sources
+- Generates `~/.config/fish/conf.d/safeslop.fish`. Fish sources
   it on every shell startup, so commands like `slop`, `slop-sandboxctl`,
   `slop-gh-key`, `slop-agent-sandbox`, `slop-brew-vm`, etc. are available in every new
   fish session — no `~/.local/bin` shims, no `PATH` manipulation.
@@ -131,9 +133,9 @@ scripts/slop-install.fish uninstall
 
 If you previously used the older bin-shim/stow installer, the new install
 detects and removes its artifacts on first run: `~/.local/bin/<our-tools>`,
-`~/.local/share/fish/vendor_conf.d/agentic_tactical_boots.fish`,
+`~/.local/share/fish/vendor_conf.d/safeslop.fish`,
 `~/.local/share/fish/vendor_completions.d/<our-tools>.fish`,
-`~/.config/agentic_tactical_boots/fish-tools.env`, and any
+`~/.config/safeslop/fish-tools.env`, and any
 `~/.local/.local` tree-fold symlink left behind by stow. Pass
 `--no-cleanup` to opt out.
 

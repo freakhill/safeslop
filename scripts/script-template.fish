@@ -31,7 +31,7 @@
 #       <command>
 #
 #   Notes:
-#     - <one bullet per safety/footgun reminder>
+#     - <one bullet per practice-safe-slop reminder>
 #     - Full reference: README.md → '<exact heading text>'.
 #
 # Every error path prints a single-line "Error: ..." to stderr followed by a
@@ -67,7 +67,7 @@ function __example_help
     __example_examples
     echo ""
     echo "Notes:"
-    echo "  - <one bullet per safety/footgun reminder>"
+    echo "  - <one bullet per practice-safe-slop reminder>"
     echo "  - Full reference: README.md → '<exact heading text>'."
 end
 

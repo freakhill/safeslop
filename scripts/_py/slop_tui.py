@@ -5,7 +5,7 @@
 #     "textual>=0.79",
 # ]
 # ///
-"""Slop — modern Textual TUI for the agentic_tactical_boots toolkit.
+"""Slop — modern Textual TUI for the safeslop toolkit.
 
 Why a Python rewrite:
 - The previous fish/gum launcher hard-depended on `gum` and limited every
@@ -660,7 +660,7 @@ def build_top_actions() -> list[Action]:
         Action(
             key="i",
             label="Install / uninstall fish-tool shims",
-            description="Manage ~/.config/fish/conf.d/agentic_tactical_boots.fish.",
+            description="Manage ~/.config/fish/conf.d/safeslop.fish.",
             submenu=[
                 Action(
                     key="i",
@@ -1208,7 +1208,7 @@ class HelpScreen(Screen):
 
 class SlopApp(App):
     TITLE = "slop"
-    SUB_TITLE = "agentic_tactical_boots launcher"
+    SUB_TITLE = "safeslop launcher"
 
     BINDINGS = [
         Binding("ctrl+c", "quit", "Quit", show=False),

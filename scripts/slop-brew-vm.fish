@@ -89,7 +89,7 @@ function __brew_vm_help
     echo "  - Host/guest files are NOT auto-shared. Use copy-in/copy-out explicitly."
     echo "  - Recommended guest share path: $BREW_VM_SHARE_DIR (inside the disposable VM)."
     echo "  - Set BREW_VM_KEEP_SESSION=true to retain the VM after install for inspection."
-    echo "  - Boot logs are written under \$XDG_STATE_HOME/agentic-tactical-boots/brew-vm/."
+    echo "  - Boot logs are written under \$XDG_STATE_HOME/safeslop/brew-vm/."
     echo "  - Full reference: README.md → 'How to sandbox brew with disposable Tart VMs'."
 end
 
@@ -137,7 +137,7 @@ function __brew_vm_state_dir
     if test -z "$root"
         set root "$HOME/.local/state"
     end
-    set -l dir "$root/agentic-tactical-boots/brew-vm"
+    set -l dir "$root/safeslop/brew-vm"
     mkdir -p "$dir"; or return 1
     # Best-effort restrictive perms; ignore errors on filesystems that do not
     # support chmod (e.g. some network mounts).

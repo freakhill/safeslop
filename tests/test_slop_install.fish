@@ -71,7 +71,7 @@ function test_install_dry_run_writes_nothing
     set -l tmp (mk_tmpdir)
     set -l out (run_fish $SCRIPT install --conf-dir $tmp --dry-run --no-cleanup 2>&1)
     set -l rc $status
-    set -l snippet "$tmp/agentic_tactical_boots.fish"
+    set -l snippet "$tmp/safeslop.fish"
     assert_status "install --dry-run status" $rc 0
     if test -e "$snippet"
         __test_record_fail "install --dry-run wrote nothing" "snippet was created"
@@ -84,14 +84,14 @@ end
 function test_install_creates_managed_snippet
     set -l tmp (mk_tmpdir)
     run_fish $SCRIPT install --conf-dir $tmp --no-cleanup >/dev/null
-    set -l snippet "$tmp/agentic_tactical_boots.fish"
+    set -l snippet "$tmp/safeslop.fish"
     if not test -f "$snippet"
         __test_record_fail "install creates snippet" "snippet missing"
         return
     end
     __test_record_pass "install creates snippet"
     set -l content (cat $snippet)
-    assert_contains "snippet has marker" "$content" "managed-by: agentic_tactical_boots/slop-install"
+    assert_contains "snippet has marker" "$content" "managed-by: safeslop/slop-install"
     assert_contains "snippet sets ATB_REPO_ROOT" "$content" "ATB_REPO_ROOT"
     assert_contains "snippet wraps slop-sandboxctl" "$content" "function slop-sandboxctl"
     assert_contains "snippet wraps slop" "$content" "function slop"
@@ -102,7 +102,7 @@ end
 function test_generated_snippet_parses_as_fish
     set -l tmp (mk_tmpdir)
     run_fish $SCRIPT install --conf-dir $tmp --no-cleanup >/dev/null
-    if command fish -n "$tmp/agentic_tactical_boots.fish" 2>/dev/null
+    if command fish -n "$tmp/safeslop.fish" 2>/dev/null
         __test_record_pass "generated snippet parses as fish"
     else
         __test_record_fail "generated snippet parses as fish" "fish -n reported errors"
@@ -112,7 +112,7 @@ end
 function test_sourced_snippet_exposes_commands
     set -l tmp (mk_tmpdir)
     run_fish $SCRIPT install --conf-dir $tmp --no-cleanup >/dev/null
-    set -l snippet "$tmp/agentic_tactical_boots.fish"
+    set -l snippet "$tmp/safeslop.fish"
 
     # Module function: slop-agent-sandbox is defined inside slop-agent-sandbox.fish, so
     # sourcing the snippet should make it callable.
@@ -140,7 +140,7 @@ function test_uninstall_removes_managed_snippet
     set -l tmp (mk_tmpdir)
     run_fish $SCRIPT install --conf-dir $tmp --no-cleanup >/dev/null
     run_fish $SCRIPT uninstall --conf-dir $tmp >/dev/null
-    if test -e "$tmp/agentic_tactical_boots.fish"
+    if test -e "$tmp/safeslop.fish"
         __test_record_fail "uninstall removed snippet" "snippet still present"
     else
         __test_record_pass "uninstall removed snippet"
@@ -150,7 +150,7 @@ end
 function test_uninstall_refuses_unmanaged_file
     # Drop a hand-written file with no marker; uninstall must refuse.
     set -l tmp (mk_tmpdir)
-    set -l snippet "$tmp/agentic_tactical_boots.fish"
+    set -l snippet "$tmp/safeslop.fish"
     echo "# user wrote this; not us" > "$snippet"
     set -l out (run_fish $SCRIPT uninstall --conf-dir $tmp 2>&1)
     set -l rc $status

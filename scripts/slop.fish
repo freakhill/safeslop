@@ -57,7 +57,7 @@ function __slop_find_cue
 end
 
 function __slop_help
-    echo "slop — interactive launcher for the agentic_tactical_boots toolkit"
+    echo "slop — interactive launcher for the safeslop toolkit"
     echo ""
     echo "Description:"
     echo "  A modern Textual-based TUI that wraps every tool in this repo."

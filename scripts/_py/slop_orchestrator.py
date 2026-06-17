@@ -1036,7 +1036,7 @@ def _on_exit_hooks(
     """
     # Run snapshot-state first, regardless of where it appears in the
     # declaration list — the alternative is forcing users to remember
-    # to put it before revoke-credentials, which is footgun-prone.
+    # to put it before revoke-credentials, which is error-prone.
     if "snapshot-state" in profile.on_exit:
         if repo_root is not None and state_dir is not None:
             try:

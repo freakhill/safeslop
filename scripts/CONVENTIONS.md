@@ -32,7 +32,7 @@ Examples (synced from README → '<exact heading text>'):
     ...
 
 Notes:
-  - <one bullet per safety/footgun reminder>
+  - <one bullet per practice-safe-slop reminder>
   - Full reference: README.md → '<exact heading text>'.
 ```
 

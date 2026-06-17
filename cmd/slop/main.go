@@ -4,7 +4,7 @@
 // packages under internal/engine (specs/0001 §6 — engine library + thin CLI).
 package main
 
-import "github.com/freakhill/agentic_tactical_boots/internal/cli"
+import "github.com/freakhill/safeslop/internal/cli"
 
 func main() {
 	cli.Execute()
