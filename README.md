@@ -215,6 +215,17 @@ For your use case, enforce three boundaries at all times:
   [OrbStack](https://orbstack.dev), [Lima](https://lima-vm.io), or [Tart](https://tart.run)).
 - Per-process outbound controls are best done with a Network Extension firewall
   ([LuLu](https://objective-see.org/products/lulu.html)) as defense-in-depth.
+- **Credentials + the sandbox boundary:** because `sandbox-exec` cannot do per-destination
+  egress filtering, staging credentials/secrets into an `environment: sandbox` profile with
+  `network: allow` is exfiltration-ready — a prompt-injected agent can POST them out. `slop
+  validate` and `slop run` warn on exactly that combination (`sandbox-open-egress-with-creds`);
+  use `environment: container`/`vm` or `network: deny` for credentialed work. Per-process egress
+  filtering for the sandbox boundary is planned (the NetworkExtension filter).
+- **Egress enforcement differs by boundary:** the *container* boundary enforces egress by
+  **topology** (the agent sits on an internal Docker network with Squid as the sole bridge, which
+  denies cloud-metadata + RFC1918 + loopback deny-first). The *VM* boundary's `network: deny`
+  egress is **advisory** — an `SLOP_VM_PROXY_URL` HTTP proxy, not topology — so point it at a
+  filtering proxy; topological VM egress is future work.
 
 Practical consequence: use `sandbox-exec` as the default local boundary for everyday agent
 and package work; escalate to container/VM when you need URL-level network control or are
