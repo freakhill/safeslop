@@ -40,3 +40,19 @@ func TestLintIsDeterministicAndStable(t *testing.T) {
 		t.Fatalf("warnings must be sorted by profile: %+v", ws)
 	}
 }
+
+func TestLintKubeTripsOpenEgress(t *testing.T) {
+	cfg := &Config{Profiles: map[string]Profile{
+		"deploy": {Environment: "sandbox", Network: "allow", Credentials: &Credentials{Kube: &KubeCluster{Eks: &EksCluster{Name: "prod"}}}},
+	}}
+	ws := Lint(cfg)
+	found := false
+	for _, w := range ws {
+		if w.Profile == "deploy" && w.Code == "sandbox-open-egress-with-creds" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("kube creds under sandbox+allow must trip open-egress lint: %+v", ws)
+	}
+}
