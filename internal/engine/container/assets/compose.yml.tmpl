@@ -15,13 +15,12 @@ services:
       NO_PROXY: localhost,127.0.0.1,proxy
 {{if .NpmConfig}}      NPM_CONFIG_USERCONFIG: /slop/runtime/.npmrc
 {{end}}{{if .Kubeconfig}}      KUBECONFIG: /slop/runtime/kubeconfig
+{{end}}{{if .SshKey}}      GIT_SSH_COMMAND: ssh -i /slop/runtime/.ssh/id -o IdentitiesOnly=yes -o IdentityAgent=none -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/slop/runtime/.ssh/known_hosts
 {{end}}{{if .Term}}      TERM: {{.Term}}
-{{end}}{{if .SSHAuthSock}}      SSH_AUTH_SOCK: /slop/ssh-agent.sock
 {{end}}    volumes:
       - {{.Workspace}}:/workspace:rw
       - {{.StageDir}}:/slop/runtime:ro
-{{if .SSHAuthSock}}      - {{.SSHAuthSock}}:/slop/ssh-agent.sock
-{{end}}    read_only: true
+    read_only: true
     tmpfs:
       - /tmp
       - /var/tmp

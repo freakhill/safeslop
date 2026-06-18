@@ -11,13 +11,13 @@ import (
 // composeParams fills compose.yml.tmpl. RuntimeDir holds the rendered squid.conf +
 // allowlist.domains; StageDir (== RuntimeDir in Launch) is bind-mounted ro at /slop/runtime.
 type composeParams struct {
-	RuntimeDir  string
-	Workspace   string
-	StageDir    string
-	SSHAuthSock string
-	Term        string
-	NpmConfig   bool // true when a staged .npmrc exists
-	Kubeconfig  bool // true when a staged kubeconfig exists (KUBECONFIG -> bind-mount path)
+	RuntimeDir string
+	Workspace  string
+	StageDir   string
+	SshKey     bool // true when a staged ssh deploy key exists (GIT_SSH_COMMAND -> bind-mount path)
+	Term       string
+	NpmConfig  bool // true when a staged .npmrc exists
+	Kubeconfig bool // true when a staged kubeconfig exists (KUBECONFIG -> bind-mount path)
 }
 
 func renderCompose(p composeParams) (string, error) {

@@ -71,3 +71,22 @@ func TestRunProfileKubeVMGuarded(t *testing.T) {
 		t.Fatalf("expected a vm-unsupported guard error for kube creds, got: %v", err)
 	}
 }
+
+func TestDoctorReportsGh(t *testing.T) {
+	if _, ok := doctorReport()["gh"]; !ok {
+		t.Fatalf("doctor must probe gh")
+	}
+}
+
+func TestRunProfileSshVMGuarded(t *testing.T) {
+	prof := policy.Profile{
+		Agent:       "claude",
+		Environment: "vm",
+		Network:     "deny",
+		Credentials: &policy.Credentials{Ssh: &policy.SshCreds{}},
+	}
+	_, err := runProfile("deploy", prof, []string{"claude"}, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "vm") {
+		t.Fatalf("expected vm guard error for ssh creds, got: %v", err)
+	}
+}
