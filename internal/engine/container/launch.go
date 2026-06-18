@@ -44,30 +44,30 @@ func materializeRun(p composeParams, open bool) (string, error) {
 	return filepath.Join(dir, "compose.yml"), nil
 }
 
-// Launch runs spec.Argv in the agent container. secretEnv (the resolved profile secrets) is
-// written to secrets.env and sourced by the entrypoint — never passed via -e, so it stays out
-// of host `ps` and `docker inspect`. stageDir is the host .slop/runtime/<profile> dir (already
-// holds .npmrc when pnpm creds were staged); it is bind-mounted ro at /slop/runtime and wiped
-// on exit by the caller. The agent runs interactively through a PTY (design §6.2).
-func Launch(ctx context.Context, spec exec.LaunchSpec, workspace, network string, secretEnv []string, stageDir string) (int, error) {
+// provision materializes the per-run runtime dir and starts the compose stack, returning the
+// interactive argv that runs the agent (`docker compose run --rm agent <argv>`) plus the compose
+// file path (for teardown). Shared by Launch (slop run) and PrepareSession (the embedded cockpit).
+// secretEnv is written to secrets.env and sourced by the entrypoint; SP7c-2 cockpit sessions pass
+// nil (inherited-host-env parity with SP7c-1; full staging is a separate deferred unit).
+func provision(ctx context.Context, agentArgv []string, workspace, network string, secretEnv []string, stageDir string) (argv []string, composeFile string, err error) {
 	if !Available() {
-		return 1, fmt.Errorf("container environment requires docker + docker compose v2 (run: slop doctor)")
+		return nil, "", fmt.Errorf("container environment requires docker + docker compose v2 (run: slop doctor)")
 	}
-	if len(spec.Argv) == 0 {
-		return 1, exec.ErrNoArgv
+	if len(agentArgv) == 0 {
+		return nil, "", exec.ErrNoArgv
 	}
-	if spec.Argv[0] == "nix" {
-		return 1, fmt.Errorf("toolchain:nix is not supported in environment:container yet (read-only container vs writable /nix store); use environment:vm or host, or toolchain:mise")
+	if agentArgv[0] == "nix" {
+		return nil, "", fmt.Errorf("toolchain:nix is not supported in environment:container yet (read-only container vs writable /nix store); use environment:vm or host, or toolchain:mise")
 	}
 	if err := os.MkdirAll(stageDir, 0o700); err != nil {
-		return 1, err
+		return nil, "", err
 	}
 	_ = withRepoLock(workspace, func() error { return Reconcile(ctx, workspace, time.Hour) })
 	if real, err := filepath.EvalSymlinks(workspace); err == nil {
 		workspace = real
 	}
 	if _, err := writeSecretsEnv(stageDir, secretEnv); err != nil {
-		return 1, err
+		return nil, "", err
 	}
 	_, npmErr := os.Stat(filepath.Join(stageDir, ".npmrc"))
 	_, kubeErr := os.Stat(filepath.Join(stageDir, "kubeconfig"))
@@ -81,15 +81,42 @@ func Launch(ctx context.Context, spec exec.LaunchSpec, workspace, network string
 		Kubeconfig: kubeErr == nil,
 		SshKey:     sshErr == nil,
 	}
-	composeFile, err := materializeRun(p, network == "allow")
+	composeFile, err = materializeRun(p, network == "allow")
+	if err != nil {
+		return nil, "", err
+	}
+	if err := Up(ctx, stageDir, composeFile); err != nil {
+		return nil, "", err
+	}
+	return composeRunArgv(composeFile, agentArgv), composeFile, nil
+}
+
+// Launch runs spec.Argv in the agent container. secretEnv (the resolved profile secrets) is
+// written to secrets.env and sourced by the entrypoint — never passed via -e, so it stays out
+// of host `ps` and `docker inspect`. stageDir is the host .slop/runtime/<profile> dir (already
+// holds .npmrc when pnpm creds were staged); it is bind-mounted ro at /slop/runtime and wiped
+// on exit by the caller. The agent runs interactively through a PTY (design §6.2).
+func Launch(ctx context.Context, spec exec.LaunchSpec, workspace, network string, secretEnv []string, stageDir string) (int, error) {
+	argv, _, err := provision(ctx, spec.Argv, workspace, network, secretEnv, stageDir)
 	if err != nil {
 		return 1, err
 	}
-	if err := Up(ctx, stageDir, composeFile); err != nil {
-		return 1, err
+	return exec.RunInPTY(ctx, exec.LaunchSpec{Argv: argv})
+}
+
+// PrepareSession provisions the agent container for an embedded-cockpit session (SP7c-2): it
+// returns the interactive argv to run on the engine's PTY plus a cleanup that tears the stack
+// down (compose down + stageDir wipe) when the session closes. Cockpit sessions pass secretEnv
+// nil (inherited-host-env parity with SP7c-1). cleanup is always non-nil and safe to call once.
+func PrepareSession(ctx context.Context, agentArgv []string, workspace, network string, secretEnv []string, stageDir string) (argv []string, cleanup func(), err error) {
+	argv, composeFile, err := provision(ctx, agentArgv, workspace, network, secretEnv, stageDir)
+	if err != nil {
+		return nil, func() {}, err
 	}
-	inner := exec.LaunchSpec{Argv: composeRunArgv(composeFile, spec.Argv)}
-	return exec.RunInPTY(ctx, inner)
+	return argv, func() {
+		_ = Teardown(context.Background(), composeFile)
+		_ = os.RemoveAll(stageDir)
+	}, nil
 }
 
 // ComposeForDown writes a throwaway runtime dir + compose file so `slop down` can target

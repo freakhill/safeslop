@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -100,4 +101,25 @@ func Down(ctx context.Context, composeFile string) error {
 		return nil
 	}
 	return runDocker(ctx, "compose", "-f", composeFile, "down")
+}
+
+// Teardown fully reaps a cockpit session's stack: it force-removes every container carrying the
+// compose project label — including the one-off `docker compose run` agent container, which
+// `compose down` deliberately leaves behind — then runs Down to drop the proxy + networks. The
+// compose project name defaults to the compose file's parent dir basename; slop gives each
+// cockpit session a unique cockpit-* stage dir, so this only ever reaps that session's own
+// containers. A "" composeFile is a no-op.
+func Teardown(ctx context.Context, composeFile string) error {
+	if composeFile == "" {
+		return nil
+	}
+	project := filepath.Base(filepath.Dir(composeFile))
+	out, err := exec.CommandContext(ctx, "docker", "ps", "-aq",
+		"--filter", "label=com.docker.compose.project="+project).Output()
+	if err == nil {
+		for _, id := range strings.Fields(string(out)) {
+			_ = exec.CommandContext(ctx, "docker", "rm", "-f", id).Run()
+		}
+	}
+	return Down(ctx, composeFile)
 }

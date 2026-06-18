@@ -311,8 +311,8 @@ func cmdServe() *cobra.Command {
 }
 
 // resolveSession turns a profile name into a control.SessionSpec: the agent argv (optionally
-// toolchain-wrapped), the workspace, and — for environment:sandbox — the sandbox-exec wrap +
-// its temp-profile cleanup as OnClose. host/sandbox only (SP7c-1); container/vm follow (SP7c-2).
+// toolchain-wrapped), the workspace, and the per-environment cleanup as OnClose. All four
+// environments (host/sandbox direct; container/vm provisioned + torn down on close).
 func resolveSession(profile, configPath string) (control.SessionSpec, error) {
 	path, err := findConfig(configPath)
 	if err != nil {
@@ -347,8 +347,44 @@ func resolveSession(profile, configPath string) (control.SessionSpec, error) {
 			return control.SessionSpec{}, err
 		}
 		return control.SessionSpec{Argv: wrapped, Dir: ws, OnClose: cleanup}, nil
+	case "container":
+		base := filepath.Join(ws, ".slop", "runtime")
+		if err := os.MkdirAll(base, 0o700); err != nil {
+			return control.SessionSpec{}, err
+		}
+		stageDir, err := os.MkdirTemp(base, "cockpit-*")
+		if err != nil {
+			return control.SessionSpec{}, err
+		}
+		cargv, cleanup, err := container.PrepareSession(context.Background(), argv, ws, prof.Network, nil, stageDir)
+		if err != nil {
+			_ = os.RemoveAll(stageDir)
+			return control.SessionSpec{}, err
+		}
+		return control.SessionSpec{Argv: cargv, Dir: ws, OnClose: cleanup}, nil
+	case "vm":
+		base := filepath.Join(ws, ".slop", "runtime")
+		if err := os.MkdirAll(base, 0o700); err != nil {
+			return control.SessionSpec{}, err
+		}
+		stageDir, err := os.MkdirTemp(base, "cockpit-*")
+		if err != nil {
+			return control.SessionSpec{}, err
+		}
+		tk := ""
+		if prof.Toolchain != nil {
+			tk = prof.Toolchain.Kind
+		}
+		// stageDir basename is the per-session VM clone name, so concurrent same-profile
+		// sessions don't collide on tart names (SP7c-1 N-session guarantee).
+		vargv, cleanup, err := vm.PrepareSession(context.Background(), argv, prof.Network, nil, stageDir, filepath.Base(stageDir), tk)
+		if err != nil {
+			_ = os.RemoveAll(stageDir)
+			return control.SessionSpec{}, err
+		}
+		return control.SessionSpec{Argv: vargv, Dir: ws, OnClose: cleanup}, nil
 	default:
-		return control.SessionSpec{}, fmt.Errorf("embedded cockpit supports environment host/sandbox in SP7c-1; %q is SP7c-2", prof.Environment)
+		return control.SessionSpec{}, fmt.Errorf("unknown environment %q", prof.Environment)
 	}
 }
 

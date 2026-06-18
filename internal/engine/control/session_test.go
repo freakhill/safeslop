@@ -5,6 +5,8 @@ import (
 	"errors"
 	"io"
 	"net"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -52,6 +54,27 @@ func TestOpenAssignsUniqueIDs(t *testing.T) {
 func TestOpenEmptyArgvErrors(t *testing.T) {
 	if _, err := NewManager().Open(SessionSpec{}); err == nil {
 		t.Fatal("empty argv must error")
+	}
+}
+
+// TestCloseDeliversTrappableTerm pins the graceful-shutdown contract: close must send a
+// trappable SIGTERM (not an untrappable SIGKILL) so a `docker compose run` / `ssh` client can
+// tear down its remote side. The child traps SIGTERM, touches a marker, and exits; if close
+// hard-killed it, the trap never runs and the marker never appears.
+func TestCloseDeliversTrappableTerm(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "termed")
+	m := NewManager()
+	script := "trap 'touch " + marker + "; exit 0' TERM; echo READY; while true; do sleep 0.05; done"
+	id, err := m.Open(SessionSpec{Argv: []string{"sh", "-c", script}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, _ := m.Get(id)
+	readWithin(t, s, 2*time.Second, []byte("READY")) // ensure the trap is installed before closing
+	m.Close(id)
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("SIGTERM trap did not run (marker absent) — close must send a trappable SIGTERM first: %v", err)
 	}
 }
 
