@@ -9,49 +9,77 @@ import (
 	"github.com/freakhill/safeslop/internal/engine/exec"
 )
 
-// Launch clones+boots a disposable session VM, copies the staged dir in, runs the agent over
-// ssh -t (sourcing secrets remotely), and destroys the VM on exit. secretEnv (resolved profile
-// secrets) is written to secrets.env in stageDir; the whole stageDir is scp'd to ~/.slop-runtime.
-// network "deny" requires SLOP_VM_PROXY_URL (advisory egress); "allow" is full VM network.
-func Launch(ctx context.Context, agentArgv []string, network string, secretEnv []string, stageDir, profile, toolchainKind string) (int, error) {
+// provision boots a disposable session VM, provisions its toolchain, scp's the staged dir in,
+// and returns the `ssh -t` argv that runs the agent remotely (sourcing secrets.env over ssh).
+// Shared by Launch (slop run) and PrepareSession (the embedded cockpit). On any failure after the
+// VM boots, provision destroys it so no VM leaks; on success the caller owns teardown (Destroy +
+// stage wipe). network "deny" requires SLOP_VM_PROXY_URL; "allow" is full VM network.
+func provision(ctx context.Context, agentArgv []string, network string, secretEnv []string, stageDir, profile, toolchainKind string) (argv []string, err error) {
 	if !Available() {
-		return 1, fmt.Errorf("vm environment requires tart (Apple-Silicon macOS) — run: slop doctor")
+		return nil, fmt.Errorf("vm environment requires tart (Apple-Silicon macOS) — run: slop doctor")
 	}
 	if len(agentArgv) == 0 {
-		return 1, exec.ErrNoArgv
+		return nil, exec.ErrNoArgv
 	}
 	proxyURL := ""
 	if network == "deny" {
 		proxyURL = os.Getenv("SLOP_VM_PROXY_URL")
 		if proxyURL == "" {
-			return 1, fmt.Errorf("network:%q needs SLOP_VM_PROXY_URL (a squid/proxy URL); set it or use network:\"allow\"", network)
+			return nil, fmt.Errorf("network:%q needs SLOP_VM_PROXY_URL (a squid/proxy URL); set it or use network:\"allow\"", network)
 		}
 	}
 	if err := os.MkdirAll(stageDir, 0o700); err != nil {
-		return 1, err
+		return nil, err
 	}
 	if _, err := writeSecretsEnv(stageDir, secretEnv); err != nil {
-		return 1, err
+		return nil, err
 	}
 	if err := EnsureBase(ctx); err != nil {
-		return 1, err
+		return nil, err
 	}
 	_ = Reconcile(ctx, profile) // reclaim an orphaned session from a prior crash
 	ip, err := CloneAndBoot(ctx, profile)
 	if err != nil {
+		return nil, err
+	}
+	if err := provisionToolchain(ctx, ip, toolchainKind); err != nil {
+		_ = Destroy(context.Background(), profile)
+		return nil, err
+	}
+	if err := runScp(ctx, ip, stageDir, "~/.slop-runtime"); err != nil {
+		_ = Destroy(context.Background(), profile)
+		return nil, err
+	}
+	remote := remoteAgentCmd(agentArgv, proxyURL)
+	return sshArgv(ip, true, "zsh", "-lc", remote), nil
+}
+
+// Launch clones+boots a disposable session VM, copies the staged dir in, runs the agent over
+// ssh -t (sourcing secrets remotely), and destroys the VM on exit. secretEnv (resolved profile
+// secrets) is written to secrets.env in stageDir; the whole stageDir is scp'd to ~/.slop-runtime.
+// network "deny" requires SLOP_VM_PROXY_URL (advisory egress); "allow" is full VM network.
+func Launch(ctx context.Context, agentArgv []string, network string, secretEnv []string, stageDir, profile, toolchainKind string) (int, error) {
+	argv, err := provision(ctx, agentArgv, network, secretEnv, stageDir, profile, toolchainKind)
+	if err != nil {
 		return 1, err
 	}
 	defer func() { _ = Destroy(context.Background(), profile) }() // disposable: always tear down
+	return exec.RunInTerminal(ctx, exec.LaunchSpec{Argv: argv})
+}
 
-	if err := provisionToolchain(ctx, ip, toolchainKind); err != nil {
-		return 1, err
+// PrepareSession provisions a disposable VM for an embedded-cockpit session (SP7c-2): it returns
+// the `ssh -t` argv to run on the engine's PTY plus a cleanup that destroys the VM and wipes the
+// stage when the session closes. Cockpit sessions pass secretEnv nil (inherited-host-env parity
+// with SP7c-1). cleanup is always non-nil and safe to call once.
+func PrepareSession(ctx context.Context, agentArgv []string, network string, secretEnv []string, stageDir, profile, toolchainKind string) (argv []string, cleanup func(), err error) {
+	argv, err = provision(ctx, agentArgv, network, secretEnv, stageDir, profile, toolchainKind)
+	if err != nil {
+		return nil, func() {}, err
 	}
-	if err := runScp(ctx, ip, stageDir, "~/.slop-runtime"); err != nil {
-		return 1, err
-	}
-	remote := remoteAgentCmd(agentArgv, proxyURL)
-	inner := exec.LaunchSpec{Argv: sshArgv(ip, true, "zsh", "-lc", remote)}
-	return exec.RunInTerminal(ctx, inner)
+	return argv, func() {
+		_ = Destroy(context.Background(), profile)
+		_ = os.RemoveAll(stageDir)
+	}, nil
 }
 
 func runScp(ctx context.Context, ip, src, dst string) error {
