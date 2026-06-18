@@ -1,8 +1,13 @@
 package creds
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/freakhill/safeslop/internal/engine/policy"
 )
 
 func TestKeygenArgv(t *testing.T) {
@@ -77,5 +82,52 @@ func TestRenderGitSSHCommand(t *testing.T) {
 func TestKnownHostsIsGithubEd25519(t *testing.T) {
 	if !strings.HasPrefix(githubKnownHosts, "github.com ssh-ed25519 ") {
 		t.Fatalf("known_hosts must pin github.com ed25519: %q", githubKnownHosts)
+	}
+}
+
+// fakeStub writes an executable /bin/sh stub with an arbitrary body.
+func fakeStub(t *testing.T, dir, name, body string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStageSSHMintsReadOnly(t *testing.T) {
+	binDir := t.TempDir()
+	fakeStub(t, binDir, "git", `echo "git@github.com:acme/repo.git"`)
+	fakeStub(t, binDir, "ssh-keygen", `eval "p=\${$#}"; echo PRIV > "$p"; echo "ssh-ed25519 AAAAPUB slop" > "$p.pub"`)
+	fakeStub(t, binDir, "gh", `echo '{"id":4242,"read_only":true}'`)
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+
+	stage := t.TempDir()
+	env, err := StageSSH(context.Background(), &policy.Credentials{Ssh: &policy.SshCreds{}}, stage)
+	if err != nil {
+		t.Fatalf("StageSSH: %v", err)
+	}
+	keyPath := filepath.Join(stage, ".ssh", "id")
+	khPath := filepath.Join(stage, ".ssh", "known_hosts")
+	joined := strings.Join(env, " ")
+	if !strings.Contains(joined, "GIT_SSH_COMMAND=ssh -i "+keyPath) || !strings.Contains(joined, "UserKnownHostsFile="+khPath) {
+		t.Fatalf("env = %v", env)
+	}
+	if fi, _ := os.Stat(keyPath); fi == nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("private key not staged 0600")
+	}
+	if _, err := os.Stat(keyPath + ".pub"); !os.IsNotExist(err) {
+		t.Fatalf(".pub must not remain staged")
+	}
+	if b, _ := os.ReadFile(khPath); !strings.HasPrefix(string(b), "github.com ssh-ed25519 ") {
+		t.Fatalf("known_hosts not pinned: %q", b)
+	}
+	if b, _ := os.ReadFile(filepath.Join(stage, ".ssh", "revoke-info")); strings.TrimSpace(string(b)) != "acme/repo 4242" {
+		t.Fatalf("revoke-info = %q", b)
+	}
+}
+
+func TestStageSSHNilIsNoop(t *testing.T) {
+	env, err := StageSSH(context.Background(), &policy.Credentials{}, t.TempDir())
+	if err != nil || env != nil {
+		t.Fatalf("nil ssh creds must be a no-op: env=%v err=%v", env, err)
 	}
 }
