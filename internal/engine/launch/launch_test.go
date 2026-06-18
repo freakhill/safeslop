@@ -93,3 +93,17 @@ func TestITerm2AdapterUsesOsascript(t *testing.T) {
 		t.Fatalf("iTerm2 adapter must drive osascript on iTerm: %q", got)
 	}
 }
+
+func TestWezTermAdapterRunsCommandViaShell(t *testing.T) {
+	got := strings.Join(AdapterArgv("WezTerm", "", "slop run review"), " ")
+	if got != "open -na WezTerm --args start -- /bin/sh -lc slop run review" {
+		t.Fatalf("wezterm argv = %q", got)
+	}
+}
+
+func TestKittyAdapterRunsCommandViaShell(t *testing.T) {
+	got := strings.Join(AdapterArgv("kitty", "/bin/zsh", "slop run review"), " ")
+	if got != "open -na kitty --args /bin/zsh -lc slop run review" {
+		t.Fatalf("kitty argv = %q", got)
+	}
+}
