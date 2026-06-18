@@ -2,6 +2,13 @@
 // Adapters turn a shell command into the argv that opens it in the user's preferred terminal.
 package launch
 
+import "strings"
+
+// appleScriptEscaper escapes a value for embedding inside an AppleScript double-quoted string
+// literal: backslash first, then double-quote (a single left-to-right pass, no double-processing).
+// Without this, a `"` in the command would break out of the literal and inject AppleScript.
+var appleScriptEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`)
+
 // taggingEnv returns the recognizability env injected into the child: the two SLOP_* vars a
 // user (or a WM rule / shell prompt) can key on. The OSC window title is emitted by the
 // spawned shell wrapper, not here.
@@ -15,7 +22,7 @@ func adapterArgv(terminal, command, session string) []string {
 	_ = session
 	switch terminal {
 	case "Terminal.app":
-		script := `tell application "Terminal" to do script "` + command + `"`
+		script := `tell application "Terminal" to do script "` + appleScriptEscaper.Replace(command) + `"`
 		return []string{"osascript", "-e", script}
 	case "Ghostty":
 		return []string{"open", "-na", "Ghostty", "--args", "-e", command}

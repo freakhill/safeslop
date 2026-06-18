@@ -45,3 +45,17 @@ func TestUnknownAdapterFallsBackToGeneric(t *testing.T) {
 		t.Fatalf("unknown adapter falls back to generic open -a: %q", got)
 	}
 }
+
+func TestTerminalAppAdapterEscapesInjection(t *testing.T) {
+	// a command containing a double-quote / backslash must not break out of the AppleScript
+	// string literal (command-injection regression).
+	got := strings.Join(adapterArgv("Terminal.app", `slop run "x" & do shell script "rm -rf ~"`, "s"), " ")
+	if !strings.Contains(got, `\"x\"`) {
+		t.Fatalf("double-quotes must be backslash-escaped: %q", got)
+	}
+	// the closing literal quote of the wrapper must be the only unescaped `"` after the opener;
+	// an injected `do script "..."` must appear escaped, not as live AppleScript.
+	if strings.Contains(got, `do script "slop run "x"`) {
+		t.Fatalf("unescaped quote broke out of the string literal: %q", got)
+	}
+}
