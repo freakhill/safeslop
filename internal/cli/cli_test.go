@@ -102,3 +102,10 @@ func TestServeAndLaunchRegistered(t *testing.T) {
 		t.Fatalf("serve/launch commands missing: %v", have)
 	}
 }
+
+func TestLaunchProfileRejectsBadName(t *testing.T) {
+	_, err := launchProfile("bad; rm -rf ~", "")
+	if err == nil || !strings.Contains(err.Error(), "invalid profile") {
+		t.Fatalf("malicious profile name must be rejected before any spawn: %v", err)
+	}
+}

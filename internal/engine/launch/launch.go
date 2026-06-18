@@ -28,10 +28,15 @@ func shellQuote(s string) string {
 func Command(slopPath, profile, cwd string, oscTitle bool) string {
 	var b strings.Builder
 	if oscTitle {
-		b.WriteString(`printf '\033]0;slop:` + profile + `\007'; `)
+		// printf interprets the \033/\007 escapes (literal, single-quoted); the profile is
+		// quoted separately so a metacharacter in it can't break out of the title.
+		b.WriteString("printf '\\033]0;slop:'" + shellQuote(profile) + "'\\007'; ")
 	}
 	b.WriteString("cd " + shellQuote(cwd) + "; ")
-	b.WriteString(strings.Join(taggingEnv(profile, cwd), " ") + " ")
+	for _, kv := range taggingEnv(profile, cwd) {
+		k, v, _ := strings.Cut(kv, "=")
+		b.WriteString(k + "=" + shellQuote(v) + " ")
+	}
 	b.WriteString("exec " + shellQuote(slopPath) + " run " + shellQuote(profile))
 	return b.String()
 }

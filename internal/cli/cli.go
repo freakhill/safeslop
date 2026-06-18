@@ -10,6 +10,7 @@ import (
 	"os"
 	osexec "os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 
@@ -322,8 +323,15 @@ func cmdLaunch() *cobra.Command {
 // `slop run <profile>`, so the real ctty handoff happens inside that window. Returns once the
 // terminal is spawned. configPath is reserved for the gRPC delegation (v1 resolves slop.cue
 // from the workspace).
+// profileNameRe constrains launchable profile names: the name is embedded in the spawned
+// terminal's window title and SLOP_SESSION, so it must not carry shell/title metacharacters.
+var profileNameRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+
 func launchProfile(name, configPath string) (int, error) {
 	_ = configPath
+	if !profileNameRe.MatchString(name) {
+		return 1, fmt.Errorf("invalid profile name %q (allowed: letters, digits, dot, underscore, hyphen)", name)
+	}
 	ws, err := os.Getwd()
 	if err != nil {
 		return 1, err

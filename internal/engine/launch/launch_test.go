@@ -63,9 +63,9 @@ func TestTerminalAppAdapterEscapesInjection(t *testing.T) {
 func TestCommandBakesTaggingAndExec(t *testing.T) {
 	cmd := Command("/usr/local/bin/slop", "review", "/work/repo", true)
 	for _, want := range []string{
-		`printf '\033]0;slop:review\007'`,
+		`printf '\033]0;slop:''review'`,
 		`cd '/work/repo'`,
-		"SLOP_SESSION=review SLOP_CWD=/work/repo",
+		`SLOP_SESSION='review' SLOP_CWD='/work/repo'`,
 		`exec '/usr/local/bin/slop' run 'review'`,
 	} {
 		if !strings.Contains(cmd, want) {
@@ -75,5 +75,14 @@ func TestCommandBakesTaggingAndExec(t *testing.T) {
 	// oscTitle off => no printf title
 	if strings.Contains(Command("/s", "r", "/w", false), "printf") {
 		t.Fatalf("oscTitle=false must omit the title printf")
+	}
+}
+
+func TestCommandQuotesAgainstInjection(t *testing.T) {
+	// a cwd carrying shell metacharacters must be single-quoted (embedded quote escaped),
+	// not interpolated raw — no command-injection via the workspace path.
+	cmd := Command("/s", "p", `/tmp/x'; rm -rf ~ #`, true)
+	if !strings.Contains(cmd, `'\''`) {
+		t.Fatalf("cwd quote not escaped (injection vector): %s", cmd)
 	}
 }
