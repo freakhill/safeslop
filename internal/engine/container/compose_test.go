@@ -120,3 +120,23 @@ func TestSecretsEnvExcludesKubeconfig(t *testing.T) {
 		t.Fatalf("KUBECONFIG must never ride secrets.env:\n%s", body)
 	}
 }
+
+func TestComposeNoAgentSocketAndSshKey(t *testing.T) {
+	with, err := renderCompose(composeParams{RuntimeDir: "/r", Workspace: "/w", StageDir: "/r", SshKey: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(with, "SSH_AUTH_SOCK") || strings.Contains(with, "ssh-agent.sock") {
+		t.Fatalf("agent socket must be gone from compose:\n%s", with)
+	}
+	if !strings.Contains(with, "GIT_SSH_COMMAND: ssh -i /slop/runtime/.ssh/id") {
+		t.Fatalf("compose missing GIT_SSH_COMMAND:\n%s", with)
+	}
+	without, err := renderCompose(composeParams{RuntimeDir: "/r", Workspace: "/w", StageDir: "/r", SshKey: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(without, "GIT_SSH_COMMAND") {
+		t.Fatalf("GIT_SSH_COMMAND must be absent when no ssh key staged:\n%s", without)
+	}
+}
