@@ -79,3 +79,36 @@ func isTimeout(err error) bool {
 	var ne net.Error
 	return errors.As(err, &ne) && ne.Timeout()
 }
+
+func TestManagerHandlesConcurrentSessions(t *testing.T) {
+	m := NewManager()
+	const n = 8
+	ids := make([]string, n)
+	for i := range ids {
+		id, err := m.Open(SessionSpec{Argv: []string{"cat"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids[i] = id
+	}
+	// each session is independent: write a distinct marker, read it back.
+	for i, id := range ids {
+		s, _ := m.Get(id)
+		marker := []byte("sess" + string(rune('A'+i)) + "\n")
+		if _, err := s.Write(marker); err != nil {
+			t.Fatal(err)
+		}
+		got := readWithin(t, s, 2*time.Second, marker[:len(marker)-1])
+		if !bytes.Contains(got, marker[:len(marker)-1]) {
+			t.Fatalf("session %s cross-talk or loss: got %q want %q", id, got, marker)
+		}
+	}
+	for _, id := range ids {
+		m.Close(id)
+	}
+	for _, id := range ids {
+		if _, ok := m.Get(id); ok {
+			t.Fatalf("session %s leaked after Close", id)
+		}
+	}
+}
