@@ -125,7 +125,7 @@ func cmdList() *cobra.Command {
 // doctorReport probes the external tools and isolation boundaries slop can use.
 // Extracted so it is testable and reusable (e.g. a future GUI / installer).
 func doctorReport() map[string]any {
-	tools := []string{"git", "docker", "op", "claude", "opencode", "tart", "mise", "nix", "aws", "gcloud", "gke-gcloud-auth-plugin"}
+	tools := []string{"git", "gh", "docker", "op", "claude", "opencode", "tart", "mise", "nix", "aws", "gcloud", "gke-gcloud-auth-plugin"}
 	report := map[string]any{}
 	for _, t := range tools {
 		p, err := osexec.LookPath(t)
@@ -293,11 +293,16 @@ func runProfile(name string, prof policy.Profile, argv []string, ws string) (int
 	stageDir := filepath.Join(ws, ".slop", "runtime", name)
 	defer os.RemoveAll(stageDir) // wipe staged secrets/.npmrc regardless of outcome
 
-	// kube creds need a kubeconfig at a boundary-stable path; vm's scp'd stage path
+	// kube/ssh creds need a file at a boundary-stable path; vm's scp'd stage path
 	// (unknown guest $HOME, single-quoted secrets.env) isn't wired yet. Fail fast,
-	// before minting any token (specs/0010).
-	if prof.Environment == "vm" && prof.Credentials != nil && prof.Credentials.Kube != nil {
-		return 1, fmt.Errorf("kube credentials are not yet supported with environment:%q — use environment:\"container\" (specs/0010)", prof.Environment)
+	// before minting any token / registering any deploy key (specs/0010, specs/0011).
+	if prof.Environment == "vm" && prof.Credentials != nil {
+		if prof.Credentials.Kube != nil {
+			return 1, fmt.Errorf("kube credentials are not yet supported with environment:%q — use environment:\"container\" (specs/0010)", prof.Environment)
+		}
+		if prof.Credentials.Ssh != nil {
+			return 1, fmt.Errorf("ssh credentials are not yet supported with environment:%q — use environment:\"container\" (specs/0011)", prof.Environment)
+		}
 	}
 
 	// secretEnv = the resolved profile secrets (sensitive). The pnpm token rides a staged
@@ -342,12 +347,24 @@ func runProfile(name string, prof policy.Profile, argv []string, ws string) (int
 		return 1, err
 	}
 
+	// ssh deploy key: the bearer is the staged 0600 private key; GIT_SSH_COMMAND is a
+	// non-secret path delivered per-environment like KUBECONFIG (host path for host/sandbox;
+	// /slop/runtime/.ssh/id via compose for container). Best-effort revoke runs before the
+	// stageDir wipe (deferred after the top-of-func wipe, so LIFO orders it first).
+	sshEnv, err := creds.StageSSH(ctx, prof.Credentials, stageDir)
+	if err != nil {
+		return 1, err
+	}
+	if prof.Credentials != nil && prof.Credentials.Ssh != nil {
+		defer creds.RevokeSSH(context.Background(), stageDir)
+	}
+
 	switch prof.Environment {
 	case "sandbox":
-		env := append(append(append(os.Environ(), secretEnv...), npmrcEnv...), kubeEnv...)
+		env := append(append(append(append(os.Environ(), secretEnv...), npmrcEnv...), kubeEnv...), sshEnv...)
 		return sandbox.Launch(ctx, engexec.LaunchSpec{Argv: argv, Dir: ws, Env: env}, ws, prof.Network)
 	case "host":
-		env := append(append(append(os.Environ(), secretEnv...), npmrcEnv...), kubeEnv...)
+		env := append(append(append(append(os.Environ(), secretEnv...), npmrcEnv...), kubeEnv...), sshEnv...)
 		return engexec.RunInTerminal(ctx, engexec.LaunchSpec{Argv: argv, Dir: ws, Env: env})
 	case "container":
 		// secrets go in secrets.env (sourced by the entrypoint); .npmrc and kubeconfig
