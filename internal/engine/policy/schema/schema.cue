@@ -72,12 +72,21 @@ package slop
 	project?: string
 }
 
-// Credential providers a profile uses (SP2: pnpm; SP/0009: aws/gcp; SP/0010: kube).
+// SSH/Git auth into the boundary as a per-run, repo-scoped ephemeral deploy key — the
+// 1Password agent socket is never passed in (specs/0001 §7.1, specs/0011). The host mints
+// the key (read-only by default); write:true is lint-gated on network:deny.
+#SshCreds: {
+	write?: bool | *false
+	ttl?:   string | *"1h"
+}
+
+// Credential providers a profile uses (SP2: pnpm; SP/0009: aws/gcp; SP/0010: kube; SP/0011: ssh).
 #Credentials: {
 	pnpm?: [...#PnpmRegistry]
 	aws?:  #AwsSso
 	gcp?:  #GcpAdc
 	kube?: #KubeCluster
+	ssh?:  #SshCreds
 }
 
 // A pinned toolchain layered onto any environment (SP5), orthogonal to `environment`.

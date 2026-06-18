@@ -159,3 +159,36 @@ slop: profiles: deploy: {
 		t.Fatalf("gke fields = %+v", g)
 	}
 }
+
+func TestLoadSshCredentials(t *testing.T) {
+	cfg, err := loadStr(t, `package slop
+slop: profiles: deploy: {
+	agent: "claude"
+	environment: "container"
+	network: "deny"
+	credentials: ssh: {write: true, ttl: "30m"}
+}`)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	s := cfg.Profiles["deploy"].Credentials.Ssh
+	if s == nil || !s.Write || s.Ttl != "30m" {
+		t.Fatalf("ssh creds = %+v", s)
+	}
+}
+
+func TestLoadSshDefaultsReadOnly(t *testing.T) {
+	cfg, err := loadStr(t, `package slop
+slop: profiles: review: {
+	agent: "claude"
+	environment: "sandbox"
+	credentials: ssh: {}
+}`)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	s := cfg.Profiles["review"].Credentials.Ssh
+	if s == nil || s.Write {
+		t.Fatalf("ssh write must default false: %+v", s)
+	}
+}

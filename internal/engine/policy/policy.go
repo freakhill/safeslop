@@ -63,12 +63,20 @@ type KubeCluster struct {
 	Gke *GkeCluster `json:"gke,omitempty"`
 }
 
-// Credentials groups the credential providers a profile uses (SP2; aws/gcp SP/0009; kube SP/0010).
+// SshCreds stages a per-run repo-scoped ephemeral SSH deploy key (read-only unless Write).
+// The host mints it; only the private key crosses the boundary (specs/0001 §7.1, specs/0011).
+type SshCreds struct {
+	Write bool   `json:"write,omitempty"`
+	Ttl   string `json:"ttl,omitempty"`
+}
+
+// Credentials groups the credential providers a profile uses (SP2; aws/gcp SP/0009; kube SP/0010; ssh SP/0011).
 type Credentials struct {
 	Pnpm []PnpmRegistry `json:"pnpm,omitempty"`
 	Aws  *AwsSso        `json:"aws,omitempty"`
 	Gcp  *GcpAdc        `json:"gcp,omitempty"`
 	Kube *KubeCluster   `json:"kube,omitempty"`
+	Ssh  *SshCreds      `json:"ssh,omitempty"`
 }
 
 // Toolchain layers a pinned tool environment onto any environment (SP5). When Run is set,
