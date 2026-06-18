@@ -131,3 +131,30 @@ func TestStageSSHNilIsNoop(t *testing.T) {
 		t.Fatalf("nil ssh creds must be a no-op: env=%v err=%v", env, err)
 	}
 }
+
+func TestRevokeSSHCallsGhDelete(t *testing.T) {
+	binDir := t.TempDir()
+	stage := t.TempDir()
+	marker := filepath.Join(stage, "gh-called")
+	fakeStub(t, binDir, "gh", `echo "$@" > `+marker)
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+
+	if err := os.MkdirAll(filepath.Join(stage, ".ssh"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stage, ".ssh", "revoke-info"), []byte("acme/repo 4242\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	RevokeSSH(context.Background(), stage)
+	b, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("gh was not called: %v", err)
+	}
+	if !strings.Contains(string(b), "DELETE repos/acme/repo/keys/4242") {
+		t.Fatalf("gh args = %q", b)
+	}
+}
+
+func TestRevokeSSHNoInfoIsSilent(t *testing.T) {
+	RevokeSSH(context.Background(), t.TempDir())
+}
