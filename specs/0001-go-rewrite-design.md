@@ -139,13 +139,26 @@ the environment, compiles the policy to that adapter, and launches.
 - `slop.cue` may declare `secrets: { ENV_NAME: "op://vault/item/field" }`. At launch the
   engine materializes them via `op read` / `op inject` into the ephemeral stage + the agent
   env, **wiped on exit**, **values never logged**.
-- **SSH** prefers the 1Password SSH agent: point the child at the agent socket via
-  `SSH_AUTH_SOCK` so keys never touch disk. For the **container** path the host agent
-  socket is **bind-mounted** into the container; for the **sandbox** path the socket path
-  is added to the `.sb` allowlist. Honest caveat surfaced by `slop doctor`: this path needs
-  the 1Password **desktop app** running.
-- `slop doctor` reports `op` presence, signed-in state, and (for the agent path) whether the
-  agent socket is reachable.
+- **SSH/Git auth** is delivered as a per-run, repo-scoped **ephemeral deploy key** — the 1Password
+  SSH agent socket is **never** passed across the boundary (FLO-decided 2026-06-18, superseding the
+  earlier socket-pass-through design; rationale + scores in
+  `specs/research/2026-06-18-ssh-auth-flo-decision.md`). The host mints the key
+  (`slop-gh-key create-pair` under Touch-ID/1Password, or `op read` of a pre-provisioned scoped key
+  via `OP_SERVICE_ACCOUNT_TOKEN` for headless/CI), **read-only by default**. Only the `0600` private
+  key + a pinned `known_hosts` are staged into the per-run stage, exposed via
+  `GIT_SSH_COMMAND="ssh -i <key> -o IdentitiesOnly=yes -o IdentityAgent=none -o StrictHostKeyChecking=yes -o UserKnownHostsFile=<kh>"`
+  at the boundary-correct path (real stage in sandbox, `/slop/runtime` in container,
+  `~/.slop-runtime` in the disposable vm — the same per-env channel as `KUBECONFIG`/`.npmrc`).
+  `write:true` is opt-in and lint-gated on `network:deny` + a forge-only egress allowlist (an
+  exfiltrated write key is then useless off-host); TTL ≤ 60m. There is **no raw-socket tier and no
+  in-boundary signing broker** — a caged key file is a strictly smaller attack surface than a live
+  signing oracle. Teardown is decay-first across three independent layers (best-effort on-exit
+  revoke, stage wipe / vm teardown, host-side reaper), none relied on alone. Honest residual: a
+  compromise can reuse the key for git ops to that **one repo** until decay — bounded blast radius,
+  not single-use.
+- `slop doctor` reports `op` presence + signed-in state, and (for the SSH path) the key's
+  read-only/write flag, resolved TTL, and — for write profiles — that the egress allowlist is
+  forge-only.
 
 ### 7.2 npm/pnpm registry-token helper
 
