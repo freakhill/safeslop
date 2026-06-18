@@ -86,3 +86,10 @@ func TestCommandQuotesAgainstInjection(t *testing.T) {
 		t.Fatalf("cwd quote not escaped (injection vector): %s", cmd)
 	}
 }
+
+func TestITerm2AdapterUsesOsascript(t *testing.T) {
+	got := strings.Join(AdapterArgv("iTerm2", "", "slop run review"), " ")
+	if !strings.HasPrefix(got, "osascript ") || !strings.Contains(got, `application "iTerm"`) || !strings.Contains(got, "slop run review") {
+		t.Fatalf("iTerm2 adapter must drive osascript on iTerm: %q", got)
+	}
+}
