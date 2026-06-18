@@ -349,7 +349,7 @@ func launchProfile(name, configPath string) (int, error) {
 		return 1, err
 	}
 	cmd := launch.Command(slopPath, name, ws, uc.Tag.OSCTitle)
-	argv := launch.AdapterArgv(uc.Terminal, cmd, name)
+	argv := launch.AdapterArgv(uc.Terminal, uc.Shell, cmd)
 	if err := osexec.Command(argv[0], argv[1:]...).Run(); err != nil {
 		return 1, fmt.Errorf("open terminal (%s): %w", uc.Terminal, err)
 	}

@@ -11,7 +11,7 @@
 slop ships as **two** independently signed + notarized artifacts:
 
 1. **`slop`** — the Go engine + CLI (today's binary), gaining `slop serve`, `slop launch`, `slop install`.
-2. **`Slop.app`** — a native macOS **SwiftUI** app, **thin presentation only**. It holds no policy logic; it drives the engine over the control plane.
+2. **`SafeSlop.app`** — a native macOS **SwiftUI** app, **thin presentation only**. It holds no policy logic; it drives the engine over the control plane.
 
 The app and engine are versioned together (the `.proto` contract is the compatibility boundary). The app build/sign/notarize is done in Xcode with jojo's Apple Developer cert; the **Go engine side + the `.proto` + generated Go server stubs** are in this repo and are what SP7a/SP7b build. Swift client stubs are generated from the same `.proto` and vendored into the app project.
 
@@ -25,7 +25,7 @@ The app and engine are versioned together (the `.proto` contract is the compatib
 - **Socket path:** `~/.slop/s.sock` — deliberately **short** (macOS `sun_path` is 104 bytes; `~/Library/Application Support/...` + a long username silently overflows → `bind: invalid argument`). Created `0700` dir, `0600` socket.
 - **Peer authentication (research HIGH):** any user process can `connect()` a user-owned socket, so the server authenticates the peer:
   - **v1 (this SP, CGO-free):** `LOCAL_PEERCRED` (`getsockopt`/`unix.GetsockoptXucred` on darwin) → assert the peer **uid == server uid** (same-user). Reject cross-uid. No CGO needed.
-  - **Hardening (follow-on):** verify the peer's **code-signing identity** (Team ID + bundle id == `Slop.app`) via the audit token. This needs Security.framework (CGO) or a `codesign`/`csops` shell-out — deferred to keep `CGO_ENABLED=0`. Flagged so the v1 uid check is not mistaken for full peer-auth.
+  - **Hardening (follow-on):** verify the peer's **code-signing identity** (Team ID + bundle id == `SafeSlop.app`) via the audit token. This needs Security.framework (CGO) or a `codesign`/`csops` shell-out — deferred to keep `CGO_ENABLED=0`. Flagged so the v1 uid check is not mistaken for full peer-auth.
 
 **Dependency cost:** adds `google.golang.org/grpc` (pure Go; `protobuf` is already an indirect dep). Stub generation needs `protoc` + `protoc-gen-go` + `protoc-gen-go-grpc` at dev time; the **generated `.pb.go` is committed** (CI does not run protoc). A `make proto` target regenerates.
 
@@ -44,8 +44,8 @@ The **interactive agent session is NOT a gRPC-parsed channel.** The agent (claud
 
 `slop launch` needs to know *which terminal* and *how to make the session recognizable*. New **user-level** config `~/.config/slop/config.cue` — distinct from the per-repo `slop.cue` (which is policy); this is per-user preference.
 
-- **Preferred terminal**, from a supported list: `Terminal.app`, `iTerm2`, `Ghostty`, `generic-fallback` (`open -a`); `kitty`/`wezterm` later. Each has a launch adapter (how to open a new window running a command).
-- **Preferred shell** (the login shell wrapping the agent).
+- **Preferred terminal**, from a supported list: `Terminal.app`, `iTerm2`, `Ghostty`, `WezTerm`, `kitty`, `generic`. **Terminal.app** (and `generic`/unknown — the always-present fallback) opens via AppleScript `do script`; **iTerm2** via AppleScript `create window with default profile command`; both run in the new window's login shell. **Ghostty** uses `open -na Ghostty --args -e <shell> -lc <command>`; **WezTerm** uses `open -na WezTerm --args start -- <shell> -lc <command>`; **kitty** uses `open -na kitty --args <shell> -lc <command>` — each runs the command through the user's preferred shell. The session command is built shell-quoted (`internal/engine/launch`).
+- **Preferred shell** (wraps the command for the Ghostty adapter; Terminal.app uses its own login shell).
 - **Recognizability tagging** so a user can tell slop windows apart:
   - **Baseline (all terminals):** OSC window-title sequence + `SLOP_SESSION` / `SLOP_CWD` env in the child.
   - **Native (where supported):** iTerm2 badge / tab color.
@@ -80,7 +80,7 @@ New engine commands (the `.app` installer screen is a thin wizard over these; CL
 
 - **SP7a (this next plan):** the **control-plane spine + data plane + terminal-launch** — `slop serve` (gRPC-over-UDS, uid peer-auth, the `.proto`, generated Go server stubs), `slop launch` (terminal spawn over the existing ctty path), and the `~/.config/slop/config.cue` terminal-launch subsystem. Pure Go + proto; TDD like the cred providers (a UDS-guarded serve test, a config parse test, a launch-adapter argv test). The `.app` is **not** built here, but the `.proto` + Go server are the contract it will target.
 - **SP7b:** `slop install` (`status`/`plan`/`apply`, pinned+checksum, optional VM-eval).
-- **SwiftUI `Slop.app`:** scaffolded against the committed `.proto` (generated Swift client stubs); built/signed in Xcode by jojo. Out of scope for the engine plans beyond providing + versioning the contract.
+- **SwiftUI `SafeSlop.app`:** scaffolded against the committed `.proto` (generated Swift client stubs); built/signed in Xcode by jojo. Out of scope for the engine plans beyond providing + versioning the contract.
 
 ---
 
@@ -93,7 +93,7 @@ New engine commands (the `.app` installer screen is a thin wizard over these; CL
 | Generated **Swift** client stubs | recipe documented; `make proto` can emit if `protoc-gen-swift` present | vendored into the app |
 | `slop serve` / `slop launch` / `slop install` | ✓ | — |
 | `~/.config/slop/config.cue` + adapters | ✓ | — |
-| `Slop.app` SwiftUI UI, build, sign, notarize | — | ✓ |
+| `SafeSlop.app` SwiftUI UI, build, sign, notarize | — | ✓ |
 
 ---
 
@@ -102,5 +102,5 @@ New engine commands (the `.app` installer screen is a thin wizard over these; CL
 1. **Peer-auth v1 = uid-only** (CGO-free); codesign-identity hardening deferred. **Recommendation:** as written.
 2. **gRPC vs a hand-rolled length-prefixed protobuf-over-UDS.** gRPC is locked (jojo's call) — accept the `grpc` dep + committed generated code. **Recommendation:** gRPC as decided.
 3. **`config.cue` location:** new `internal/engine/userconfig/` package (parallels `policy/`) vs folding into `policy/`. **Recommendation:** new `userconfig/` package — it is user-level, not policy.
-4. **Terminal adapters scope for SP7a:** `Terminal.app` + `Ghostty` + `generic-fallback` (open -a) in v1; `iTerm2` native tagging + `kitty`/`wezterm` follow-on. **Recommendation:** as written.
+4. **Terminal adapters scope for SP7a:** `Terminal.app` + `iTerm2` (AppleScript) and `Ghostty` + `WezTerm` + `kitty` (`open -na … --args` running `<shell> -lc <command>`), with `generic`→Terminal fallback — all v1. `iTerm2`-native tagging (badge/tab color) is the remaining follow-on. **Recommendation:** as written.
 5. **`make proto` toolchain:** require `protoc` + plugins locally; commit generated code so CI/`make build` never needs protoc. **Recommendation:** as written.

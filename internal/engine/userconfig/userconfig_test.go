@@ -51,3 +51,19 @@ terminal: "Hyper"`); err == nil {
 		t.Fatal("unknown terminal must be rejected by the schema")
 	}
 }
+
+func TestLoadAcceptsITerm2(t *testing.T) {
+	cfg, err := loadStr(t, "package slopcfg\nterminal: \"iTerm2\"")
+	if err != nil || cfg.Terminal != "iTerm2" {
+		t.Fatalf("iTerm2 must be an accepted terminal: cfg=%+v err=%v", cfg, err)
+	}
+}
+
+func TestLoadAcceptsWezTermAndKitty(t *testing.T) {
+	for _, term := range []string{"WezTerm", "kitty"} {
+		cfg, err := loadStr(t, "package slopcfg\nterminal: \""+term+"\"")
+		if err != nil || cfg.Terminal != term {
+			t.Fatalf("%s must be an accepted terminal: cfg=%+v err=%v", term, cfg, err)
+		}
+	}
+}

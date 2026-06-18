@@ -18,43 +18,43 @@ func TestTaggingEnv(t *testing.T) {
 	}
 }
 
-func TestGenericAdapterArgv(t *testing.T) {
-	got := strings.Join(AdapterArgv("generic", "/usr/local/bin/slop run review", "review"), " ")
-	if !strings.Contains(got, "open -a") {
-		t.Fatalf("generic adapter uses `open -a`: %q", got)
+func TestGhosttyAdapterRunsCommandViaShell(t *testing.T) {
+	// default shell (/bin/sh) when none configured; Ghostty's -e must get a program (the
+	// shell), then -lc, then the command — NOT the bare command string.
+	got := strings.Join(AdapterArgv("Ghostty", "", "slop run review"), " ")
+	if got != "open -na Ghostty --args -e /bin/sh -lc slop run review" {
+		t.Fatalf("ghostty argv = %q", got)
 	}
-}
-
-func TestGhosttyAdapterArgv(t *testing.T) {
-	got := strings.Join(AdapterArgv("Ghostty", "slop run review", "review"), " ")
-	if !strings.Contains(got, "Ghostty") || !strings.Contains(got, "slop run review") {
-		t.Fatalf("ghostty adapter must open Ghostty running the command: %q", got)
+	// honors the configured shell.
+	withZsh := AdapterArgv("Ghostty", "/bin/zsh", "slop run review")
+	if withZsh[5] != "/bin/zsh" || withZsh[6] != "-lc" || withZsh[7] != "slop run review" {
+		t.Fatalf("ghostty must use the configured shell: %v", withZsh)
 	}
 }
 
 func TestTerminalAppAdapterUsesOsascript(t *testing.T) {
-	got := strings.Join(AdapterArgv("Terminal.app", "slop run review", "review"), " ")
+	got := strings.Join(AdapterArgv("Terminal.app", "", "slop run review"), " ")
 	if !strings.HasPrefix(got, "osascript ") || !strings.Contains(got, "Terminal") {
 		t.Fatalf("Terminal.app adapter drives osascript: %q", got)
 	}
 }
 
-func TestUnknownAdapterFallsBackToGeneric(t *testing.T) {
-	got := strings.Join(AdapterArgv("Nope", "slop run review", "review"), " ")
-	if !strings.Contains(got, "open -a") {
-		t.Fatalf("unknown adapter falls back to generic open -a: %q", got)
+func TestGenericAndUnknownFallBackToTerminal(t *testing.T) {
+	for _, term := range []string{"generic", "Nope"} {
+		got := strings.Join(AdapterArgv(term, "", "slop run review"), " ")
+		if !strings.HasPrefix(got, "osascript ") || !strings.Contains(got, "Terminal") {
+			t.Fatalf("%q must fall back to the Terminal.app osascript adapter: %q", term, got)
+		}
 	}
 }
 
 func TestTerminalAppAdapterEscapesInjection(t *testing.T) {
 	// a command containing a double-quote / backslash must not break out of the AppleScript
 	// string literal (command-injection regression).
-	got := strings.Join(AdapterArgv("Terminal.app", `slop run "x" & do shell script "rm -rf ~"`, "s"), " ")
+	got := strings.Join(AdapterArgv("Terminal.app", "", `slop run "x" & do shell script "rm -rf ~"`), " ")
 	if !strings.Contains(got, `\"x\"`) {
 		t.Fatalf("double-quotes must be backslash-escaped: %q", got)
 	}
-	// the closing literal quote of the wrapper must be the only unescaped `"` after the opener;
-	// an injected `do script "..."` must appear escaped, not as live AppleScript.
 	if strings.Contains(got, `do script "slop run "x"`) {
 		t.Fatalf("unescaped quote broke out of the string literal: %q", got)
 	}
@@ -84,5 +84,26 @@ func TestCommandQuotesAgainstInjection(t *testing.T) {
 	cmd := Command("/s", "p", `/tmp/x'; rm -rf ~ #`, true)
 	if !strings.Contains(cmd, `'\''`) {
 		t.Fatalf("cwd quote not escaped (injection vector): %s", cmd)
+	}
+}
+
+func TestITerm2AdapterUsesOsascript(t *testing.T) {
+	got := strings.Join(AdapterArgv("iTerm2", "", "slop run review"), " ")
+	if !strings.HasPrefix(got, "osascript ") || !strings.Contains(got, `application "iTerm"`) || !strings.Contains(got, "slop run review") {
+		t.Fatalf("iTerm2 adapter must drive osascript on iTerm: %q", got)
+	}
+}
+
+func TestWezTermAdapterRunsCommandViaShell(t *testing.T) {
+	got := strings.Join(AdapterArgv("WezTerm", "", "slop run review"), " ")
+	if got != "open -na WezTerm --args start -- /bin/sh -lc slop run review" {
+		t.Fatalf("wezterm argv = %q", got)
+	}
+}
+
+func TestKittyAdapterRunsCommandViaShell(t *testing.T) {
+	got := strings.Join(AdapterArgv("kitty", "/bin/zsh", "slop run review"), " ")
+	if got != "open -na kitty --args /bin/zsh -lc slop run review" {
+		t.Fatalf("kitty argv = %q", got)
 	}
 }

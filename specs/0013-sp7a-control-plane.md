@@ -816,6 +816,6 @@ EOF
 
 - **codesign-identity** peer-auth (v1 is uid-only).
 - **`ListProfiles`** concrete impl (portal-facing; lands with the app).
-- **SwiftUI `Slop.app`** build/sign/notarize (jojo, Xcode).
+- **SwiftUI `SafeSlop.app`** build/sign/notarize (jojo, Xcode).
 - **iTerm2-native** tagging; **kitty/wezterm** adapters.
 - **SP7b** `slop install`.
