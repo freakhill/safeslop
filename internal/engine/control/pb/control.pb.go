@@ -418,6 +418,477 @@ func (x *LaunchEvent) GetExitCode() int32 {
 	return 0
 }
 
+// OpenSession opens an isolated agent session and allocates its PTY. Non-blocking.
+type OpenSessionRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Profile       string                 `protobuf:"bytes,1,opt,name=profile,proto3" json:"profile,omitempty"`
+	ConfigPath    string                 `protobuf:"bytes,2,opt,name=config_path,json=configPath,proto3" json:"config_path,omitempty"`
+	Cols          uint32                 `protobuf:"varint,3,opt,name=cols,proto3" json:"cols,omitempty"`
+	Rows          uint32                 `protobuf:"varint,4,opt,name=rows,proto3" json:"rows,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenSessionRequest) Reset() {
+	*x = OpenSessionRequest{}
+	mi := &file_internal_engine_control_control_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenSessionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenSessionRequest) ProtoMessage() {}
+
+func (x *OpenSessionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_engine_control_control_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenSessionRequest.ProtoReflect.Descriptor instead.
+func (*OpenSessionRequest) Descriptor() ([]byte, []int) {
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *OpenSessionRequest) GetProfile() string {
+	if x != nil {
+		return x.Profile
+	}
+	return ""
+}
+
+func (x *OpenSessionRequest) GetConfigPath() string {
+	if x != nil {
+		return x.ConfigPath
+	}
+	return ""
+}
+
+func (x *OpenSessionRequest) GetCols() uint32 {
+	if x != nil {
+		return x.Cols
+	}
+	return 0
+}
+
+func (x *OpenSessionRequest) GetRows() uint32 {
+	if x != nil {
+		return x.Rows
+	}
+	return 0
+}
+
+type OpenSessionResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenSessionResponse) Reset() {
+	*x = OpenSessionResponse{}
+	mi := &file_internal_engine_control_control_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenSessionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenSessionResponse) ProtoMessage() {}
+
+func (x *OpenSessionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_engine_control_control_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenSessionResponse.ProtoReflect.Descriptor instead.
+func (*OpenSessionResponse) Descriptor() ([]byte, []int) {
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *OpenSessionResponse) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+// Attach is a long-lived bidi stream: the first ClientFrame carries attach_session_id;
+// subsequent client frames are input/resize, server frames are output until exited.
+type Resize struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Cols          uint32                 `protobuf:"varint,1,opt,name=cols,proto3" json:"cols,omitempty"`
+	Rows          uint32                 `protobuf:"varint,2,opt,name=rows,proto3" json:"rows,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Resize) Reset() {
+	*x = Resize{}
+	mi := &file_internal_engine_control_control_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Resize) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Resize) ProtoMessage() {}
+
+func (x *Resize) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_engine_control_control_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Resize.ProtoReflect.Descriptor instead.
+func (*Resize) Descriptor() ([]byte, []int) {
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *Resize) GetCols() uint32 {
+	if x != nil {
+		return x.Cols
+	}
+	return 0
+}
+
+func (x *Resize) GetRows() uint32 {
+	if x != nil {
+		return x.Rows
+	}
+	return 0
+}
+
+type ClientFrame struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Msg:
+	//
+	//	*ClientFrame_AttachSessionId
+	//	*ClientFrame_Input
+	//	*ClientFrame_Resize
+	Msg           isClientFrame_Msg `protobuf_oneof:"msg"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ClientFrame) Reset() {
+	*x = ClientFrame{}
+	mi := &file_internal_engine_control_control_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ClientFrame) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ClientFrame) ProtoMessage() {}
+
+func (x *ClientFrame) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_engine_control_control_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ClientFrame.ProtoReflect.Descriptor instead.
+func (*ClientFrame) Descriptor() ([]byte, []int) {
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *ClientFrame) GetMsg() isClientFrame_Msg {
+	if x != nil {
+		return x.Msg
+	}
+	return nil
+}
+
+func (x *ClientFrame) GetAttachSessionId() string {
+	if x != nil {
+		if x, ok := x.Msg.(*ClientFrame_AttachSessionId); ok {
+			return x.AttachSessionId
+		}
+	}
+	return ""
+}
+
+func (x *ClientFrame) GetInput() []byte {
+	if x != nil {
+		if x, ok := x.Msg.(*ClientFrame_Input); ok {
+			return x.Input
+		}
+	}
+	return nil
+}
+
+func (x *ClientFrame) GetResize() *Resize {
+	if x != nil {
+		if x, ok := x.Msg.(*ClientFrame_Resize); ok {
+			return x.Resize
+		}
+	}
+	return nil
+}
+
+type isClientFrame_Msg interface {
+	isClientFrame_Msg()
+}
+
+type ClientFrame_AttachSessionId struct {
+	AttachSessionId string `protobuf:"bytes,1,opt,name=attach_session_id,json=attachSessionId,proto3,oneof"` // MUST be the first frame
+}
+
+type ClientFrame_Input struct {
+	Input []byte `protobuf:"bytes,2,opt,name=input,proto3,oneof"` // bytes typed into the PTY
+}
+
+type ClientFrame_Resize struct {
+	Resize *Resize `protobuf:"bytes,3,opt,name=resize,proto3,oneof"` // terminal resized
+}
+
+func (*ClientFrame_AttachSessionId) isClientFrame_Msg() {}
+
+func (*ClientFrame_Input) isClientFrame_Msg() {}
+
+func (*ClientFrame_Resize) isClientFrame_Msg() {}
+
+type Exited struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ExitCode      int32                  `protobuf:"varint,1,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Exited) Reset() {
+	*x = Exited{}
+	mi := &file_internal_engine_control_control_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Exited) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Exited) ProtoMessage() {}
+
+func (x *Exited) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_engine_control_control_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Exited.ProtoReflect.Descriptor instead.
+func (*Exited) Descriptor() ([]byte, []int) {
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *Exited) GetExitCode() int32 {
+	if x != nil {
+		return x.ExitCode
+	}
+	return 0
+}
+
+type ServerFrame struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Msg:
+	//
+	//	*ServerFrame_Output
+	//	*ServerFrame_Exited
+	Msg           isServerFrame_Msg `protobuf_oneof:"msg"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ServerFrame) Reset() {
+	*x = ServerFrame{}
+	mi := &file_internal_engine_control_control_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ServerFrame) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ServerFrame) ProtoMessage() {}
+
+func (x *ServerFrame) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_engine_control_control_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ServerFrame.ProtoReflect.Descriptor instead.
+func (*ServerFrame) Descriptor() ([]byte, []int) {
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *ServerFrame) GetMsg() isServerFrame_Msg {
+	if x != nil {
+		return x.Msg
+	}
+	return nil
+}
+
+func (x *ServerFrame) GetOutput() []byte {
+	if x != nil {
+		if x, ok := x.Msg.(*ServerFrame_Output); ok {
+			return x.Output
+		}
+	}
+	return nil
+}
+
+func (x *ServerFrame) GetExited() *Exited {
+	if x != nil {
+		if x, ok := x.Msg.(*ServerFrame_Exited); ok {
+			return x.Exited
+		}
+	}
+	return nil
+}
+
+type isServerFrame_Msg interface {
+	isServerFrame_Msg()
+}
+
+type ServerFrame_Output struct {
+	Output []byte `protobuf:"bytes,1,opt,name=output,proto3,oneof"` // PTY output bytes
+}
+
+type ServerFrame_Exited struct {
+	Exited *Exited `protobuf:"bytes,2,opt,name=exited,proto3,oneof"` // agent exited; stream ends after this
+}
+
+func (*ServerFrame_Output) isServerFrame_Msg() {}
+
+func (*ServerFrame_Exited) isServerFrame_Msg() {}
+
+type CloseSessionRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CloseSessionRequest) Reset() {
+	*x = CloseSessionRequest{}
+	mi := &file_internal_engine_control_control_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CloseSessionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CloseSessionRequest) ProtoMessage() {}
+
+func (x *CloseSessionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_engine_control_control_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CloseSessionRequest.ProtoReflect.Descriptor instead.
+func (*CloseSessionRequest) Descriptor() ([]byte, []int) {
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *CloseSessionRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+type CloseSessionResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CloseSessionResponse) Reset() {
+	*x = CloseSessionResponse{}
+	mi := &file_internal_engine_control_control_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CloseSessionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CloseSessionResponse) ProtoMessage() {}
+
+func (x *CloseSessionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_engine_control_control_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CloseSessionResponse.ProtoReflect.Descriptor instead.
+func (*CloseSessionResponse) Descriptor() ([]byte, []int) {
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{14}
+}
+
 var File_internal_engine_control_control_proto protoreflect.FileDescriptor
 
 const file_internal_engine_control_control_proto_rawDesc = "" +
@@ -448,11 +919,41 @@ const file_internal_engine_control_control_proto_rawDesc = "" +
 	"\aSPAWNED\x10\x00\x12\n" +
 	"\n" +
 	"\x06EXITED\x10\x01\x12\t\n" +
-	"\x05ERROR\x10\x022\xf5\x01\n" +
+	"\x05ERROR\x10\x02\"w\n" +
+	"\x12OpenSessionRequest\x12\x18\n" +
+	"\aprofile\x18\x01 \x01(\tR\aprofile\x12\x1f\n" +
+	"\vconfig_path\x18\x02 \x01(\tR\n" +
+	"configPath\x12\x12\n" +
+	"\x04cols\x18\x03 \x01(\rR\x04cols\x12\x12\n" +
+	"\x04rows\x18\x04 \x01(\rR\x04rows\"4\n" +
+	"\x13OpenSessionResponse\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\"0\n" +
+	"\x06Resize\x12\x12\n" +
+	"\x04cols\x18\x01 \x01(\rR\x04cols\x12\x12\n" +
+	"\x04rows\x18\x02 \x01(\rR\x04rows\"\x8d\x01\n" +
+	"\vClientFrame\x12,\n" +
+	"\x11attach_session_id\x18\x01 \x01(\tH\x00R\x0fattachSessionId\x12\x16\n" +
+	"\x05input\x18\x02 \x01(\fH\x00R\x05input\x121\n" +
+	"\x06resize\x18\x03 \x01(\v2\x17.slop.control.v1.ResizeH\x00R\x06resizeB\x05\n" +
+	"\x03msg\"%\n" +
+	"\x06Exited\x12\x1b\n" +
+	"\texit_code\x18\x01 \x01(\x05R\bexitCode\"a\n" +
+	"\vServerFrame\x12\x18\n" +
+	"\x06output\x18\x01 \x01(\fH\x00R\x06output\x121\n" +
+	"\x06exited\x18\x02 \x01(\v2\x17.slop.control.v1.ExitedH\x00R\x06exitedB\x05\n" +
+	"\x03msg\"4\n" +
+	"\x13CloseSessionRequest\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\"\x16\n" +
+	"\x14CloseSessionResponse2\xf6\x03\n" +
 	"\aControl\x12C\n" +
 	"\x04Ping\x12\x1c.slop.control.v1.PingRequest\x1a\x1d.slop.control.v1.PingResponse\x12[\n" +
 	"\fListProfiles\x12$.slop.control.v1.ListProfilesRequest\x1a%.slop.control.v1.ListProfilesResponse\x12H\n" +
-	"\x06Launch\x12\x1e.slop.control.v1.LaunchRequest\x1a\x1c.slop.control.v1.LaunchEvent0\x01B=Z;github.com/freakhill/safeslop/internal/engine/control/pb;pbb\x06proto3"
+	"\x06Launch\x12\x1e.slop.control.v1.LaunchRequest\x1a\x1c.slop.control.v1.LaunchEvent0\x01\x12X\n" +
+	"\vOpenSession\x12#.slop.control.v1.OpenSessionRequest\x1a$.slop.control.v1.OpenSessionResponse\x12H\n" +
+	"\x06Attach\x12\x1c.slop.control.v1.ClientFrame\x1a\x1c.slop.control.v1.ServerFrame(\x010\x01\x12[\n" +
+	"\fCloseSession\x12$.slop.control.v1.CloseSessionRequest\x1a%.slop.control.v1.CloseSessionResponseB=Z;github.com/freakhill/safeslop/internal/engine/control/pb;pbb\x06proto3"
 
 var (
 	file_internal_engine_control_control_proto_rawDescOnce sync.Once
@@ -467,7 +968,7 @@ func file_internal_engine_control_control_proto_rawDescGZIP() []byte {
 }
 
 var file_internal_engine_control_control_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_internal_engine_control_control_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_internal_engine_control_control_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_internal_engine_control_control_proto_goTypes = []any{
 	(LaunchEvent_Kind)(0),        // 0: slop.control.v1.LaunchEvent.Kind
 	(*PingRequest)(nil),          // 1: slop.control.v1.PingRequest
@@ -477,21 +978,37 @@ var file_internal_engine_control_control_proto_goTypes = []any{
 	(*ListProfilesResponse)(nil), // 5: slop.control.v1.ListProfilesResponse
 	(*LaunchRequest)(nil),        // 6: slop.control.v1.LaunchRequest
 	(*LaunchEvent)(nil),          // 7: slop.control.v1.LaunchEvent
+	(*OpenSessionRequest)(nil),   // 8: slop.control.v1.OpenSessionRequest
+	(*OpenSessionResponse)(nil),  // 9: slop.control.v1.OpenSessionResponse
+	(*Resize)(nil),               // 10: slop.control.v1.Resize
+	(*ClientFrame)(nil),          // 11: slop.control.v1.ClientFrame
+	(*Exited)(nil),               // 12: slop.control.v1.Exited
+	(*ServerFrame)(nil),          // 13: slop.control.v1.ServerFrame
+	(*CloseSessionRequest)(nil),  // 14: slop.control.v1.CloseSessionRequest
+	(*CloseSessionResponse)(nil), // 15: slop.control.v1.CloseSessionResponse
 }
 var file_internal_engine_control_control_proto_depIdxs = []int32{
-	4, // 0: slop.control.v1.ListProfilesResponse.profiles:type_name -> slop.control.v1.Profile
-	0, // 1: slop.control.v1.LaunchEvent.kind:type_name -> slop.control.v1.LaunchEvent.Kind
-	1, // 2: slop.control.v1.Control.Ping:input_type -> slop.control.v1.PingRequest
-	3, // 3: slop.control.v1.Control.ListProfiles:input_type -> slop.control.v1.ListProfilesRequest
-	6, // 4: slop.control.v1.Control.Launch:input_type -> slop.control.v1.LaunchRequest
-	2, // 5: slop.control.v1.Control.Ping:output_type -> slop.control.v1.PingResponse
-	5, // 6: slop.control.v1.Control.ListProfiles:output_type -> slop.control.v1.ListProfilesResponse
-	7, // 7: slop.control.v1.Control.Launch:output_type -> slop.control.v1.LaunchEvent
-	5, // [5:8] is the sub-list for method output_type
-	2, // [2:5] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	4,  // 0: slop.control.v1.ListProfilesResponse.profiles:type_name -> slop.control.v1.Profile
+	0,  // 1: slop.control.v1.LaunchEvent.kind:type_name -> slop.control.v1.LaunchEvent.Kind
+	10, // 2: slop.control.v1.ClientFrame.resize:type_name -> slop.control.v1.Resize
+	12, // 3: slop.control.v1.ServerFrame.exited:type_name -> slop.control.v1.Exited
+	1,  // 4: slop.control.v1.Control.Ping:input_type -> slop.control.v1.PingRequest
+	3,  // 5: slop.control.v1.Control.ListProfiles:input_type -> slop.control.v1.ListProfilesRequest
+	6,  // 6: slop.control.v1.Control.Launch:input_type -> slop.control.v1.LaunchRequest
+	8,  // 7: slop.control.v1.Control.OpenSession:input_type -> slop.control.v1.OpenSessionRequest
+	11, // 8: slop.control.v1.Control.Attach:input_type -> slop.control.v1.ClientFrame
+	14, // 9: slop.control.v1.Control.CloseSession:input_type -> slop.control.v1.CloseSessionRequest
+	2,  // 10: slop.control.v1.Control.Ping:output_type -> slop.control.v1.PingResponse
+	5,  // 11: slop.control.v1.Control.ListProfiles:output_type -> slop.control.v1.ListProfilesResponse
+	7,  // 12: slop.control.v1.Control.Launch:output_type -> slop.control.v1.LaunchEvent
+	9,  // 13: slop.control.v1.Control.OpenSession:output_type -> slop.control.v1.OpenSessionResponse
+	13, // 14: slop.control.v1.Control.Attach:output_type -> slop.control.v1.ServerFrame
+	15, // 15: slop.control.v1.Control.CloseSession:output_type -> slop.control.v1.CloseSessionResponse
+	10, // [10:16] is the sub-list for method output_type
+	4,  // [4:10] is the sub-list for method input_type
+	4,  // [4:4] is the sub-list for extension type_name
+	4,  // [4:4] is the sub-list for extension extendee
+	0,  // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_internal_engine_control_control_proto_init() }
@@ -499,13 +1016,22 @@ func file_internal_engine_control_control_proto_init() {
 	if File_internal_engine_control_control_proto != nil {
 		return
 	}
+	file_internal_engine_control_control_proto_msgTypes[10].OneofWrappers = []any{
+		(*ClientFrame_AttachSessionId)(nil),
+		(*ClientFrame_Input)(nil),
+		(*ClientFrame_Resize)(nil),
+	}
+	file_internal_engine_control_control_proto_msgTypes[12].OneofWrappers = []any{
+		(*ServerFrame_Output)(nil),
+		(*ServerFrame_Exited)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_engine_control_control_proto_rawDesc), len(file_internal_engine_control_control_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   7,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

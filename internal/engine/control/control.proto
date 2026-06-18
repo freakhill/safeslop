@@ -7,6 +7,9 @@ service Control {
   rpc Ping(PingRequest) returns (PingResponse);
   rpc ListProfiles(ListProfilesRequest) returns (ListProfilesResponse);
   rpc Launch(LaunchRequest) returns (stream LaunchEvent);
+  rpc OpenSession(OpenSessionRequest) returns (OpenSessionResponse);
+  rpc Attach(stream ClientFrame) returns (stream ServerFrame);
+  rpc CloseSession(CloseSessionRequest) returns (CloseSessionResponse);
 }
 
 message PingRequest {}
@@ -35,3 +38,33 @@ message LaunchEvent {
   string message = 2;
   int32 exit_code = 3;
 }
+
+// OpenSession opens an isolated agent session and allocates its PTY. Non-blocking.
+message OpenSessionRequest {
+  string profile = 1;
+  string config_path = 2;
+  uint32 cols = 3;
+  uint32 rows = 4;
+}
+message OpenSessionResponse { string session_id = 1; }
+
+// Attach is a long-lived bidi stream: the first ClientFrame carries attach_session_id;
+// subsequent client frames are input/resize, server frames are output until exited.
+message Resize { uint32 cols = 1; uint32 rows = 2; }
+message ClientFrame {
+  oneof msg {
+    string attach_session_id = 1; // MUST be the first frame
+    bytes  input = 2;             // bytes typed into the PTY
+    Resize resize = 3;            // terminal resized
+  }
+}
+message Exited { int32 exit_code = 1; }
+message ServerFrame {
+  oneof msg {
+    bytes  output = 1;            // PTY output bytes
+    Exited exited = 2;            // agent exited; stream ends after this
+  }
+}
+
+message CloseSessionRequest { string session_id = 1; }
+message CloseSessionResponse {}

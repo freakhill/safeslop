@@ -23,8 +23,12 @@ func socketPath() (string, error) {
 
 // Serve binds the UDS (0700 dir / 0600 socket), enforces same-uid peer-auth at Accept time,
 // and serves the Control service until the listener is closed. version is reported by Ping;
-// launchFn handles Launch RPCs (nil => Launch reports "not wired").
-func Serve(version string, launchFn func(profile, configPath string, emit func(*pb.LaunchEvent)) error) error {
+// launchFn handles Launch RPCs (nil => Launch reports "not wired"); resolveFn maps a profile
+// to a SessionSpec for OpenSession (the embedded-cockpit data plane).
+func Serve(version string,
+	launchFn func(profile, configPath string, emit func(*pb.LaunchEvent)) error,
+	resolveFn func(profile, configPath string) (SessionSpec, error),
+) error {
 	path, err := socketPath()
 	if err != nil {
 		return err
@@ -41,7 +45,7 @@ func Serve(version string, launchFn func(profile, configPath string, emit func(*
 		return err
 	}
 	gs := grpc.NewServer()
-	pb.RegisterControlServer(gs, &server{version: version, launchFn: launchFn})
+	pb.RegisterControlServer(gs, &server{version: version, launchFn: launchFn, mgr: NewManager(), resolveFn: resolveFn})
 	return gs.Serve(peerAuthListener{ln})
 }
 

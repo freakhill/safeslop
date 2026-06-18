@@ -101,6 +101,27 @@ func Available() bool {
 	return err == nil
 }
 
+// WrapArgv writes a Seatbelt profile for (workspace, network) to a temp file and returns
+// the argv that runs agentArgv under it, plus a cleanup that removes the file. The caller
+// runs the argv (e.g. on a PTY) and calls cleanup when the process exits.
+func WrapArgv(agentArgv []string, workspace, network string) (argv []string, cleanup func(), err error) {
+	if _, statErr := os.Stat(SandboxExecPath); statErr != nil {
+		return nil, func() {}, fmt.Errorf("sandbox environment requires macOS sandbox-exec at %s", SandboxExecPath)
+	}
+	f, err := os.CreateTemp("", "slop-sb-*.sb")
+	if err != nil {
+		return nil, func() {}, err
+	}
+	if _, err := f.WriteString(Profile(workspace, network)); err != nil {
+		_ = f.Close()
+		_ = os.Remove(f.Name())
+		return nil, func() {}, err
+	}
+	_ = f.Close()
+	argv = append([]string{SandboxExecPath, "-f", f.Name(), "--"}, agentArgv...)
+	return argv, func() { _ = os.Remove(f.Name()) }, nil
+}
+
 // Launch runs spec.Argv under sandbox-exec with a profile generated for the
 // given workspace and network policy.
 func Launch(ctx context.Context, spec exec.LaunchSpec, workspace, network string) (int, error) {
@@ -116,20 +137,13 @@ func Launch(ctx context.Context, spec exec.LaunchSpec, workspace, network string
 		workspace = real
 	}
 
-	f, err := os.CreateTemp("", "slop-*.sb")
+	argv, cleanup, err := WrapArgv(spec.Argv, workspace, network)
 	if err != nil {
 		return 1, err
 	}
-	defer func() { _ = os.Remove(f.Name()) }()
-	if _, err := f.WriteString(Profile(workspace, network)); err != nil {
-		_ = f.Close()
-		return 1, err
-	}
-	if err := f.Close(); err != nil {
-		return 1, err
-	}
+	defer cleanup()
 
 	inner := spec
-	inner.Argv = append([]string{SandboxExecPath, "-f", f.Name(), "--"}, spec.Argv...)
+	inner.Argv = argv
 	return exec.RunInTerminal(ctx, inner)
 }

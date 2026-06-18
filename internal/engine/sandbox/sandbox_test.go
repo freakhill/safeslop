@@ -27,6 +27,28 @@ func TestProfileContainsExpectedDirectives(t *testing.T) {
 	}
 }
 
+func TestWrapArgvWritesProfileAndWraps(t *testing.T) {
+	argv, cleanup, err := WrapArgv([]string{"claude"}, "/ws", "deny")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	if argv[0] != SandboxExecPath || argv[1] != "-f" {
+		t.Fatalf("argv must start with sandbox-exec -f: %v", argv)
+	}
+	if _, err := os.Stat(argv[2]); err != nil {
+		t.Fatalf("profile file %q must exist: %v", argv[2], err)
+	}
+	last := argv[len(argv)-1]
+	if last != "claude" {
+		t.Fatalf("agent argv must be appended: %v", argv)
+	}
+	cleanup()
+	if _, err := os.Stat(argv[2]); !os.IsNotExist(err) {
+		t.Fatalf("cleanup must remove the profile file")
+	}
+}
+
 func TestProfileNetworkAllow(t *testing.T) {
 	p := Profile("/w", "allow")
 	if !strings.Contains(p, "(allow network*)") {

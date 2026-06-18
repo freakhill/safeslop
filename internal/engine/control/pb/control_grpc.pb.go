@@ -22,6 +22,9 @@ const (
 	Control_Ping_FullMethodName         = "/slop.control.v1.Control/Ping"
 	Control_ListProfiles_FullMethodName = "/slop.control.v1.Control/ListProfiles"
 	Control_Launch_FullMethodName       = "/slop.control.v1.Control/Launch"
+	Control_OpenSession_FullMethodName  = "/slop.control.v1.Control/OpenSession"
+	Control_Attach_FullMethodName       = "/slop.control.v1.Control/Attach"
+	Control_CloseSession_FullMethodName = "/slop.control.v1.Control/CloseSession"
 )
 
 // ControlClient is the client API for Control service.
@@ -33,6 +36,9 @@ type ControlClient interface {
 	Ping(ctx context.Context, in *PingRequest, opts ...grpc.CallOption) (*PingResponse, error)
 	ListProfiles(ctx context.Context, in *ListProfilesRequest, opts ...grpc.CallOption) (*ListProfilesResponse, error)
 	Launch(ctx context.Context, in *LaunchRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[LaunchEvent], error)
+	OpenSession(ctx context.Context, in *OpenSessionRequest, opts ...grpc.CallOption) (*OpenSessionResponse, error)
+	Attach(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ClientFrame, ServerFrame], error)
+	CloseSession(ctx context.Context, in *CloseSessionRequest, opts ...grpc.CallOption) (*CloseSessionResponse, error)
 }
 
 type controlClient struct {
@@ -82,6 +88,39 @@ func (c *controlClient) Launch(ctx context.Context, in *LaunchRequest, opts ...g
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Control_LaunchClient = grpc.ServerStreamingClient[LaunchEvent]
 
+func (c *controlClient) OpenSession(ctx context.Context, in *OpenSessionRequest, opts ...grpc.CallOption) (*OpenSessionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(OpenSessionResponse)
+	err := c.cc.Invoke(ctx, Control_OpenSession_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *controlClient) Attach(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ClientFrame, ServerFrame], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Control_ServiceDesc.Streams[1], Control_Attach_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[ClientFrame, ServerFrame]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Control_AttachClient = grpc.BidiStreamingClient[ClientFrame, ServerFrame]
+
+func (c *controlClient) CloseSession(ctx context.Context, in *CloseSessionRequest, opts ...grpc.CallOption) (*CloseSessionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CloseSessionResponse)
+	err := c.cc.Invoke(ctx, Control_CloseSession_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ControlServer is the server API for Control service.
 // All implementations must embed UnimplementedControlServer
 // for forward compatibility.
@@ -91,6 +130,9 @@ type ControlServer interface {
 	Ping(context.Context, *PingRequest) (*PingResponse, error)
 	ListProfiles(context.Context, *ListProfilesRequest) (*ListProfilesResponse, error)
 	Launch(*LaunchRequest, grpc.ServerStreamingServer[LaunchEvent]) error
+	OpenSession(context.Context, *OpenSessionRequest) (*OpenSessionResponse, error)
+	Attach(grpc.BidiStreamingServer[ClientFrame, ServerFrame]) error
+	CloseSession(context.Context, *CloseSessionRequest) (*CloseSessionResponse, error)
 	mustEmbedUnimplementedControlServer()
 }
 
@@ -109,6 +151,15 @@ func (UnimplementedControlServer) ListProfiles(context.Context, *ListProfilesReq
 }
 func (UnimplementedControlServer) Launch(*LaunchRequest, grpc.ServerStreamingServer[LaunchEvent]) error {
 	return status.Error(codes.Unimplemented, "method Launch not implemented")
+}
+func (UnimplementedControlServer) OpenSession(context.Context, *OpenSessionRequest) (*OpenSessionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method OpenSession not implemented")
+}
+func (UnimplementedControlServer) Attach(grpc.BidiStreamingServer[ClientFrame, ServerFrame]) error {
+	return status.Error(codes.Unimplemented, "method Attach not implemented")
+}
+func (UnimplementedControlServer) CloseSession(context.Context, *CloseSessionRequest) (*CloseSessionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CloseSession not implemented")
 }
 func (UnimplementedControlServer) mustEmbedUnimplementedControlServer() {}
 func (UnimplementedControlServer) testEmbeddedByValue()                 {}
@@ -178,6 +229,49 @@ func _Control_Launch_Handler(srv interface{}, stream grpc.ServerStream) error {
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Control_LaunchServer = grpc.ServerStreamingServer[LaunchEvent]
 
+func _Control_OpenSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(OpenSessionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ControlServer).OpenSession(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Control_OpenSession_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ControlServer).OpenSession(ctx, req.(*OpenSessionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Control_Attach_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(ControlServer).Attach(&grpc.GenericServerStream[ClientFrame, ServerFrame]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Control_AttachServer = grpc.BidiStreamingServer[ClientFrame, ServerFrame]
+
+func _Control_CloseSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CloseSessionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ControlServer).CloseSession(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Control_CloseSession_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ControlServer).CloseSession(ctx, req.(*CloseSessionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Control_ServiceDesc is the grpc.ServiceDesc for Control service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -193,12 +287,26 @@ var Control_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "ListProfiles",
 			Handler:    _Control_ListProfiles_Handler,
 		},
+		{
+			MethodName: "OpenSession",
+			Handler:    _Control_OpenSession_Handler,
+		},
+		{
+			MethodName: "CloseSession",
+			Handler:    _Control_CloseSession_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "Launch",
 			Handler:       _Control_Launch_Handler,
 			ServerStreams: true,
+		},
+		{
+			StreamName:    "Attach",
+			Handler:       _Control_Attach_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
 		},
 	},
 	Metadata: "internal/engine/control/control.proto",
