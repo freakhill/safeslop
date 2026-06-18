@@ -41,17 +41,23 @@ func Command(slopPath, profile, cwd string, oscTitle bool) string {
 	return b.String()
 }
 
-// AdapterArgv builds the argv that opens `command` in the named terminal. Unknown terminals
-// fall back to the generic `open -a` adapter.
-func AdapterArgv(terminal, command, session string) []string {
-	_ = session
+// AdapterArgv builds the argv that opens `command` (a POSIX-sh command line, e.g. from
+// Command) in the named terminal, run through `shell` (default /bin/sh).
+//
+//   - Ghostty: `open -na Ghostty --args -e <shell> -lc <command>` — Ghostty's -e takes a
+//     program + args, so the command is wrapped in a shell (a bare command string would be
+//     exec'd as if it were a binary). Honors the user's preferred shell.
+//   - Terminal.app (and "generic"/unknown — the always-present fallback): AppleScript
+//     `do script`, which runs the command in a new Terminal window's own login shell.
+func AdapterArgv(terminal, shell, command string) []string {
+	if shell == "" {
+		shell = "/bin/sh"
+	}
 	switch terminal {
-	case "Terminal.app":
+	case "Ghostty":
+		return []string{"open", "-na", "Ghostty", "--args", "-e", shell, "-lc", command}
+	default: // "Terminal.app", "generic", any unknown value
 		script := `tell application "Terminal" to do script "` + appleScriptEscaper.Replace(command) + `"`
 		return []string{"osascript", "-e", script}
-	case "Ghostty":
-		return []string{"open", "-na", "Ghostty", "--args", "-e", command}
-	default: // "generic" and any unknown value
-		return []string{"open", "-a", "Terminal", "--args", command}
 	}
 }
