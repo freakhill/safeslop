@@ -10,7 +10,14 @@ CONTAINER_SRC := library/layer/container
 CONTAINER_DST := internal/engine/container/assets
 SYNCED        := allowlist.domains Dockerfile.agent Dockerfile.agent.tools
 
-.PHONY: build test vet fmt fmtcheck check check-assets sync-container-assets dist sign clean
+.PHONY: build test vet fmt fmtcheck check check-assets sync-container-assets dist sign clean proto
+
+## Regenerate the gRPC control-plane stubs (dev-only; needs protoc + protoc-gen-go[-grpc]).
+## Generated *.pb.go are committed, so CI/`make build` never run protoc.
+proto:
+	protoc --go_out=. --go_opt=module=github.com/freakhill/safeslop \
+	       --go-grpc_out=. --go-grpc_opt=module=github.com/freakhill/safeslop \
+	       internal/engine/control/control.proto
 
 ## Build the local binary (static — no cgo, immune to the WARP/uv install path).
 build:
