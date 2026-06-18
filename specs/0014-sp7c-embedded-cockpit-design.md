@@ -140,3 +140,15 @@ Three units, each its own plan:
 3. **Panels** (tracking/network/…): deferred; chrome reserves regions, control plane can add streaming status RPCs later.
 4. **One window = one session** in v1; tabs (multiple sessions per window) deferred — the engine already supports N sessions, so it's purely an app-side addition.
 5. **External-terminal opt-out granularity:** global config vs per-profile vs per-launch — leaning per-launch override on top of a config default.
+
+---
+
+## Appendix A — app-side memory / concurrency tooling (Swift track)
+
+Reference for the Xcode work (§5, §7). **There is no useful `valgrind` on modern macOS** (effectively unsupported on Apple Silicon, and noisy under ARC anyway). Swift is **ARC, not GC**, so "leaks" are almost always **retain cycles**, and the native toolset covers more than valgrind would:
+
+- **Memory errors** (use-after-free, overflow, double-free) — **AddressSanitizer** is the direct valgrind-memcheck analog: Xcode scheme → Diagnostics → Address Sanitizer, or `swift build -Xswiftc -sanitize=address`. **UndefinedBehaviorSanitizer** (`-sanitize=undefined`) for the C-interop edges (SwiftTerm's PTY/byte handling, the gRPC framing).
+- **Data races** — **ThreadSanitizer** (`-sanitize=thread`). This is the high-value one here: the `Attach` stream is read on a background task and must hand bytes to the `@MainActor` SwiftTerm view; TSan catches the seams. Run it while wiring the stream, not after.
+- **Leaks / retain cycles** — the **Memory Graph Debugger** (the cube icon while paused) is *the* tool; nothing in the valgrind world matches it for SwiftUI closure/delegate cycles. Plus **Instruments → Leaks / Allocations** (generational: mark heap → act → mark → see survivors), and the scriptable **`leaks <pid>`** CLI (set `MallocStackLogging=1` for backtraces; `NSZombie`/`MallocScribble` for UAF on the AppKit/CF objects SwiftTerm bridges).
+
+**Cockpit-specific check:** when a window closes (`CloseSession`), confirm the client-side `Attach` task **and** the SwiftTerm view actually deallocate (Memory Graph Debugger) — a leaked stream subscription is the app-side mirror of the engine-side teardown leak fixed in SP7c-2 (the engine reaps its pump goroutine + container/VM; the app must reap its subscription + view).
