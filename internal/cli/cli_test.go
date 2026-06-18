@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/freakhill/safeslop/internal/engine/policy"
@@ -48,5 +49,25 @@ func TestRunProfileStagesSecretsAndNpmrcThenWipes(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(ws, ".slop", "runtime", "probe")); !os.IsNotExist(err) {
 		t.Fatalf("stage dir was not wiped on exit: err=%v", err)
+	}
+}
+
+func TestDoctorReportsGkeAuthPlugin(t *testing.T) {
+	report := doctorReport()
+	if _, ok := report["gke-gcloud-auth-plugin"]; !ok {
+		t.Fatalf("doctor must probe gke-gcloud-auth-plugin: %v keys", report)
+	}
+}
+
+func TestRunProfileKubeVMGuarded(t *testing.T) {
+	prof := policy.Profile{
+		Agent:       "claude",
+		Environment: "vm",
+		Network:     "allow",
+		Credentials: &policy.Credentials{Kube: &policy.KubeCluster{Eks: &policy.EksCluster{Name: "prod"}}},
+	}
+	_, err := runProfile("deploy", prof, []string{"claude"}, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "vm") {
+		t.Fatalf("expected a vm-unsupported guard error for kube creds, got: %v", err)
 	}
 }

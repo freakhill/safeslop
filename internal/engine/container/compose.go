@@ -17,6 +17,7 @@ type composeParams struct {
 	SSHAuthSock string
 	Term        string
 	NpmConfig   bool // true when a staged .npmrc exists
+	Kubeconfig  bool // true when a staged kubeconfig exists (KUBECONFIG -> bind-mount path)
 }
 
 func renderCompose(p composeParams) (string, error) {

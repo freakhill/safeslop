@@ -2,6 +2,7 @@ package container
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -87,5 +88,35 @@ func TestComposeHasNoHostBridgeLeak(t *testing.T) {
 	}
 	if !strings.Contains(yml, "internal: true") {
 		t.Fatalf("agent net no longer internal-only:\n%s", yml)
+	}
+}
+
+func TestRenderComposeKubeconfig(t *testing.T) {
+	with, err := renderCompose(composeParams{RuntimeDir: "/r", Workspace: "/w", StageDir: "/r", Kubeconfig: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(with, "KUBECONFIG: /slop/runtime/kubeconfig") {
+		t.Fatalf("compose missing KUBECONFIG env:\n%s", with)
+	}
+	without, err := renderCompose(composeParams{RuntimeDir: "/r", Workspace: "/w", StageDir: "/r", Kubeconfig: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(without, "KUBECONFIG") {
+		t.Fatalf("KUBECONFIG must be absent when no kubeconfig staged:\n%s", without)
+	}
+}
+
+// secretEnv carries only true secrets; KUBECONFIG (a non-secret path) is delivered via
+// the compose env, never written into secrets.env. Pin that invariant.
+func TestSecretsEnvExcludesKubeconfig(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := writeSecretsEnv(dir, []string{"AWS_ACCESS_KEY_ID=AKIA"}); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := os.ReadFile(filepath.Join(dir, "secrets.env"))
+	if strings.Contains(string(body), "KUBECONFIG") {
+		t.Fatalf("KUBECONFIG must never ride secrets.env:\n%s", body)
 	}
 }
