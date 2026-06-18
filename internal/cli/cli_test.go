@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/freakhill/safeslop/internal/engine/policy"
 )
 
@@ -88,5 +90,15 @@ func TestRunProfileSshVMGuarded(t *testing.T) {
 	_, err := runProfile("deploy", prof, []string{"claude"}, t.TempDir())
 	if err == nil || !strings.Contains(err.Error(), "vm") {
 		t.Fatalf("expected vm guard error for ssh creds, got: %v", err)
+	}
+}
+
+func TestServeAndLaunchRegistered(t *testing.T) {
+	have := map[string]bool{}
+	for _, c := range []*cobra.Command{cmdServe(), cmdLaunch()} {
+		have[c.Name()] = true
+	}
+	if !have["serve"] || !have["launch"] {
+		t.Fatalf("serve/launch commands missing: %v", have)
 	}
 }
