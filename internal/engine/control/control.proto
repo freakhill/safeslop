@@ -1,0 +1,37 @@
+syntax = "proto3";
+package slop.control.v1;
+option go_package = "github.com/freakhill/safeslop/internal/engine/control/pb;pb";
+
+// Control is the app<->engine control plane (gRPC over a Unix-domain socket).
+service Control {
+  rpc Ping(PingRequest) returns (PingResponse);
+  rpc ListProfiles(ListProfilesRequest) returns (ListProfilesResponse);
+  rpc Launch(LaunchRequest) returns (stream LaunchEvent);
+}
+
+message PingRequest {}
+message PingResponse { string version = 1; }
+
+message ListProfilesRequest { string config_path = 1; } // dir holding slop.cue; empty = server cwd
+message Profile {
+  string name = 1;
+  string agent = 2;
+  string environment = 3;
+  string network = 4;
+}
+message ListProfilesResponse { repeated Profile profiles = 1; }
+
+message LaunchRequest {
+  string profile = 1;
+  string config_path = 2;
+}
+message LaunchEvent {
+  enum Kind {
+    SPAWNED = 0;
+    EXITED = 1;
+    ERROR = 2;
+  }
+  Kind kind = 1;
+  string message = 2;
+  int32 exit_code = 3;
+}

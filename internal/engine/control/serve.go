@@ -1,0 +1,63 @@
+package control
+
+import (
+	"fmt"
+	"net"
+	"os"
+	"path/filepath"
+
+	"google.golang.org/grpc"
+
+	"github.com/freakhill/safeslop/internal/engine/control/pb"
+)
+
+// socketPath is ~/.slop/s.sock — deliberately short (macOS sun_path is 104 bytes;
+// ~/Library/Application Support/... + a long username would silently overflow).
+func socketPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".slop", "s.sock"), nil
+}
+
+// Serve binds the UDS (0700 dir / 0600 socket), enforces same-uid peer-auth at Accept time,
+// and serves the Control service until the listener is closed. version is reported by Ping;
+// launchFn handles Launch RPCs (nil => Launch reports "not wired").
+func Serve(version string, launchFn func(profile, configPath string, emit func(*pb.LaunchEvent)) error) error {
+	path, err := socketPath()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	_ = os.Remove(path) // clear a stale socket from a prior crash
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		return fmt.Errorf("bind %s: %w", path, err)
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		return err
+	}
+	gs := grpc.NewServer()
+	pb.RegisterControlServer(gs, &server{version: version, launchFn: launchFn})
+	return gs.Serve(peerAuthListener{ln})
+}
+
+// peerAuthListener rejects cross-uid peers at Accept time (before any RPC is served).
+type peerAuthListener struct{ net.Listener }
+
+func (l peerAuthListener) Accept() (net.Conn, error) {
+	c, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	if uc, ok := c.(*net.UnixConn); ok {
+		if aerr := authorizePeer(uc); aerr != nil {
+			_ = c.Close()
+			return l.Accept() // skip the unauthorized peer, keep serving
+		}
+	}
+	return c, nil
+}

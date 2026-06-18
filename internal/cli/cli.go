@@ -10,18 +10,23 @@ import (
 	"os"
 	osexec "os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 
 	"github.com/spf13/cobra"
 
 	"github.com/freakhill/safeslop/internal/engine/container"
+	"github.com/freakhill/safeslop/internal/engine/control"
+	"github.com/freakhill/safeslop/internal/engine/control/pb"
 	"github.com/freakhill/safeslop/internal/engine/creds"
 	engexec "github.com/freakhill/safeslop/internal/engine/exec"
+	"github.com/freakhill/safeslop/internal/engine/launch"
 	"github.com/freakhill/safeslop/internal/engine/policy"
 	"github.com/freakhill/safeslop/internal/engine/sandbox"
 	"github.com/freakhill/safeslop/internal/engine/secrets"
 	"github.com/freakhill/safeslop/internal/engine/toolchain"
+	"github.com/freakhill/safeslop/internal/engine/userconfig"
 	"github.com/freakhill/safeslop/internal/engine/vm"
 )
 
@@ -51,7 +56,7 @@ func newRoot() *cobra.Command {
 		SilenceErrors: true,
 	}
 	root.PersistentFlags().BoolVar(&jsonOut, "json", false, "emit machine-readable JSON output")
-	root.AddCommand(cmdValidate(), cmdList(), cmdDoctor(), cmdRun(), cmdDown())
+	root.AddCommand(cmdValidate(), cmdList(), cmdDoctor(), cmdRun(), cmdDown(), cmdServe(), cmdLaunch())
 	return root
 }
 
@@ -280,6 +285,75 @@ func cmdDown() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func cmdServe() *cobra.Command {
+	return &cobra.Command{
+		Use:   "serve",
+		Short: "Run the gRPC control plane on ~/.slop/s.sock (drives the GUI app)",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return control.Serve(Version, func(profile, configPath string, emit func(*pb.LaunchEvent)) error {
+				emit(&pb.LaunchEvent{Kind: pb.LaunchEvent_SPAWNED, Message: profile})
+				code, err := launchProfile(profile, configPath)
+				if err != nil {
+					emit(&pb.LaunchEvent{Kind: pb.LaunchEvent_ERROR, Message: err.Error()})
+					return nil
+				}
+				emit(&pb.LaunchEvent{Kind: pb.LaunchEvent_EXITED, ExitCode: int32(code)})
+				return nil
+			})
+		},
+	}
+}
+
+func cmdLaunch() *cobra.Command {
+	return &cobra.Command{
+		Use:   "launch <profile>",
+		Short: "Open a terminal window running the profile's agent (ctty intact)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			_, err := launchProfile(args[0], "")
+			return err
+		},
+	}
+}
+
+// launchProfile opens the user's preferred terminal (from ~/.config/slop/config.cue) running
+// `slop run <profile>`, so the real ctty handoff happens inside that window. Returns once the
+// terminal is spawned. configPath is reserved for the gRPC delegation (v1 resolves slop.cue
+// from the workspace).
+// profileNameRe constrains launchable profile names: the name is embedded in the spawned
+// terminal's window title and SLOP_SESSION, so it must not carry shell/title metacharacters.
+var profileNameRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+
+func launchProfile(name, configPath string) (int, error) {
+	_ = configPath
+	if !profileNameRe.MatchString(name) {
+		return 1, fmt.Errorf("invalid profile name %q (allowed: letters, digits, dot, underscore, hyphen)", name)
+	}
+	ws, err := os.Getwd()
+	if err != nil {
+		return 1, err
+	}
+	ucPath, err := userconfig.DefaultPath()
+	if err != nil {
+		return 1, err
+	}
+	uc, err := userconfig.Load(ucPath)
+	if err != nil {
+		return 1, err
+	}
+	slopPath, err := os.Executable()
+	if err != nil {
+		return 1, err
+	}
+	cmd := launch.Command(slopPath, name, ws, uc.Tag.OSCTitle)
+	argv := launch.AdapterArgv(uc.Terminal, cmd, name)
+	if err := osexec.Command(argv[0], argv[1:]...).Run(); err != nil {
+		return 1, fmt.Errorf("open terminal (%s): %w", uc.Terminal, err)
+	}
+	return 0, nil
 }
 
 // ---- helpers ----
