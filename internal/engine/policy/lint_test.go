@@ -56,3 +56,26 @@ func TestLintKubeTripsOpenEgress(t *testing.T) {
 		t.Fatalf("kube creds under sandbox+allow must trip open-egress lint: %+v", ws)
 	}
 }
+
+func TestLintSshWriteOpenEgress(t *testing.T) {
+	cfg := &Config{Profiles: map[string]Profile{
+		"push_open": {Environment: "container", Network: "allow", Credentials: &Credentials{Ssh: &SshCreds{Write: true}}},
+		"push_deny": {Environment: "container", Network: "deny", Credentials: &Credentials{Ssh: &SshCreds{Write: true}}},
+		"ro_open":   {Environment: "container", Network: "allow", Credentials: &Credentials{Ssh: &SshCreds{Write: false}}},
+	}}
+	codes := map[string]string{}
+	for _, w := range Lint(cfg) {
+		if w.Code == "ssh-write-open-egress" {
+			codes[w.Profile] = w.Code
+		}
+	}
+	if codes["push_open"] != "ssh-write-open-egress" {
+		t.Fatalf("write+allow must be flagged: %+v", codes)
+	}
+	if _, bad := codes["push_deny"]; bad {
+		t.Fatal("write+deny must NOT be flagged")
+	}
+	if _, bad := codes["ro_open"]; bad {
+		t.Fatal("read-only+allow must NOT be flagged")
+	}
+}
