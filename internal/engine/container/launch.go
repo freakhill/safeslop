@@ -114,7 +114,7 @@ func PrepareSession(ctx context.Context, agentArgv []string, workspace, network 
 		return nil, func() {}, err
 	}
 	return argv, func() {
-		_ = Down(context.Background(), composeFile)
+		_ = Teardown(context.Background(), composeFile)
 		_ = os.RemoveAll(stageDir)
 	}, nil
 }

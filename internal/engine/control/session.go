@@ -8,10 +8,16 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/creack/pty"
 )
+
+// closeGrace is how long closeProc waits for the agent to exit after SIGTERM before escalating
+// to SIGKILL. It gives a `docker compose run` / `ssh` client time to tear down its remote side
+// (e.g. removing the `--rm` agent container) instead of being hard-killed and orphaning it.
+const closeGrace = 5 * time.Second
 
 // SessionSpec describes the agent process to run on a PTY.
 type SessionSpec struct {
@@ -44,7 +50,18 @@ func (s *Session) Code() int               { return s.code }
 func (s *Session) closeProc() {
 	s.closeOne.Do(func() {
 		if s.cmd.Process != nil {
-			_ = s.cmd.Process.Kill()
+			// SIGTERM first so a `docker compose run` / `ssh` client tears down its remote side
+			// cleanly (an untrappable SIGKILL orphans the --rm container / remote PTY). Escalate
+			// to SIGKILL only if the process ignores the term within the grace window. Wait for
+			// the exit before running onClose so the remote teardown finishes before OnClose
+			// (e.g. compose down) runs.
+			_ = s.cmd.Process.Signal(syscall.SIGTERM)
+			select {
+			case <-s.exited:
+			case <-time.After(closeGrace):
+				_ = s.cmd.Process.Kill()
+				<-s.exited
+			}
 		}
 		_ = s.ptmx.Close()
 		if s.onClose != nil {
