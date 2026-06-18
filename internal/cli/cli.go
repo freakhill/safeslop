@@ -293,17 +293,62 @@ func cmdServe() *cobra.Command {
 		Short: "Run the gRPC control plane on ~/.slop/s.sock (drives the GUI app)",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			return control.Serve(Version, func(profile, configPath string, emit func(*pb.LaunchEvent)) error {
-				emit(&pb.LaunchEvent{Kind: pb.LaunchEvent_SPAWNED, Message: profile})
-				code, err := launchProfile(profile, configPath)
-				if err != nil {
-					emit(&pb.LaunchEvent{Kind: pb.LaunchEvent_ERROR, Message: err.Error()})
+			return control.Serve(Version,
+				func(profile, configPath string, emit func(*pb.LaunchEvent)) error {
+					emit(&pb.LaunchEvent{Kind: pb.LaunchEvent_SPAWNED, Message: profile})
+					code, err := launchProfile(profile, configPath)
+					if err != nil {
+						emit(&pb.LaunchEvent{Kind: pb.LaunchEvent_ERROR, Message: err.Error()})
+						return nil
+					}
+					emit(&pb.LaunchEvent{Kind: pb.LaunchEvent_EXITED, ExitCode: int32(code)})
 					return nil
-				}
-				emit(&pb.LaunchEvent{Kind: pb.LaunchEvent_EXITED, ExitCode: int32(code)})
-				return nil
-			})
+				},
+				resolveSession,
+			)
 		},
+	}
+}
+
+// resolveSession turns a profile name into a control.SessionSpec: the agent argv (optionally
+// toolchain-wrapped), the workspace, and — for environment:sandbox — the sandbox-exec wrap +
+// its temp-profile cleanup as OnClose. host/sandbox only (SP7c-1); container/vm follow (SP7c-2).
+func resolveSession(profile, configPath string) (control.SessionSpec, error) {
+	path, err := findConfig(configPath)
+	if err != nil {
+		return control.SessionSpec{}, err
+	}
+	cfg, err := policy.Load(path)
+	if err != nil {
+		return control.SessionSpec{}, err
+	}
+	name, prof, err := selectProfile(cfg, profile)
+	if err != nil {
+		return control.SessionSpec{}, err
+	}
+	_ = name
+	argv, err := agentArgv(prof)
+	if err != nil {
+		return control.SessionSpec{}, err
+	}
+	if prof.Toolchain != nil && toolchain.Wraps(prof.Toolchain.Kind) {
+		argv = toolchain.Wrap(prof.Toolchain.Kind, prof.Toolchain.Run, argv)
+	}
+	ws := prof.Workspace
+	if ws == "" {
+		ws, _ = os.Getwd()
+	}
+	switch prof.Environment {
+	case "host":
+		return control.SessionSpec{Argv: argv, Dir: ws}, nil
+	case "sandbox", "": // sandbox is the default
+		wrapped, cleanup, err := sandbox.WrapArgv(argv, ws, prof.Network)
+		if err != nil {
+			return control.SessionSpec{}, err
+		}
+		return control.SessionSpec{Argv: wrapped, Dir: ws, OnClose: cleanup}, nil
+	default:
+		return control.SessionSpec{}, fmt.Errorf("embedded cockpit supports environment host/sandbox in SP7c-1; %q is SP7c-2", prof.Environment)
 	}
 }
 
