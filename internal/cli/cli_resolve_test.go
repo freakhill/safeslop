@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -41,9 +42,10 @@ func TestResolveSessionHostAndSandbox(t *testing.T) {
 	if len(h.Argv) == 0 || h.Argv[0] != "claude" {
 		t.Fatalf("host argv = %v, want it to start with claude", h.Argv)
 	}
-	if h.OnClose != nil {
-		t.Fatal("host session needs no cleanup")
+	if h.OnClose == nil {
+		t.Fatal("host session must carry a cleanup (per-session stage-dir wipe)")
 	}
+	h.OnClose() // must not panic
 
 	s, err := resolveSession("s", path)
 	if err != nil {
@@ -70,5 +72,56 @@ func TestResolveSessionContainerVMErrorWhenToolingAbsent(t *testing.T) {
 	}
 	if _, err := resolveSession("v", path); err == nil || !strings.Contains(err.Error(), "tart") {
 		t.Fatalf("vm resolve must reach PrepareSession and fail on tart availability, got %v", err)
+	}
+}
+
+const secretHostCue = `package slop
+slop: {
+	version: 1
+	profiles: {
+		h: {agent: "claude", environment: "host", network: "deny", secrets: {FOO: "env:TEST_SLOP_SECRET"}}
+	}
+}
+`
+
+const sshHostCue = `package slop
+slop: {
+	version: 1
+	profiles: {
+		h: {agent: "claude", environment: "host", network: "deny", credentials: {ssh: {}}}
+	}
+}
+`
+
+func TestResolveSessionDeliversSecretToHostEnv(t *testing.T) {
+	t.Setenv("TEST_SLOP_SECRET", "s3cr3t")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "slop.cue")
+	if err := os.WriteFile(path, []byte(secretHostCue), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir) // any cockpit-* stage dir lands under a throwaway cwd
+
+	spec, err := resolveSession("h", path)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if !slices.Contains(spec.Env, "FOO=s3cr3t") {
+		t.Fatalf("secret not delivered to host env: %v", spec.Env)
+	}
+	if spec.OnClose != nil {
+		spec.OnClose() // stage-dir wipe must not panic
+	}
+}
+
+func TestResolveSessionRejectsSshCreds(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "slop.cue")
+	if err := os.WriteFile(path, []byte(sshHostCue), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	if _, err := resolveSession("h", path); err == nil || !strings.Contains(err.Error(), "ssh credentials") {
+		t.Fatalf("expected ssh-cred rejection, got %v", err)
 	}
 }

@@ -310,9 +310,10 @@ func cmdServe() *cobra.Command {
 	}
 }
 
-// resolveSession turns a profile name into a control.SessionSpec: the agent argv (optionally
-// toolchain-wrapped), the workspace, and the per-environment cleanup as OnClose. All four
-// environments (host/sandbox direct; container/vm provisioned + torn down on close).
+// resolveSession turns a profile name into a control.SessionSpec: the (optionally toolchain-
+// wrapped) agent argv, the workspace, the profile's resolved secrets + staged credentials, and
+// the per-environment cleanup as OnClose. Credential parity with `slop run` (SP7c-3), minus ssh
+// deploy keys, which are deferred in the cockpit (they key off the workspace git origin).
 func resolveSession(profile, configPath string) (control.SessionSpec, error) {
 	path, err := findConfig(configPath)
 	if err != nil {
@@ -322,11 +323,10 @@ func resolveSession(profile, configPath string) (control.SessionSpec, error) {
 	if err != nil {
 		return control.SessionSpec{}, err
 	}
-	name, prof, err := selectProfile(cfg, profile)
+	_, prof, err := selectProfile(cfg, profile)
 	if err != nil {
 		return control.SessionSpec{}, err
 	}
-	_ = name
 	argv, err := agentArgv(prof)
 	if err != nil {
 		return control.SessionSpec{}, err
@@ -338,53 +338,81 @@ func resolveSession(profile, configPath string) (control.SessionSpec, error) {
 	if ws == "" {
 		ws, _ = os.Getwd()
 	}
+
+	// Credential gates the cockpit can't satisfy yet (reject before staging anything):
+	// ssh mints a per-window deploy key scoped to the *workspace* git origin, but slop serve's
+	// cwd isn't the workspace — deferred to `slop run`. vm can't reach kube (mirrors runProfile).
+	if prof.Credentials != nil {
+		if prof.Credentials.Ssh != nil {
+			return control.SessionSpec{}, fmt.Errorf("ssh credentials aren't supported in cockpit sessions yet (the deploy key is scoped to the workspace git origin); use `slop run`")
+		}
+		if prof.Environment == "vm" && prof.Credentials.Kube != nil {
+			return control.SessionSpec{}, fmt.Errorf("kube credentials are not supported with environment:%q; use environment:\"container\" (specs/0010)", prof.Environment)
+		}
+	}
+
+	// Per-session stage dir (unique → N concurrent sessions don't collide; also the vm clone name).
+	base := filepath.Join(ws, ".slop", "runtime")
+	if err := os.MkdirAll(base, 0o700); err != nil {
+		return control.SessionSpec{}, err
+	}
+	stageDir, err := os.MkdirTemp(base, "cockpit-*")
+	if err != nil {
+		return control.SessionSpec{}, err
+	}
+	secretEnv, pathEnv, err := stageProfile(context.Background(), prof, stageDir)
+	if err != nil {
+		_ = os.RemoveAll(stageDir)
+		return control.SessionSpec{}, err
+	}
+	wipe := func() { _ = os.RemoveAll(stageDir) }
+
 	switch prof.Environment {
 	case "host":
-		return control.SessionSpec{Argv: argv, Dir: ws}, nil
+		env := append(append(os.Environ(), secretEnv...), pathEnv...)
+		return control.SessionSpec{Argv: argv, Dir: ws, Env: env, OnClose: wipe}, nil
 	case "sandbox", "": // sandbox is the default
-		wrapped, cleanup, err := sandbox.WrapArgv(argv, ws, prof.Network)
-		if err != nil {
-			return control.SessionSpec{}, err
-		}
-		return control.SessionSpec{Argv: wrapped, Dir: ws, OnClose: cleanup}, nil
-	case "container":
-		base := filepath.Join(ws, ".slop", "runtime")
-		if err := os.MkdirAll(base, 0o700); err != nil {
-			return control.SessionSpec{}, err
-		}
-		stageDir, err := os.MkdirTemp(base, "cockpit-*")
-		if err != nil {
-			return control.SessionSpec{}, err
-		}
-		cargv, cleanup, err := container.PrepareSession(context.Background(), argv, ws, prof.Network, nil, stageDir)
+		wrapped, wrapCleanup, err := sandbox.WrapArgv(argv, ws, prof.Network)
 		if err != nil {
 			_ = os.RemoveAll(stageDir)
 			return control.SessionSpec{}, err
 		}
-		return control.SessionSpec{Argv: cargv, Dir: ws, OnClose: cleanup}, nil
-	case "vm":
-		base := filepath.Join(ws, ".slop", "runtime")
-		if err := os.MkdirAll(base, 0o700); err != nil {
-			return control.SessionSpec{}, err
-		}
-		stageDir, err := os.MkdirTemp(base, "cockpit-*")
+		env := append(append(os.Environ(), secretEnv...), pathEnv...)
+		return control.SessionSpec{Argv: wrapped, Dir: ws, Env: env, OnClose: chainClose(wrapCleanup, wipe)}, nil
+	case "container":
+		cargv, cleanup, err := container.PrepareSession(context.Background(), argv, ws, prof.Network, secretEnv, stageDir)
 		if err != nil {
+			_ = os.RemoveAll(stageDir)
 			return control.SessionSpec{}, err
 		}
+		return control.SessionSpec{Argv: cargv, Dir: ws, OnClose: cleanup}, nil // cleanup wipes stageDir
+	case "vm":
 		tk := ""
 		if prof.Toolchain != nil {
 			tk = prof.Toolchain.Kind
 		}
-		// stageDir basename is the per-session VM clone name, so concurrent same-profile
-		// sessions don't collide on tart names (SP7c-1 N-session guarantee).
-		vargv, cleanup, err := vm.PrepareSession(context.Background(), argv, prof.Network, nil, stageDir, filepath.Base(stageDir), tk)
+		// stageDir basename is the per-session VM clone name (concurrency isolation).
+		vargv, cleanup, err := vm.PrepareSession(context.Background(), argv, prof.Network, secretEnv, stageDir, filepath.Base(stageDir), tk)
 		if err != nil {
 			_ = os.RemoveAll(stageDir)
 			return control.SessionSpec{}, err
 		}
-		return control.SessionSpec{Argv: vargv, Dir: ws, OnClose: cleanup}, nil
+		return control.SessionSpec{Argv: vargv, Dir: ws, OnClose: cleanup}, nil // cleanup wipes stageDir
 	default:
+		_ = os.RemoveAll(stageDir)
 		return control.SessionSpec{}, fmt.Errorf("unknown environment %q", prof.Environment)
+	}
+}
+
+// chainClose returns a cleanup that runs fns in order, skipping nils — used to compose a
+// session's OnClose (e.g. a sandbox temp-profile removal followed by the stage-dir wipe).
+func chainClose(fns ...func()) func() {
+	return func() {
+		for _, f := range fns {
+			if f != nil {
+				f()
+			}
+		}
 	}
 }
 
