@@ -9,9 +9,10 @@ import Observation
 @MainActor
 @Observable
 final class CockpitSession {
-    enum State: Equatable { case opening, running, closed, error(String) }
+    enum State: Equatable { case opening, needsTrust(String), running, closed, error(String) }
 
     let profile: Safeslop_Control_V1_Profile
+    let configPath: String
     private(set) var state: State = .opening
     private(set) var sessionID: String = ""
     private(set) var exitCode: Int? = nil
@@ -24,8 +25,9 @@ final class CockpitSession {
     private let outboundContinuation: AsyncStream<Safeslop_Control_V1_ClientFrame>.Continuation
     private var task: Task<Void, Never>?
 
-    init(profile: Safeslop_Control_V1_Profile) {
+    init(profile: Safeslop_Control_V1_Profile, configPath: String = "") {
         self.profile = profile
+        self.configPath = configPath
         (self.outbound, self.outboundContinuation) =
             AsyncStream<Safeslop_Control_V1_ClientFrame>.makeStream()
     }
@@ -109,7 +111,35 @@ final class CockpitSession {
         } catch is CancellationError {
             // close() was called — normal teardown.
         } catch {
-            await MainActor.run { self.state = .error(String(describing: error)) }
+            // The engine fail-closes OpenSession on an untrusted/changed safeslop.cue (specs/0024
+            // S1a). Surface that as needsTrust (the in-place trust sheet), not a generic error.
+            let desc = String(describing: error)
+            await MainActor.run {
+                if desc.contains("not trusted") || desc.contains("changed since you trusted") {
+                    self.state = .needsTrust(desc)
+                } else {
+                    self.state = .error(desc)
+                }
+            }
+        }
+    }
+
+    /// Approve the repo's safeslop.cue via the Trust RPC, then restart the session — called from the
+    /// trust sheet after the user reviews the profile's capabilities (the safe-by-design trust flow,
+    /// specs/research/2026-06-20-cockpit-safe-by-design.md). The engine's peer-auth (uid +
+    /// process-tree) already gates who may approve.
+    func approveTrustAndRetry(cols: UInt32 = 80, rows: UInt32 = 24) {
+        state = .opening
+        task?.cancel()
+        task = nil
+        Task {
+            do {
+                _ = try await EngineConnection.trust(configPath: configPath)
+            } catch {
+                await MainActor.run { self.state = .error("trust failed: \(String(describing: error))") }
+                return
+            }
+            await MainActor.run { self.start(cols: cols, rows: rows) }
         }
     }
 }
