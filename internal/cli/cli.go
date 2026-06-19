@@ -310,9 +310,10 @@ func cmdServe() *cobra.Command {
 	}
 }
 
-// resolveSession turns a profile name into a control.SessionSpec: the agent argv (optionally
-// toolchain-wrapped), the workspace, and the per-environment cleanup as OnClose. All four
-// environments (host/sandbox direct; container/vm provisioned + torn down on close).
+// resolveSession turns a profile name into a control.SessionSpec: the (optionally toolchain-
+// wrapped) agent argv, the workspace, the profile's resolved secrets + staged credentials, and
+// the per-environment cleanup as OnClose. Credential parity with `slop run` (SP7c-3), minus ssh
+// deploy keys, which are deferred in the cockpit (they key off the workspace git origin).
 func resolveSession(profile, configPath string) (control.SessionSpec, error) {
 	path, err := findConfig(configPath)
 	if err != nil {
@@ -322,11 +323,10 @@ func resolveSession(profile, configPath string) (control.SessionSpec, error) {
 	if err != nil {
 		return control.SessionSpec{}, err
 	}
-	name, prof, err := selectProfile(cfg, profile)
+	_, prof, err := selectProfile(cfg, profile)
 	if err != nil {
 		return control.SessionSpec{}, err
 	}
-	_ = name
 	argv, err := agentArgv(prof)
 	if err != nil {
 		return control.SessionSpec{}, err
@@ -338,53 +338,81 @@ func resolveSession(profile, configPath string) (control.SessionSpec, error) {
 	if ws == "" {
 		ws, _ = os.Getwd()
 	}
+
+	// Credential gates the cockpit can't satisfy yet (reject before staging anything):
+	// ssh mints a per-window deploy key scoped to the *workspace* git origin, but slop serve's
+	// cwd isn't the workspace — deferred to `slop run`. vm can't reach kube (mirrors runProfile).
+	if prof.Credentials != nil {
+		if prof.Credentials.Ssh != nil {
+			return control.SessionSpec{}, fmt.Errorf("ssh credentials aren't supported in cockpit sessions yet (the deploy key is scoped to the workspace git origin); use `slop run`")
+		}
+		if prof.Environment == "vm" && prof.Credentials.Kube != nil {
+			return control.SessionSpec{}, fmt.Errorf("kube credentials are not supported with environment:%q; use environment:\"container\" (specs/0010)", prof.Environment)
+		}
+	}
+
+	// Per-session stage dir (unique → N concurrent sessions don't collide; also the vm clone name).
+	base := filepath.Join(ws, ".slop", "runtime")
+	if err := os.MkdirAll(base, 0o700); err != nil {
+		return control.SessionSpec{}, err
+	}
+	stageDir, err := os.MkdirTemp(base, "cockpit-*")
+	if err != nil {
+		return control.SessionSpec{}, err
+	}
+	secretEnv, pathEnv, err := stageProfile(context.Background(), prof, stageDir)
+	if err != nil {
+		_ = os.RemoveAll(stageDir)
+		return control.SessionSpec{}, err
+	}
+	wipe := func() { _ = os.RemoveAll(stageDir) }
+
 	switch prof.Environment {
 	case "host":
-		return control.SessionSpec{Argv: argv, Dir: ws}, nil
+		env := append(append(os.Environ(), secretEnv...), pathEnv...)
+		return control.SessionSpec{Argv: argv, Dir: ws, Env: env, OnClose: wipe}, nil
 	case "sandbox", "": // sandbox is the default
-		wrapped, cleanup, err := sandbox.WrapArgv(argv, ws, prof.Network)
-		if err != nil {
-			return control.SessionSpec{}, err
-		}
-		return control.SessionSpec{Argv: wrapped, Dir: ws, OnClose: cleanup}, nil
-	case "container":
-		base := filepath.Join(ws, ".slop", "runtime")
-		if err := os.MkdirAll(base, 0o700); err != nil {
-			return control.SessionSpec{}, err
-		}
-		stageDir, err := os.MkdirTemp(base, "cockpit-*")
-		if err != nil {
-			return control.SessionSpec{}, err
-		}
-		cargv, cleanup, err := container.PrepareSession(context.Background(), argv, ws, prof.Network, nil, stageDir)
+		wrapped, wrapCleanup, err := sandbox.WrapArgv(argv, ws, prof.Network)
 		if err != nil {
 			_ = os.RemoveAll(stageDir)
 			return control.SessionSpec{}, err
 		}
-		return control.SessionSpec{Argv: cargv, Dir: ws, OnClose: cleanup}, nil
-	case "vm":
-		base := filepath.Join(ws, ".slop", "runtime")
-		if err := os.MkdirAll(base, 0o700); err != nil {
-			return control.SessionSpec{}, err
-		}
-		stageDir, err := os.MkdirTemp(base, "cockpit-*")
+		env := append(append(os.Environ(), secretEnv...), pathEnv...)
+		return control.SessionSpec{Argv: wrapped, Dir: ws, Env: env, OnClose: chainClose(wrapCleanup, wipe)}, nil
+	case "container":
+		cargv, cleanup, err := container.PrepareSession(context.Background(), argv, ws, prof.Network, secretEnv, stageDir)
 		if err != nil {
+			_ = os.RemoveAll(stageDir)
 			return control.SessionSpec{}, err
 		}
+		return control.SessionSpec{Argv: cargv, Dir: ws, OnClose: cleanup}, nil // cleanup wipes stageDir
+	case "vm":
 		tk := ""
 		if prof.Toolchain != nil {
 			tk = prof.Toolchain.Kind
 		}
-		// stageDir basename is the per-session VM clone name, so concurrent same-profile
-		// sessions don't collide on tart names (SP7c-1 N-session guarantee).
-		vargv, cleanup, err := vm.PrepareSession(context.Background(), argv, prof.Network, nil, stageDir, filepath.Base(stageDir), tk)
+		// stageDir basename is the per-session VM clone name (concurrency isolation).
+		vargv, cleanup, err := vm.PrepareSession(context.Background(), argv, prof.Network, secretEnv, stageDir, filepath.Base(stageDir), tk)
 		if err != nil {
 			_ = os.RemoveAll(stageDir)
 			return control.SessionSpec{}, err
 		}
-		return control.SessionSpec{Argv: vargv, Dir: ws, OnClose: cleanup}, nil
+		return control.SessionSpec{Argv: vargv, Dir: ws, OnClose: cleanup}, nil // cleanup wipes stageDir
 	default:
+		_ = os.RemoveAll(stageDir)
 		return control.SessionSpec{}, fmt.Errorf("unknown environment %q", prof.Environment)
+	}
+}
+
+// chainClose returns a cleanup that runs fns in order, skipping nils — used to compose a
+// session's OnClose (e.g. a sandbox temp-profile removal followed by the stage-dir wipe).
+func chainClose(fns ...func()) func() {
+	return func() {
+		for _, f := range fns {
+			if f != nil {
+				f()
+			}
+		}
 	}
 }
 
@@ -439,6 +467,56 @@ func launchProfile(name, configPath string) (int, error) {
 
 // ---- helpers ----
 
+// stageProfile resolves the profile's secrets and stages its credentials into stageDir. It
+// returns secretEnv (sensitive KEY=VAL — the resolved secrets plus aws/gcp env creds, destined
+// for the secrets.env channel / the process env) and pathEnv (non-secret NPM_CONFIG_USERCONFIG /
+// KUBECONFIG / GIT_SSH_COMMAND host paths into stageDir, for the host/sandbox process env). The
+// caller owns the stageDir lifecycle (creation, the on-exit wipe, and creds.RevokeSSH if an ssh
+// key was staged).
+func stageProfile(ctx context.Context, prof policy.Profile, stageDir string) (secretEnv, pathEnv []string, err error) {
+	if len(prof.Secrets) > 0 {
+		resolved, err := secrets.ResolveMap(ctx, prof.Secrets)
+		if err != nil {
+			return nil, nil, err
+		}
+		for k, v := range resolved {
+			secretEnv = append(secretEnv, k+"="+v)
+		}
+	}
+	npmrcEnv, err := creds.StagePnpm(ctx, prof.Credentials, stageDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	// Cloud creds are short-lived (SSO role creds / ADC access token) and delivered as env vars
+	// through the secret channel, so they ride secrets.env (container) / the scp'd env (vm) and
+	// reach host/sandbox children too. No revoke: decay-first.
+	awsEnv, err := creds.StageAWS(ctx, prof.Credentials, stageDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	gcpEnv, err := creds.StageGCP(ctx, prof.Credentials, stageDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	secretEnv = append(secretEnv, awsEnv...)
+	secretEnv = append(secretEnv, gcpEnv...)
+	// kubeconfig / .npmrc / ssh key bearers are staged 0600 in stageDir; KUBECONFIG /
+	// NPM_CONFIG_USERCONFIG / GIT_SSH_COMMAND are non-secret host paths delivered via the env for
+	// host/sandbox, and via the bind mount (paths set by the compose file) for container.
+	kubeEnv, err := creds.StageKube(ctx, prof.Credentials, stageDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	sshEnv, err := creds.StageSSH(ctx, prof.Credentials, stageDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	pathEnv = append(pathEnv, npmrcEnv...)
+	pathEnv = append(pathEnv, kubeEnv...)
+	pathEnv = append(pathEnv, sshEnv...)
+	return secretEnv, pathEnv, nil
+}
+
 // runProfile stages secrets + credentials into an ephemeral dir under the
 // workspace, launches the agent under its environment, and wipes the stage on
 // exit. Returns the child's exit code.
@@ -460,66 +538,22 @@ func runProfile(name string, prof policy.Profile, argv []string, ws string) (int
 		}
 	}
 
-	// secretEnv = the resolved profile secrets (sensitive). The pnpm token rides a staged
-	// .npmrc file. Kept separate so the container path can deliver secrets via a sourced
-	// file (out of `ps`/`docker inspect`) rather than the whole host environment.
-	var secretEnv []string
-	if len(prof.Secrets) > 0 {
-		resolved, err := secrets.ResolveMap(ctx, prof.Secrets)
-		if err != nil {
-			return 1, err
-		}
-		for k, v := range resolved {
-			secretEnv = append(secretEnv, k+"="+v)
-		}
-	}
-
-	npmrcEnv, err := creds.StagePnpm(ctx, prof.Credentials, stageDir)
+	secretEnv, pathEnv, err := stageProfile(ctx, prof, stageDir)
 	if err != nil {
 		return 1, err
 	}
-
-	// Cloud creds are short-lived (SSO role creds / ADC access token) and delivered
-	// as env vars through the secret channel, so they ride secrets.env (container) /
-	// the scp'd env (vm) and reach host/sandbox children too. No revoke: decay-first.
-	awsEnv, err := creds.StageAWS(ctx, prof.Credentials, stageDir)
-	if err != nil {
-		return 1, err
-	}
-	gcpEnv, err := creds.StageGCP(ctx, prof.Credentials, stageDir)
-	if err != nil {
-		return 1, err
-	}
-	secretEnv = append(secretEnv, awsEnv...)
-	secretEnv = append(secretEnv, gcpEnv...)
-
-	// kubeconfig (with the bearer token inside) is staged 0600; KUBECONFIG is a
-	// non-secret path delivered per-environment like .npmrc/NPM_CONFIG_USERCONFIG —
-	// host path for host/sandbox; /slop/runtime/kubeconfig via compose for container.
-	// Kept out of secretEnv so it never lands in the container's secrets.env.
-	kubeEnv, err := creds.StageKube(ctx, prof.Credentials, stageDir)
-	if err != nil {
-		return 1, err
-	}
-
-	// ssh deploy key: the bearer is the staged 0600 private key; GIT_SSH_COMMAND is a
-	// non-secret path delivered per-environment like KUBECONFIG (host path for host/sandbox;
-	// /slop/runtime/.ssh/id via compose for container). Best-effort revoke runs before the
-	// stageDir wipe (deferred after the top-of-func wipe, so LIFO orders it first).
-	sshEnv, err := creds.StageSSH(ctx, prof.Credentials, stageDir)
-	if err != nil {
-		return 1, err
-	}
+	// Best-effort revoke runs before the stageDir wipe (deferred after the top-of-func wipe, so
+	// LIFO orders it first).
 	if prof.Credentials != nil && prof.Credentials.Ssh != nil {
 		defer creds.RevokeSSH(context.Background(), stageDir)
 	}
 
 	switch prof.Environment {
 	case "sandbox":
-		env := append(append(append(append(os.Environ(), secretEnv...), npmrcEnv...), kubeEnv...), sshEnv...)
+		env := append(append(os.Environ(), secretEnv...), pathEnv...)
 		return sandbox.Launch(ctx, engexec.LaunchSpec{Argv: argv, Dir: ws, Env: env}, ws, prof.Network)
 	case "host":
-		env := append(append(append(append(os.Environ(), secretEnv...), npmrcEnv...), kubeEnv...), sshEnv...)
+		env := append(append(os.Environ(), secretEnv...), pathEnv...)
 		return engexec.RunInTerminal(ctx, engexec.LaunchSpec{Argv: argv, Dir: ws, Env: env})
 	case "container":
 		// secrets go in secrets.env (sourced by the entrypoint); .npmrc and kubeconfig
