@@ -45,3 +45,22 @@ func TestPeerUIDOnUnixSocket(t *testing.T) {
 	c.Close()
 	<-done
 }
+
+func TestIsProcessTreeDescendant(t *testing.T) {
+	// fake tree: serve(100) -> sandbox-exec(200) -> agent(300); gui(50) -> launchd(1)
+	parents := map[int]int{300: 200, 200: 100, 100: 1, 50: 1}
+	ppidOf := func(pid int) (int, error) { return parents[pid], nil }
+
+	// the sandboxed agent IS a descendant of serve -> must be detected (rejected upstream)
+	if d, _ := isProcessTreeDescendant(100, 300, ppidOf); !d {
+		t.Error("agent (300) must be detected as a descendant of serve (100)")
+	}
+	// the cockpit GUI is NOT a descendant of serve -> allowed
+	if d, _ := isProcessTreeDescendant(100, 50, ppidOf); d {
+		t.Error("gui (50) must NOT be a descendant of serve (100)")
+	}
+	// serve connecting to itself is not a STRICT descendant -> allowed (the same-process test case)
+	if d, _ := isProcessTreeDescendant(100, 100, ppidOf); d {
+		t.Error("serve (100) must not be its own descendant")
+	}
+}

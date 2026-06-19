@@ -10,6 +10,14 @@ import (
 	"github.com/freakhill/safeslop/internal/engine/sandbox"
 )
 
+func trustPolicy(t *testing.T, path string) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir()) // isolate the trust store from the real ~/.config/safeslop
+	if err := enforceTrust(path, true); err != nil {
+		t.Fatalf("trust %s: %v", path, err)
+	}
+}
+
 const resolverCue = `package safeslop
 safeslop: {
 	version: 1
@@ -29,6 +37,7 @@ func writeResolverCue(t *testing.T) string {
 	if err := os.WriteFile(path, []byte(resolverCue), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	trustPolicy(t, path)
 	return path
 }
 
@@ -100,6 +109,7 @@ func TestResolveSessionDeliversSecretToHostEnv(t *testing.T) {
 	if err := os.WriteFile(path, []byte(secretHostCue), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	trustPolicy(t, path)
 	t.Chdir(dir) // any cockpit-* stage dir lands under a throwaway cwd
 
 	spec, err := resolveSession("h", path)
@@ -120,8 +130,22 @@ func TestResolveSessionRejectsSshCreds(t *testing.T) {
 	if err := os.WriteFile(path, []byte(sshHostCue), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	trustPolicy(t, path)
 	t.Chdir(dir)
 	if _, err := resolveSession("h", path); err == nil || !strings.Contains(err.Error(), "ssh credentials") {
 		t.Fatalf("expected ssh-cred rejection, got %v", err)
+	}
+}
+
+func TestResolveSessionRefusesUntrustedPolicy(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // empty trust store
+	dir := t.TempDir()
+	path := filepath.Join(dir, "safeslop.cue")
+	if err := os.WriteFile(path, []byte(resolverCue), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// NOT trusted -> OpenSession's resolver must fail closed (the in-sandbox escape this closes).
+	if _, err := resolveSession("h", path); err == nil || !strings.Contains(err.Error(), "not trusted") {
+		t.Fatalf("untrusted policy must be refused by resolveSession, got %v", err)
 	}
 }

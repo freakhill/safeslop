@@ -230,6 +230,12 @@ For your use case, enforce three boundaries at all times:
   validate` and `safeslop run` warn on exactly that combination (`sandbox-open-egress-with-creds`);
   use `environment: container`/`vm` or `network: deny` for credentialed work. Per-process egress
   filtering for the sandbox boundary is planned (the NetworkExtension filter).
+- **Scrubbed environment:** the `sandbox` and `host` environments run the agent with a scrubbed
+  environment — only safe basics (`PATH`, `HOME`, `TERM`, `LANG`, …) are carried from your shell.
+  Ambient credentials — `AWS_*`, `OP_SESSION_*`, `SSH_AUTH_SOCK`, `GITHUB_TOKEN`, and even
+  `ANTHROPIC_API_KEY` — are **not** inherited. Give the agent a credential by declaring it in your
+  `safeslop.cue` `secrets:` block (e.g. `secrets: { ANTHROPIC_API_KEY: "op://Private/Anthropic/api-key" }`),
+  which is staged ephemerally and wiped on exit.
 - **Egress enforcement differs by boundary:** the *container* boundary enforces egress by
   **topology** (the agent sits on an internal Docker network with Squid as the sole bridge, which
   denies cloud-metadata + RFC1918 + loopback deny-first). The *VM* boundary's `network: deny`

@@ -408,6 +408,14 @@ func resolveSession(profile, configPath string) (control.SessionSpec, error) {
 	if err != nil {
 		return control.SessionSpec{}, err
 	}
+	// Fail-closed policy trust gate, identical to the CLI `run` path (specs/0022). The cockpit's
+	// in-process OpenSession data plane was the one launch chokepoint not gated, so a same-uid
+	// in-sandbox peer could rewrite safeslop.cue and OpenSession its way to environment:"host"
+	// (specs/0024 S1a). The GUI surfaces approval via `safeslop trust` (a wizard screen is a
+	// follow-on); allowTrust stays false here (the engine never auto-approves on the agent's behalf).
+	if err := enforceTrust(path, false); err != nil {
+		return control.SessionSpec{}, err
+	}
 	cfg, err := policy.Load(path)
 	if err != nil {
 		return control.SessionSpec{}, err
@@ -458,7 +466,7 @@ func resolveSession(profile, configPath string) (control.SessionSpec, error) {
 
 	switch prof.Environment {
 	case "host":
-		env := append(append(os.Environ(), secretEnv...), pathEnv...)
+		env := childEnv(secretEnv, pathEnv)
 		return control.SessionSpec{Argv: argv, Dir: ws, Env: env, OnClose: wipe}, nil
 	case "sandbox", "": // sandbox is the default
 		wrapped, wrapCleanup, err := sandbox.WrapArgv(argv, ws, prof.Network)
@@ -466,7 +474,7 @@ func resolveSession(profile, configPath string) (control.SessionSpec, error) {
 			_ = os.RemoveAll(stageDir)
 			return control.SessionSpec{}, err
 		}
-		env := append(append(os.Environ(), secretEnv...), pathEnv...)
+		env := childEnv(secretEnv, pathEnv)
 		return control.SessionSpec{Argv: wrapped, Dir: ws, Env: env, OnClose: chainClose(wrapCleanup, wipe)}, nil
 	case "container":
 		cargv, cleanup, err := container.PrepareSession(context.Background(), argv, ws, prof.Network, secretEnv, stageDir)
@@ -801,10 +809,10 @@ func runProfile(name string, prof policy.Profile, argv []string, ws string) (int
 
 	switch prof.Environment {
 	case "sandbox":
-		env := append(append(os.Environ(), secretEnv...), pathEnv...)
+		env := childEnv(secretEnv, pathEnv)
 		return sandbox.Launch(ctx, engexec.LaunchSpec{Argv: argv, Dir: ws, Env: env}, ws, prof.Network)
 	case "host":
-		env := append(append(os.Environ(), secretEnv...), pathEnv...)
+		env := childEnv(secretEnv, pathEnv)
 		return engexec.RunInTerminal(ctx, engexec.LaunchSpec{Argv: argv, Dir: ws, Env: env})
 	case "container":
 		// secrets go in secrets.env (sourced by the entrypoint); .npmrc and kubeconfig
