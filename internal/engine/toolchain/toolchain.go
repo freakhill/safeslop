@@ -1,4 +1,4 @@
-// Package toolchain layers a pinned tool environment (mise/nix) onto any slop environment.
+// Package toolchain layers a pinned tool environment (mise/nix) onto any safeslop environment.
 // Wrap is pure: it transforms the agent argv so the toolchain is provisioned, or replaces it
 // with a mise task / nix app. Enabling mise/nix inside each environment is the caller's job.
 package toolchain
@@ -28,7 +28,7 @@ func Wrap(kind, run string, agentArgv []string) []string {
 // Wraps reports whether kind is a real toolchain (mise/nix) that Wrap will transform.
 func Wraps(kind string) bool { return kind == "mise" || kind == "nix" }
 
-// Available reports whether the kind's CLI is on the host PATH (for slop doctor / host runs).
+// Available reports whether the kind's CLI is on the host PATH (for safeslop doctor / host runs).
 func Available(kind string) bool {
 	if !Wraps(kind) {
 		return false

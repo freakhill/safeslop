@@ -85,8 +85,8 @@ func TestLoadRejectsBadSecretRef(t *testing.T) {
 }
 
 func TestToolchainDecodes(t *testing.T) {
-	cfg, err := loadStr(t, `package slop
-slop: profiles: dev: {agent: "claude", toolchain: {kind: "mise", run: "build"}}`)
+	cfg, err := loadStr(t, `package safeslop
+safeslop: profiles: dev: {agent: "claude", toolchain: {kind: "mise", run: "build"}}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,15 +97,15 @@ slop: profiles: dev: {agent: "claude", toolchain: {kind: "mise", run: "build"}}`
 }
 
 func TestToolchainRejectsBadKind(t *testing.T) {
-	if _, err := loadStr(t, `package slop
-slop: profiles: dev: {agent: "claude", toolchain: {kind: "cargo"}}`); err == nil {
+	if _, err := loadStr(t, `package safeslop
+safeslop: profiles: dev: {agent: "claude", toolchain: {kind: "cargo"}}`); err == nil {
 		t.Fatal("expected validation error for kind \"cargo\"")
 	}
 }
 
 func TestLoadDecodesAwsGcpCredentials(t *testing.T) {
-	cfg, err := loadStr(t, `package slop
-slop: profiles: cloud: {
+	cfg, err := loadStr(t, `package safeslop
+safeslop: profiles: cloud: {
 	agent: "claude"
 	environment: "container"
 	credentials: {aws: {profile: "dev-admin", region: "eu-west-1"}, gcp: {}}
@@ -123,8 +123,8 @@ slop: profiles: cloud: {
 }
 
 func TestLoadKubeEksCredentials(t *testing.T) {
-	cfg, err := loadStr(t, `package slop
-slop: profiles: deploy: {
+	cfg, err := loadStr(t, `package safeslop
+safeslop: profiles: deploy: {
 	agent: "claude"
 	environment: "container"
 	credentials: kube: eks: {name: "prod", region: "eu-west-1", profile: "dev-admin"}
@@ -145,8 +145,8 @@ slop: profiles: deploy: {
 }
 
 func TestLoadKubeGkeCredentials(t *testing.T) {
-	cfg, err := loadStr(t, `package slop
-slop: profiles: deploy: {
+	cfg, err := loadStr(t, `package safeslop
+safeslop: profiles: deploy: {
 	agent: "claude"
 	environment: "container"
 	credentials: kube: gke: {name: "prod", location: "europe-west1", project: "acme-prod"}
@@ -161,8 +161,8 @@ slop: profiles: deploy: {
 }
 
 func TestLoadSshCredentials(t *testing.T) {
-	cfg, err := loadStr(t, `package slop
-slop: profiles: deploy: {
+	cfg, err := loadStr(t, `package safeslop
+safeslop: profiles: deploy: {
 	agent: "claude"
 	environment: "container"
 	network: "deny"
@@ -178,8 +178,8 @@ slop: profiles: deploy: {
 }
 
 func TestLoadSshDefaultsReadOnly(t *testing.T) {
-	cfg, err := loadStr(t, `package slop
-slop: profiles: review: {
+	cfg, err := loadStr(t, `package safeslop
+safeslop: profiles: review: {
 	agent: "claude"
 	environment: "sandbox"
 	credentials: ssh: {}

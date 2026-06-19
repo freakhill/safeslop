@@ -12,7 +12,7 @@ func sshBaseOpts() []string {
 		"-o", "UserKnownHostsFile=/dev/null",
 		"-o", "ConnectTimeout=5",
 	}
-	if key := os.Getenv("SLOP_VM_SSH_KEY"); key != "" {
+	if key := os.Getenv("SAFESLOP_VM_SSH_KEY"); key != "" {
 		opts = append(opts, "-i", key)
 	}
 	return opts
@@ -45,7 +45,7 @@ func remoteAgentCmd(agentArgv []string, proxyURL string) string {
 		p := shellQuote(proxyURL)
 		b.WriteString("export HTTP_PROXY=" + p + " HTTPS_PROXY=" + p + " http_proxy=" + p + " https_proxy=" + p + "; ")
 	}
-	b.WriteString("set -a; [ -f ~/.slop-runtime/secrets.env ] && . ~/.slop-runtime/secrets.env; set +a; exec")
+	b.WriteString("set -a; [ -f ~/.safeslop-runtime/secrets.env ] && . ~/.safeslop-runtime/secrets.env; set +a; exec")
 	for _, a := range agentArgv {
 		b.WriteString(" " + shellQuote(a))
 	}

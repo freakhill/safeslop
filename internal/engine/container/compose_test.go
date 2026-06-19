@@ -15,10 +15,10 @@ func TestComposeIsNetworkEnforcedAndLeakFree(t *testing.T) {
 	if !strings.Contains(yml, "internal: true") {
 		t.Fatal("agent network is not internal-only — egress not enforced")
 	}
-	if !strings.Contains(yml, `entrypoint: ["/bin/sh", "/slop/runtime/entrypoint.sh"]`) {
+	if !strings.Contains(yml, `entrypoint: ["/bin/sh", "/safeslop/runtime/entrypoint.sh"]`) {
 		t.Fatal("entrypoint (secret loader) missing")
 	}
-	if !strings.Contains(yml, "/ws:/workspace:rw") || !strings.Contains(yml, "/st:/slop/runtime:ro") {
+	if !strings.Contains(yml, "/ws:/workspace:rw") || !strings.Contains(yml, "/st:/safeslop/runtime:ro") {
 		t.Fatalf("mounts missing:\n%s", yml)
 	}
 	// a secret VALUE must never be written into the compose file.
@@ -96,7 +96,7 @@ func TestRenderComposeKubeconfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(with, "KUBECONFIG: /slop/runtime/kubeconfig") {
+	if !strings.Contains(with, "KUBECONFIG: /safeslop/runtime/kubeconfig") {
 		t.Fatalf("compose missing KUBECONFIG env:\n%s", with)
 	}
 	without, err := renderCompose(composeParams{RuntimeDir: "/r", Workspace: "/w", StageDir: "/r", Kubeconfig: false})
@@ -129,7 +129,7 @@ func TestComposeNoAgentSocketAndSshKey(t *testing.T) {
 	if strings.Contains(with, "SSH_AUTH_SOCK") || strings.Contains(with, "ssh-agent.sock") {
 		t.Fatalf("agent socket must be gone from compose:\n%s", with)
 	}
-	if !strings.Contains(with, "GIT_SSH_COMMAND: ssh -i /slop/runtime/.ssh/id") {
+	if !strings.Contains(with, "GIT_SSH_COMMAND: ssh -i /safeslop/runtime/.ssh/id") {
 		t.Fatalf("compose missing GIT_SSH_COMMAND:\n%s", with)
 	}
 	without, err := renderCompose(composeParams{RuntimeDir: "/r", Workspace: "/w", StageDir: "/r", SshKey: false})

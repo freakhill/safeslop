@@ -98,7 +98,7 @@ func StageSSH(ctx context.Context, creds *policy.Credentials, stageDir string) (
 	if creds == nil || creds.Ssh == nil {
 		return nil, nil
 	}
-	rOut, err := runSSHCmd(ctx, []string{"git", "remote", "get-url", "origin"}, "run slop from a repo with a github.com origin")
+	rOut, err := runSSHCmd(ctx, []string{"git", "remote", "get-url", "origin"}, "run safeslop from a repo with a github.com origin")
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +114,7 @@ func StageSSH(ctx context.Context, creds *policy.Credentials, stageDir string) (
 	keyPath := filepath.Join(sshDir, "id")
 	khPath := filepath.Join(sshDir, "known_hosts")
 
-	title := "slop-" + owner + "-" + repo
+	title := "safeslop-" + owner + "-" + repo
 	if _, err := runSSHCmd(ctx, keygenArgv(keyPath, title), "is ssh-keygen on PATH?"); err != nil {
 		return nil, err
 	}

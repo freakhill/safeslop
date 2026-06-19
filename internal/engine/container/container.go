@@ -16,17 +16,17 @@ const (
 )
 
 // Reconcile reclaims state a crashed prior run may have left: staged dirs older than maxAge
-// carrying the .slop-stage marker (wiping any leftover secrets.env). Safe to call on every
+// carrying the .safeslop-stage marker (wiping any leftover secrets.env). Safe to call on every
 // run; idempotent. repo is the workspace root. Orphaned-squid reaping rides the Docker path
 // (Up/Down) added in a later task.
 func Reconcile(ctx context.Context, repo string, maxAge time.Duration) error {
 	_ = ctx
-	runtimeRoot := filepath.Join(repo, ".slop", "runtime")
+	runtimeRoot := filepath.Join(repo, ".safeslop", "runtime")
 	entries, _ := os.ReadDir(runtimeRoot)
 	for _, e := range entries {
 		dir := filepath.Join(runtimeRoot, e.Name())
-		if _, err := os.Stat(filepath.Join(dir, ".slop-stage")); err != nil {
-			continue // not a slop staging dir
+		if _, err := os.Stat(filepath.Join(dir, ".safeslop-stage")); err != nil {
+			continue // not a safeslop staging dir
 		}
 		if fi, err := os.Stat(dir); err == nil && time.Since(fi.ModTime()) > maxAge {
 			_ = os.RemoveAll(dir) // wipes any leftover secrets.env
@@ -106,7 +106,7 @@ func Down(ctx context.Context, composeFile string) error {
 // Teardown fully reaps a cockpit session's stack: it force-removes every container carrying the
 // compose project label — including the one-off `docker compose run` agent container, which
 // `compose down` deliberately leaves behind — then runs Down to drop the proxy + networks. The
-// compose project name defaults to the compose file's parent dir basename; slop gives each
+// compose project name defaults to the compose file's parent dir basename; safeslop gives each
 // cockpit session a unique cockpit-* stage dir, so this only ever reaps that session's own
 // containers. A "" composeFile is a no-op.
 func Teardown(ctx context.Context, composeFile string) error {

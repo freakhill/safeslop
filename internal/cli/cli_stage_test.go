@@ -9,8 +9,8 @@ import (
 )
 
 func TestStageProfileResolvesEnvSecret(t *testing.T) {
-	t.Setenv("TEST_SLOP_SECRET", "s3cr3t")
-	prof := policy.Profile{Secrets: map[string]string{"FOO": "env:TEST_SLOP_SECRET"}}
+	t.Setenv("TEST_SAFESLOP_SECRET", "s3cr3t")
+	prof := policy.Profile{Secrets: map[string]string{"FOO": "env:TEST_SAFESLOP_SECRET"}}
 	secretEnv, pathEnv, err := stageProfile(context.Background(), prof, t.TempDir())
 	if err != nil {
 		t.Fatal(err)

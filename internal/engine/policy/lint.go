@@ -3,7 +3,7 @@ package policy
 import "sort"
 
 // Warning is a non-fatal advisory about a dangerous profile combination,
-// surfaced by `slop validate` and `slop run` (never blocks).
+// surfaced by `safeslop validate` and `safeslop run` (never blocks).
 type Warning struct {
 	Profile string `json:"profile"`
 	Code    string `json:"code"`

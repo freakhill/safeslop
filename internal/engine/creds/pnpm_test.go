@@ -28,11 +28,11 @@ func TestRenderNpmrcScopedAndDefault(t *testing.T) {
 }
 
 func TestStagePnpmWritesScopedNpmrc(t *testing.T) {
-	t.Setenv("SLOP_TEST_NPM_TOKEN", "abc123")
+	t.Setenv("SAFESLOP_TEST_NPM_TOKEN", "abc123")
 	stage := t.TempDir()
 	env, err := StagePnpm(context.Background(), &policy.Credentials{
 		Pnpm: []policy.PnpmRegistry{
-			{Host: "registry.npmjs.org", Token: "env:SLOP_TEST_NPM_TOKEN"},
+			{Host: "registry.npmjs.org", Token: "env:SAFESLOP_TEST_NPM_TOKEN"},
 		},
 	}, stage)
 	if err != nil {

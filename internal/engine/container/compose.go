@@ -9,7 +9,7 @@ import (
 )
 
 // composeParams fills compose.yml.tmpl. RuntimeDir holds the rendered squid.conf +
-// allowlist.domains; StageDir (== RuntimeDir in Launch) is bind-mounted ro at /slop/runtime.
+// allowlist.domains; StageDir (== RuntimeDir in Launch) is bind-mounted ro at /safeslop/runtime.
 type composeParams struct {
 	RuntimeDir string
 	Workspace  string

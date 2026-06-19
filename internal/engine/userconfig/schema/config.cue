@@ -1,6 +1,6 @@
-package slopcfg
+package safeslopcfg
 
-// User-level slop preferences (~/.config/slop/config.cue) — distinct from per-repo slop.cue.
+// User-level safeslop preferences (~/.config/safeslop/config.cue) — distinct from per-repo safeslop.cue.
 terminal: "Terminal.app" | "iTerm2" | "Ghostty" | "WezTerm" | "kitty" | "generic" | *"Terminal.app"
 shell?:   string
 tag: {

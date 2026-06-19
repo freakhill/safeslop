@@ -80,7 +80,7 @@ type Credentials struct {
 }
 
 // Toolchain layers a pinned tool environment onto any environment (SP5). When Run is set,
-// slop launches that mise task / nix app instead of the agent; otherwise the agent is wrapped.
+// safeslop launches that mise task / nix app instead of the agent; otherwise the agent is wrapped.
 type Toolchain struct {
 	Kind string `json:"kind"`
 	Run  string `json:"run,omitempty"`
@@ -101,7 +101,7 @@ type Profile struct {
 	Toolchain *Toolchain `json:"toolchain,omitempty"`
 }
 
-// Config is the decoded top-level `slop:` value from safeslop.cue.
+// Config is the decoded top-level `safeslop:` value from safeslop.cue.
 type Config struct {
 	Version  int                `json:"version"`
 	Profiles map[string]Profile `json:"profiles"`
@@ -109,7 +109,7 @@ type Config struct {
 
 // virtualDir is an in-memory CUE package built from the embedded schema plus the
 // user's file via an overlay, so neither needs to live in a real CUE module.
-const virtualDir = "/__slop__"
+const virtualDir = "/__safeslop__"
 
 // Load reads, validates, and decodes the safeslop.cue at path. Validation errors
 // are rendered with cue/errors.Details for cue-vet-quality messages.
@@ -120,9 +120,9 @@ func Load(path string) (*Config, error) {
 	}
 	ctx := cuecontext.New()
 	overlay := map[string]load.Source{
-		filepath.Join(virtualDir, "cue.mod", "module.cue"): load.FromString(`module: "slop.local/cfg"` + "\n" + `language: version: "v0.9.0"`),
+		filepath.Join(virtualDir, "cue.mod", "module.cue"): load.FromString(`module: "safeslop.local/cfg"` + "\n" + `language: version: "v0.9.0"`),
 		filepath.Join(virtualDir, "schema.cue"):            load.FromString(schemaSrc),
-		filepath.Join(virtualDir, "safeslop.cue"):              load.FromBytes(data),
+		filepath.Join(virtualDir, "safeslop.cue"):          load.FromBytes(data),
 	}
 	insts := load.Instances([]string{"."}, &load.Config{Dir: virtualDir, Overlay: overlay})
 	if len(insts) == 0 {
@@ -139,13 +139,13 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("invalid %s:\n%s", path, errors.Details(err, nil))
 	}
 	var cfg Config
-	if err := val.LookupPath(cue.ParsePath("slop")).Decode(&cfg); err != nil {
+	if err := val.LookupPath(cue.ParsePath("safeslop")).Decode(&cfg); err != nil {
 		return nil, fmt.Errorf("decode %s: %w", path, err)
 	}
 	return &cfg, nil
 }
 
-// Validate is Load without returning the config — used by `slop validate`.
+// Validate is Load without returning the config — used by `safeslop validate`.
 func Validate(path string) error {
 	_, err := Load(path)
 	return err

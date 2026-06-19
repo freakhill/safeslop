@@ -114,7 +114,7 @@ func TestLaunchDeniesWriteOutsideWorkspaceOnDarwin(t *testing.T) {
 	ws := t.TempDir()
 	// A path outside workspace and outside the allowed temp dirs: a sibling of
 	// the workspace under the same parent.
-	outside := filepath.Join(filepath.Dir(ws), "slop_outside_probe")
+	outside := filepath.Join(filepath.Dir(ws), "safeslop_outside_probe")
 	defer os.Remove(outside)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()

@@ -1,4 +1,4 @@
-// Package userconfig loads the user-level ~/.config/slop/config.cue (terminal-launch
+// Package userconfig loads the user-level ~/.config/safeslop/config.cue (terminal-launch
 // preferences), validated against an embedded CUE schema. Distinct from policy.safeslop.cue.
 package userconfig
 
@@ -30,18 +30,18 @@ type Tag struct {
 	PromptMarker bool `json:"promptMarker"`
 }
 
-const virtualDir = "/__slopcfg__"
+const virtualDir = "/__safeslopcfg__"
 
 // Load reads + validates path against the embedded schema, then decodes it. A missing file
 // yields the schema defaults (Terminal.app, oscTitle on).
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		data = []byte("package slopcfg\n") // missing file => schema defaults
+		data = []byte("package safeslopcfg\n") // missing file => schema defaults
 	}
 	ctx := cuecontext.New()
 	overlay := map[string]load.Source{
-		filepath.Join(virtualDir, "cue.mod", "module.cue"): load.FromString(`module: "slop.local/cfg"` + "\n" + `language: version: "v0.9.0"`),
+		filepath.Join(virtualDir, "cue.mod", "module.cue"): load.FromString(`module: "safeslop.local/cfg"` + "\n" + `language: version: "v0.9.0"`),
 		filepath.Join(virtualDir, "schema.cue"):            load.FromString(schemaSrc),
 		filepath.Join(virtualDir, "config.cue"):            load.FromBytes(data),
 	}
@@ -66,11 +66,11 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-// DefaultPath is ~/.config/slop/config.cue.
+// DefaultPath is ~/.config/safeslop/config.cue.
 func DefaultPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".config", "slop", "config.cue"), nil
+	return filepath.Join(home, ".config", "safeslop", "config.cue"), nil
 }

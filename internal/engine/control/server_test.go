@@ -24,7 +24,7 @@ func TestSocketPathIsShort(t *testing.T) {
 	if len(p) >= 104 {
 		t.Fatalf("socket path %q exceeds the 104-byte sun_path limit (%d)", p, len(p))
 	}
-	if !strings.HasSuffix(p, "/.slop/s.sock") {
-		t.Fatalf("socket path = %q, want ~/.slop/s.sock", p)
+	if !strings.HasSuffix(p, "/.safeslop/s.sock") {
+		t.Fatalf("socket path = %q, want ~/.safeslop/s.sock", p)
 	}
 }

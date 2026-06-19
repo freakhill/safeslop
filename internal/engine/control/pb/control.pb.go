@@ -360,7 +360,7 @@ func (x *LaunchRequest) GetConfigPath() string {
 
 type LaunchEvent struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Kind          LaunchEvent_Kind       `protobuf:"varint,1,opt,name=kind,proto3,enum=slop.control.v1.LaunchEvent_Kind" json:"kind,omitempty"`
+	Kind          LaunchEvent_Kind       `protobuf:"varint,1,opt,name=kind,proto3,enum=safeslop.control.v1.LaunchEvent_Kind" json:"kind,omitempty"`
 	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
 	ExitCode      int32                  `protobuf:"varint,3,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -893,7 +893,7 @@ var File_internal_engine_control_control_proto protoreflect.FileDescriptor
 
 const file_internal_engine_control_control_proto_rawDesc = "" +
 	"\n" +
-	"%internal/engine/control/control.proto\x12\x0fslop.control.v1\"\r\n" +
+	"%internal/engine/control/control.proto\x12\x13safeslop.control.v1\"\r\n" +
 	"\vPingRequest\"(\n" +
 	"\fPingResponse\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\tR\aversion\"6\n" +
@@ -904,15 +904,15 @@ const file_internal_engine_control_control_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05agent\x18\x02 \x01(\tR\x05agent\x12 \n" +
 	"\venvironment\x18\x03 \x01(\tR\venvironment\x12\x18\n" +
-	"\anetwork\x18\x04 \x01(\tR\anetwork\"L\n" +
-	"\x14ListProfilesResponse\x124\n" +
-	"\bprofiles\x18\x01 \x03(\v2\x18.slop.control.v1.ProfileR\bprofiles\"J\n" +
+	"\anetwork\x18\x04 \x01(\tR\anetwork\"P\n" +
+	"\x14ListProfilesResponse\x128\n" +
+	"\bprofiles\x18\x01 \x03(\v2\x1c.safeslop.control.v1.ProfileR\bprofiles\"J\n" +
 	"\rLaunchRequest\x12\x18\n" +
 	"\aprofile\x18\x01 \x01(\tR\aprofile\x12\x1f\n" +
 	"\vconfig_path\x18\x02 \x01(\tR\n" +
-	"configPath\"\xa7\x01\n" +
-	"\vLaunchEvent\x125\n" +
-	"\x04kind\x18\x01 \x01(\x0e2!.slop.control.v1.LaunchEvent.KindR\x04kind\x12\x18\n" +
+	"configPath\"\xab\x01\n" +
+	"\vLaunchEvent\x129\n" +
+	"\x04kind\x18\x01 \x01(\x0e2%.safeslop.control.v1.LaunchEvent.KindR\x04kind\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1b\n" +
 	"\texit_code\x18\x03 \x01(\x05R\bexitCode\"*\n" +
 	"\x04Kind\x12\v\n" +
@@ -931,29 +931,29 @@ const file_internal_engine_control_control_proto_rawDesc = "" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\"0\n" +
 	"\x06Resize\x12\x12\n" +
 	"\x04cols\x18\x01 \x01(\rR\x04cols\x12\x12\n" +
-	"\x04rows\x18\x02 \x01(\rR\x04rows\"\x8d\x01\n" +
+	"\x04rows\x18\x02 \x01(\rR\x04rows\"\x91\x01\n" +
 	"\vClientFrame\x12,\n" +
 	"\x11attach_session_id\x18\x01 \x01(\tH\x00R\x0fattachSessionId\x12\x16\n" +
-	"\x05input\x18\x02 \x01(\fH\x00R\x05input\x121\n" +
-	"\x06resize\x18\x03 \x01(\v2\x17.slop.control.v1.ResizeH\x00R\x06resizeB\x05\n" +
+	"\x05input\x18\x02 \x01(\fH\x00R\x05input\x125\n" +
+	"\x06resize\x18\x03 \x01(\v2\x1b.safeslop.control.v1.ResizeH\x00R\x06resizeB\x05\n" +
 	"\x03msg\"%\n" +
 	"\x06Exited\x12\x1b\n" +
-	"\texit_code\x18\x01 \x01(\x05R\bexitCode\"a\n" +
+	"\texit_code\x18\x01 \x01(\x05R\bexitCode\"e\n" +
 	"\vServerFrame\x12\x18\n" +
-	"\x06output\x18\x01 \x01(\fH\x00R\x06output\x121\n" +
-	"\x06exited\x18\x02 \x01(\v2\x17.slop.control.v1.ExitedH\x00R\x06exitedB\x05\n" +
+	"\x06output\x18\x01 \x01(\fH\x00R\x06output\x125\n" +
+	"\x06exited\x18\x02 \x01(\v2\x1b.safeslop.control.v1.ExitedH\x00R\x06exitedB\x05\n" +
 	"\x03msg\"4\n" +
 	"\x13CloseSessionRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\"\x16\n" +
-	"\x14CloseSessionResponse2\xf6\x03\n" +
-	"\aControl\x12C\n" +
-	"\x04Ping\x12\x1c.slop.control.v1.PingRequest\x1a\x1d.slop.control.v1.PingResponse\x12[\n" +
-	"\fListProfiles\x12$.slop.control.v1.ListProfilesRequest\x1a%.slop.control.v1.ListProfilesResponse\x12H\n" +
-	"\x06Launch\x12\x1e.slop.control.v1.LaunchRequest\x1a\x1c.slop.control.v1.LaunchEvent0\x01\x12X\n" +
-	"\vOpenSession\x12#.slop.control.v1.OpenSessionRequest\x1a$.slop.control.v1.OpenSessionResponse\x12H\n" +
-	"\x06Attach\x12\x1c.slop.control.v1.ClientFrame\x1a\x1c.slop.control.v1.ServerFrame(\x010\x01\x12[\n" +
-	"\fCloseSession\x12$.slop.control.v1.CloseSessionRequest\x1a%.slop.control.v1.CloseSessionResponseB=Z;github.com/freakhill/safeslop/internal/engine/control/pb;pbb\x06proto3"
+	"\x14CloseSessionResponse2\xa6\x04\n" +
+	"\aControl\x12K\n" +
+	"\x04Ping\x12 .safeslop.control.v1.PingRequest\x1a!.safeslop.control.v1.PingResponse\x12c\n" +
+	"\fListProfiles\x12(.safeslop.control.v1.ListProfilesRequest\x1a).safeslop.control.v1.ListProfilesResponse\x12P\n" +
+	"\x06Launch\x12\".safeslop.control.v1.LaunchRequest\x1a .safeslop.control.v1.LaunchEvent0\x01\x12`\n" +
+	"\vOpenSession\x12'.safeslop.control.v1.OpenSessionRequest\x1a(.safeslop.control.v1.OpenSessionResponse\x12P\n" +
+	"\x06Attach\x12 .safeslop.control.v1.ClientFrame\x1a .safeslop.control.v1.ServerFrame(\x010\x01\x12c\n" +
+	"\fCloseSession\x12(.safeslop.control.v1.CloseSessionRequest\x1a).safeslop.control.v1.CloseSessionResponseB=Z;github.com/freakhill/safeslop/internal/engine/control/pb;pbb\x06proto3"
 
 var (
 	file_internal_engine_control_control_proto_rawDescOnce sync.Once
@@ -970,40 +970,40 @@ func file_internal_engine_control_control_proto_rawDescGZIP() []byte {
 var file_internal_engine_control_control_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_internal_engine_control_control_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_internal_engine_control_control_proto_goTypes = []any{
-	(LaunchEvent_Kind)(0),        // 0: slop.control.v1.LaunchEvent.Kind
-	(*PingRequest)(nil),          // 1: slop.control.v1.PingRequest
-	(*PingResponse)(nil),         // 2: slop.control.v1.PingResponse
-	(*ListProfilesRequest)(nil),  // 3: slop.control.v1.ListProfilesRequest
-	(*Profile)(nil),              // 4: slop.control.v1.Profile
-	(*ListProfilesResponse)(nil), // 5: slop.control.v1.ListProfilesResponse
-	(*LaunchRequest)(nil),        // 6: slop.control.v1.LaunchRequest
-	(*LaunchEvent)(nil),          // 7: slop.control.v1.LaunchEvent
-	(*OpenSessionRequest)(nil),   // 8: slop.control.v1.OpenSessionRequest
-	(*OpenSessionResponse)(nil),  // 9: slop.control.v1.OpenSessionResponse
-	(*Resize)(nil),               // 10: slop.control.v1.Resize
-	(*ClientFrame)(nil),          // 11: slop.control.v1.ClientFrame
-	(*Exited)(nil),               // 12: slop.control.v1.Exited
-	(*ServerFrame)(nil),          // 13: slop.control.v1.ServerFrame
-	(*CloseSessionRequest)(nil),  // 14: slop.control.v1.CloseSessionRequest
-	(*CloseSessionResponse)(nil), // 15: slop.control.v1.CloseSessionResponse
+	(LaunchEvent_Kind)(0),        // 0: safeslop.control.v1.LaunchEvent.Kind
+	(*PingRequest)(nil),          // 1: safeslop.control.v1.PingRequest
+	(*PingResponse)(nil),         // 2: safeslop.control.v1.PingResponse
+	(*ListProfilesRequest)(nil),  // 3: safeslop.control.v1.ListProfilesRequest
+	(*Profile)(nil),              // 4: safeslop.control.v1.Profile
+	(*ListProfilesResponse)(nil), // 5: safeslop.control.v1.ListProfilesResponse
+	(*LaunchRequest)(nil),        // 6: safeslop.control.v1.LaunchRequest
+	(*LaunchEvent)(nil),          // 7: safeslop.control.v1.LaunchEvent
+	(*OpenSessionRequest)(nil),   // 8: safeslop.control.v1.OpenSessionRequest
+	(*OpenSessionResponse)(nil),  // 9: safeslop.control.v1.OpenSessionResponse
+	(*Resize)(nil),               // 10: safeslop.control.v1.Resize
+	(*ClientFrame)(nil),          // 11: safeslop.control.v1.ClientFrame
+	(*Exited)(nil),               // 12: safeslop.control.v1.Exited
+	(*ServerFrame)(nil),          // 13: safeslop.control.v1.ServerFrame
+	(*CloseSessionRequest)(nil),  // 14: safeslop.control.v1.CloseSessionRequest
+	(*CloseSessionResponse)(nil), // 15: safeslop.control.v1.CloseSessionResponse
 }
 var file_internal_engine_control_control_proto_depIdxs = []int32{
-	4,  // 0: slop.control.v1.ListProfilesResponse.profiles:type_name -> slop.control.v1.Profile
-	0,  // 1: slop.control.v1.LaunchEvent.kind:type_name -> slop.control.v1.LaunchEvent.Kind
-	10, // 2: slop.control.v1.ClientFrame.resize:type_name -> slop.control.v1.Resize
-	12, // 3: slop.control.v1.ServerFrame.exited:type_name -> slop.control.v1.Exited
-	1,  // 4: slop.control.v1.Control.Ping:input_type -> slop.control.v1.PingRequest
-	3,  // 5: slop.control.v1.Control.ListProfiles:input_type -> slop.control.v1.ListProfilesRequest
-	6,  // 6: slop.control.v1.Control.Launch:input_type -> slop.control.v1.LaunchRequest
-	8,  // 7: slop.control.v1.Control.OpenSession:input_type -> slop.control.v1.OpenSessionRequest
-	11, // 8: slop.control.v1.Control.Attach:input_type -> slop.control.v1.ClientFrame
-	14, // 9: slop.control.v1.Control.CloseSession:input_type -> slop.control.v1.CloseSessionRequest
-	2,  // 10: slop.control.v1.Control.Ping:output_type -> slop.control.v1.PingResponse
-	5,  // 11: slop.control.v1.Control.ListProfiles:output_type -> slop.control.v1.ListProfilesResponse
-	7,  // 12: slop.control.v1.Control.Launch:output_type -> slop.control.v1.LaunchEvent
-	9,  // 13: slop.control.v1.Control.OpenSession:output_type -> slop.control.v1.OpenSessionResponse
-	13, // 14: slop.control.v1.Control.Attach:output_type -> slop.control.v1.ServerFrame
-	15, // 15: slop.control.v1.Control.CloseSession:output_type -> slop.control.v1.CloseSessionResponse
+	4,  // 0: safeslop.control.v1.ListProfilesResponse.profiles:type_name -> safeslop.control.v1.Profile
+	0,  // 1: safeslop.control.v1.LaunchEvent.kind:type_name -> safeslop.control.v1.LaunchEvent.Kind
+	10, // 2: safeslop.control.v1.ClientFrame.resize:type_name -> safeslop.control.v1.Resize
+	12, // 3: safeslop.control.v1.ServerFrame.exited:type_name -> safeslop.control.v1.Exited
+	1,  // 4: safeslop.control.v1.Control.Ping:input_type -> safeslop.control.v1.PingRequest
+	3,  // 5: safeslop.control.v1.Control.ListProfiles:input_type -> safeslop.control.v1.ListProfilesRequest
+	6,  // 6: safeslop.control.v1.Control.Launch:input_type -> safeslop.control.v1.LaunchRequest
+	8,  // 7: safeslop.control.v1.Control.OpenSession:input_type -> safeslop.control.v1.OpenSessionRequest
+	11, // 8: safeslop.control.v1.Control.Attach:input_type -> safeslop.control.v1.ClientFrame
+	14, // 9: safeslop.control.v1.Control.CloseSession:input_type -> safeslop.control.v1.CloseSessionRequest
+	2,  // 10: safeslop.control.v1.Control.Ping:output_type -> safeslop.control.v1.PingResponse
+	5,  // 11: safeslop.control.v1.Control.ListProfiles:output_type -> safeslop.control.v1.ListProfilesResponse
+	7,  // 12: safeslop.control.v1.Control.Launch:output_type -> safeslop.control.v1.LaunchEvent
+	9,  // 13: safeslop.control.v1.Control.OpenSession:output_type -> safeslop.control.v1.OpenSessionResponse
+	13, // 14: safeslop.control.v1.Control.Attach:output_type -> safeslop.control.v1.ServerFrame
+	15, // 15: safeslop.control.v1.Control.CloseSession:output_type -> safeslop.control.v1.CloseSessionResponse
 	10, // [10:16] is the sub-list for method output_type
 	4,  // [4:10] is the sub-list for method input_type
 	4,  // [4:4] is the sub-list for extension type_name

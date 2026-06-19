@@ -6,8 +6,8 @@ import (
 )
 
 func TestResolveEnvRef(t *testing.T) {
-	t.Setenv("SLOP_TEST_SECRET", "s3cr3t")
-	v, err := Resolve(context.Background(), "env:SLOP_TEST_SECRET")
+	t.Setenv("SAFESLOP_TEST_SECRET", "s3cr3t")
+	v, err := Resolve(context.Background(), "env:SAFESLOP_TEST_SECRET")
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -17,7 +17,7 @@ func TestResolveEnvRef(t *testing.T) {
 }
 
 func TestResolveEnvRefUnset(t *testing.T) {
-	if _, err := Resolve(context.Background(), "env:SLOP_DEFINITELY_UNSET_VAR"); err == nil {
+	if _, err := Resolve(context.Background(), "env:SAFESLOP_DEFINITELY_UNSET_VAR"); err == nil {
 		t.Fatal("expected an error for an unset env var")
 	}
 }
@@ -29,11 +29,11 @@ func TestResolveUnsupportedRef(t *testing.T) {
 }
 
 func TestResolveMapEnv(t *testing.T) {
-	t.Setenv("SLOP_A", "aa")
-	t.Setenv("SLOP_B", "bb")
+	t.Setenv("SAFESLOP_A", "aa")
+	t.Setenv("SAFESLOP_B", "bb")
 	got, err := ResolveMap(context.Background(), map[string]string{
-		"A": "env:SLOP_A",
-		"B": "env:SLOP_B",
+		"A": "env:SAFESLOP_A",
+		"B": "env:SAFESLOP_B",
 	})
 	if err != nil {
 		t.Fatalf("ResolveMap: %v", err)

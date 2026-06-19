@@ -1,4 +1,4 @@
-// Package exec launches child processes for the slop engine.
+// Package exec launches child processes for the safeslop engine.
 //
 // Two launch paths exist, matching the two interactive scenarios from the
 // design (specs/0001, §6.2 — the ctty/#1 risk):

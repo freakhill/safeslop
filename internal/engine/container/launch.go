@@ -11,7 +11,7 @@ import (
 )
 
 // materializeRun writes the per-run runtime dir (squid.conf, allowlist.domains, compose.yml,
-// entrypoint.sh, and a .slop-stage marker for the reconcile sweep) and returns the compose
+// entrypoint.sh, and a .safeslop-stage marker for the reconcile sweep) and returns the compose
 // file path. dir is p.RuntimeDir, which is also the bind-mounted stage dir.
 func materializeRun(p composeParams, open bool) (string, error) {
 	dir := p.RuntimeDir
@@ -34,7 +34,7 @@ func materializeRun(p composeParams, open bool) (string, error) {
 		"squid.conf":        []byte(squid),
 		"allowlist.domains": allow,
 		"compose.yml":       []byte(yml),
-		".slop-stage":       nil,
+		".safeslop-stage":   nil,
 	}
 	for name, content := range files {
 		if werr := os.WriteFile(filepath.Join(dir, name), content, 0o600); werr != nil {
@@ -46,12 +46,12 @@ func materializeRun(p composeParams, open bool) (string, error) {
 
 // provision materializes the per-run runtime dir and starts the compose stack, returning the
 // interactive argv that runs the agent (`docker compose run --rm agent <argv>`) plus the compose
-// file path (for teardown). Shared by Launch (slop run) and PrepareSession (the embedded cockpit).
+// file path (for teardown). Shared by Launch (safeslop run) and PrepareSession (the embedded cockpit).
 // secretEnv is written to secrets.env and sourced by the entrypoint; SP7c-2 cockpit sessions pass
 // nil (inherited-host-env parity with SP7c-1; full staging is a separate deferred unit).
 func provision(ctx context.Context, agentArgv []string, workspace, network string, secretEnv []string, stageDir string) (argv []string, composeFile string, err error) {
 	if !Available() {
-		return nil, "", fmt.Errorf("container environment requires docker + docker compose v2 (run: slop doctor)")
+		return nil, "", fmt.Errorf("container environment requires docker + docker compose v2 (run: safeslop doctor)")
 	}
 	if len(agentArgv) == 0 {
 		return nil, "", exec.ErrNoArgv
@@ -93,8 +93,8 @@ func provision(ctx context.Context, agentArgv []string, workspace, network strin
 
 // Launch runs spec.Argv in the agent container. secretEnv (the resolved profile secrets) is
 // written to secrets.env and sourced by the entrypoint — never passed via -e, so it stays out
-// of host `ps` and `docker inspect`. stageDir is the host .slop/runtime/<profile> dir (already
-// holds .npmrc when pnpm creds were staged); it is bind-mounted ro at /slop/runtime and wiped
+// of host `ps` and `docker inspect`. stageDir is the host .safeslop/runtime/<profile> dir (already
+// holds .npmrc when pnpm creds were staged); it is bind-mounted ro at /safeslop/runtime and wiped
 // on exit by the caller. The agent runs interactively through a PTY (design §6.2).
 func Launch(ctx context.Context, spec exec.LaunchSpec, workspace, network string, secretEnv []string, stageDir string) (int, error) {
 	argv, _, err := provision(ctx, spec.Argv, workspace, network, secretEnv, stageDir)
@@ -119,11 +119,11 @@ func PrepareSession(ctx context.Context, agentArgv []string, workspace, network 
 	}, nil
 }
 
-// ComposeForDown writes a throwaway runtime dir + compose file so `slop down` can target
+// ComposeForDown writes a throwaway runtime dir + compose file so `safeslop down` can target
 // `docker compose down` without a live run's dir (the agent container is --rm; only squid
 // persists). Caller removes the returned dir.
 func ComposeForDown() (dir, composeFile string, err error) {
-	dir, err = os.MkdirTemp("", "slop-down-*")
+	dir, err = os.MkdirTemp("", "safeslop-down-*")
 	if err != nil {
 		return "", "", err
 	}

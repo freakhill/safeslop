@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-const riskyCue = `package slop
-slop: {
+const riskyCue = `package safeslop
+safeslop: {
 	version: 1
 	profiles: risky: {
 		agent: "claude"

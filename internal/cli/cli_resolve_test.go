@@ -10,8 +10,8 @@ import (
 	"github.com/freakhill/safeslop/internal/engine/sandbox"
 )
 
-const resolverCue = `package slop
-slop: {
+const resolverCue = `package safeslop
+safeslop: {
 	version: 1
 	profiles: {
 		h: {agent: "claude", environment: "host", network: "deny"}
@@ -75,17 +75,17 @@ func TestResolveSessionContainerVMErrorWhenToolingAbsent(t *testing.T) {
 	}
 }
 
-const secretHostCue = `package slop
-slop: {
+const secretHostCue = `package safeslop
+safeslop: {
 	version: 1
 	profiles: {
-		h: {agent: "claude", environment: "host", network: "deny", secrets: {FOO: "env:TEST_SLOP_SECRET"}}
+		h: {agent: "claude", environment: "host", network: "deny", secrets: {FOO: "env:TEST_SAFESLOP_SECRET"}}
 	}
 }
 `
 
-const sshHostCue = `package slop
-slop: {
+const sshHostCue = `package safeslop
+safeslop: {
 	version: 1
 	profiles: {
 		h: {agent: "claude", environment: "host", network: "deny", credentials: {ssh: {}}}
@@ -94,7 +94,7 @@ slop: {
 `
 
 func TestResolveSessionDeliversSecretToHostEnv(t *testing.T) {
-	t.Setenv("TEST_SLOP_SECRET", "s3cr3t")
+	t.Setenv("TEST_SAFESLOP_SECRET", "s3cr3t")
 	dir := t.TempDir()
 	path := filepath.Join(dir, "safeslop.cue")
 	if err := os.WriteFile(path, []byte(secretHostCue), 0o644); err != nil {
