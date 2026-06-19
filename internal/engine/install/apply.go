@@ -77,6 +77,16 @@ type Event struct {
 	Msg  string    `json:"msg"`
 }
 
+// The trust chain (specs/0012 §10.2 — the honest "no naive Homebrew" rationale):
+// the pinned sha256es ship COMPILED INTO THE NOTARIZED safeslop binary, so an artifact that
+// matches its embedded sha inherits Apple's code-signing root of trust — tampering with the pin
+// set breaks the binary's own signature. A GitHub-release download against an advisory README hash
+// (what brew-style delegation would amount to) is a WEAKER root of trust, not stronger. Where
+// upstream also publishes a verifiable signature, Apply verifies it too (Pin.Sig), because a
+// faithfully-checksummed artifact from a compromised maintainer is still malicious
+// (provenance != honesty; TUF/SLSA). sha256 defends substitution/tampering; the signature defends
+// maintainer compromise.
+//
 // Apply executes the plan's non-ok actions in manifest order: fetch -> verify (sha256, then the
 // minisign chain when the pin declares a Sig) -> install per Format. Fail-closed: a verify error
 // aborts that action (emitting EventError) and Apply returns the first error without installing.
