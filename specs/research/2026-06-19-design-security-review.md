@@ -133,6 +133,15 @@ and so same-uid `ps`/`docker inspect` can't read it. [C, partial by design]** ·
 - DO: prefer a short-lived `credential_process`/file the SDK calls over raw env (the earlier
   pass's H5 actionable 5); `FD_CLOEXEC` + explicit FD scrub on every host-only fd before spawn
   ([G] fd-leak class); never return secret bytes over the socket.
+- **PARTIALLY REALIZED (specs/0026) + VERIFIED:** the scope-first half shipped for GCP — an
+  optional `gcp.scopes` downscopes the minted ADC token (least-privilege; bounds a full-TTL
+  reuse). Verified already-handled: **M1** refresh-token never crosses (GCP stages only the
+  short access token; AWS only short STS creds — the SSO refresh token stays in `~/.aws/sso`,
+  unmounted), and the ambient-authority leak is closed by S2 (specs/0024 `childEnv`). Deferred
+  with rationale: **AWS session-policy** downscoping (needs assume-role + role-ARN plumbing) and
+  **`credential_process`** delivery (the env channel is a deliberate uniform-across-tiers choice;
+  changing it is a design fork). The `op read`-over-socket / FD-scrub concerns hinge on S1's peer
+  check (specs/0024) — no socket method returns secret bytes.
 
 ### MEDIUM — actionable, secondary, or needs design
 

@@ -11,8 +11,15 @@ import (
 	"github.com/freakhill/safeslop/internal/engine/policy"
 )
 
-func gcpTokenArgv() []string {
-	return []string{"gcloud", "auth", "application-default", "print-access-token"}
+// gcpTokenArgv builds the ADC access-token call. When scopes are declared they are
+// passed as a comma-joined --scopes to downscope the minted token (scope-first
+// least-privilege, specs/0026 S5); empty scopes keep ADC's default (broad) scopes.
+func gcpTokenArgv(scopes []string) []string {
+	argv := []string{"gcloud", "auth", "application-default", "print-access-token"}
+	if len(scopes) > 0 {
+		argv = append(argv, "--scopes="+strings.Join(scopes, ","))
+	}
+	return argv
 }
 
 // StageGCP mints a short-lived ADC access token on the host and stages ONLY that
@@ -22,7 +29,7 @@ func StageGCP(ctx context.Context, creds *policy.Credentials, stageDir string) (
 	if creds == nil || creds.Gcp == nil {
 		return nil, nil
 	}
-	argv := gcpTokenArgv()
+	argv := gcpTokenArgv(creds.Gcp.Scopes)
 	out, err := osexec.CommandContext(ctx, argv[0], argv[1:]...).Output()
 	if err != nil {
 		return nil, fmt.Errorf("gcloud print-access-token (is ADC set up? run: gcloud auth application-default login): %w", err)

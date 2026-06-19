@@ -42,6 +42,10 @@ package safeslop
 // minted via `gcloud auth application-default print-access-token`; the long-lived
 // refresh token is never staged (specs/0009).
 #GcpAdc: {
+	// Optional: downscope the minted access token to these OAuth scopes (scope-first
+	// least-privilege). Empty = ADC's default (broad) scopes. E.g.
+	// ["https://www.googleapis.com/auth/devstorage.read_only"].
+	scopes?: [...string]
 }
 
 // A single Kubernetes cluster to pre-authenticate for (specs/0010). Set exactly one

@@ -11,10 +11,23 @@ import (
 )
 
 func TestGcpTokenArgv(t *testing.T) {
-	got := gcpTokenArgv()
+	got := gcpTokenArgv(nil)
 	want := []string{"gcloud", "auth", "application-default", "print-access-token"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("argv = %v", got)
+	}
+}
+
+func TestGcpTokenArgvScopes(t *testing.T) {
+	// scope-first: declared scopes downscope the minted token (specs/0026 S5).
+	got := gcpTokenArgv([]string{
+		"https://www.googleapis.com/auth/devstorage.read_only",
+		"https://www.googleapis.com/auth/bigquery.readonly",
+	})
+	joined := strings.Join(got, " ")
+	want := "--scopes=https://www.googleapis.com/auth/devstorage.read_only,https://www.googleapis.com/auth/bigquery.readonly"
+	if !strings.Contains(joined, want) {
+		t.Fatalf("scoped argv must carry comma-joined --scopes, got %v", got)
 	}
 }
 
