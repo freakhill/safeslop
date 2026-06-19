@@ -153,6 +153,10 @@ and so same-uid `ps`/`docker inspect` can't read it. [C, partial by design]** ·
   **`credential_process`** delivery (the env channel is a deliberate uniform-across-tiers choice;
   changing it is a design fork). The `op read`-over-socket / FD-scrub concerns hinge on S1's peer
   check (specs/0024) — no socket method returns secret bytes.
+- **AWS half now REALIZED (specs/0027):** optional `aws.roleArn` + `aws.sessionPolicy` downscope the
+  staged creds via `sts assume-role` with an inline session policy (least-privilege; the role must
+  be assumable by the SSO identity). Scope-first at mint is now complete for **both** AWS and GCP;
+  only `credential_process` delivery remains (the design fork above).
 
 ### MEDIUM — actionable, secondary, or needs design
 
