@@ -446,6 +446,37 @@ func cmdInstall() *cobra.Command {
 			return nil
 		},
 	})
+	c.AddCommand(&cobra.Command{
+		Use:   "plan",
+		Short: "Show the pinned actions needed to install/upgrade toolchains + runtimes",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if jsonOut {
+				out, err := renderInstallPlanJSON(Version)
+				if err != nil {
+					return err
+				}
+				fmt.Println(out)
+				return nil
+			}
+			res, err := installPlanResult(Version)
+			if err != nil {
+				return err // fail closed: a bad manifest is an error, not an empty plan
+			}
+			fmt.Printf("%d change(s) pending\n", res.Pending())
+			for _, a := range res.Actions {
+				cur := a.Current
+				if cur == "" {
+					cur = "-"
+				}
+				fmt.Printf("  %-10s %-8s %s -> %s\n", a.Name, a.Kind, cur, a.Desired)
+			}
+			if len(res.Actions) == 0 {
+				fmt.Println("  (desired-state manifest is empty)")
+			}
+			return nil
+		},
+	})
 	return c
 }
 
@@ -453,6 +484,20 @@ func renderInstallStatusJSON(version string) string {
 	st := install.Status(context.Background(), version)
 	b, _ := json.MarshalIndent(st, "", "  ")
 	return string(b)
+}
+
+func installPlanResult(version string) (install.Result, error) {
+	st := install.Status(context.Background(), version)
+	return install.Plan(st, install.DesiredState())
+}
+
+func renderInstallPlanJSON(version string) (string, error) {
+	res, err := installPlanResult(version)
+	if err != nil {
+		return "", err
+	}
+	b, _ := json.MarshalIndent(res, "", "  ")
+	return string(b), nil
 }
 
 func printTools(label string, tools []install.Tool) {
