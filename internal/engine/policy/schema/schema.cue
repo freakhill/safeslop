@@ -36,6 +36,11 @@ package safeslop
 #AwsSso: {
 	profile: string // a named profile configured for SSO in ~/.aws/config
 	region?: string
+	// Optional scope-first downscope: assume roleArn with an inline sessionPolicy (JSON), using
+	// the SSO creds, so the staged creds are least-privilege. Both required together; the role
+	// must be assumable by your SSO identity.
+	roleArn?:       string
+	sessionPolicy?: string
 }
 
 // GCP creds from Application Default Credentials. A short-lived access token is

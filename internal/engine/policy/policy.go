@@ -29,10 +29,14 @@ type PnpmRegistry struct {
 	Scope string `json:"scope,omitempty"`
 }
 
-// AwsSso mints short-lived AWS creds from an SSO-configured profile (specs/0009).
+// AwsSso mints short-lived AWS creds from an SSO-configured profile (specs/0009). RoleArn +
+// SessionPolicy (both, optional) downscope the creds via `sts assume-role` with an inline session
+// policy — least-privilege, scope-first (specs/0027); the role must be assumable by the SSO identity.
 type AwsSso struct {
-	Profile string `json:"profile"`
-	Region  string `json:"region,omitempty"`
+	Profile       string `json:"profile"`
+	Region        string `json:"region,omitempty"`
+	RoleArn       string `json:"roleArn,omitempty"`
+	SessionPolicy string `json:"sessionPolicy,omitempty"`
 }
 
 // GcpAdc stages a short-lived GCP access token from ADC, refresh token stripped (specs/0009).

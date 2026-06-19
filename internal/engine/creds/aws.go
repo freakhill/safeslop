@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	osexec "os/exec"
 
 	"github.com/freakhill/safeslop/internal/engine/policy"
@@ -66,5 +67,58 @@ func StageAWS(ctx context.Context, creds *policy.Credentials, _ string) ([]strin
 	if err != nil {
 		return nil, err
 	}
+	// Optional scope-first downscope (specs/0027 S5·2): assume RoleArn with an inline session
+	// policy using the SSO creds, so the staged creds are bounded to least-privilege even at full
+	// TTL. Both fields required together; the role must be assumable by the SSO identity.
+	if creds.Aws.RoleArn != "" && creds.Aws.SessionPolicy != "" {
+		c, err = assumeRoleDownscope(ctx, c, creds.Aws.RoleArn, creds.Aws.SessionPolicy)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return awsEnv(c, creds.Aws.Region), nil
+}
+
+// awsAssumeRoleArgv builds the `aws sts assume-role` call that downscopes via an inline session
+// policy (a session policy can only narrow, never widen, the role's permissions).
+func awsAssumeRoleArgv(roleArn, sessionPolicy string) []string {
+	return []string{
+		"aws", "sts", "assume-role",
+		"--role-arn", roleArn,
+		"--role-session-name", "safeslop",
+		"--policy", sessionPolicy,
+		"--output", "json",
+	}
+}
+
+type awsAssumeRoleResp struct {
+	Credentials awsCreds `json:"Credentials"`
+}
+
+func parseAWSAssumeRole(out []byte) (awsCreds, error) {
+	var r awsAssumeRoleResp
+	if err := json.Unmarshal(out, &r); err != nil {
+		return awsCreds{}, fmt.Errorf("parse aws assume-role: %w", err)
+	}
+	if r.Credentials.AccessKeyID == "" || r.Credentials.SecretAccessKey == "" {
+		return awsCreds{}, fmt.Errorf("aws assume-role returned no credentials")
+	}
+	return r.Credentials, nil
+}
+
+// assumeRoleDownscope runs `aws sts assume-role` with base's SSO creds in the subprocess env
+// (they override any AWS_PROFILE from the host), returning the downscoped creds.
+func assumeRoleDownscope(ctx context.Context, base awsCreds, roleArn, sessionPolicy string) (awsCreds, error) {
+	argv := awsAssumeRoleArgv(roleArn, sessionPolicy)
+	cmd := osexec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Env = append(os.Environ(),
+		"AWS_ACCESS_KEY_ID="+base.AccessKeyID,
+		"AWS_SECRET_ACCESS_KEY="+base.SecretAccessKey,
+		"AWS_SESSION_TOKEN="+base.SessionToken,
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		return awsCreds{}, fmt.Errorf("aws sts assume-role (role %q; is it assumable by your SSO identity?): %w", roleArn, err)
+	}
+	return parseAWSAssumeRole(out)
 }
