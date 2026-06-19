@@ -145,6 +145,23 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
+// EnvTier returns an honest one-line characterization of an environment's isolation strength so
+// run/doctor (and the GUI) never imply the default sandbox contains a determined adversary
+// (ayo specs/0012 §10.5 H1). tier is a short label; note is the honest caveat. An empty env is the
+// default (sandbox).
+func EnvTier(env string) (tier, note string) {
+	switch env {
+	case "host":
+		return "none", "no isolation boundary — the agent runs as you, with your full account"
+	case "container":
+		return "network-enforced", "container + egress allowlist: real per-URL network control, shared-kernel file isolation"
+	case "vm":
+		return "adversary-grade", "disposable hardware-virtualized VM: the strongest boundary, heaviest to run"
+	default: // "sandbox" and "" (the default)
+		return "mistake-guard", "Seatbelt confines files + exec: guards agent mistakes + accidental exfil, not a malicious-code escape"
+	}
+}
+
 // Validate is Load without returning the config — used by `safeslop validate`.
 func Validate(path string) error {
 	_, err := Load(path)

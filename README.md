@@ -204,6 +204,15 @@ For your use case, enforce three boundaries at all times:
 
 ### macOS isolation reality in 2026
 
+| environment | tier | what it actually protects |
+|---|---|---|
+| `host` | none | no boundary — the agent runs as you |
+| `sandbox` (default) | mistake-guard | Seatbelt confines files + exec; guards mistakes + accidental exfil, **not** a malicious-code escape |
+| `container` | network-enforced | container + egress allowlist: real per-URL network control |
+| `vm` | adversary-grade | disposable hardware-virtualized VM: strongest, heaviest |
+
+`safeslop doctor` and `safeslop run` print the active tier so the label is never implicit.
+
 - `sandbox-exec` (macOS Seatbelt) is the **first-class lightweight local boundary** for the
   common case — launching Claude Code or a shell for package work with a file boundary and
   strict egress deny. It is built in to macOS, needs no daemon, and starts instantly.

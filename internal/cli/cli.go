@@ -145,6 +145,17 @@ func doctorReport() map[string]any {
 	return report
 }
 
+// doctorTiers renders the per-environment isolation tier legend (shared by doctor's human + JSON),
+// so the honest "what each boundary protects" framing is never implicit (ayo §10.5 H1).
+func doctorTiers() map[string]map[string]string {
+	out := map[string]map[string]string{}
+	for _, env := range []string{"host", "sandbox", "container", "vm"} {
+		tier, note := policy.EnvTier(env)
+		out[env] = map[string]string{"tier": tier, "note": note}
+	}
+	return out
+}
+
 func cmdDoctor() *cobra.Command {
 	return &cobra.Command{
 		Use:   "doctor",
@@ -153,7 +164,7 @@ func cmdDoctor() *cobra.Command {
 		RunE: func(_ *cobra.Command, _ []string) error {
 			report := doctorReport()
 			if jsonOut {
-				emitJSON(map[string]any{"ok": true, "os": runtime.GOOS, "arch": runtime.GOARCH, "tools": report})
+				emitJSON(map[string]any{"ok": true, "os": runtime.GOOS, "arch": runtime.GOARCH, "tools": report, "tiers": doctorTiers()})
 				return nil
 			}
 			fmt.Printf("safeslop %s  (%s/%s)\n", Version, runtime.GOOS, runtime.GOARCH)
@@ -169,6 +180,11 @@ func cmdDoctor() *cobra.Command {
 					mark = "yes"
 				}
 				fmt.Printf("  %-14s %-4s %s\n", n, mark, m["path"])
+			}
+			fmt.Println("isolation tiers (what each environment actually protects):")
+			for _, env := range []string{"host", "sandbox", "container", "vm"} {
+				tier, note := policy.EnvTier(env)
+				fmt.Printf("  %-10s %-16s %s\n", env, tier, note)
 			}
 			return nil
 		},
@@ -212,8 +228,10 @@ func cmdRun() *cobra.Command {
 				ws, _ = os.Getwd()
 			}
 
+			tier, tierNote := policy.EnvTier(prof.Environment)
+
 			if dryRun {
-				out := map[string]any{"ok": true, "profile": name, "environment": prof.Environment, "workspace": ws, "argv": argv, "network": prof.Network}
+				out := map[string]any{"ok": true, "profile": name, "environment": prof.Environment, "workspace": ws, "argv": argv, "network": prof.Network, "isolation_tier": tier, "isolation_note": tierNote}
 				if len(prof.Secrets) > 0 {
 					out["secrets"] = prof.Secrets // refs, never resolved here
 				}
@@ -227,6 +245,7 @@ func cmdRun() *cobra.Command {
 					emitJSON(out)
 				} else {
 					fmt.Printf("profile %q: environment=%s workspace=%s network=%s\n  argv: %v\n", name, prof.Environment, ws, prof.Network, argv)
+					fmt.Printf("  isolation tier: %s — %s\n", tier, tierNote)
 					if prof.Toolchain != nil && toolchain.Wraps(prof.Toolchain.Kind) {
 						fmt.Printf("  toolchain: %s", prof.Toolchain.Kind)
 						if prof.Toolchain.Run != "" {
@@ -247,6 +266,10 @@ func cmdRun() *cobra.Command {
 					}
 				}
 				return nil
+			}
+
+			if !jsonOut {
+				fmt.Printf("isolation tier: %s — %s\n", tier, tierNote)
 			}
 
 			// Fail-closed: only an explicitly host-approved safeslop.cue may launch an agent

@@ -192,3 +192,25 @@ safeslop: profiles: review: {
 		t.Fatalf("ssh write must default false: %+v", s)
 	}
 }
+
+func TestEnvTier(t *testing.T) {
+	cases := map[string]string{
+		"host":      "none",
+		"sandbox":   "mistake-guard",
+		"":          "mistake-guard", // unspecified defaults to sandbox
+		"container": "network-enforced",
+		"vm":        "adversary-grade",
+	}
+	for env, wantTier := range cases {
+		tier, note := EnvTier(env)
+		if tier != wantTier {
+			t.Errorf("EnvTier(%q) tier = %q, want %q", env, tier, wantTier)
+		}
+		if env != "host" && note == "" {
+			t.Errorf("EnvTier(%q) must carry an honest note", env)
+		}
+	}
+	if _, note := EnvTier("host"); note == "" {
+		t.Error("host tier must still carry a note (no isolation)")
+	}
+}
