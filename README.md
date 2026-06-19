@@ -1,6 +1,6 @@
 # safeslop
 
-> **Practice safe slop** — run agentic workflows behind stronger isolation defaults.
+> **Practice safe safeslop** — run agentic workflows behind stronger isolation defaults.
 
 [![Tests](https://github.com/freakhill/safeslop/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/freakhill/safeslop/actions/workflows/tests.yml?query=branch%3Amain+is%3Asuccess)
 
@@ -16,7 +16,7 @@ Local scripts and docs for running agent workflows with stronger isolation defau
 - ephemeral key lifecycle helpers (`slop-gh-key`, `slop-forgejo-key`)
 - unified isolation policy compiler (`slop-isolate`: one CUE file → per-tool configs for sandbox-exec, docker-compose, envoy, claude-code, opencode, …)
 - host-side agent launchers with bundled defaults (`slop-agents claude`, `slop-agents opencode`)
-- a single Textual TUI hub (`slop`) wrapping every action above
+- a single Textual TUI hub (`safeslop`) wrapping every action above
 
 ## Quick start
 
@@ -30,8 +30,8 @@ scripts/slop-sandboxctl.fish help    # hub: lists every tool and what it does
 For an interactive launcher across every tool in this repo:
 
 ```fish
-slop          # Textual TUI; auto-installs Textual on first run via uv + PEP-723.
-slop --check  # diagnose the first-run install path (useful behind TLS-intercepting proxies).
+safeslop          # Textual TUI; auto-installs Textual on first run via uv + PEP-723.
+safeslop --check  # diagnose the first-run install path (useful behind TLS-intercepting proxies).
 ```
 
 For the most common workflow (managing deploy keys for the current repo) you
@@ -43,7 +43,7 @@ slop-gh-key here list           # list keys for current repo
 slop-gh-key here revoke 12345   # revoke by id
 slop-gh-key here cleanup        # revoke-expired --yes
 slop-gh-key here revoke-all     # revoke-by-title '^llm-agent:' --yes (destructive)
-slop-gh-key tui                 # per-tool TUI; soft-deps on [gum](https://github.com/charmbracelet/gum) (the global slop is [Textual](https://textual.textualize.io), no gum needed)
+slop-gh-key tui                 # per-tool TUI; soft-deps on [gum](https://github.com/charmbracelet/gum) (the global safeslop is [Textual](https://textual.textualize.io), no gum needed)
 ```
 
 To launch Claude Code or OpenCode with the repo's bundled defaults applied:
@@ -99,7 +99,7 @@ scripts/slop-install.fish install
 What this does:
 
 - Generates `~/.config/fish/conf.d/safeslop.fish`. Fish sources
-  it on every shell startup, so commands like `slop`, `slop-sandboxctl`,
+  it on every shell startup, so commands like `safeslop`, `slop-sandboxctl`,
   `slop-gh-key`, `slop-agent-sandbox`, `slop-brew-vm`, etc. are available in every new
   fish session — no `~/.local/bin` shims, no `PATH` manipulation.
 - The snippet `source`s "module" scripts that define functions, and wraps
@@ -217,14 +217,14 @@ For your use case, enforce three boundaries at all times:
   ([LuLu](https://objective-see.org/products/lulu.html)) as defense-in-depth.
 - **Credentials + the sandbox boundary:** because `sandbox-exec` cannot do per-destination
   egress filtering, staging credentials/secrets into an `environment: sandbox` profile with
-  `network: allow` is exfiltration-ready — a prompt-injected agent can POST them out. `slop
-  validate` and `slop run` warn on exactly that combination (`sandbox-open-egress-with-creds`);
+  `network: allow` is exfiltration-ready — a prompt-injected agent can POST them out. `safeslop
+  validate` and `safeslop run` warn on exactly that combination (`sandbox-open-egress-with-creds`);
   use `environment: container`/`vm` or `network: deny` for credentialed work. Per-process egress
   filtering for the sandbox boundary is planned (the NetworkExtension filter).
 - **Egress enforcement differs by boundary:** the *container* boundary enforces egress by
   **topology** (the agent sits on an internal Docker network with Squid as the sole bridge, which
   denies cloud-metadata + RFC1918 + loopback deny-first). The *VM* boundary's `network: deny`
-  egress is **advisory** — an `SLOP_VM_PROXY_URL` HTTP proxy, not topology — so point it at a
+  egress is **advisory** — an `SAFESLOP_VM_PROXY_URL` HTTP proxy, not topology — so point it at a
   filtering proxy; topological VM egress is future work.
 
 Practical consequence: use `sandbox-exec` as the default local boundary for everyday agent
@@ -549,7 +549,7 @@ slop-isolate presets show claude-code
 ```fish
 cat > .isolation.cue <<'CUE'
 package isolation
-import "slop.dev/isolation/presets"
+import "safeslop.dev/isolation/presets"
 isolation: presets.#ClaudeCode & {
     extras: "allow-domains": ["github.example.internal"]
     tool: pf: "domain-fallback": "fail"
@@ -685,27 +685,27 @@ first hit wins:
 2. `<repo_root>/.claude/settings.json` (or `<repo_root>/opencode.json`)
 3. user-level `~/.claude/settings.json` if present, else nothing
 
-`slop` (the Textual TUI) exposes the same flow under key `a` ("Agents").
+`safeslop` (the Textual TUI) exposes the same flow under key `a` ("Agents").
 
 For container-side use, drop into the agent-tools shell first and type
 `claude` or `opencode` once inside (`slop-agent-sandbox-tools shell`).
 
-### Drive isolated agent sessions with `slop.cue`
+### Drive isolated agent sessions with `safeslop.cue`
 
 `slop-agents` is the simplest "give me a REPL with default settings"
 path. For repeatable, configurable sessions — pick the agent, choose
 the isolation environment, declare which ephemeral credentials to
-provision, list the cleanup hooks — drop a `slop.cue` at the root of
-your repo. The `slop` runtime reads it and orchestrates everything:
+provision, list the cleanup hooks — drop a `safeslop.cue` at the root of
+your repo. The `safeslop` runtime reads it and orchestrates everything:
 
 1. Author the file. Start from the bundled sample at
    `library/layer/policy/samples/slop/slop.cue`:
 
 ```cue
-package slop
+package safeslop
 
-import "slop.dev/isolation/schema"
-import "slop.dev/isolation/presets"
+import "safeslop.dev/isolation/schema"
+import "safeslop.dev/isolation/presets"
 
 profiles: {
     "review": schema.#Profile & {
@@ -736,36 +736,36 @@ default: "review"
 2. Validate, list, and dry-run before committing:
 
 ```fish
-slop validate                   # CUE → schema check; no side effects
-slop list                       # profiles + last-known state
-slop run review --dry-run       # show what would happen, no side effects
+safeslop validate                   # CUE → schema check; no side effects
+safeslop list                       # profiles + last-known state
+safeslop run review --dry-run       # show what would happen, no side effects
 ```
 
 3. Run a profile end-to-end:
 
 ```fish
-slop run review                 # default profile if you ran a bare `slop`
-slop run explore                # explicit
+safeslop run review                 # default profile if you ran a bare `safeslop`
+safeslop run explore                # explicit
 ```
 
 4. Tear down on next session start (or after a crashed run):
 
 ```fish
-slop down                       # run on-exit hooks for any active profiles
+safeslop down                       # run on-exit hooks for any active profiles
 ```
 
-Bare `slop` in a repo containing `slop.cue` runs the `default` profile;
+Bare `safeslop` in a repo containing `safeslop.cue` runs the `default` profile;
 elsewhere it falls back to the Textual TUI. The TUI also exposes the
 flow under key `p` ("Run profile") with profile-specific shortcuts
-generated from your `slop.cue`.
+generated from your `safeslop.cue`.
 
-What `slop run review` does, in order:
+What `safeslop run review` does, in order:
 
 - Resolves the profile and validates the CUE.
-- Reads `<repo>/.slop/state.json` (per-repo, gitignored).
+- Reads `<repo>/.safeslop/state.json` (per-repo, gitignored).
 - Provisions credentials: `slop-gh-key here create-pair` for
   `credentials.github != "none"`, similarly for `forgejo`.
-- Stages the just-created keys to `<repo>/.slop/runtime/<profile>/.ssh/`
+- Stages the just-created keys to `<repo>/.safeslop/runtime/<profile>/.ssh/`
   with a fresh SSH config that uses just-the-filename `IdentityFile`
   paths. The host's permanent identities (`~/.ssh/id_ed25519` etc.)
   stay on the host — only the ephemeral keys this profile created go
@@ -788,7 +788,7 @@ What `slop run review` does, in order:
   `stop-proxy` → `slop-isolate proxy stop`,
   `destroy-vm` → `slop-brew-vm destroy`,
   `snapshot-state` is a no-op today; Phase E+1 plumbs it).
-- Always wipes `<repo>/.slop/runtime/<profile>/` so the staged private
+- Always wipes `<repo>/.safeslop/runtime/<profile>/` so the staged private
   keys do not survive the session.
 
 Inside the container, the user's repo root is mounted read-write at
@@ -796,7 +796,7 @@ Inside the container, the user's repo root is mounted read-write at
 host's repo without further plumbing. The mount is transitively
 `docker-compose.yml`'s `../../..:/workspace` (compose file → container/
 → layer/ → library/ → repo root); change the override emitted under
-`<repo>/.slop/runtime/<profile>/docker-compose.override.yml` if you need
+`<repo>/.safeslop/runtime/<profile>/docker-compose.override.yml` if you need
 a different mount path.
 
 ### How to lock down OpenCode on macOS

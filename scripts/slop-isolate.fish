@@ -35,7 +35,7 @@ function __slop_isolate_examples
     echo 'Author your config (extend a preset via the extras struct):'
     echo '  cat > .isolation.cue <<\'CUE\''
     echo '  package isolation'
-    echo '  import "slop.dev/isolation/presets"'
+    echo '  import "safeslop.dev/isolation/presets"'
     echo '  isolation: presets.#ClaudeCode & {'
     echo '      extras: "allow-domains": ["github.example.internal"]'
     echo '      tool: pf: "domain-fallback": "fail"'
