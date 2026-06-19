@@ -21,6 +21,7 @@ import (
 	"github.com/freakhill/safeslop/internal/engine/control/pb"
 	"github.com/freakhill/safeslop/internal/engine/creds"
 	engexec "github.com/freakhill/safeslop/internal/engine/exec"
+	"github.com/freakhill/safeslop/internal/engine/gitguard"
 	"github.com/freakhill/safeslop/internal/engine/install"
 	"github.com/freakhill/safeslop/internal/engine/launch"
 	"github.com/freakhill/safeslop/internal/engine/policy"
@@ -807,6 +808,13 @@ func runProfile(name string, prof policy.Profile, argv []string, ws string) (int
 		defer creds.RevokeSSH(context.Background(), stageDir)
 	}
 
+	// Detect (and warn about) any change the agent makes to git's executable surface —
+	// a planted .git/hooks script or a .git/config hooksPath/fsmonitor/filter that the
+	// host would run on its next git command in this repo (specs/0025 S3). Best-effort,
+	// never blocks the agent's legitimate git use.
+	gitBefore, _ := gitguard.Snapshot(ws)
+	defer warnGitExecSurface(ws, gitBefore)
+
 	switch prof.Environment {
 	case "sandbox":
 		env := childEnv(secretEnv, pathEnv)
@@ -828,6 +836,25 @@ func runProfile(name string, prof policy.Profile, argv []string, ws string) (int
 	default:
 		return 1, fmt.Errorf("unknown environment %q", prof.Environment)
 	}
+}
+
+// warnGitExecSurface prints a prominent warning if the agent changed git's executable surface
+// (.git/hooks or .git/config) during the run — a planted hook or config directive runs on your
+// next git command in this repo (specs/0025 S3). Best-effort: snapshot errors are ignored.
+func warnGitExecSurface(ws string, before gitguard.State) {
+	after, err := gitguard.Snapshot(ws)
+	if err != nil {
+		return
+	}
+	changes := before.Diff(after)
+	if len(changes) == 0 {
+		return
+	}
+	fmt.Fprintln(os.Stderr, "\nwarning: the agent changed git's executable surface during this run:")
+	for _, c := range changes {
+		fmt.Fprintf(os.Stderr, "  - %s\n", c)
+	}
+	fmt.Fprintln(os.Stderr, "review these before running git in this repo — a planted hook or config directive runs on your next git command.")
 }
 
 func hostOr(h string) string {

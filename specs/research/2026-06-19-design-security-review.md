@@ -104,6 +104,11 @@ repo write *is* host code-exec. [G, VERIFIED reachable]** · Surface 1 · Q1 hig
   document the `direnv`/editor-task class; consider a commit shim. At minimum, surface it
   loudly — it defeats the "guards mistakes" claim when a *mistake* the agent makes is letting
   injected content write `.git/hooks`.
+- **PARTIALLY REALIZED (specs/0025):** detect-and-warn shipped — `internal/engine/gitguard`
+  fingerprints `.git/config` + executable `.git/hooks` before launch and `runProfile` warns on
+  exit if the exec-surface changed (all tiers, non-breaking). *Prevention* (worktree-isolated
+  gitdir or sandbox `.git/hooks` write-deny) and the cockpit-path wiring + `.envrc`/editor-task
+  class remain follow-ons.
 
 **S4. Treat the squid allowlist as a parser surface and label "network-enforced" honestly. [C,
 UNVERIFIED — needs the squid config audit]** · Surface 2 · Q1 high
