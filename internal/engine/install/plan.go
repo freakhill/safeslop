@@ -45,3 +45,79 @@ func ValidateDesired(pins []Pin) error {
 	}
 	return nil
 }
+
+// ActionKind is what apply must do to one tool to reach the pinned state.
+type ActionKind string
+
+const (
+	ActionInstall ActionKind = "install" // tool absent -> fetch + install
+	ActionUpgrade ActionKind = "upgrade" // present but not the pinned version -> replace
+	ActionOK      ActionKind = "ok"      // present at the pinned version -> no-op
+)
+
+// Action is the planned outcome for one pinned tool.
+type Action struct {
+	Name    string     `json:"name"`
+	Kind    ActionKind `json:"kind"`
+	Current string     `json:"current,omitempty"` // probed version ("" if absent)
+	Desired string     `json:"desired"`           // pinned version
+	SHA256  string     `json:"sha256"`            // carried through for apply
+	URL     string     `json:"url"`
+}
+
+// Result is the ordered plan: one Action per pinned tool, in manifest order.
+type Result struct {
+	Actions []Action `json:"actions"`
+}
+
+// Pending counts the non-ok actions (install + upgrade) — the "N changes" headline.
+func (r Result) Pending() int {
+	n := 0
+	for _, a := range r.Actions {
+		if a.Kind != ActionOK {
+			n++
+		}
+	}
+	return n
+}
+
+var versionRe = regexp.MustCompile(`\d+(?:\.\d+)+`)
+
+// Plan diffs the live install state against the pinned desired manifest and returns the ordered
+// actions to reconcile it. It fails closed: an invalid manifest is an error, never a partial plan.
+func Plan(state State, desired []Pin) (Result, error) {
+	if err := ValidateDesired(desired); err != nil {
+		return Result{}, err
+	}
+	index := map[string]Tool{}
+	for _, t := range state.Toolchains {
+		index[t.Name] = t
+	}
+	for _, t := range state.Runtimes {
+		index[t.Name] = t
+	}
+	var res Result
+	for _, p := range desired {
+		a := Action{Name: p.Name, Desired: p.Version, SHA256: p.SHA256, URL: p.URL}
+		tool, found := index[p.Name]
+		cur := extractVersion(tool.Version)
+		switch {
+		case !found || !tool.Present:
+			a.Kind = ActionInstall
+		case cur == p.Version:
+			a.Kind = ActionOK
+			a.Current = cur
+		default:
+			a.Kind = ActionUpgrade
+			a.Current = cur
+		}
+		res.Actions = append(res.Actions, a)
+	}
+	return res, nil
+}
+
+// extractVersion pulls the first dotted-numeric token out of a `--version` line so a pinned
+// "2.0.0" matches probe output like "tart version: 2.0.0 (build 7)". Returns "" if none.
+func extractVersion(s string) string {
+	return versionRe.FindString(s)
+}

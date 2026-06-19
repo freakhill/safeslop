@@ -59,3 +59,68 @@ func TestValidateDesiredRejectsDuplicate(t *testing.T) {
 		t.Fatal("duplicate tool names must be rejected")
 	}
 }
+
+func TestPlanClassifiesInstallUpgradeOK(t *testing.T) {
+	state := State{
+		Toolchains: []Tool{{Name: "mise", Present: true, Version: "mise 2026.6.0 macos-arm64"}},
+		Runtimes:   []Tool{{Name: "tart", Present: false}},
+	}
+	desired := []Pin{
+		pin("mise", "toolchain", "2026.6.0"), // present at exact version -> ok
+		pin("tart", "runtime", "2.0.0"),       // absent -> install
+	}
+	res, err := Plan(state, desired)
+	if err != nil {
+		t.Fatalf("Plan errored: %v", err)
+	}
+	if len(res.Actions) != 2 {
+		t.Fatalf("want 2 actions in manifest order, got %d", len(res.Actions))
+	}
+	if res.Actions[0].Kind != ActionOK {
+		t.Fatalf("mise should be ok, got %s", res.Actions[0].Kind)
+	}
+	if res.Actions[1].Kind != ActionInstall {
+		t.Fatalf("tart should be install, got %s", res.Actions[1].Kind)
+	}
+	if res.Pending() != 1 {
+		t.Fatalf("pending want 1, got %d", res.Pending())
+	}
+}
+
+func TestPlanDetectsUpgrade(t *testing.T) {
+	state := State{Toolchains: []Tool{{Name: "mise", Present: true, Version: "2026.5.0"}}}
+	res, err := Plan(state, []Pin{pin("mise", "toolchain", "2026.6.0")})
+	if err != nil {
+		t.Fatalf("Plan errored: %v", err)
+	}
+	if res.Actions[0].Kind != ActionUpgrade {
+		t.Fatalf("want upgrade, got %s", res.Actions[0].Kind)
+	}
+	if res.Actions[0].Current != "2026.5.0" {
+		t.Fatalf("current want 2026.5.0, got %q", res.Actions[0].Current)
+	}
+	if res.Actions[0].Desired != "2026.6.0" {
+		t.Fatalf("desired want 2026.6.0, got %q", res.Actions[0].Desired)
+	}
+}
+
+func TestPlanFailsClosedOnBadManifest(t *testing.T) {
+	bad := []Pin{{Name: "mise", Kind: "toolchain", Version: "latest", SHA256: "x", URL: "u"}}
+	if _, err := Plan(State{}, bad); err == nil {
+		t.Fatal("Plan must fail closed on an invalid manifest")
+	}
+}
+
+func TestExtractVersion(t *testing.T) {
+	cases := map[string]string{
+		"mise 2026.6.0 macos-arm64":     "2026.6.0",
+		"tart version: 2.0.0 (build 7)": "2.0.0",
+		"no version here":               "",
+		"v1.2":                          "1.2",
+	}
+	for in, want := range cases {
+		if got := extractVersion(in); got != want {
+			t.Errorf("extractVersion(%q) = %q want %q", in, got, want)
+		}
+	}
+}
