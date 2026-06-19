@@ -67,7 +67,7 @@ func TestPlanClassifiesInstallUpgradeOK(t *testing.T) {
 	}
 	desired := []Pin{
 		pin("mise", "toolchain", "2026.6.0"), // present at exact version -> ok
-		pin("tart", "runtime", "2.0.0"),       // absent -> install
+		pin("tart", "runtime", "2.0.0"),      // absent -> install
 	}
 	res, err := Plan(state, desired)
 	if err != nil {
