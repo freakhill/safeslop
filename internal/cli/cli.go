@@ -50,7 +50,7 @@ func Execute() {
 func newRoot() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "safeslop",
-		Short:         "Launch coding agents under isolation, driven by slop.cue",
+		Short:         "Launch coding agents under isolation, driven by safeslop.cue",
 		Version:       Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -64,8 +64,8 @@ func newRoot() *cobra.Command {
 
 func cmdValidate() *cobra.Command {
 	return &cobra.Command{
-		Use:   "validate [slop.cue]",
-		Short: "Validate a slop.cue against the embedded schema",
+		Use:   "validate [safeslop.cue]",
+		Short: "Validate a safeslop.cue against the embedded schema",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			path, err := findConfig(arg0(args))
@@ -91,8 +91,8 @@ func cmdValidate() *cobra.Command {
 
 func cmdList() *cobra.Command {
 	return &cobra.Command{
-		Use:   "list [slop.cue]",
-		Short: "List the profiles defined in slop.cue",
+		Use:   "list [safeslop.cue]",
+		Short: "List the profiles defined in safeslop.cue",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			path, err := findConfig(arg0(args))
@@ -430,7 +430,7 @@ func cmdLaunch() *cobra.Command {
 
 // launchProfile opens the user's preferred terminal (from ~/.config/slop/config.cue) running
 // `slop run <profile>`, so the real ctty handoff happens inside that window. Returns once the
-// terminal is spawned. configPath is reserved for the gRPC delegation (v1 resolves slop.cue
+// terminal is spawned. configPath is reserved for the gRPC delegation (v1 resolves safeslop.cue
 // from the workspace).
 // profileNameRe constrains launchable profile names: the name is embedded in the spawned
 // terminal's window title and SLOP_SESSION, so it must not carry shell/title metacharacters.
@@ -603,7 +603,7 @@ func arg0(args []string) string {
 	return ""
 }
 
-// findConfig returns the explicit path if given, else the nearest slop.cue
+// findConfig returns the explicit path if given, else the nearest safeslop.cue
 // walking up from the current directory.
 func findConfig(explicit string) (string, error) {
 	if explicit != "" {
@@ -615,13 +615,13 @@ func findConfig(explicit string) (string, error) {
 	}
 	start := dir
 	for {
-		p := filepath.Join(dir, "slop.cue")
+		p := filepath.Join(dir, "safeslop.cue")
 		if _, err := os.Stat(p); err == nil {
 			return p, nil
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return "", fmt.Errorf("no slop.cue found in %s or any parent directory", start)
+			return "", fmt.Errorf("no safeslop.cue found in %s or any parent directory", start)
 		}
 		dir = parent
 	}
@@ -632,7 +632,7 @@ func selectProfile(cfg *policy.Config, requested string) (string, policy.Profile
 	if requested != "" {
 		p, ok := cfg.Profiles[requested]
 		if !ok {
-			return "", policy.Profile{}, fmt.Errorf("no profile %q in slop.cue", requested)
+			return "", policy.Profile{}, fmt.Errorf("no profile %q in safeslop.cue", requested)
 		}
 		return requested, p, nil
 	}

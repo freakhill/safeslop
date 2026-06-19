@@ -6,10 +6,10 @@ import (
 	"testing"
 )
 
-// loadStr writes src to a temp slop.cue and Loads it (the package's load path is file-based).
+// loadStr writes src to a temp safeslop.cue and Loads it (the package's load path is file-based).
 func loadStr(t *testing.T, src string) (*Config, error) {
 	t.Helper()
-	p := filepath.Join(t.TempDir(), "slop.cue")
+	p := filepath.Join(t.TempDir(), "safeslop.cue")
 	if err := os.WriteFile(p, []byte(src), 0o600); err != nil {
 		t.Fatal(err)
 	}

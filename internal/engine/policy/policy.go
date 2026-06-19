@@ -1,4 +1,4 @@
-// Package policy loads and validates a user's slop.cue against the embedded
+// Package policy loads and validates a user's safeslop.cue against the embedded
 // engine schema, returning a typed Config.
 //
 // The schema is compiled into the binary via go:embed and unified with the
@@ -86,7 +86,7 @@ type Toolchain struct {
 	Run  string `json:"run,omitempty"`
 }
 
-// Profile is one launchable configuration from slop.cue.
+// Profile is one launchable configuration from safeslop.cue.
 type Profile struct {
 	Agent       string `json:"agent"`
 	Environment string `json:"environment"`
@@ -101,7 +101,7 @@ type Profile struct {
 	Toolchain *Toolchain `json:"toolchain,omitempty"`
 }
 
-// Config is the decoded top-level `slop:` value from slop.cue.
+// Config is the decoded top-level `slop:` value from safeslop.cue.
 type Config struct {
 	Version  int                `json:"version"`
 	Profiles map[string]Profile `json:"profiles"`
@@ -111,7 +111,7 @@ type Config struct {
 // user's file via an overlay, so neither needs to live in a real CUE module.
 const virtualDir = "/__slop__"
 
-// Load reads, validates, and decodes the slop.cue at path. Validation errors
+// Load reads, validates, and decodes the safeslop.cue at path. Validation errors
 // are rendered with cue/errors.Details for cue-vet-quality messages.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
@@ -122,7 +122,7 @@ func Load(path string) (*Config, error) {
 	overlay := map[string]load.Source{
 		filepath.Join(virtualDir, "cue.mod", "module.cue"): load.FromString(`module: "slop.local/cfg"` + "\n" + `language: version: "v0.9.0"`),
 		filepath.Join(virtualDir, "schema.cue"):            load.FromString(schemaSrc),
-		filepath.Join(virtualDir, "slop.cue"):              load.FromBytes(data),
+		filepath.Join(virtualDir, "safeslop.cue"):              load.FromBytes(data),
 	}
 	insts := load.Instances([]string{"."}, &load.Config{Dir: virtualDir, Overlay: overlay})
 	if len(insts) == 0 {

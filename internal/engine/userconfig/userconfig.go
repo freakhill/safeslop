@@ -1,5 +1,5 @@
 // Package userconfig loads the user-level ~/.config/slop/config.cue (terminal-launch
-// preferences), validated against an embedded CUE schema. Distinct from policy.slop.cue.
+// preferences), validated against an embedded CUE schema. Distinct from policy.safeslop.cue.
 package userconfig
 
 import (

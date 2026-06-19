@@ -25,7 +25,7 @@ slop: {
 func writeResolverCue(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	path := filepath.Join(dir, "slop.cue")
+	path := filepath.Join(dir, "safeslop.cue")
 	if err := os.WriteFile(path, []byte(resolverCue), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ slop: {
 func TestResolveSessionDeliversSecretToHostEnv(t *testing.T) {
 	t.Setenv("TEST_SLOP_SECRET", "s3cr3t")
 	dir := t.TempDir()
-	path := filepath.Join(dir, "slop.cue")
+	path := filepath.Join(dir, "safeslop.cue")
 	if err := os.WriteFile(path, []byte(secretHostCue), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestResolveSessionDeliversSecretToHostEnv(t *testing.T) {
 
 func TestResolveSessionRejectsSshCreds(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "slop.cue")
+	path := filepath.Join(dir, "safeslop.cue")
 	if err := os.WriteFile(path, []byte(sshHostCue), 0o644); err != nil {
 		t.Fatal(err)
 	}
