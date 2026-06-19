@@ -43,8 +43,12 @@ The header shows profile / environment / network / agent; the footer shows sessi
 
 ## What's a stub vs. real
 
-- **Real:** the gRPC client (UDS, `OpenSession`/`Attach`/`CloseSession`), the bidi I/O pump, the
-  SwiftTerm bridge (input/output/resize), the trust-color logic, launch-on-demand.
+- **Real:** the gRPC client (UDS, `OpenSession`/`Attach`/`CloseSession`/`Trust`), the bidi I/O pump,
+  the SwiftTerm bridge (input/output/resize), the trust-color logic, launch-on-demand, and the
+  **trust flow** — an untrusted `OpenSession` surfaces an in-place capability sheet (plain-language
+  posture, highest-risk in the button) that calls the `Trust` RPC and retries (specs/research/
+  2026-06-20-cockpit-safe-by-design.md). Quick Look raw-diff + EnvTier-sourced capability text are
+  next.
 - **Stub / next:** one gRPC connection **per session** (sharing a single client across windows is a
   follow-up); no reconnect-after-drop (engine streams live bytes only, `specs/0014` §10); no
   settings/`cockpit: external` opt-out yet; no app icon / codesigning / notarization; the

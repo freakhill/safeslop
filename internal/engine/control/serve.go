@@ -30,6 +30,7 @@ func socketPath() (string, error) {
 func Serve(version string,
 	launchFn func(profile, configPath string, emit func(*pb.LaunchEvent)) error,
 	resolveFn func(profile, configPath string) (SessionSpec, error),
+	trustFn func(configPath string) (string, error),
 ) error {
 	path, err := socketPath()
 	if err != nil {
@@ -52,6 +53,7 @@ func Serve(version string,
 		launchFn:       launchFn,
 		mgr:            NewManager(),
 		resolveFn:      resolveFn,
+		trustFn:        trustFn,
 		installApplyFn: defaultInstallApply(version),
 	})
 	return gs.Serve(peerAuthListener{ln})

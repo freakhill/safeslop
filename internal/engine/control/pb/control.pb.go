@@ -119,7 +119,7 @@ func (x InstallApplyEvent_Kind) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use InstallApplyEvent_Kind.Descriptor instead.
 func (InstallApplyEvent_Kind) EnumDescriptor() ([]byte, []int) {
-	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{19, 0}
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{21, 0}
 }
 
 type PingRequest struct {
@@ -941,6 +941,97 @@ func (*CloseSessionResponse) Descriptor() ([]byte, []int) {
 	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{14}
 }
 
+// Trust records host-side approval of a repo's safeslop.cue (its exact bytes), so a
+// subsequent OpenSession/Launch for that policy passes the fail-closed trust gate.
+// The GUI calls this after the user reviews and approves (specs/0024 S1a follow-on).
+type TrustRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ConfigPath    string                 `protobuf:"bytes,1,opt,name=config_path,json=configPath,proto3" json:"config_path,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TrustRequest) Reset() {
+	*x = TrustRequest{}
+	mi := &file_internal_engine_control_control_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TrustRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TrustRequest) ProtoMessage() {}
+
+func (x *TrustRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_engine_control_control_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TrustRequest.ProtoReflect.Descriptor instead.
+func (*TrustRequest) Descriptor() ([]byte, []int) {
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *TrustRequest) GetConfigPath() string {
+	if x != nil {
+		return x.ConfigPath
+	}
+	return ""
+}
+
+type TrustResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TrustedPath   string                 `protobuf:"bytes,1,opt,name=trusted_path,json=trustedPath,proto3" json:"trusted_path,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TrustResponse) Reset() {
+	*x = TrustResponse{}
+	mi := &file_internal_engine_control_control_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TrustResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TrustResponse) ProtoMessage() {}
+
+func (x *TrustResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_engine_control_control_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TrustResponse.ProtoReflect.Descriptor instead.
+func (*TrustResponse) Descriptor() ([]byte, []int) {
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *TrustResponse) GetTrustedPath() string {
+	if x != nil {
+		return x.TrustedPath
+	}
+	return ""
+}
+
 // InstallPlan returns the pinned desired-state diff (the SP7b-2 plan) for the wizard to preview.
 type InstallAction struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -954,7 +1045,7 @@ type InstallAction struct {
 
 func (x *InstallAction) Reset() {
 	*x = InstallAction{}
-	mi := &file_internal_engine_control_control_proto_msgTypes[15]
+	mi := &file_internal_engine_control_control_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -966,7 +1057,7 @@ func (x *InstallAction) String() string {
 func (*InstallAction) ProtoMessage() {}
 
 func (x *InstallAction) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_engine_control_control_proto_msgTypes[15]
+	mi := &file_internal_engine_control_control_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -979,7 +1070,7 @@ func (x *InstallAction) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InstallAction.ProtoReflect.Descriptor instead.
 func (*InstallAction) Descriptor() ([]byte, []int) {
-	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{15}
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *InstallAction) GetName() string {
@@ -1018,7 +1109,7 @@ type InstallPlanRequest struct {
 
 func (x *InstallPlanRequest) Reset() {
 	*x = InstallPlanRequest{}
-	mi := &file_internal_engine_control_control_proto_msgTypes[16]
+	mi := &file_internal_engine_control_control_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1030,7 +1121,7 @@ func (x *InstallPlanRequest) String() string {
 func (*InstallPlanRequest) ProtoMessage() {}
 
 func (x *InstallPlanRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_engine_control_control_proto_msgTypes[16]
+	mi := &file_internal_engine_control_control_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1043,7 +1134,7 @@ func (x *InstallPlanRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InstallPlanRequest.ProtoReflect.Descriptor instead.
 func (*InstallPlanRequest) Descriptor() ([]byte, []int) {
-	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{16}
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{18}
 }
 
 type InstallPlanResponse struct {
@@ -1055,7 +1146,7 @@ type InstallPlanResponse struct {
 
 func (x *InstallPlanResponse) Reset() {
 	*x = InstallPlanResponse{}
-	mi := &file_internal_engine_control_control_proto_msgTypes[17]
+	mi := &file_internal_engine_control_control_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1067,7 +1158,7 @@ func (x *InstallPlanResponse) String() string {
 func (*InstallPlanResponse) ProtoMessage() {}
 
 func (x *InstallPlanResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_engine_control_control_proto_msgTypes[17]
+	mi := &file_internal_engine_control_control_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1080,7 +1171,7 @@ func (x *InstallPlanResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InstallPlanResponse.ProtoReflect.Descriptor instead.
 func (*InstallPlanResponse) Descriptor() ([]byte, []int) {
-	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{17}
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *InstallPlanResponse) GetActions() []*InstallAction {
@@ -1099,7 +1190,7 @@ type InstallApplyRequest struct {
 
 func (x *InstallApplyRequest) Reset() {
 	*x = InstallApplyRequest{}
-	mi := &file_internal_engine_control_control_proto_msgTypes[18]
+	mi := &file_internal_engine_control_control_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1111,7 +1202,7 @@ func (x *InstallApplyRequest) String() string {
 func (*InstallApplyRequest) ProtoMessage() {}
 
 func (x *InstallApplyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_engine_control_control_proto_msgTypes[18]
+	mi := &file_internal_engine_control_control_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1124,7 +1215,7 @@ func (x *InstallApplyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InstallApplyRequest.ProtoReflect.Descriptor instead.
 func (*InstallApplyRequest) Descriptor() ([]byte, []int) {
-	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{18}
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{20}
 }
 
 type InstallApplyEvent struct {
@@ -1138,7 +1229,7 @@ type InstallApplyEvent struct {
 
 func (x *InstallApplyEvent) Reset() {
 	*x = InstallApplyEvent{}
-	mi := &file_internal_engine_control_control_proto_msgTypes[19]
+	mi := &file_internal_engine_control_control_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1150,7 +1241,7 @@ func (x *InstallApplyEvent) String() string {
 func (*InstallApplyEvent) ProtoMessage() {}
 
 func (x *InstallApplyEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_engine_control_control_proto_msgTypes[19]
+	mi := &file_internal_engine_control_control_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1163,7 +1254,7 @@ func (x *InstallApplyEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InstallApplyEvent.ProtoReflect.Descriptor instead.
 func (*InstallApplyEvent) Descriptor() ([]byte, []int) {
-	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{19}
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *InstallApplyEvent) GetKind() InstallApplyEvent_Kind {
@@ -1244,7 +1335,12 @@ const file_internal_engine_control_control_proto_rawDesc = "" +
 	"\x13CloseSessionRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\"\x16\n" +
-	"\x14CloseSessionResponse\"k\n" +
+	"\x14CloseSessionResponse\"/\n" +
+	"\fTrustRequest\x12\x1f\n" +
+	"\vconfig_path\x18\x01 \x01(\tR\n" +
+	"configPath\"2\n" +
+	"\rTrustResponse\x12!\n" +
+	"\ftrusted_path\x18\x01 \x01(\tR\vtrustedPath\"k\n" +
 	"\rInstallAction\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x18\n" +
@@ -1262,14 +1358,15 @@ const file_internal_engine_control_control_proto_rawDesc = "" +
 	"\x05START\x10\x00\x12\f\n" +
 	"\bPROGRESS\x10\x01\x12\b\n" +
 	"\x04DONE\x10\x02\x12\t\n" +
-	"\x05ERROR\x10\x032\xec\x05\n" +
+	"\x05ERROR\x10\x032\xbc\x06\n" +
 	"\aControl\x12K\n" +
 	"\x04Ping\x12 .safeslop.control.v1.PingRequest\x1a!.safeslop.control.v1.PingResponse\x12c\n" +
 	"\fListProfiles\x12(.safeslop.control.v1.ListProfilesRequest\x1a).safeslop.control.v1.ListProfilesResponse\x12P\n" +
 	"\x06Launch\x12\".safeslop.control.v1.LaunchRequest\x1a .safeslop.control.v1.LaunchEvent0\x01\x12`\n" +
 	"\vOpenSession\x12'.safeslop.control.v1.OpenSessionRequest\x1a(.safeslop.control.v1.OpenSessionResponse\x12P\n" +
 	"\x06Attach\x12 .safeslop.control.v1.ClientFrame\x1a .safeslop.control.v1.ServerFrame(\x010\x01\x12c\n" +
-	"\fCloseSession\x12(.safeslop.control.v1.CloseSessionRequest\x1a).safeslop.control.v1.CloseSessionResponse\x12`\n" +
+	"\fCloseSession\x12(.safeslop.control.v1.CloseSessionRequest\x1a).safeslop.control.v1.CloseSessionResponse\x12N\n" +
+	"\x05Trust\x12!.safeslop.control.v1.TrustRequest\x1a\".safeslop.control.v1.TrustResponse\x12`\n" +
 	"\vInstallPlan\x12'.safeslop.control.v1.InstallPlanRequest\x1a(.safeslop.control.v1.InstallPlanResponse\x12b\n" +
 	"\fInstallApply\x12(.safeslop.control.v1.InstallApplyRequest\x1a&.safeslop.control.v1.InstallApplyEvent0\x01B=Z;github.com/freakhill/safeslop/internal/engine/control/pb;pbb\x06proto3"
 
@@ -1286,7 +1383,7 @@ func file_internal_engine_control_control_proto_rawDescGZIP() []byte {
 }
 
 var file_internal_engine_control_control_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_internal_engine_control_control_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
+var file_internal_engine_control_control_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
 var file_internal_engine_control_control_proto_goTypes = []any{
 	(LaunchEvent_Kind)(0),        // 0: safeslop.control.v1.LaunchEvent.Kind
 	(InstallApplyEvent_Kind)(0),  // 1: safeslop.control.v1.InstallApplyEvent.Kind
@@ -1305,18 +1402,20 @@ var file_internal_engine_control_control_proto_goTypes = []any{
 	(*ServerFrame)(nil),          // 14: safeslop.control.v1.ServerFrame
 	(*CloseSessionRequest)(nil),  // 15: safeslop.control.v1.CloseSessionRequest
 	(*CloseSessionResponse)(nil), // 16: safeslop.control.v1.CloseSessionResponse
-	(*InstallAction)(nil),        // 17: safeslop.control.v1.InstallAction
-	(*InstallPlanRequest)(nil),   // 18: safeslop.control.v1.InstallPlanRequest
-	(*InstallPlanResponse)(nil),  // 19: safeslop.control.v1.InstallPlanResponse
-	(*InstallApplyRequest)(nil),  // 20: safeslop.control.v1.InstallApplyRequest
-	(*InstallApplyEvent)(nil),    // 21: safeslop.control.v1.InstallApplyEvent
+	(*TrustRequest)(nil),         // 17: safeslop.control.v1.TrustRequest
+	(*TrustResponse)(nil),        // 18: safeslop.control.v1.TrustResponse
+	(*InstallAction)(nil),        // 19: safeslop.control.v1.InstallAction
+	(*InstallPlanRequest)(nil),   // 20: safeslop.control.v1.InstallPlanRequest
+	(*InstallPlanResponse)(nil),  // 21: safeslop.control.v1.InstallPlanResponse
+	(*InstallApplyRequest)(nil),  // 22: safeslop.control.v1.InstallApplyRequest
+	(*InstallApplyEvent)(nil),    // 23: safeslop.control.v1.InstallApplyEvent
 }
 var file_internal_engine_control_control_proto_depIdxs = []int32{
 	5,  // 0: safeslop.control.v1.ListProfilesResponse.profiles:type_name -> safeslop.control.v1.Profile
 	0,  // 1: safeslop.control.v1.LaunchEvent.kind:type_name -> safeslop.control.v1.LaunchEvent.Kind
 	11, // 2: safeslop.control.v1.ClientFrame.resize:type_name -> safeslop.control.v1.Resize
 	13, // 3: safeslop.control.v1.ServerFrame.exited:type_name -> safeslop.control.v1.Exited
-	17, // 4: safeslop.control.v1.InstallPlanResponse.actions:type_name -> safeslop.control.v1.InstallAction
+	19, // 4: safeslop.control.v1.InstallPlanResponse.actions:type_name -> safeslop.control.v1.InstallAction
 	1,  // 5: safeslop.control.v1.InstallApplyEvent.kind:type_name -> safeslop.control.v1.InstallApplyEvent.Kind
 	2,  // 6: safeslop.control.v1.Control.Ping:input_type -> safeslop.control.v1.PingRequest
 	4,  // 7: safeslop.control.v1.Control.ListProfiles:input_type -> safeslop.control.v1.ListProfilesRequest
@@ -1324,18 +1423,20 @@ var file_internal_engine_control_control_proto_depIdxs = []int32{
 	9,  // 9: safeslop.control.v1.Control.OpenSession:input_type -> safeslop.control.v1.OpenSessionRequest
 	12, // 10: safeslop.control.v1.Control.Attach:input_type -> safeslop.control.v1.ClientFrame
 	15, // 11: safeslop.control.v1.Control.CloseSession:input_type -> safeslop.control.v1.CloseSessionRequest
-	18, // 12: safeslop.control.v1.Control.InstallPlan:input_type -> safeslop.control.v1.InstallPlanRequest
-	20, // 13: safeslop.control.v1.Control.InstallApply:input_type -> safeslop.control.v1.InstallApplyRequest
-	3,  // 14: safeslop.control.v1.Control.Ping:output_type -> safeslop.control.v1.PingResponse
-	6,  // 15: safeslop.control.v1.Control.ListProfiles:output_type -> safeslop.control.v1.ListProfilesResponse
-	8,  // 16: safeslop.control.v1.Control.Launch:output_type -> safeslop.control.v1.LaunchEvent
-	10, // 17: safeslop.control.v1.Control.OpenSession:output_type -> safeslop.control.v1.OpenSessionResponse
-	14, // 18: safeslop.control.v1.Control.Attach:output_type -> safeslop.control.v1.ServerFrame
-	16, // 19: safeslop.control.v1.Control.CloseSession:output_type -> safeslop.control.v1.CloseSessionResponse
-	19, // 20: safeslop.control.v1.Control.InstallPlan:output_type -> safeslop.control.v1.InstallPlanResponse
-	21, // 21: safeslop.control.v1.Control.InstallApply:output_type -> safeslop.control.v1.InstallApplyEvent
-	14, // [14:22] is the sub-list for method output_type
-	6,  // [6:14] is the sub-list for method input_type
+	17, // 12: safeslop.control.v1.Control.Trust:input_type -> safeslop.control.v1.TrustRequest
+	20, // 13: safeslop.control.v1.Control.InstallPlan:input_type -> safeslop.control.v1.InstallPlanRequest
+	22, // 14: safeslop.control.v1.Control.InstallApply:input_type -> safeslop.control.v1.InstallApplyRequest
+	3,  // 15: safeslop.control.v1.Control.Ping:output_type -> safeslop.control.v1.PingResponse
+	6,  // 16: safeslop.control.v1.Control.ListProfiles:output_type -> safeslop.control.v1.ListProfilesResponse
+	8,  // 17: safeslop.control.v1.Control.Launch:output_type -> safeslop.control.v1.LaunchEvent
+	10, // 18: safeslop.control.v1.Control.OpenSession:output_type -> safeslop.control.v1.OpenSessionResponse
+	14, // 19: safeslop.control.v1.Control.Attach:output_type -> safeslop.control.v1.ServerFrame
+	16, // 20: safeslop.control.v1.Control.CloseSession:output_type -> safeslop.control.v1.CloseSessionResponse
+	18, // 21: safeslop.control.v1.Control.Trust:output_type -> safeslop.control.v1.TrustResponse
+	21, // 22: safeslop.control.v1.Control.InstallPlan:output_type -> safeslop.control.v1.InstallPlanResponse
+	23, // 23: safeslop.control.v1.Control.InstallApply:output_type -> safeslop.control.v1.InstallApplyEvent
+	15, // [15:24] is the sub-list for method output_type
+	6,  // [6:15] is the sub-list for method input_type
 	6,  // [6:6] is the sub-list for extension type_name
 	6,  // [6:6] is the sub-list for extension extendee
 	0,  // [0:6] is the sub-list for field type_name
@@ -1361,7 +1462,7 @@ func file_internal_engine_control_control_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_engine_control_control_proto_rawDesc), len(file_internal_engine_control_control_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   20,
+			NumMessages:   22,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

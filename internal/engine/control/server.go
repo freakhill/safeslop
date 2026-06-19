@@ -19,6 +19,7 @@ type server struct {
 	launchFn       func(profile, configPath string, emit func(*pb.LaunchEvent)) error
 	mgr            *Manager
 	resolveFn      func(profile, configPath string) (SessionSpec, error)
+	trustFn        func(configPath string) (string, error)
 	installApplyFn func(emit func(*pb.InstallApplyEvent)) error
 }
 
@@ -98,6 +99,20 @@ func (s *server) Attach(stream pb.Control_AttachServer) error {
 func (s *server) CloseSession(_ context.Context, req *pb.CloseSessionRequest) (*pb.CloseSessionResponse, error) {
 	s.mgr.Close(req.SessionId)
 	return &pb.CloseSessionResponse{}, nil
+}
+
+// Trust records host-side approval of the safeslop.cue at req.ConfigPath so a subsequent
+// OpenSession passes the fail-closed trust gate (specs/0024 S1a). The peer is already
+// uid- and process-tree-checked at Accept (peerauth.go), so a sandboxed agent can't call this.
+func (s *server) Trust(_ context.Context, req *pb.TrustRequest) (*pb.TrustResponse, error) {
+	if s.trustFn == nil {
+		return nil, status.Errorf(codes.Unimplemented, "trust not wired")
+	}
+	abs, err := s.trustFn(req.ConfigPath)
+	if err != nil {
+		return nil, err
+	}
+	return &pb.TrustResponse{TrustedPath: abs}, nil
 }
 
 func (s *server) InstallPlan(_ context.Context, _ *pb.InstallPlanRequest) (*pb.InstallPlanResponse, error) {

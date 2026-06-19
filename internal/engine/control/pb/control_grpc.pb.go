@@ -25,6 +25,7 @@ const (
 	Control_OpenSession_FullMethodName  = "/safeslop.control.v1.Control/OpenSession"
 	Control_Attach_FullMethodName       = "/safeslop.control.v1.Control/Attach"
 	Control_CloseSession_FullMethodName = "/safeslop.control.v1.Control/CloseSession"
+	Control_Trust_FullMethodName        = "/safeslop.control.v1.Control/Trust"
 	Control_InstallPlan_FullMethodName  = "/safeslop.control.v1.Control/InstallPlan"
 	Control_InstallApply_FullMethodName = "/safeslop.control.v1.Control/InstallApply"
 )
@@ -41,6 +42,7 @@ type ControlClient interface {
 	OpenSession(ctx context.Context, in *OpenSessionRequest, opts ...grpc.CallOption) (*OpenSessionResponse, error)
 	Attach(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ClientFrame, ServerFrame], error)
 	CloseSession(ctx context.Context, in *CloseSessionRequest, opts ...grpc.CallOption) (*CloseSessionResponse, error)
+	Trust(ctx context.Context, in *TrustRequest, opts ...grpc.CallOption) (*TrustResponse, error)
 	InstallPlan(ctx context.Context, in *InstallPlanRequest, opts ...grpc.CallOption) (*InstallPlanResponse, error)
 	InstallApply(ctx context.Context, in *InstallApplyRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[InstallApplyEvent], error)
 }
@@ -125,6 +127,16 @@ func (c *controlClient) CloseSession(ctx context.Context, in *CloseSessionReques
 	return out, nil
 }
 
+func (c *controlClient) Trust(ctx context.Context, in *TrustRequest, opts ...grpc.CallOption) (*TrustResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TrustResponse)
+	err := c.cc.Invoke(ctx, Control_Trust_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *controlClient) InstallPlan(ctx context.Context, in *InstallPlanRequest, opts ...grpc.CallOption) (*InstallPlanResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(InstallPlanResponse)
@@ -166,6 +178,7 @@ type ControlServer interface {
 	OpenSession(context.Context, *OpenSessionRequest) (*OpenSessionResponse, error)
 	Attach(grpc.BidiStreamingServer[ClientFrame, ServerFrame]) error
 	CloseSession(context.Context, *CloseSessionRequest) (*CloseSessionResponse, error)
+	Trust(context.Context, *TrustRequest) (*TrustResponse, error)
 	InstallPlan(context.Context, *InstallPlanRequest) (*InstallPlanResponse, error)
 	InstallApply(*InstallApplyRequest, grpc.ServerStreamingServer[InstallApplyEvent]) error
 	mustEmbedUnimplementedControlServer()
@@ -195,6 +208,9 @@ func (UnimplementedControlServer) Attach(grpc.BidiStreamingServer[ClientFrame, S
 }
 func (UnimplementedControlServer) CloseSession(context.Context, *CloseSessionRequest) (*CloseSessionResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CloseSession not implemented")
+}
+func (UnimplementedControlServer) Trust(context.Context, *TrustRequest) (*TrustResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Trust not implemented")
 }
 func (UnimplementedControlServer) InstallPlan(context.Context, *InstallPlanRequest) (*InstallPlanResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method InstallPlan not implemented")
@@ -313,6 +329,24 @@ func _Control_CloseSession_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Control_Trust_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TrustRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ControlServer).Trust(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Control_Trust_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ControlServer).Trust(ctx, req.(*TrustRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Control_InstallPlan_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(InstallPlanRequest)
 	if err := dec(in); err != nil {
@@ -364,6 +398,10 @@ var Control_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CloseSession",
 			Handler:    _Control_CloseSession_Handler,
+		},
+		{
+			MethodName: "Trust",
+			Handler:    _Control_Trust_Handler,
 		},
 		{
 			MethodName: "InstallPlan",

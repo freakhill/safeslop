@@ -44,6 +44,19 @@ enum EngineConnection {
         }
     }
 
+    /// Records host-side approval of the safeslop.cue at configPath (the Trust RPC) so a subsequent
+    /// OpenSession passes the engine's fail-closed trust gate (specs/0024 S1a). Returns the approved
+    /// absolute path. configPath empty => the engine resolves it from its cwd (same as OpenSession).
+    @discardableResult
+    static func trust(configPath: String = "") async throws -> String {
+        let transport = try makeTransport()
+        return try await withGRPCClient(transport: transport) { client in
+            let control = Safeslop_Control_V1_Control.Client(wrapping: client)
+            let resp = try await control.trust(.with { $0.configPath = configPath })
+            return resp.trustedPath
+        }
+    }
+
     /// Ensures `safeslop serve` is running: pings, and if unreachable spawns the binary and
     /// polls until the socket answers (or a timeout). `safeslop` is expected on PATH.
     @discardableResult

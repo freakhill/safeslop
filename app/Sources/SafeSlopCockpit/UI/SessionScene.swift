@@ -59,6 +59,11 @@ struct CockpitChrome: View {
         }
         .padding(border)
         .background(ref.trustColor)
+        .overlay {
+            if case .needsTrust(let msg) = session.state {
+                TrustSheet(ref: ref, message: msg, session: session)
+            }
+        }
     }
 
     private var header: some View {
@@ -96,6 +101,7 @@ struct CockpitChrome: View {
     private var statusColor: Color {
         switch session.state {
         case .opening: return .yellow
+        case .needsTrust: return .orange
         case .running: return .green
         case .closed: return .gray
         case .error: return .red
@@ -105,9 +111,72 @@ struct CockpitChrome: View {
     private var statusText: String {
         switch session.state {
         case .opening: return "opening…"
+        case .needsTrust: return "needs trust"
         case .running: return "running"
         case .closed: return session.exitCode.map { "exited (\($0))" } ?? "closed"
         case .error(let e): return "error: \(e)"
+        }
+    }
+}
+
+/// TrustSheet covers the terminal *in place* (not a sibling modal — specs/research/
+/// 2026-06-20-cockpit-safe-by-design.md) when the engine refused an untrusted/changed safeslop.cue.
+/// It states the profile's capabilities in plain language (not CUE), names the highest-risk one in
+/// the approve button, and calls the Trust RPC on approval.
+struct TrustSheet: View {
+    let ref: ProfileRef
+    let message: String
+    let session: CockpitSession
+
+    private var openEgress: Bool { ref.network == "allow" }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label("Review & trust this profile", systemImage: "lock.shield")
+                .font(.title3.weight(.semibold))
+            Text("safeslop won't run this repo's policy until you approve it. Review what “\(ref.name)” can do, then trust it.")
+                .font(.callout).foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 8) {
+                capability("cube", "Isolation", ref.environment, .secondary)
+                if openEgress {
+                    capability("network", "Network", "open — the agent can reach the internet", .red)
+                } else {
+                    capability("network.slash", "Network", "denied — offline", .green)
+                }
+                capability("terminal", "Agent", ref.agent, .secondary)
+            }
+            .padding(12)
+            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+
+            Text(message).font(.caption.monospaced()).foregroundStyle(.tertiary).lineLimit(3)
+
+            HStack {
+                Button("Cancel", role: .cancel) { session.close() }
+                Spacer()
+                Button(openEgress ? "Trust & Launch — allows open network" : "Trust & Launch") {
+                    session.approveTrustAndRetry()
+                }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+                .tint(openEgress ? .red : .accentColor)
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: 460)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .shadow(radius: 20)
+        .padding(40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.black.opacity(0.25))
+    }
+
+    private func capability(_ symbol: String, _ title: String, _ value: String, _ color: Color) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: symbol).foregroundStyle(color == .secondary ? .secondary : color).frame(width: 20)
+            Text(title).font(.callout.weight(.medium))
+            Spacer()
+            Text(value).font(.callout).foregroundStyle(color == .secondary ? .secondary : color)
         }
     }
 }

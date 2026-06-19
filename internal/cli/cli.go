@@ -324,6 +324,21 @@ func enforceTrust(policyPath string, allowTrust bool) error {
 	}
 }
 
+// cockpitTrust records host-side approval of the safeslop.cue at configPath — the engine side of
+// the GUI's Trust RPC, so a subsequent OpenSession passes the fail-closed trust gate (specs/0024
+// S1a). Returns the approved absolute path. The peer is already uid/process-tree-checked at the
+// socket accept (control/peerauth.go), so a sandboxed agent can't reach this.
+func cockpitTrust(configPath string) (string, error) {
+	path, err := findConfig(configPath)
+	if err != nil {
+		return "", err
+	}
+	if err := enforceTrust(path, true); err != nil {
+		return "", err
+	}
+	return filepath.Abs(path)
+}
+
 func cmdTrust() *cobra.Command {
 	return &cobra.Command{
 		Use:   "trust [safeslop.cue]",
@@ -395,6 +410,7 @@ func cmdServe() *cobra.Command {
 					return nil
 				},
 				resolveSession,
+				cockpitTrust,
 			)
 		},
 	}
