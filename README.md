@@ -307,7 +307,7 @@ For your use case, enforce three boundaries at all times:
 |---|---|---|
 | `host` | none | no boundary — the agent runs as you |
 | `sandbox` (default) | mistake-guard | Seatbelt confines files + exec; guards mistakes + accidental exfil, **not** a malicious-code escape |
-| `container` | network-enforced | container + egress allowlist: real per-URL network control |
+| `container` | egress-allowlisted | default-deny per-domain egress allowlist (SNI-trust); stops `curl\|sh` + accidental beaconing, **not** exfil via an allowed domain |
 | `vm` | adversary-grade | disposable hardware-virtualized VM: strongest, heaviest |
 
 `safeslop doctor` and `safeslop run` print the active tier so the label is never implicit.
