@@ -121,6 +121,17 @@ UNVERIFIED — needs the squid config audit]** · Surface 2 · Q1 high
   `(normalized-host, port)` via a real parser, terminate TLS or accept that it's SNI-trust. Keep
   it (real value vs `curl|sh` + accidental beaconing) but the "network-enforced" tier label
   should read "egress-allowlisted (SNI-trust)" until bypasses are closed.
+- **VERIFIED + REALIZED (squid.conf audit):** the bypass classes mostly **don't apply** to
+  safeslop's config — `CONNECT` is restricted to 443 (`deny CONNECT !SSL_ports`) and non-80/443
+  ports denied; RFC1918 + link-local are denied **before** the allow rule (blocks metadata/SSRF and
+  rebind-to-internal); it matches `dstdomain` not `urlpath_regex` (path-encoding tricks N/A); and
+  it's a **forward** proxy (squid resolves+connects), so the Host-vs-routed-IP / domain-fronting
+  asymmetry is N/A. The genuine residual is that it's an SNI-trust per-**domain** allowlist:
+  it stops `curl|sh` + accidental beaconing but **not** exfil via an *allowed* domain or DNS
+  tunneling. So the fix is the honest **relabel**, now shipped: `EnvTier("container")` →
+  `egress-allowlisted` ("default-deny per-domain egress allowlist (SNI-trust): stops curl|sh +
+  accidental beaconing, not exfil via an allowed domain") + README tier table. No squid hardening
+  was needed (the config is already deny-first and CONNECT/port-restricted).
 
 **S5. Build the child env / stage secrets so the daemon never *holds* reusable secret material,
 and so same-uid `ps`/`docker inspect` can't read it. [C, partial by design]** · Surface 3 · Q1 high

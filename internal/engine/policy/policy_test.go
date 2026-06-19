@@ -198,7 +198,7 @@ func TestEnvTier(t *testing.T) {
 		"host":      "none",
 		"sandbox":   "mistake-guard",
 		"":          "mistake-guard", // unspecified defaults to sandbox
-		"container": "network-enforced",
+		"container": "egress-allowlisted",
 		"vm":        "adversary-grade",
 	}
 	for env, wantTier := range cases {
