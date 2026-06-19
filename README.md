@@ -8,77 +8,176 @@ The badge shows the current state of the test suite on `main`. Click it to see
 the list of successful runs on `main` — the topmost entry is the last commit
 that passed CI.
 
-Local scripts and docs for running agent workflows with stronger isolation defaults:
+**safeslop** is a single, signed Go binary that launches coding agents (Claude
+Code, a shell, OpenCode) under macOS isolation, driven by a per-repo
+`safeslop.cue` policy. One file declares *which* agent runs, in *which* isolation
+environment, with *which* ephemeral credentials — and safeslop provisions it,
+launches the agent, and tears everything down on exit.
 
-- container sandbox helpers (`slop-agent-sandbox`, `slop-agent-sandbox-tools`)
-- VM-backed Homebrew evaluation (`slop-brew-vm`)
-- strict installer wrappers (`slop-safe-npm`, `slop-safe-uv`)
-- ephemeral key lifecycle helpers (`slop-gh-key`, `slop-forgejo-key`)
-- unified isolation policy compiler (`slop-isolate`: one CUE file → per-tool configs for sandbox-exec, docker-compose, envoy, claude-code, opencode, …)
-- host-side agent launchers with bundled defaults (`slop-agents claude`, `slop-agents opencode`)
-- a single Textual TUI hub (`safeslop`) wrapping every action above
+What it gives you:
+
+- **Four isolation tiers, labelled honestly** — `host` (none), `sandbox`
+  (Seatbelt file/exec guard — the default), `container` (Docker + a Squid egress
+  allowlist), `vm` (a disposable Tart VM). `safeslop run` and `safeslop doctor`
+  print the active tier so the protection level is never implicit.
+- **Ephemeral, decay-first credentials** — short-TTL git deploy keys (read-only
+  by default), npm granular tokens, AWS-SSO / GCP-ADC / Kubernetes tokens, and
+  secrets via 1Password `op` — staged per-run, wiped on exit. Your permanent
+  credentials never cross the boundary.
+- **A scrubbed environment** in the `sandbox`/`host` tiers — ambient `AWS_*`,
+  `OP_SESSION_*`, `SSH_AUTH_SOCK`, `GITHUB_TOKEN` (even `ANTHROPIC_API_KEY`) are
+  *not* inherited; declare what the agent actually needs in `secrets:`.
+- **A fail-closed policy trust gate** — `safeslop run` refuses a `safeslop.cue`
+  you haven't approved with `safeslop trust`, so a freshly-cloned repo or an
+  agent editing its own policy can't silently escalate.
+
+> **Migration note.** safeslop is mid-port (strangler) from an older fish +
+> Python(`uv`) toolkit to this single Go binary. The Go binary is the product
+> and the direction; the original fish `slop-*` scripts still ship and work as a
+> transitional layer (see **Legacy fish toolkit** below) until each piece is
+> fully ported. Where both cover the same ground, prefer the Go binary.
 
 ## Quick start
 
-After installing the shims (see *Install fish command shims* below), every
-`slop-*` command is on PATH in any new fish shell:
+Drop a `safeslop.cue` at your repo root:
 
-```fish
-scripts/slop-sandboxctl.fish help    # hub: lists every tool and what it does
+```cue
+package safeslop
+
+safeslop: {
+	version: 1
+	profiles: {
+		// Sandboxed Claude Code: file-confined to this repo, egress denied.
+		review: {agent: "claude", environment: "sandbox", network: "deny"}
+
+		// A sandboxed shell for package work; network on for the registry.
+		dev: {agent: "shell", environment: "sandbox", network: "allow"}
+	}
+}
 ```
 
-For an interactive launcher across every tool in this repo:
+Then validate, approve, and run:
 
 ```fish
-safeslop          # Textual TUI; auto-installs Textual on first run via uv + PEP-723.
-safeslop --check  # diagnose the first-run install path (useful behind TLS-intercepting proxies).
+safeslop validate           # check the file against the embedded schema
+safeslop list               # show the profiles
+safeslop trust              # approve this safeslop.cue (one-time, host-recorded)
+safeslop run review         # launch sandboxed Claude Code
 ```
 
-For the most common workflow (managing deploy keys for the current repo) you
-can skip the menu entirely with the repo-aware shortcuts:
+`list` and `run --dry-run` show exactly what you get, isolation tier included:
 
-```fish
-slop-gh-key here create-pair    # RO+RW pair for cwd's git origin, 24h, ssh-config installed
-slop-gh-key here list           # list keys for current repo
-slop-gh-key here revoke 12345   # revoke by id
-slop-gh-key here cleanup        # revoke-expired --yes
-slop-gh-key here revoke-all     # revoke-by-title '^llm-agent:' --yes (destructive)
-slop-gh-key tui                 # per-tool TUI; soft-deps on [gum](https://github.com/charmbracelet/gum) (the global safeslop is [Textual](https://textual.textualize.io), no gum needed)
+```
+$ safeslop list
+review           agent=claude   environment=sandbox   network=deny
+dev              agent=shell    environment=sandbox   network=allow
+
+$ safeslop run review --dry-run
+profile "review": environment=sandbox workspace=/path/to/repo network=deny
+  argv: [claude]
+  isolation tier: mistake-guard — Seatbelt confines files + exec: guards agent mistakes + accidental exfil, not a malicious-code escape
 ```
 
-To launch Claude Code or OpenCode with the repo's bundled defaults applied:
-
-```fish
-slop-agents seed all            # one-time: write .claude/settings.json + opencode.json at repo root
-slop-agents claude              # drop into Claude Code from the seeded cwd
-slop-agents opencode            # drop into OpenCode from the seeded cwd
-```
+`safeslop doctor` reports which boundaries and external tools are available on
+this host. See **`safeslop.cue` reference** below for the full schema —
+credentials, secrets, the container/VM tiers, and pinned toolchains.
 
 ## Common use cases
 
-The two everyday workflows this repo is built for:
+Both everyday workflows are just a profile in `safeslop.cue`:
 
-- **Sandboxed Claude Code** — drop into Claude Code with file, SSH, network, and installer
-  boundaries already applied:
+- **Sandboxed Claude Code** (`agent: "claude"`) — Claude Code with a file
+  boundary and egress denied (`environment: "sandbox"`, `network: "deny"`): it
+  can edit the repo but can't read `~/.ssh` or beacon a secret out.
+- **A sandboxed shell for package work** (`agent: "shell"`) — run `pnpm install`
+  / `uv sync` under Seatbelt so a malicious lifecycle script can't read outside
+  the repo. `sandbox-exec` can't do a URL allowlist, so for *real* per-domain
+  egress control step up to `environment: "container"` (Docker + Squid).
 
-  ```fish
-  slop-agents seed all     # one-time: write .claude/settings.json at repo root
-  slop-agents claude       # launch Claude Code from the seeded cwd
-  ```
+Rule of thumb: **`sandbox`** for everyday agent + package work, **`container`**
+when you need URL-level egress control, **`vm`** for untrusted code. The tier
+table under **macOS isolation reality** spells out what each actually protects.
 
-- **A sandboxed shell for package work (`pnpm`/`uv`)** — run installs under a `sandbox-exec`
-  boundary that confines file access to your repo, so a malicious lifecycle script can't read
-  `~/.ssh` or your environment. Network stays open for the registry (`sandbox-exec` can't do a
-  URL allowlist — use the container boundary below for that):
+## `safeslop.cue` reference
 
-  ```fish
-  slop-macos-sandbox run --repo-root-access --network-policy off -- /usr/bin/env pnpm install
-  slop-macos-sandbox run --repo-root-access --network-policy off -- /usr/bin/env uv sync
-  ```
+One file at your repo root declares your profiles. The schema is embedded in the
+binary (no external `cue` needed); `safeslop validate` checks against it.
 
-Everything below is reference and how-to detail for these and the heavier container/VM
-boundaries. See the **Reference appendix** at the end for the full per-framework capability
-matrix.
+```cue
+package safeslop
+
+safeslop: {
+	version: 1
+	profiles: {
+		example: {
+			// What to launch: "claude" | "shell" | "opencode".
+			agent: "claude"
+
+			// Where it runs: "sandbox" (default) | "container" | "vm" | "host".
+			environment: "sandbox"
+
+			// Coarse egress for sandbox/host: "deny" (default) | "allow".
+			// Real per-URL allowlisting is the container tier's job.
+			network: "deny"
+
+			// Directory the boundary confines file access to.
+			// Omitted => the directory you ran safeslop from.
+			workspace: "."
+
+			// Env var -> secret ref, materialized at launch, wiped on exit.
+			// Refs are 1Password ("op://vault/item/field") or "env:NAME".
+			secrets: {
+				ANTHROPIC_API_KEY: "op://Private/Anthropic/credential"
+			}
+
+			// Ephemeral credentials staged before launch, torn down after.
+			credentials: {
+				ssh: {write: false, ttl: "1h"}     // repo-scoped deploy key
+				aws: {profile: "my-sso-profile"}    // short-lived SSO role creds
+				gcp: {}                             // ADC access token
+				pnpm: [{host: "registry.npmjs.org", token: "op://Private/npm/token"}]
+			}
+
+			// Optional pinned toolchain, orthogonal to environment.
+			toolchain: {kind: "mise"}              // "mise" | "nix" | "none"
+		}
+	}
+}
+```
+
+Every field except `agent` has a default or is optional. `safeslop run` is
+**fail-closed on trust**: a `safeslop.cue` is honored only after you approve its
+exact bytes with `safeslop trust` (or `safeslop run --trust`); editing the file
+afterwards re-blocks it until you re-approve. `validate`, `list`, and
+`run --dry-run` stay ungated — inspect an untrusted policy before trusting it.
+
+### CLI
+
+```
+safeslop validate [safeslop.cue]    # check against the embedded schema
+safeslop list                       # profiles + resolved environment/network
+safeslop trust [safeslop.cue]       # record approval of this policy's bytes
+safeslop run <profile> [--dry-run]  # launch under the profile's tier (trust-gated)
+safeslop doctor                     # what boundaries/tools are available here
+safeslop down                       # tear down container/VM sessions
+safeslop install                    # inventory + install the pinned toolchain (status/plan/apply)
+safeslop serve                      # gRPC control plane (drives the GUI app)
+```
+
+Add `--json` to any command for machine-readable output (a future GUI drives the
+engine entirely through it).
+
+---
+
+## Legacy fish toolkit (transitional)
+
+Everything below documents the original fish + Python(`uv`) toolkit safeslop is
+being ported from, plus the broader macOS agent-sandboxing reference it grew up
+with. **These scripts still ship and work** — they back surfaces not yet folded
+into the Go binary (the `slop-*` helpers, the `slop-isolate` CUE compiler, the
+multi-framework reference). New work targets the Go binary above; where it
+already covers the same ground (`run`, the four tiers, ephemeral creds), prefer
+it.
 
 ## Install fish command shims
 
@@ -705,114 +804,27 @@ first hit wins:
 For container-side use, drop into the agent-tools shell first and type
 `claude` or `opencode` once inside (`slop-agent-sandbox-tools shell`).
 
-### Drive isolated agent sessions with `safeslop.cue`
+### Drive isolated agent sessions with `safeslop.cue` (legacy orchestrator)
 
-`slop-agents` is the simplest "give me a REPL with default settings"
-path. For repeatable, configurable sessions — pick the agent, choose
-the isolation environment, declare which ephemeral credentials to
-provision, list the cleanup hooks — drop a `safeslop.cue` at the root of
-your repo. The `safeslop` runtime reads it and orchestrates everything:
+The current `safeslop.cue` workflow — schema, `validate` / `list` / `trust` /
+`run`, and what `run` provisions — is documented under **`safeslop.cue`
+reference** near the top of this README. That is the Go engine and the supported
+path.
 
-1. Author the file. Start from the bundled sample at
-   `library/layer/policy/samples/slop/slop.cue`:
+Historically the same idea was driven by the fish/Python orchestrator
+(`scripts/_py/slop_orchestrator.py`), which read an *earlier* `slop.cue` shape
+(`profiles: { … isolation: presets.#ClaudeCode, credentials: github:
+"ephemeral-rw", "on-exit": [...] }`) and shelled out to the `slop-*` helpers —
+`slop-gh-key here create-pair` for credentials, `slop-agent-sandbox-tools up`
+for the container + Squid stack, `slop-brew-vm` for the VM — with a Textual TUI
+fallback. That orchestrator still exists during the migration but is being
+superseded by the Go engine, which stages credentials natively (the
+`CredentialProvider` interface), enforces the trust gate, and scrubs the child
+environment.
 
-```cue
-package safeslop
-
-import "safeslop.dev/isolation/schema"
-import "safeslop.dev/isolation/presets"
-
-profiles: {
-    "review": schema.#Profile & {
-        agent:       "claude"
-        environment: "container"
-        isolation:   presets.#ClaudeCode & {
-            extras: "allow-domains": [
-                "pypi.org",
-                "registry.npmjs.org",
-            ]
-        }
-        credentials: github: "ephemeral-rw"
-        "on-exit": [
-            "revoke-credentials",
-            "stop-container",
-            "stop-proxy",
-        ]
-    }
-    "explore": schema.#Profile & {
-        agent:       "opencode"
-        environment: "host"
-        isolation:   presets.#OpenCode
-    }
-}
-default: "review"
-```
-
-2. Validate, list, and dry-run before committing:
-
-```fish
-safeslop validate                   # CUE → schema check; no side effects
-safeslop list                       # profiles + last-known state
-safeslop run review --dry-run       # show what would happen, no side effects
-```
-
-3. Run a profile end-to-end:
-
-```fish
-safeslop run review                 # default profile if you ran a bare `safeslop`
-safeslop run explore                # explicit
-```
-
-4. Tear down on next session start (or after a crashed run):
-
-```fish
-safeslop down                       # run on-exit hooks for any active profiles
-```
-
-Bare `safeslop` in a repo containing `safeslop.cue` runs the `default` profile;
-elsewhere it falls back to the Textual TUI. The TUI also exposes the
-flow under key `p` ("Run profile") with profile-specific shortcuts
-generated from your `safeslop.cue`.
-
-What `safeslop run review` does, in order:
-
-- Resolves the profile and validates the CUE.
-- Reads `<repo>/.safeslop/state.json` (per-repo, gitignored).
-- Provisions credentials: `slop-gh-key here create-pair` for
-  `credentials.github != "none"`, similarly for `forgejo`.
-- Stages the just-created keys to `<repo>/.safeslop/runtime/<profile>/.ssh/`
-  with a fresh SSH config that uses just-the-filename `IdentityFile`
-  paths. The host's permanent identities (`~/.ssh/id_ed25519` etc.)
-  stay on the host — only the ephemeral keys this profile created go
-  into the staging dir.
-- For `environment: container`: invokes `slop-agent-sandbox-tools up`
-  to (re)build the image and start the [Squid](https://www.squid-cache.org/)
-  proxy, then runs `docker compose -f <main> -f <override> run --rm
-  agent-tools <agent>` with a read-only bind mount of the staged
-  `.ssh/` at `/root/.ssh/` — so `git push` from inside the container
-  resolves the `github-llm-{ro,rw}` aliases against the ephemeral keys.
-- For `environment: vm`: same staging, but `slop-brew-vm copy-in
-  <stage> ~/.ssh` (scp -r) into the disposable [Tart](https://tart.run)
-  guest after `slop-brew-vm init` brings it up.
-- For `environment: host`: defers to `slop-agents` so the agent
-  inherits the user's terminal directly.
-- Runs the agent.
-- On agent exit: invokes the declared `on-exit` hooks
-  (`revoke-credentials` → `slop-gh-key here cleanup`,
-  `stop-container` → `slop-agent-sandbox-tools down`,
-  `stop-proxy` → `slop-isolate proxy stop`,
-  `destroy-vm` → `slop-brew-vm destroy`,
-  `snapshot-state` is a no-op today; Phase E+1 plumbs it).
-- Always wipes `<repo>/.safeslop/runtime/<profile>/` so the staged private
-  keys do not survive the session.
-
-Inside the container, the user's repo root is mounted read-write at
-`/workspace`. The agent's cwd defaults there, so file edits land in the
-host's repo without further plumbing. The mount is transitively
-`docker-compose.yml`'s `../../..:/workspace` (compose file → container/
-→ layer/ → library/ → repo root); change the override emitted under
-`<repo>/.safeslop/runtime/<profile>/docker-compose.override.yml` if you need
-a different mount path.
+**Prefer the Go `safeslop.cue` shape documented above.** The legacy `slop.cue`
+shape (with `isolation:`, `credentials: github:`, `on-exit:`, `default:`) is
+**not** accepted by the Go binary's embedded schema.
 
 ### How to lock down OpenCode on macOS
 
