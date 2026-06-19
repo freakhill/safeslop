@@ -1,6 +1,7 @@
 package control
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/freakhill/safeslop/internal/engine/control/pb"
+	"github.com/freakhill/safeslop/internal/engine/install"
 )
 
 // socketPath is ~/.safeslop/s.sock — deliberately short (macOS sun_path is 104 bytes;
@@ -45,8 +47,33 @@ func Serve(version string,
 		return err
 	}
 	gs := grpc.NewServer()
-	pb.RegisterControlServer(gs, &server{version: version, launchFn: launchFn, mgr: NewManager(), resolveFn: resolveFn})
+	pb.RegisterControlServer(gs, &server{
+		version:        version,
+		launchFn:       launchFn,
+		mgr:            NewManager(),
+		resolveFn:      resolveFn,
+		installApplyFn: defaultInstallApply(version),
+	})
 	return gs.Serve(peerAuthListener{ln})
+}
+
+// defaultInstallApply runs the pinned plan over the same HTTP fetcher + dirs the CLI uses,
+// translating engine events to the wire enum.
+func defaultInstallApply(version string) func(emit func(*pb.InstallApplyEvent)) error {
+	return func(emit func(*pb.InstallApplyEvent)) error {
+		ctx := context.Background()
+		res, err := install.Plan(install.Status(ctx, version), install.DesiredState())
+		if err != nil {
+			return err
+		}
+		dirs, err := install.DefaultDirs()
+		if err != nil {
+			return err
+		}
+		return install.Apply(ctx, res, dirs, install.HTTPFetcher{}, func(e install.Event) {
+			emit(installEventToPB(e))
+		})
+	}
 }
 
 // peerAuthListener rejects cross-uid peers at Accept time (before any RPC is served).

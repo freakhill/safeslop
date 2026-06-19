@@ -7,16 +7,19 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/freakhill/safeslop/internal/engine/control/pb"
+	"github.com/freakhill/safeslop/internal/engine/install"
 )
 
 // server implements pb.ControlServer. Launch delegation is wired in Serve via launchFn;
-// session RPCs are backed by mgr + the profile->SessionSpec resolver resolveFn.
+// session RPCs are backed by mgr + the profile->SessionSpec resolver resolveFn; install apply
+// is wired via installApplyFn.
 type server struct {
 	pb.UnimplementedControlServer
-	version   string
-	launchFn  func(profile, configPath string, emit func(*pb.LaunchEvent)) error
-	mgr       *Manager
-	resolveFn func(profile, configPath string) (SessionSpec, error)
+	version        string
+	launchFn       func(profile, configPath string, emit func(*pb.LaunchEvent)) error
+	mgr            *Manager
+	resolveFn      func(profile, configPath string) (SessionSpec, error)
+	installApplyFn func(emit func(*pb.InstallApplyEvent)) error
 }
 
 func (s *server) Ping(_ context.Context, _ *pb.PingRequest) (*pb.PingResponse, error) {
@@ -95,4 +98,42 @@ func (s *server) Attach(stream pb.Control_AttachServer) error {
 func (s *server) CloseSession(_ context.Context, req *pb.CloseSessionRequest) (*pb.CloseSessionResponse, error) {
 	s.mgr.Close(req.SessionId)
 	return &pb.CloseSessionResponse{}, nil
+}
+
+func (s *server) InstallPlan(_ context.Context, _ *pb.InstallPlanRequest) (*pb.InstallPlanResponse, error) {
+	st := install.Status(context.Background(), s.version)
+	res, err := install.Plan(st, install.DesiredState())
+	if err != nil {
+		return nil, err
+	}
+	out := &pb.InstallPlanResponse{}
+	for _, a := range res.Actions {
+		out.Actions = append(out.Actions, &pb.InstallAction{
+			Name: a.Name, Kind: string(a.Kind), Current: a.Current, Desired: a.Desired,
+		})
+	}
+	return out, nil
+}
+
+func (s *server) InstallApply(_ *pb.InstallApplyRequest, stream pb.Control_InstallApplyServer) error {
+	emit := func(e *pb.InstallApplyEvent) { _ = stream.Send(e) }
+	if s.installApplyFn == nil {
+		emit(&pb.InstallApplyEvent{Kind: pb.InstallApplyEvent_ERROR, Msg: "install apply not wired"})
+		return nil
+	}
+	return s.installApplyFn(emit)
+}
+
+// installEventToPB maps a pb-free install.Event onto the wire enum.
+func installEventToPB(e install.Event) *pb.InstallApplyEvent {
+	k := pb.InstallApplyEvent_PROGRESS
+	switch e.Kind {
+	case install.EventStart:
+		k = pb.InstallApplyEvent_START
+	case install.EventDone:
+		k = pb.InstallApplyEvent_DONE
+	case install.EventError:
+		k = pb.InstallApplyEvent_ERROR
+	}
+	return &pb.InstallApplyEvent{Kind: k, Tool: e.Tool, Msg: e.Msg}
 }
