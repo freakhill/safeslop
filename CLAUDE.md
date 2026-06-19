@@ -62,9 +62,10 @@ make build          # static CGO_ENABLED=0 binary -> ./safeslop
 CI runs all four fish gates plus the Go workflow. The **active CI is Forgejo
 Woodpecker** (`.woodpecker/*.yml`) while GitHub is paused (see *Development
 happens on Forgejo* below); the `.github/workflows/` mirror is kept for the
-eventual release. Woodpecker runs on Linux, so the darwin-only `sandbox-exec`
-launch tests `t.Skip` there — run `make check` on a Mac before a release.
-The Textual launcher has two diagnostic entry points worth knowing:
+eventual release. Woodpecker runs natively on a **darwin/arm64** agent (local
+backend, so steps run on the host — no Docker images, host needs Go/make/fish/uv),
+so CI mirrors the local `make check` / `fish tests/run.fish` and the `sandbox-exec`
+launch tests run for real. The Textual launcher has two diagnostic entry points worth knowing:
 
 ```fish
 env UV_NATIVE_TLS=1 SSL_CERT_FILE=/etc/ssl/cert.pem \

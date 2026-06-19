@@ -1,13 +1,11 @@
-# Version-pinning gate (no `latest` in pinned files). Port of .github/workflows/pinning-check.yml.
+# Version-pinning gate (no `latest` in pinned files). Native on darwin/arm64 (host fish).
 when:
   - event: push
     branch: main
   - event: pull_request
-
+labels:
+  platform: darwin/arm64
 steps:
   - name: pinning
-    image: ubuntu:24.04
     commands:
-      - apt-get update
-      - apt-get install -y --no-install-recommends fish
       - fish scripts/slop-pinning.fish

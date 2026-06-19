@@ -1,15 +1,15 @@
 # script/docs/skills/tests sync gate. Port of .github/workflows/script-doc-sync-check.yml.
 # When scripts/*.fish or scripts/_py/*.py change, README.md + skills + tests must
-# change too. Uses Woodpecker's CI_* vars; falls back to a full-tree check if the
-# diff base is unavailable (shallow clone / first push).
+# change too. Native on darwin/arm64 (host git + POSIX sh); uses Woodpecker's CI_*
+# vars and falls back to a full-tree check if the diff base is unavailable.
 when:
   - event: push
     branch: main
   - event: pull_request
-
+labels:
+  platform: darwin/arm64
 steps:
   - name: sync-check
-    image: alpine/git
     commands:
       - |
         set -eu
