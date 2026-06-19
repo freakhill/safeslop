@@ -16,6 +16,25 @@ func TestServerPing(t *testing.T) {
 	}
 }
 
+func TestTrustCallsTrustFn(t *testing.T) {
+	got := ""
+	s := &server{trustFn: func(cp string) (string, error) { got = cp; return "/abs/safeslop.cue", nil }}
+	resp, err := s.Trust(context.Background(), &pb.TrustRequest{ConfigPath: "/repo"})
+	if err != nil {
+		t.Fatalf("Trust: %v", err)
+	}
+	if got != "/repo" || resp.TrustedPath != "/abs/safeslop.cue" {
+		t.Fatalf("trustFn called with %q, resp=%+v", got, resp)
+	}
+}
+
+func TestTrustUnwiredErrors(t *testing.T) {
+	s := &server{}
+	if _, err := s.Trust(context.Background(), &pb.TrustRequest{}); err == nil {
+		t.Fatal("unwired Trust must error")
+	}
+}
+
 func TestSocketPathIsShort(t *testing.T) {
 	p, err := socketPath()
 	if err != nil {

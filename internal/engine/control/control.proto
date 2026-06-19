@@ -10,6 +10,7 @@ service Control {
   rpc OpenSession(OpenSessionRequest) returns (OpenSessionResponse);
   rpc Attach(stream ClientFrame) returns (stream ServerFrame);
   rpc CloseSession(CloseSessionRequest) returns (CloseSessionResponse);
+  rpc Trust(TrustRequest) returns (TrustResponse);
   rpc InstallPlan(InstallPlanRequest) returns (InstallPlanResponse);
   rpc InstallApply(InstallApplyRequest) returns (stream InstallApplyEvent);
 }
@@ -70,6 +71,12 @@ message ServerFrame {
 
 message CloseSessionRequest { string session_id = 1; }
 message CloseSessionResponse {}
+
+// Trust records host-side approval of a repo's safeslop.cue (its exact bytes), so a
+// subsequent OpenSession/Launch for that policy passes the fail-closed trust gate.
+// The GUI calls this after the user reviews and approves (specs/0024 S1a follow-on).
+message TrustRequest { string config_path = 1; } // dir/file holding safeslop.cue; empty = server cwd
+message TrustResponse { string trusted_path = 1; } // absolute path that was approved
 
 // InstallPlan returns the pinned desired-state diff (the SP7b-2 plan) for the wizard to preview.
 message InstallAction {

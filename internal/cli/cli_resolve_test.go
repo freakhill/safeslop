@@ -149,3 +149,29 @@ func TestResolveSessionRefusesUntrustedPolicy(t *testing.T) {
 		t.Fatalf("untrusted policy must be refused by resolveSession, got %v", err)
 	}
 }
+
+// TestCockpitTrustUnblocksResolveSession is the engine side of the GUI trust flow: an untrusted
+// policy fails OpenSession; the cockpit's Trust RPC (cockpitTrust) approves it; OpenSession passes.
+func TestCockpitTrustUnblocksResolveSession(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // empty trust store
+	dir := t.TempDir()
+	path := filepath.Join(dir, "safeslop.cue")
+	if err := os.WriteFile(path, []byte(resolverCue), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir) // cockpit stage dirs land under a throwaway cwd
+
+	if _, err := resolveSession("h", path); err == nil || !strings.Contains(err.Error(), "not trusted") {
+		t.Fatalf("untrusted must fail closed, got %v", err)
+	}
+	abs, err := cockpitTrust(path)
+	if err != nil {
+		t.Fatalf("cockpitTrust: %v", err)
+	}
+	if abs == "" {
+		t.Fatal("cockpitTrust must return the approved absolute path")
+	}
+	if _, err := resolveSession("h", path); err != nil {
+		t.Fatalf("after Trust, resolveSession must pass: %v", err)
+	}
+}
