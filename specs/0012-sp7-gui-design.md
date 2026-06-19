@@ -186,7 +186,10 @@ they're not lost, to be scoped as their own plans:
   refuse mid-run mutation, and treat a **repo-supplied** policy as untrusted-until-host-
   approves (devcontainer trust-prompt model) — the sandboxed agent can otherwise rewrite
   the file that governs its own run, and `git clone <evil>` ships a permissive one.
-  (Q1; H2 — orchestrator/policy.)
+  (Q1; H2 — orchestrator/policy.) **Realized: specs/0022** — host-side
+  `~/.config/safeslop/trust.json`, `safeslop trust`, and a fail-closed `run` gate on the
+  policy's sha256 (untrusted *or* changed blocks; `validate`/`list`/`--dry-run` stay open).
+  Remaining fast-follow: the gRPC `Launch`/`OpenSession` cockpit chokepoint (the GUI surface).
 - **Scope-first, decay-second creds:** downscope cloud tokens at the *minting* step
   (AWS session policy / permission boundary, narrowest GCP scopes) so even full-TTL reuse
   is bounded; stage via a short-lived `credential_process` rather than raw env vars.

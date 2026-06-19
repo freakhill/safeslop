@@ -27,6 +27,7 @@ import (
 	"github.com/freakhill/safeslop/internal/engine/sandbox"
 	"github.com/freakhill/safeslop/internal/engine/secrets"
 	"github.com/freakhill/safeslop/internal/engine/toolchain"
+	"github.com/freakhill/safeslop/internal/engine/trust"
 	"github.com/freakhill/safeslop/internal/engine/userconfig"
 	"github.com/freakhill/safeslop/internal/engine/vm"
 )
@@ -57,7 +58,7 @@ func newRoot() *cobra.Command {
 		SilenceErrors: true,
 	}
 	root.PersistentFlags().BoolVar(&jsonOut, "json", false, "emit machine-readable JSON output")
-	root.AddCommand(cmdValidate(), cmdList(), cmdDoctor(), cmdRun(), cmdDown(), cmdServe(), cmdLaunch(), cmdInstall())
+	root.AddCommand(cmdValidate(), cmdList(), cmdDoctor(), cmdRun(), cmdTrust(), cmdDown(), cmdServe(), cmdLaunch(), cmdInstall())
 	return root
 }
 
@@ -178,6 +179,7 @@ func cmdDoctor() *cobra.Command {
 
 func cmdRun() *cobra.Command {
 	var dryRun bool
+	var trustFlag bool
 	c := &cobra.Command{
 		Use:   "run [profile]",
 		Short: "Launch a profile's agent under its isolation boundary",
@@ -247,6 +249,11 @@ func cmdRun() *cobra.Command {
 				return nil
 			}
 
+			// Fail-closed: only an explicitly host-approved safeslop.cue may launch an agent
+			// (specs/0022). --dry-run above stays ungated — it is inspection, like validate.
+			if err := enforceTrust(path, trustFlag); err != nil {
+				return err
+			}
 			code, err := runProfile(name, prof, argv, ws)
 			if err != nil && code == 0 {
 				return err
@@ -256,7 +263,65 @@ func cmdRun() *cobra.Command {
 		},
 	}
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "print the resolved launch + sandbox profile without executing")
+	c.Flags().BoolVar(&trustFlag, "trust", false, "approve this safeslop.cue, then run it")
 	return c
+}
+
+// enforceTrust gates `run` on a host-recorded approval of the policy's exact bytes. With allowTrust
+// it records approval and proceeds; otherwise an untrusted or changed policy is a fail-closed error.
+// The store is host-side (~/.config/safeslop/trust.json), outside the agent-writable workspace.
+func enforceTrust(policyPath string, allowTrust bool) error {
+	abs, err := filepath.Abs(policyPath)
+	if err != nil {
+		return err
+	}
+	policyBytes, err := os.ReadFile(abs)
+	if err != nil {
+		return err
+	}
+	storePath, err := trust.DefaultPath()
+	if err != nil {
+		return err
+	}
+	store, err := trust.Load(storePath)
+	if err != nil {
+		return err
+	}
+	if allowTrust {
+		return store.Approve(abs, policyBytes)
+	}
+	switch store.Check(abs, policyBytes) {
+	case trust.Trusted:
+		return nil
+	case trust.Changed:
+		return fmt.Errorf("safeslop.cue at %s changed since you trusted it (an agent or edit may have modified it).\n  review it, then run:  safeslop trust %s", abs, abs)
+	default: // Untrusted
+		return fmt.Errorf("safeslop.cue at %s is not trusted (a policy can grant network and secret access).\n  review it, then run:  safeslop trust %s", abs, abs)
+	}
+}
+
+func cmdTrust() *cobra.Command {
+	return &cobra.Command{
+		Use:   "trust [safeslop.cue]",
+		Short: "Record approval of a repo's safeslop.cue so `safeslop run` will honor it",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			path, err := findConfig(arg0(args))
+			if err != nil {
+				return err
+			}
+			if err := enforceTrust(path, true); err != nil {
+				return err
+			}
+			abs, _ := filepath.Abs(path)
+			if jsonOut {
+				emitJSON(map[string]any{"ok": true, "trusted": abs})
+			} else {
+				fmt.Printf("trusted: %s\n", abs)
+			}
+			return nil
+		},
+	}
 }
 
 // ---- down ----
