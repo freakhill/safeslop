@@ -36,7 +36,11 @@ type AwsSso struct {
 }
 
 // GcpAdc stages a short-lived GCP access token from ADC, refresh token stripped (specs/0009).
-type GcpAdc struct{}
+// Scopes, when set, downscope the minted token to least-privilege (scope-first, specs/0026),
+// e.g. ["https://www.googleapis.com/auth/devstorage.read_only"]; empty = ADC's default scopes.
+type GcpAdc struct {
+	Scopes []string `json:"scopes,omitempty"`
+}
 
 // EksCluster pre-authenticates an EKS cluster: the host runs `aws eks get-token`
 // (bearer) + `aws eks describe-cluster` (endpoint/CA) under Profile's SSO (specs/0010).
