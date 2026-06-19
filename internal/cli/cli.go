@@ -458,7 +458,7 @@ func resolveSession(profile, configPath string) (control.SessionSpec, error) {
 
 	switch prof.Environment {
 	case "host":
-		env := append(append(os.Environ(), secretEnv...), pathEnv...)
+		env := childEnv(secretEnv, pathEnv)
 		return control.SessionSpec{Argv: argv, Dir: ws, Env: env, OnClose: wipe}, nil
 	case "sandbox", "": // sandbox is the default
 		wrapped, wrapCleanup, err := sandbox.WrapArgv(argv, ws, prof.Network)
@@ -466,7 +466,7 @@ func resolveSession(profile, configPath string) (control.SessionSpec, error) {
 			_ = os.RemoveAll(stageDir)
 			return control.SessionSpec{}, err
 		}
-		env := append(append(os.Environ(), secretEnv...), pathEnv...)
+		env := childEnv(secretEnv, pathEnv)
 		return control.SessionSpec{Argv: wrapped, Dir: ws, Env: env, OnClose: chainClose(wrapCleanup, wipe)}, nil
 	case "container":
 		cargv, cleanup, err := container.PrepareSession(context.Background(), argv, ws, prof.Network, secretEnv, stageDir)
@@ -801,10 +801,10 @@ func runProfile(name string, prof policy.Profile, argv []string, ws string) (int
 
 	switch prof.Environment {
 	case "sandbox":
-		env := append(append(os.Environ(), secretEnv...), pathEnv...)
+		env := childEnv(secretEnv, pathEnv)
 		return sandbox.Launch(ctx, engexec.LaunchSpec{Argv: argv, Dir: ws, Env: env}, ws, prof.Network)
 	case "host":
-		env := append(append(os.Environ(), secretEnv...), pathEnv...)
+		env := childEnv(secretEnv, pathEnv)
 		return engexec.RunInTerminal(ctx, engexec.LaunchSpec{Argv: argv, Dir: ws, Env: env})
 	case "container":
 		// secrets go in secrets.env (sourced by the entrypoint); .npmrc and kubeconfig
