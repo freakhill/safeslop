@@ -84,6 +84,29 @@ func TestApplyFailsClosedOnSHAMismatch(t *testing.T) {
 	}
 }
 
+func TestApplyInstallsAppTarball(t *testing.T) {
+	art := tgz(t, map[string]string{
+		"tart.app/Contents/MacOS/tart": "#!/bin/sh\necho tart\n",
+		"tart.app/Contents/Info.plist": "<plist/>",
+	})
+	url := "https://x/tart.tgz"
+	res := Result{Actions: []Action{{
+		Name: "tart", Kind: ActionInstall, Desired: "2.32.1",
+		Format: FormatAppTarball, SHA256: sha(art), URL: url,
+	}}}
+	dirs := Dirs{BinDir: t.TempDir(), AppDir: t.TempDir(), TmpDir: t.TempDir()}
+	if err := Apply(context.Background(), res, dirs, fakeFetcher{url: art}, func(Event) {}); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dirs.AppDir, "tart.app", "Contents", "MacOS", "tart")); err != nil {
+		t.Fatalf("tart.app not installed: %v", err)
+	}
+	link := filepath.Join(dirs.BinDir, "tart")
+	if target, err := os.Readlink(link); err != nil || filepath.Base(target) != "tart" {
+		t.Fatalf("expected %s -> .../MacOS/tart symlink, got %q err=%v", link, target, err)
+	}
+}
+
 func TestApplySkipsOKActions(t *testing.T) {
 	res := Result{Actions: []Action{{Name: "mise", Kind: ActionOK, Format: FormatBinaryTarball}}}
 	dirs := Dirs{BinDir: t.TempDir(), AppDir: t.TempDir(), TmpDir: t.TempDir()}
