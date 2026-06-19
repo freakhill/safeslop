@@ -72,6 +72,12 @@ code signature, not its uid. [C, VERIFIED-OPEN]** · Surface 6+4 · Q1 crit
   specs/0022 — promote it to *now*, it is the GUI's only integrity gate); (b) audit-token +
   codesign peer verification; (c) **hard-refuse** any peer whose pid is inside a safeslop-spawned
   process tree / sandbox (defense in depth even if network:deny already blocks the socket).
+- **REALIZED (specs/0024):** S1a trust-gates `resolveSession`/`OpenSession` (fail-closed, same
+  `enforceTrust` as CLI `run`); S1b refuses peers inside a safeslop-spawned process tree
+  (`LOCAL_PEERPID` + `kern.proc.pid` parent-walk, strict-descendant). **Correction:** the `Launch`
+  RPC was *already* transitively gated — `launchProfile` shells out to `safeslop run`, which gates —
+  so `OpenSession` was the only exposed launch path. Remaining follow-on: codesign/audit-token peer
+  verification (closes arbitrary same-uid host malware that is *not* a descendant).
 
 **S2. Scrub the child environment to an allowlist before entering `sandbox`/`host`. [C,
 VERIFIED-OPEN]** · Surface 1+3 · Q1 crit
@@ -82,6 +88,9 @@ VERIFIED-OPEN]** · Surface 1+3 · Q1 crit
 - DO: build the child env from `taggingEnv` + `secretEnv` + `pathEnv` + a small allowlist
   (`PATH`, `HOME`→stage, `TERM`, `LANG`), never the parent's. This is the highest
   value-per-line fix in the review.
+- **REALIZED (specs/0024):** `childEnv` strict allowlist — the `sandbox`/`host` children no longer
+  inherit `os.Environ()`; ambient `AWS_*`/`OP_SESSION`/`SSH_AUTH_SOCK`/`GITHUB_TOKEN`/`ANTHROPIC_API_KEY`
+  are dropped. Agents declare any needed key in `secrets:` (jojo chose the strict, no-carve variant).
 
 **S3. Exclude `.git` (and other host-auto-executed paths) from the agent-writable mount, or the
 repo write *is* host code-exec. [G, VERIFIED reachable]** · Surface 1 · Q1 high
