@@ -13,6 +13,7 @@ func DesiredState() []Pin {
 		{
 			Name:    "mise",
 			Kind:    "toolchain",
+			Format:  FormatBinaryTarball,
 			Version: "2026.6.11",
 			SHA256:  "084c352a9c5d1a19bd31fef84ba9692952aa04e8d2e3fe666948db35dedfaf95",
 			URL:     "https://github.com/jdx/mise/releases/download/v2026.6.11/mise-v2026.6.11-macos-arm64.tar.gz",
@@ -20,6 +21,7 @@ func DesiredState() []Pin {
 		{
 			Name:    "tart",
 			Kind:    "runtime",
+			Format:  FormatAppTarball,
 			Version: "2.32.1",
 			SHA256:  "8554ab4f7fc12afe52f9b7e3093a935673cbac737a83973d2db7a0683c814529",
 			URL:     "https://github.com/cirruslabs/tart/releases/download/2.32.1/tart.tar.gz",

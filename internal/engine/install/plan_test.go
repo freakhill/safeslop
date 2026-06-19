@@ -7,6 +7,7 @@ func pin(name, kind, ver string) Pin {
 	return Pin{
 		Name:    name,
 		Kind:    kind,
+		Format:  "binary-tarball",
 		Version: ver,
 		SHA256:  "0000000000000000000000000000000000000000000000000000000000000000",
 		URL:     "https://example.test/" + name,
@@ -108,6 +109,46 @@ func TestPlanFailsClosedOnBadManifest(t *testing.T) {
 	bad := []Pin{{Name: "mise", Kind: "toolchain", Version: "latest", SHA256: "x", URL: "u"}}
 	if _, err := Plan(State{}, bad); err == nil {
 		t.Fatal("Plan must fail closed on an invalid manifest")
+	}
+}
+
+func TestValidateDesiredRejectsBadFormat(t *testing.T) {
+	p := pin("mise", "toolchain", "2026.6.0")
+	p.Format = "zip"
+	if err := ValidateDesired([]Pin{p}); err == nil {
+		t.Fatal("an unknown format must be rejected")
+	}
+}
+
+func TestValidateDesiredRejectsMissingFormat(t *testing.T) {
+	p := pin("mise", "toolchain", "2026.6.0")
+	p.Format = ""
+	if err := ValidateDesired([]Pin{p}); err == nil {
+		t.Fatal("an empty format must be rejected (fail-closed)")
+	}
+}
+
+func TestValidateDesiredRejectsIncompleteSig(t *testing.T) {
+	p := pin("mise", "toolchain", "2026.6.0")
+	p.Sig = &Sig{Scheme: "minisign"} // missing pubkey/urls/artifact
+	if err := ValidateDesired([]Pin{p}); err == nil {
+		t.Fatal("a partial Sig must be rejected (fail-closed)")
+	}
+}
+
+func TestPlanCarriesFormatAndSig(t *testing.T) {
+	p := pin("mise", "toolchain", "2026.6.0")
+	p.Sig = &Sig{Scheme: "minisign", PubKey: "RWQk", SumsURL: "u", SigURL: "u", Artifact: "a"}
+	state := State{Toolchains: []Tool{{Name: "mise", Present: false}}}
+	res, err := Plan(state, []Pin{p})
+	if err != nil {
+		t.Fatalf("Plan errored: %v", err)
+	}
+	if res.Actions[0].Format != "binary-tarball" {
+		t.Fatalf("format not carried onto action: %q", res.Actions[0].Format)
+	}
+	if res.Actions[0].Sig == nil || res.Actions[0].Sig.Scheme != "minisign" {
+		t.Fatalf("sig not carried onto action: %+v", res.Actions[0].Sig)
 	}
 }
 

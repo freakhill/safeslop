@@ -5,15 +5,34 @@ import (
 	"regexp"
 )
 
+// Artifact formats Apply knows how to install (specs/0021).
+const (
+	FormatBinaryTarball = "binary-tarball" // tar.gz containing <name>/bin/<name>; install to BinDir
+	FormatAppTarball    = "app-tarball"    // tar.gz containing <name>.app; install to AppDir + symlink
+)
+
+// Sig is an optional upstream signature over the artifact's checksum file. When present, Apply
+// verifies sig -> checksum-file -> artifact-sha (fail-closed). Defends a maintainer compromise that
+// a copied sha256 cannot (provenance != honesty; specs/0012 §10.2).
+type Sig struct {
+	Scheme   string `json:"scheme"`   // "minisign"
+	PubKey   string `json:"pubkey"`   // minisign public key (the single base64 key line)
+	SumsURL  string `json:"sums_url"` // URL of SHASUMS256.txt
+	SigURL   string `json:"sig_url"`  // URL of SHASUMS256.txt.minisig
+	Artifact string `json:"artifact"` // the artifact's name as it appears in SHASUMS256.txt
+}
+
 // Pin is one tool's pinned desired-state entry. Plan diffs the live Status against these; apply
 // (SP7b-3) downloads URL, verifies SHA256, installs Version. The manifest is fail-closed: every
 // field is mandatory and Version is never "latest" (specs/0012 §5).
 type Pin struct {
-	Name    string `json:"name"`    // matches Tool.Name from Status (e.g. "mise", "tart")
-	Kind    string `json:"kind"`    // "toolchain" | "runtime" — informs apply's provisioner
-	Version string `json:"version"` // exact pinned version, never "latest"
-	SHA256  string `json:"sha256"`  // sha256 of the darwin-arm64 artifact (provenance)
-	URL     string `json:"url"`     // download source for that artifact
+	Name    string `json:"name"`          // matches Tool.Name from Status (e.g. "mise", "tart")
+	Kind    string `json:"kind"`          // "toolchain" | "runtime" — informs apply's provisioner
+	Format  string `json:"format"`        // binary-tarball | app-tarball
+	Version string `json:"version"`       // exact pinned version, never "latest"
+	SHA256  string `json:"sha256"`        // sha256 of the darwin-arm64 artifact (provenance)
+	URL     string `json:"url"`           // download source for that artifact
+	Sig     *Sig   `json:"sig,omitempty"` // optional upstream signature
 }
 
 var sha256Re = regexp.MustCompile(`^[0-9a-f]{64}$`)
@@ -42,6 +61,17 @@ func ValidateDesired(pins []Pin) error {
 		if p.URL == "" {
 			return fmt.Errorf("install: pin %q must declare a source url", p.Name)
 		}
+		if p.Format != FormatBinaryTarball && p.Format != FormatAppTarball {
+			return fmt.Errorf("install: pin %q has invalid format %q (want %s|%s)", p.Name, p.Format, FormatBinaryTarball, FormatAppTarball)
+		}
+		if p.Sig != nil {
+			if p.Sig.Scheme != "minisign" {
+				return fmt.Errorf("install: pin %q sig scheme %q unsupported (want minisign)", p.Name, p.Sig.Scheme)
+			}
+			if p.Sig.PubKey == "" || p.Sig.SumsURL == "" || p.Sig.SigURL == "" || p.Sig.Artifact == "" {
+				return fmt.Errorf("install: pin %q sig is incomplete (need pubkey, sums_url, sig_url, artifact)", p.Name)
+			}
+		}
 	}
 	return nil
 }
@@ -63,6 +93,8 @@ type Action struct {
 	Desired string     `json:"desired"`           // pinned version
 	SHA256  string     `json:"sha256"`            // carried through for apply
 	URL     string     `json:"url"`
+	Format  string     `json:"format"`
+	Sig     *Sig       `json:"sig,omitempty"`
 }
 
 // Result is the ordered plan: one Action per pinned tool, in manifest order.
@@ -98,7 +130,7 @@ func Plan(state State, desired []Pin) (Result, error) {
 	}
 	var res Result
 	for _, p := range desired {
-		a := Action{Name: p.Name, Desired: p.Version, SHA256: p.SHA256, URL: p.URL}
+		a := Action{Name: p.Name, Desired: p.Version, SHA256: p.SHA256, URL: p.URL, Format: p.Format, Sig: p.Sig}
 		tool, found := index[p.Name]
 		cur := extractVersion(tool.Version)
 		switch {
