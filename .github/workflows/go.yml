@@ -31,7 +31,7 @@ jobs:
           fi
 
       - name: go build
-        run: CGO_ENABLED=0 go build -o slop ./cmd/slop
+        run: CGO_ENABLED=0 go build -o safeslop ./cmd/safeslop
 
       - name: go test
         run: go test ./...
