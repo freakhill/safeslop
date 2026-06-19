@@ -70,6 +70,58 @@ func (LaunchEvent_Kind) EnumDescriptor() ([]byte, []int) {
 	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{6, 0}
 }
 
+type InstallApplyEvent_Kind int32
+
+const (
+	InstallApplyEvent_START    InstallApplyEvent_Kind = 0
+	InstallApplyEvent_PROGRESS InstallApplyEvent_Kind = 1
+	InstallApplyEvent_DONE     InstallApplyEvent_Kind = 2
+	InstallApplyEvent_ERROR    InstallApplyEvent_Kind = 3
+)
+
+// Enum value maps for InstallApplyEvent_Kind.
+var (
+	InstallApplyEvent_Kind_name = map[int32]string{
+		0: "START",
+		1: "PROGRESS",
+		2: "DONE",
+		3: "ERROR",
+	}
+	InstallApplyEvent_Kind_value = map[string]int32{
+		"START":    0,
+		"PROGRESS": 1,
+		"DONE":     2,
+		"ERROR":    3,
+	}
+)
+
+func (x InstallApplyEvent_Kind) Enum() *InstallApplyEvent_Kind {
+	p := new(InstallApplyEvent_Kind)
+	*p = x
+	return p
+}
+
+func (x InstallApplyEvent_Kind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (InstallApplyEvent_Kind) Descriptor() protoreflect.EnumDescriptor {
+	return file_internal_engine_control_control_proto_enumTypes[1].Descriptor()
+}
+
+func (InstallApplyEvent_Kind) Type() protoreflect.EnumType {
+	return &file_internal_engine_control_control_proto_enumTypes[1]
+}
+
+func (x InstallApplyEvent_Kind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use InstallApplyEvent_Kind.Descriptor instead.
+func (InstallApplyEvent_Kind) EnumDescriptor() ([]byte, []int) {
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{19, 0}
+}
+
 type PingRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -889,6 +941,252 @@ func (*CloseSessionResponse) Descriptor() ([]byte, []int) {
 	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{14}
 }
 
+// InstallPlan returns the pinned desired-state diff (the SP7b-2 plan) for the wizard to preview.
+type InstallAction struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Kind          string                 `protobuf:"bytes,2,opt,name=kind,proto3" json:"kind,omitempty"` // install | upgrade | ok
+	Current       string                 `protobuf:"bytes,3,opt,name=current,proto3" json:"current,omitempty"`
+	Desired       string                 `protobuf:"bytes,4,opt,name=desired,proto3" json:"desired,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InstallAction) Reset() {
+	*x = InstallAction{}
+	mi := &file_internal_engine_control_control_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InstallAction) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InstallAction) ProtoMessage() {}
+
+func (x *InstallAction) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_engine_control_control_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InstallAction.ProtoReflect.Descriptor instead.
+func (*InstallAction) Descriptor() ([]byte, []int) {
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *InstallAction) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *InstallAction) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *InstallAction) GetCurrent() string {
+	if x != nil {
+		return x.Current
+	}
+	return ""
+}
+
+func (x *InstallAction) GetDesired() string {
+	if x != nil {
+		return x.Desired
+	}
+	return ""
+}
+
+type InstallPlanRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InstallPlanRequest) Reset() {
+	*x = InstallPlanRequest{}
+	mi := &file_internal_engine_control_control_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InstallPlanRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InstallPlanRequest) ProtoMessage() {}
+
+func (x *InstallPlanRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_engine_control_control_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InstallPlanRequest.ProtoReflect.Descriptor instead.
+func (*InstallPlanRequest) Descriptor() ([]byte, []int) {
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{16}
+}
+
+type InstallPlanResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Actions       []*InstallAction       `protobuf:"bytes,1,rep,name=actions,proto3" json:"actions,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InstallPlanResponse) Reset() {
+	*x = InstallPlanResponse{}
+	mi := &file_internal_engine_control_control_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InstallPlanResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InstallPlanResponse) ProtoMessage() {}
+
+func (x *InstallPlanResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_engine_control_control_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InstallPlanResponse.ProtoReflect.Descriptor instead.
+func (*InstallPlanResponse) Descriptor() ([]byte, []int) {
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *InstallPlanResponse) GetActions() []*InstallAction {
+	if x != nil {
+		return x.Actions
+	}
+	return nil
+}
+
+// InstallApply streams progress while it downloads, verifies (fail-closed), and installs.
+type InstallApplyRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InstallApplyRequest) Reset() {
+	*x = InstallApplyRequest{}
+	mi := &file_internal_engine_control_control_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InstallApplyRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InstallApplyRequest) ProtoMessage() {}
+
+func (x *InstallApplyRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_engine_control_control_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InstallApplyRequest.ProtoReflect.Descriptor instead.
+func (*InstallApplyRequest) Descriptor() ([]byte, []int) {
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{18}
+}
+
+type InstallApplyEvent struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Kind          InstallApplyEvent_Kind `protobuf:"varint,1,opt,name=kind,proto3,enum=safeslop.control.v1.InstallApplyEvent_Kind" json:"kind,omitempty"`
+	Tool          string                 `protobuf:"bytes,2,opt,name=tool,proto3" json:"tool,omitempty"`
+	Msg           string                 `protobuf:"bytes,3,opt,name=msg,proto3" json:"msg,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InstallApplyEvent) Reset() {
+	*x = InstallApplyEvent{}
+	mi := &file_internal_engine_control_control_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InstallApplyEvent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InstallApplyEvent) ProtoMessage() {}
+
+func (x *InstallApplyEvent) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_engine_control_control_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InstallApplyEvent.ProtoReflect.Descriptor instead.
+func (*InstallApplyEvent) Descriptor() ([]byte, []int) {
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *InstallApplyEvent) GetKind() InstallApplyEvent_Kind {
+	if x != nil {
+		return x.Kind
+	}
+	return InstallApplyEvent_START
+}
+
+func (x *InstallApplyEvent) GetTool() string {
+	if x != nil {
+		return x.Tool
+	}
+	return ""
+}
+
+func (x *InstallApplyEvent) GetMsg() string {
+	if x != nil {
+		return x.Msg
+	}
+	return ""
+}
+
 var File_internal_engine_control_control_proto protoreflect.FileDescriptor
 
 const file_internal_engine_control_control_proto_rawDesc = "" +
@@ -946,14 +1244,34 @@ const file_internal_engine_control_control_proto_rawDesc = "" +
 	"\x13CloseSessionRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\"\x16\n" +
-	"\x14CloseSessionResponse2\xa6\x04\n" +
+	"\x14CloseSessionResponse\"k\n" +
+	"\rInstallAction\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
+	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x18\n" +
+	"\acurrent\x18\x03 \x01(\tR\acurrent\x12\x18\n" +
+	"\adesired\x18\x04 \x01(\tR\adesired\"\x14\n" +
+	"\x12InstallPlanRequest\"S\n" +
+	"\x13InstallPlanResponse\x12<\n" +
+	"\aactions\x18\x01 \x03(\v2\".safeslop.control.v1.InstallActionR\aactions\"\x15\n" +
+	"\x13InstallApplyRequest\"\xb0\x01\n" +
+	"\x11InstallApplyEvent\x12?\n" +
+	"\x04kind\x18\x01 \x01(\x0e2+.safeslop.control.v1.InstallApplyEvent.KindR\x04kind\x12\x12\n" +
+	"\x04tool\x18\x02 \x01(\tR\x04tool\x12\x10\n" +
+	"\x03msg\x18\x03 \x01(\tR\x03msg\"4\n" +
+	"\x04Kind\x12\t\n" +
+	"\x05START\x10\x00\x12\f\n" +
+	"\bPROGRESS\x10\x01\x12\b\n" +
+	"\x04DONE\x10\x02\x12\t\n" +
+	"\x05ERROR\x10\x032\xec\x05\n" +
 	"\aControl\x12K\n" +
 	"\x04Ping\x12 .safeslop.control.v1.PingRequest\x1a!.safeslop.control.v1.PingResponse\x12c\n" +
 	"\fListProfiles\x12(.safeslop.control.v1.ListProfilesRequest\x1a).safeslop.control.v1.ListProfilesResponse\x12P\n" +
 	"\x06Launch\x12\".safeslop.control.v1.LaunchRequest\x1a .safeslop.control.v1.LaunchEvent0\x01\x12`\n" +
 	"\vOpenSession\x12'.safeslop.control.v1.OpenSessionRequest\x1a(.safeslop.control.v1.OpenSessionResponse\x12P\n" +
 	"\x06Attach\x12 .safeslop.control.v1.ClientFrame\x1a .safeslop.control.v1.ServerFrame(\x010\x01\x12c\n" +
-	"\fCloseSession\x12(.safeslop.control.v1.CloseSessionRequest\x1a).safeslop.control.v1.CloseSessionResponseB=Z;github.com/freakhill/safeslop/internal/engine/control/pb;pbb\x06proto3"
+	"\fCloseSession\x12(.safeslop.control.v1.CloseSessionRequest\x1a).safeslop.control.v1.CloseSessionResponse\x12`\n" +
+	"\vInstallPlan\x12'.safeslop.control.v1.InstallPlanRequest\x1a(.safeslop.control.v1.InstallPlanResponse\x12b\n" +
+	"\fInstallApply\x12(.safeslop.control.v1.InstallApplyRequest\x1a&.safeslop.control.v1.InstallApplyEvent0\x01B=Z;github.com/freakhill/safeslop/internal/engine/control/pb;pbb\x06proto3"
 
 var (
 	file_internal_engine_control_control_proto_rawDescOnce sync.Once
@@ -967,48 +1285,60 @@ func file_internal_engine_control_control_proto_rawDescGZIP() []byte {
 	return file_internal_engine_control_control_proto_rawDescData
 }
 
-var file_internal_engine_control_control_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_internal_engine_control_control_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_internal_engine_control_control_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_internal_engine_control_control_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_internal_engine_control_control_proto_goTypes = []any{
 	(LaunchEvent_Kind)(0),        // 0: safeslop.control.v1.LaunchEvent.Kind
-	(*PingRequest)(nil),          // 1: safeslop.control.v1.PingRequest
-	(*PingResponse)(nil),         // 2: safeslop.control.v1.PingResponse
-	(*ListProfilesRequest)(nil),  // 3: safeslop.control.v1.ListProfilesRequest
-	(*Profile)(nil),              // 4: safeslop.control.v1.Profile
-	(*ListProfilesResponse)(nil), // 5: safeslop.control.v1.ListProfilesResponse
-	(*LaunchRequest)(nil),        // 6: safeslop.control.v1.LaunchRequest
-	(*LaunchEvent)(nil),          // 7: safeslop.control.v1.LaunchEvent
-	(*OpenSessionRequest)(nil),   // 8: safeslop.control.v1.OpenSessionRequest
-	(*OpenSessionResponse)(nil),  // 9: safeslop.control.v1.OpenSessionResponse
-	(*Resize)(nil),               // 10: safeslop.control.v1.Resize
-	(*ClientFrame)(nil),          // 11: safeslop.control.v1.ClientFrame
-	(*Exited)(nil),               // 12: safeslop.control.v1.Exited
-	(*ServerFrame)(nil),          // 13: safeslop.control.v1.ServerFrame
-	(*CloseSessionRequest)(nil),  // 14: safeslop.control.v1.CloseSessionRequest
-	(*CloseSessionResponse)(nil), // 15: safeslop.control.v1.CloseSessionResponse
+	(InstallApplyEvent_Kind)(0),  // 1: safeslop.control.v1.InstallApplyEvent.Kind
+	(*PingRequest)(nil),          // 2: safeslop.control.v1.PingRequest
+	(*PingResponse)(nil),         // 3: safeslop.control.v1.PingResponse
+	(*ListProfilesRequest)(nil),  // 4: safeslop.control.v1.ListProfilesRequest
+	(*Profile)(nil),              // 5: safeslop.control.v1.Profile
+	(*ListProfilesResponse)(nil), // 6: safeslop.control.v1.ListProfilesResponse
+	(*LaunchRequest)(nil),        // 7: safeslop.control.v1.LaunchRequest
+	(*LaunchEvent)(nil),          // 8: safeslop.control.v1.LaunchEvent
+	(*OpenSessionRequest)(nil),   // 9: safeslop.control.v1.OpenSessionRequest
+	(*OpenSessionResponse)(nil),  // 10: safeslop.control.v1.OpenSessionResponse
+	(*Resize)(nil),               // 11: safeslop.control.v1.Resize
+	(*ClientFrame)(nil),          // 12: safeslop.control.v1.ClientFrame
+	(*Exited)(nil),               // 13: safeslop.control.v1.Exited
+	(*ServerFrame)(nil),          // 14: safeslop.control.v1.ServerFrame
+	(*CloseSessionRequest)(nil),  // 15: safeslop.control.v1.CloseSessionRequest
+	(*CloseSessionResponse)(nil), // 16: safeslop.control.v1.CloseSessionResponse
+	(*InstallAction)(nil),        // 17: safeslop.control.v1.InstallAction
+	(*InstallPlanRequest)(nil),   // 18: safeslop.control.v1.InstallPlanRequest
+	(*InstallPlanResponse)(nil),  // 19: safeslop.control.v1.InstallPlanResponse
+	(*InstallApplyRequest)(nil),  // 20: safeslop.control.v1.InstallApplyRequest
+	(*InstallApplyEvent)(nil),    // 21: safeslop.control.v1.InstallApplyEvent
 }
 var file_internal_engine_control_control_proto_depIdxs = []int32{
-	4,  // 0: safeslop.control.v1.ListProfilesResponse.profiles:type_name -> safeslop.control.v1.Profile
+	5,  // 0: safeslop.control.v1.ListProfilesResponse.profiles:type_name -> safeslop.control.v1.Profile
 	0,  // 1: safeslop.control.v1.LaunchEvent.kind:type_name -> safeslop.control.v1.LaunchEvent.Kind
-	10, // 2: safeslop.control.v1.ClientFrame.resize:type_name -> safeslop.control.v1.Resize
-	12, // 3: safeslop.control.v1.ServerFrame.exited:type_name -> safeslop.control.v1.Exited
-	1,  // 4: safeslop.control.v1.Control.Ping:input_type -> safeslop.control.v1.PingRequest
-	3,  // 5: safeslop.control.v1.Control.ListProfiles:input_type -> safeslop.control.v1.ListProfilesRequest
-	6,  // 6: safeslop.control.v1.Control.Launch:input_type -> safeslop.control.v1.LaunchRequest
-	8,  // 7: safeslop.control.v1.Control.OpenSession:input_type -> safeslop.control.v1.OpenSessionRequest
-	11, // 8: safeslop.control.v1.Control.Attach:input_type -> safeslop.control.v1.ClientFrame
-	14, // 9: safeslop.control.v1.Control.CloseSession:input_type -> safeslop.control.v1.CloseSessionRequest
-	2,  // 10: safeslop.control.v1.Control.Ping:output_type -> safeslop.control.v1.PingResponse
-	5,  // 11: safeslop.control.v1.Control.ListProfiles:output_type -> safeslop.control.v1.ListProfilesResponse
-	7,  // 12: safeslop.control.v1.Control.Launch:output_type -> safeslop.control.v1.LaunchEvent
-	9,  // 13: safeslop.control.v1.Control.OpenSession:output_type -> safeslop.control.v1.OpenSessionResponse
-	13, // 14: safeslop.control.v1.Control.Attach:output_type -> safeslop.control.v1.ServerFrame
-	15, // 15: safeslop.control.v1.Control.CloseSession:output_type -> safeslop.control.v1.CloseSessionResponse
-	10, // [10:16] is the sub-list for method output_type
-	4,  // [4:10] is the sub-list for method input_type
-	4,  // [4:4] is the sub-list for extension type_name
-	4,  // [4:4] is the sub-list for extension extendee
-	0,  // [0:4] is the sub-list for field type_name
+	11, // 2: safeslop.control.v1.ClientFrame.resize:type_name -> safeslop.control.v1.Resize
+	13, // 3: safeslop.control.v1.ServerFrame.exited:type_name -> safeslop.control.v1.Exited
+	17, // 4: safeslop.control.v1.InstallPlanResponse.actions:type_name -> safeslop.control.v1.InstallAction
+	1,  // 5: safeslop.control.v1.InstallApplyEvent.kind:type_name -> safeslop.control.v1.InstallApplyEvent.Kind
+	2,  // 6: safeslop.control.v1.Control.Ping:input_type -> safeslop.control.v1.PingRequest
+	4,  // 7: safeslop.control.v1.Control.ListProfiles:input_type -> safeslop.control.v1.ListProfilesRequest
+	7,  // 8: safeslop.control.v1.Control.Launch:input_type -> safeslop.control.v1.LaunchRequest
+	9,  // 9: safeslop.control.v1.Control.OpenSession:input_type -> safeslop.control.v1.OpenSessionRequest
+	12, // 10: safeslop.control.v1.Control.Attach:input_type -> safeslop.control.v1.ClientFrame
+	15, // 11: safeslop.control.v1.Control.CloseSession:input_type -> safeslop.control.v1.CloseSessionRequest
+	18, // 12: safeslop.control.v1.Control.InstallPlan:input_type -> safeslop.control.v1.InstallPlanRequest
+	20, // 13: safeslop.control.v1.Control.InstallApply:input_type -> safeslop.control.v1.InstallApplyRequest
+	3,  // 14: safeslop.control.v1.Control.Ping:output_type -> safeslop.control.v1.PingResponse
+	6,  // 15: safeslop.control.v1.Control.ListProfiles:output_type -> safeslop.control.v1.ListProfilesResponse
+	8,  // 16: safeslop.control.v1.Control.Launch:output_type -> safeslop.control.v1.LaunchEvent
+	10, // 17: safeslop.control.v1.Control.OpenSession:output_type -> safeslop.control.v1.OpenSessionResponse
+	14, // 18: safeslop.control.v1.Control.Attach:output_type -> safeslop.control.v1.ServerFrame
+	16, // 19: safeslop.control.v1.Control.CloseSession:output_type -> safeslop.control.v1.CloseSessionResponse
+	19, // 20: safeslop.control.v1.Control.InstallPlan:output_type -> safeslop.control.v1.InstallPlanResponse
+	21, // 21: safeslop.control.v1.Control.InstallApply:output_type -> safeslop.control.v1.InstallApplyEvent
+	14, // [14:22] is the sub-list for method output_type
+	6,  // [6:14] is the sub-list for method input_type
+	6,  // [6:6] is the sub-list for extension type_name
+	6,  // [6:6] is the sub-list for extension extendee
+	0,  // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_internal_engine_control_control_proto_init() }
@@ -1030,8 +1360,8 @@ func file_internal_engine_control_control_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_engine_control_control_proto_rawDesc), len(file_internal_engine_control_control_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   15,
+			NumEnums:      2,
+			NumMessages:   20,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

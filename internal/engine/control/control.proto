@@ -10,6 +10,8 @@ service Control {
   rpc OpenSession(OpenSessionRequest) returns (OpenSessionResponse);
   rpc Attach(stream ClientFrame) returns (stream ServerFrame);
   rpc CloseSession(CloseSessionRequest) returns (CloseSessionResponse);
+  rpc InstallPlan(InstallPlanRequest) returns (InstallPlanResponse);
+  rpc InstallApply(InstallApplyRequest) returns (stream InstallApplyEvent);
 }
 
 message PingRequest {}
@@ -68,3 +70,22 @@ message ServerFrame {
 
 message CloseSessionRequest { string session_id = 1; }
 message CloseSessionResponse {}
+
+// InstallPlan returns the pinned desired-state diff (the SP7b-2 plan) for the wizard to preview.
+message InstallAction {
+  string name = 1;
+  string kind = 2;    // install | upgrade | ok
+  string current = 3;
+  string desired = 4;
+}
+message InstallPlanRequest {}
+message InstallPlanResponse { repeated InstallAction actions = 1; }
+
+// InstallApply streams progress while it downloads, verifies (fail-closed), and installs.
+message InstallApplyRequest {}
+message InstallApplyEvent {
+  enum Kind { START = 0; PROGRESS = 1; DONE = 2; ERROR = 3; }
+  Kind kind = 1;
+  string tool = 2;
+  string msg = 3;
+}

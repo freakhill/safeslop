@@ -25,6 +25,8 @@ const (
 	Control_OpenSession_FullMethodName  = "/safeslop.control.v1.Control/OpenSession"
 	Control_Attach_FullMethodName       = "/safeslop.control.v1.Control/Attach"
 	Control_CloseSession_FullMethodName = "/safeslop.control.v1.Control/CloseSession"
+	Control_InstallPlan_FullMethodName  = "/safeslop.control.v1.Control/InstallPlan"
+	Control_InstallApply_FullMethodName = "/safeslop.control.v1.Control/InstallApply"
 )
 
 // ControlClient is the client API for Control service.
@@ -39,6 +41,8 @@ type ControlClient interface {
 	OpenSession(ctx context.Context, in *OpenSessionRequest, opts ...grpc.CallOption) (*OpenSessionResponse, error)
 	Attach(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ClientFrame, ServerFrame], error)
 	CloseSession(ctx context.Context, in *CloseSessionRequest, opts ...grpc.CallOption) (*CloseSessionResponse, error)
+	InstallPlan(ctx context.Context, in *InstallPlanRequest, opts ...grpc.CallOption) (*InstallPlanResponse, error)
+	InstallApply(ctx context.Context, in *InstallApplyRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[InstallApplyEvent], error)
 }
 
 type controlClient struct {
@@ -121,6 +125,35 @@ func (c *controlClient) CloseSession(ctx context.Context, in *CloseSessionReques
 	return out, nil
 }
 
+func (c *controlClient) InstallPlan(ctx context.Context, in *InstallPlanRequest, opts ...grpc.CallOption) (*InstallPlanResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InstallPlanResponse)
+	err := c.cc.Invoke(ctx, Control_InstallPlan_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *controlClient) InstallApply(ctx context.Context, in *InstallApplyRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[InstallApplyEvent], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Control_ServiceDesc.Streams[2], Control_InstallApply_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[InstallApplyRequest, InstallApplyEvent]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Control_InstallApplyClient = grpc.ServerStreamingClient[InstallApplyEvent]
+
 // ControlServer is the server API for Control service.
 // All implementations must embed UnimplementedControlServer
 // for forward compatibility.
@@ -133,6 +166,8 @@ type ControlServer interface {
 	OpenSession(context.Context, *OpenSessionRequest) (*OpenSessionResponse, error)
 	Attach(grpc.BidiStreamingServer[ClientFrame, ServerFrame]) error
 	CloseSession(context.Context, *CloseSessionRequest) (*CloseSessionResponse, error)
+	InstallPlan(context.Context, *InstallPlanRequest) (*InstallPlanResponse, error)
+	InstallApply(*InstallApplyRequest, grpc.ServerStreamingServer[InstallApplyEvent]) error
 	mustEmbedUnimplementedControlServer()
 }
 
@@ -160,6 +195,12 @@ func (UnimplementedControlServer) Attach(grpc.BidiStreamingServer[ClientFrame, S
 }
 func (UnimplementedControlServer) CloseSession(context.Context, *CloseSessionRequest) (*CloseSessionResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CloseSession not implemented")
+}
+func (UnimplementedControlServer) InstallPlan(context.Context, *InstallPlanRequest) (*InstallPlanResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method InstallPlan not implemented")
+}
+func (UnimplementedControlServer) InstallApply(*InstallApplyRequest, grpc.ServerStreamingServer[InstallApplyEvent]) error {
+	return status.Error(codes.Unimplemented, "method InstallApply not implemented")
 }
 func (UnimplementedControlServer) mustEmbedUnimplementedControlServer() {}
 func (UnimplementedControlServer) testEmbeddedByValue()                 {}
@@ -272,6 +313,35 @@ func _Control_CloseSession_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Control_InstallPlan_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(InstallPlanRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ControlServer).InstallPlan(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Control_InstallPlan_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ControlServer).InstallPlan(ctx, req.(*InstallPlanRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Control_InstallApply_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(InstallApplyRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(ControlServer).InstallApply(m, &grpc.GenericServerStream[InstallApplyRequest, InstallApplyEvent]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Control_InstallApplyServer = grpc.ServerStreamingServer[InstallApplyEvent]
+
 // Control_ServiceDesc is the grpc.ServiceDesc for Control service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -295,6 +365,10 @@ var Control_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "CloseSession",
 			Handler:    _Control_CloseSession_Handler,
 		},
+		{
+			MethodName: "InstallPlan",
+			Handler:    _Control_InstallPlan_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
@@ -307,6 +381,11 @@ var Control_ServiceDesc = grpc.ServiceDesc{
 			Handler:       _Control_Attach_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
+		},
+		{
+			StreamName:    "InstallApply",
+			Handler:       _Control_InstallApply_Handler,
+			ServerStreams: true,
 		},
 	},
 	Metadata: "internal/engine/control/control.proto",
