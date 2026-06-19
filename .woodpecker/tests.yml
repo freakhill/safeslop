@@ -1,0 +1,17 @@
+# Fish test suite. Port of .github/workflows/tests.yml.
+# ubuntu:24.04 mirrors the old ubuntu-latest runner (fish 3.7); uv is the
+# project policy for any Python (PEP-723 helpers under scripts/_py/).
+when:
+  - event: push
+    branch: main
+  - event: pull_request
+
+steps:
+  - name: fish-tests
+    image: ubuntu:24.04
+    commands:
+      - apt-get update
+      - apt-get install -y --no-install-recommends fish git curl ca-certificates jq
+      - curl -LsSf https://astral.sh/uv/install.sh | sh
+      - export PATH="$HOME/.local/bin:$PATH"
+      - fish tests/run.fish

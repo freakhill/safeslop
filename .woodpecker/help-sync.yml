@@ -1,0 +1,17 @@
+# README <-> fish-script --help drift gate. Port of .github/workflows/help-sync-check.yml.
+# Fails if any AUTOGEN: examples block in scripts/*.fish is out of sync with its
+# named README section. Fix locally with: fish scripts/slop-sync-help.fish sync
+when:
+  - event: push
+    branch: main
+  - event: pull_request
+
+steps:
+  - name: help-sync
+    image: ubuntu:24.04
+    commands:
+      - apt-get update
+      - apt-get install -y --no-install-recommends fish git curl ca-certificates
+      - curl -LsSf https://astral.sh/uv/install.sh | sh
+      - export PATH="$HOME/.local/bin:$PATH"
+      - fish scripts/slop-sync-help.fish check

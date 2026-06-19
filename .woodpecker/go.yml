@@ -1,0 +1,21 @@
+# Go engine: vet, gofmt, build, test. Port of .github/workflows/go.yml.
+#
+# NOTE: Woodpecker runners are Linux/Docker, not macOS. The darwin-only
+# sandbox-exec launch tests t.Skip() here, so that macOS-specific coverage is
+# lost vs the old GitHub macos-latest runner; build + vet + gofmt + every
+# non-darwin test still gate. Run `make check` on a Mac before a release.
+when:
+  - event: push
+    branch: main
+  - event: pull_request
+
+steps:
+  - name: check
+    image: golang:1.26
+    environment:
+      CGO_ENABLED: "0"
+    commands:
+      - go vet ./...
+      - 'if [ -n "$(gofmt -l cmd internal)" ]; then echo "needs gofmt:"; gofmt -l cmd internal; exit 1; fi'
+      - go build -o safeslop ./cmd/safeslop
+      - go test ./...

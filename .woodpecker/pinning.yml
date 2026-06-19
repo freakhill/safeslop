@@ -1,0 +1,13 @@
+# Version-pinning gate (no `latest` in pinned files). Port of .github/workflows/pinning-check.yml.
+when:
+  - event: push
+    branch: main
+  - event: pull_request
+
+steps:
+  - name: pinning
+    image: ubuntu:24.04
+    commands:
+      - apt-get update
+      - apt-get install -y --no-install-recommends fish
+      - fish scripts/slop-pinning.fish

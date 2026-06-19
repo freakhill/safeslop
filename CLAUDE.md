@@ -59,8 +59,12 @@ make check          # go vet + gofmt + go test ./...  (CI: .github/workflows/go.
 make build          # static CGO_ENABLED=0 binary -> ./safeslop
 ```
 
-CI runs all four fish gates plus the Go workflow. The Textual launcher has two
-diagnostic entry points worth knowing:
+CI runs all four fish gates plus the Go workflow. The **active CI is Forgejo
+Woodpecker** (`.woodpecker/*.yml`) while GitHub is paused (see *Development
+happens on Forgejo* below); the `.github/workflows/` mirror is kept for the
+eventual release. Woodpecker runs on Linux, so the darwin-only `sandbox-exec`
+launch tests `t.Skip` there — run `make check` on a Mac before a release.
+The Textual launcher has two diagnostic entry points worth knowing:
 
 ```fish
 env UV_NATIVE_TLS=1 SSL_CERT_FILE=/etc/ssl/cert.pem \
@@ -143,11 +147,20 @@ All Python work goes through `uv` for isolated, repeatable runs. Don't
 suggest installing packages globally with pip; PEP-723 metadata in the
 script is the canonical place to add a dep.
 
-## Don't push directly to `main`
+## Development happens on Forgejo (GitHub paused)
 
-The sandbox blocks `git push origin main`. Either branch + PR, or hand
-back to the user with the commits sitting locally — a `! git push origin
-main` from the prompt works for them.
+Active development is on the **Forgejo** remote
+(`forgejo` → `ssh://git@forgejojo.lucyjojo.me:2222/jojo/safeslop.git`) with
+**Woodpecker CI** (`.woodpecker/`). GitHub (`origin`) is paused until release —
+don't push there or open GitHub PRs for now.
+
+- Push feature branches to `forgejo`; open PRs in the Forgejo web UI.
+- `forgejo`'s `main` is the source of truth; `origin` (GitHub) is a stale mirror
+  to be re-synced at release time. The `.github/workflows/` files are kept (not
+  deleted) so GitHub CI can resume for the release.
+- The sandbox blocks `git push origin main` (GitHub); pushing to `forgejo` is the
+  normal path now. Still don't push `main` directly unless asked — branch + PR, or
+  hand back commits sitting locally.
 
 ## Where the load-bearing code lives
 

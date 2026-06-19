@@ -1,0 +1,52 @@
+# Build the agent sandbox container images. Port of .github/workflows/sandbox-images-check.yml.
+#
+# Gated to MANUAL trigger: building images needs a Docker daemon, i.e. a
+# Woodpecker runner that permits the privileged dind service below. If your
+# runner allows that, change `event: manual` to `[push, pull_request]` to gate
+# every change. Left manual so it never red-lights CI on a runner without dind.
+#
+# DOCKER_BUILDKIT=0 forces the legacy daemon-side builder: Dockerfile.agent.tools
+# starts `FROM local/agent-sandbox:latest`, and buildkit isolates that tag from a
+# subsequent build, so the second FROM would 404. The legacy builder tags into the
+# daemon where the second build finds it.
+when:
+  - event: manual
+
+services:
+  - name: docker
+    image: docker:27-dind
+    privileged: true
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+
+steps:
+  - name: build-images
+    image: docker:27
+    environment:
+      DOCKER_HOST: tcp://docker:2375
+      DOCKER_BUILDKIT: "0"
+      COMPOSE_DOCKER_CLI_BUILD: "0"
+    commands:
+      - until docker info >/dev/null 2>&1; do echo "waiting for dind..."; sleep 1; done
+      - docker compose -f library/layer/container/docker-compose.yml config >/dev/null
+      - docker build -t local/agent-sandbox:latest -f library/layer/container/Dockerfile.agent .
+      - cp library/layer/container/agent-tools.env.example library/layer/container/agent-tools.env
+      - |
+        set -a
+        . library/layer/container/agent-tools.env
+        set +a
+        docker build \
+          -t local/agent-sandbox-tools:latest \
+          -f library/layer/container/Dockerfile.agent.tools \
+          --build-arg CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-}" \
+          --build-arg OPENCODE_VERSION="${OPENCODE_VERSION:-}" \
+          --build-arg CREWAI_VERSION="${CREWAI_VERSION:-}" \
+          --build-arg PYDANTIC_AI_VERSION="${PYDANTIC_AI_VERSION:-}" \
+          --build-arg PYDANTIC_AI_HARNESS_VERSION="${PYDANTIC_AI_HARNESS_VERSION:-}" \
+          --build-arg AG2_VERSION="${AG2_VERSION:-}" \
+          --build-arg ENABLE_CLAUDE_CODE="${ENABLE_CLAUDE_CODE:-false}" \
+          --build-arg ENABLE_OPENCODE="${ENABLE_OPENCODE:-false}" \
+          --build-arg ENABLE_CREWAI="${ENABLE_CREWAI:-true}" \
+          --build-arg ENABLE_PYDANTICAI="${ENABLE_PYDANTICAI:-true}" \
+          --build-arg ENABLE_AG2="${ENABLE_AG2:-true}" \
+          .
