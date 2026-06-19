@@ -1,6 +1,6 @@
 # SP7 — GUI portal + installer: design
 
-**Status:** Design (locked in brainstorm 2026-06-17; this doc is the written record). Folds the cross-model prior-art actionables (`specs/research/2026-06-17-startup-usecase-prior-art.md`). Execution split into SP7a (control plane + portal + terminal-launch) and SP7b (installer); see "Build order".
+**Status:** Design (locked in brainstorm 2026-06-17; this doc is the written record). Folds the cross-model prior-art actionables (`specs/research/2026-06-17-startup-usecase-prior-art.md`). Execution split into SP7a (control plane + portal + terminal-launch) and SP7b (installer); see "Build order". **Amended 2026-06-19** with the promise-vs-pain `ayo` HIGH actionables (§10, from `specs/research/2026-06-19-design-promise-vs-pain.md`).
 
 **Audience for the GUI:** the non-technical coworker who can't run fish/uv/cue installers behind corporate Cloudflare WARP TLS interception, on a MacBook deploying to AWS/GCP. The CLI (SP1–SP6) is the shipped power-user surface; the GUI is the *second* surface (the dropped SP6 terminal TUI is **not** revived — direction is "CLI or GUI").
 
@@ -104,3 +104,93 @@ New engine commands (the `.app` installer screen is a thin wizard over these; CL
 3. **`config.cue` location:** new `internal/engine/userconfig/` package (parallels `policy/`) vs folding into `policy/`. **Recommendation:** new `userconfig/` package — it is user-level, not policy.
 4. **Terminal adapters scope for SP7a:** `Terminal.app` + `iTerm2` (AppleScript) and `Ghostty` + `WezTerm` + `kitty` (`open -na … --args` running `<shell> -lc <command>`), with `generic`→Terminal fallback — all v1. `iTerm2`-native tagging (badge/tab color) is the remaining follow-on. **Recommendation:** as written.
 5. **`make proto` toolchain:** require `protoc` + plugins locally; commit generated code so CI/`make build` never needs protoc. **Recommendation:** as written.
+
+---
+
+## 10. Amendments — 2026-06-19 (cross-model `ayo`)
+
+Folds the HIGH actionables from `specs/research/2026-06-19-design-promise-vs-pain.md`
+(blind Host/Gemini/DeepSeek pass on "promise vs pain") that land on SP7 surfaces. Each
+item cites the § it changes. Cross-cutting items that fall outside SP7 are tracked at the
+bottom as **separate slices** (not folded here).
+
+### 10.1 Control-plane peer-auth — revises §9.1 (no longer "deferred as written")
+
+The ayo's sharpest Q1 finding: with uid-only `LOCAL_PEERCRED`, **the very agent SP7
+sandboxes can `connect()` `~/.slop/s.sock` and ask the engine to `Launch` an *un*sandboxed
+profile or surface secrets** — the tool's control channel is reachable by the thing it
+cages (confused deputy; cf. Zoom's local web server, firejail D-Bus CVE-2021-26910, why
+macOS XPC enforces code-signing per message). So §9.1's "uid-only v1, codesign deferred"
+is **downgraded from a clean recommendation to a known hole that must close before the GUI
+ships to Audience A**:
+
+- **Un-defer the codesign / audit-token peer check.** It is achievable **without CGO** via
+  a `codesign`/`csops` verification of the peer's audit token (assert Team ID + bundle id
+  == `SafeSlop.app`), keeping `CGO_ENABLED=0`. uid-only is acceptable only for a
+  power-user-CLI-only build with no GUI installed.
+- **Refuse control-plane connections originating from inside a sandbox / the engine's own
+  spawned process tree** — a launched agent must never be able to talk back to `serve`.
+- **User-presence gate (LocalAuthentication / Touch ID)** on privileged verbs
+  (`Launch` of a weaker-than-default profile, granting write creds) so same-uid automation
+  can't silently invoke them. (Q1; H3/M7.)
+
+### 10.2 Installer trust chain + provenance — extends §5
+
+- **Document the load-bearing justification for "no naive Homebrew":** the pins are
+  **compiled into the notarized binary**, so the pin set inherits Apple's code-signing
+  root of trust (tampering breaks the signature). A GitHub-release download against an
+  advisory README hash would be *weaker* than brew, not stronger — the notarized-binary
+  chain is the whole reason the refusal is defensible. State it explicitly in the installer
+  docs. (Q1; H6.)
+- **Verify the upstream maintainer signature**, not only the sha256 safeslop copied: sha +
+  embedded-in-notarized-binary defends *substitution/tampering*, never an upstream
+  maintainer compromise shipping malware at a faithfully-checksummed pinned version
+  (TUF/SLSA "provenance ≠ honesty"). mise publishes `SHASUMS256.asc`/minisig; tart signs
+  releases — verify them. Prefer artifacts aged `> N` days (freshness/time-delay) so a
+  poisoned release has a detection window. (Q1; H6 — folded into SP7b-3 `apply`.)
+- **Demote the reserved behavioral VM-eval to opt-in-first-use only.** Cuckoo/Qubes show
+  per-install VM diffing is too slow/noisy/evadable to gate routine updates; it will be
+  disabled. The routine honesty gap is better closed by the signature + freshness checks
+  above. (Q2; H8.)
+
+### 10.3 WARP toolchain TLS plumbing — extends §5 (the #1 adoption gate)
+
+The single-binary rewrite fixes *safeslop's own* downloads (a `CGO_ENABLED=0` Go binary on
+darwin consults the system trust store, so WARP's CA in the keychain is honored), **but not
+the toolchains it installs** (`npm`/`pip`/`uv`/`cargo`/Node ignore the keychain and fail
+opaquely behind WARP → users reach for `--insecure` and leave it on). `install apply` must
+export the system-keychain CA bundle and wire each toolchain's cert env
+(`SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, `PIP_CERT`, `UV_NATIVE_TLS=1`, `CARGO_HTTP_CAINFO`).
+**Port the existing fish 4-strategy uv TLS fallback (`scripts/slop.fish`) — do not
+re-discover it.** (Q2; H4.)
+
+### 10.4 Strong, zero-authoring default + GUI never shows CUE — extends §4/§5
+
+Secure-by-default must mean **strong-default + zero authoring**, not "the weakest env, free
+of charge." The GUI wizard (§5) **generates/edits policy; Audience A never sees raw CUE**
+(Tailscale's zero-config adoption lever; Nix/Bazel's config-language adoption penalty). A
+profile that declares secrets/creds should **default its environment to container
+(squid-enforced), not bare sandbox.** (Q1+Q2; H7. The engine-side "auto-select a strong
+profile when no `safeslop.cue` exists" is the cross-cutting SP-run item below.)
+
+### 10.5 Cross-cutting — tracked as separate slices (NOT folded into SP7)
+
+These ayo HIGH items touch already-shipped SP1–SP3 surfaces, not SP7; recorded here so
+they're not lost, to be scoped as their own plans:
+
+- **Tier labels** in `doctor`/`run`/README: sandbox = mistake-guard, container+squid =
+  network-enforced, vm = adversary-grade. The honest product claim is "guards agent
+  *mistakes* + accidental exfil, **not** a malicious-code escape jail." (Q1; H1 — the
+  load-bearing reframe; SP1/SP3 + docs.)
+- **Policy integrity:** hash `safeslop.cue` at launch from *outside* the writable mount,
+  refuse mid-run mutation, and treat a **repo-supplied** policy as untrusted-until-host-
+  approves (devcontainer trust-prompt model) — the sandboxed agent can otherwise rewrite
+  the file that governs its own run, and `git clone <evil>` ships a permissive one.
+  (Q1; H2 — orchestrator/policy.)
+- **Scope-first, decay-second creds:** downscope cloud tokens at the *minting* step
+  (AWS session policy / permission boundary, narrowest GCP scopes) so even full-TTL reuse
+  is bounded; stage via a short-lived `credential_process` rather than raw env vars.
+  (Q1; H5 — SP2 creds.)
+- **FLO hand-off:** read-only-default deploy keys vs autonomous-agent ergonomics is a
+  genuine contested fork (DeepSeek: read-only pushes power users to long-lived write
+  tokens) — score with `feedback-loop-optimization`, don't decide ad hoc.
