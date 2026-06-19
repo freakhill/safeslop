@@ -11,14 +11,14 @@ import (
 	"github.com/freakhill/safeslop/internal/engine/control/pb"
 )
 
-// socketPath is ~/.slop/s.sock — deliberately short (macOS sun_path is 104 bytes;
+// socketPath is ~/.safeslop/s.sock — deliberately short (macOS sun_path is 104 bytes;
 // ~/Library/Application Support/... + a long username would silently overflow).
 func socketPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".slop", "s.sock"), nil
+	return filepath.Join(home, ".safeslop", "s.sock"), nil
 }
 
 // Serve binds the UDS (0700 dir / 0600 socket), enforces same-uid peer-auth at Accept time,

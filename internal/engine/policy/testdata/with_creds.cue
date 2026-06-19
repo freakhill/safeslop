@@ -1,6 +1,6 @@
-package slop
+package safeslop
 
-slop: profiles: {
+safeslop: profiles: {
 	work: {
 		agent:   "shell"
 		network: "allow"

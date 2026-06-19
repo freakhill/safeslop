@@ -1,4 +1,4 @@
-// Package cli is the slop command tree. Every command drives the engine
+// Package cli is the safeslop command tree. Every command drives the engine
 // packages and (with --json) emits machine-readable output so a future GUI can
 // drive the same engine without re-implementing logic (specs/0001 §6, §A).
 package cli
@@ -39,7 +39,7 @@ var jsonOut bool
 func Execute() {
 	if err := newRoot().Execute(); err != nil {
 		if !jsonOut {
-			fmt.Fprintln(os.Stderr, "slop:", err)
+			fmt.Fprintln(os.Stderr, "safeslop:", err)
 		} else {
 			emitJSON(map[string]any{"ok": false, "error": err.Error()})
 		}
@@ -49,8 +49,8 @@ func Execute() {
 
 func newRoot() *cobra.Command {
 	root := &cobra.Command{
-		Use:           "slop",
-		Short:         "Launch coding agents under isolation, driven by slop.cue",
+		Use:           "safeslop",
+		Short:         "Launch coding agents under isolation, driven by safeslop.cue",
 		Version:       Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -64,8 +64,8 @@ func newRoot() *cobra.Command {
 
 func cmdValidate() *cobra.Command {
 	return &cobra.Command{
-		Use:   "validate [slop.cue]",
-		Short: "Validate a slop.cue against the embedded schema",
+		Use:   "validate [safeslop.cue]",
+		Short: "Validate a safeslop.cue against the embedded schema",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			path, err := findConfig(arg0(args))
@@ -91,8 +91,8 @@ func cmdValidate() *cobra.Command {
 
 func cmdList() *cobra.Command {
 	return &cobra.Command{
-		Use:   "list [slop.cue]",
-		Short: "List the profiles defined in slop.cue",
+		Use:   "list [safeslop.cue]",
+		Short: "List the profiles defined in safeslop.cue",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			path, err := findConfig(arg0(args))
@@ -127,7 +127,7 @@ func cmdList() *cobra.Command {
 
 // ---- doctor ----
 
-// doctorReport probes the external tools and isolation boundaries slop can use.
+// doctorReport probes the external tools and isolation boundaries safeslop can use.
 // Extracted so it is testable and reusable (e.g. a future GUI / installer).
 func doctorReport() map[string]any {
 	tools := []string{"git", "gh", "docker", "op", "claude", "opencode", "tart", "mise", "nix", "aws", "gcloud", "gke-gcloud-auth-plugin"}
@@ -154,7 +154,7 @@ func cmdDoctor() *cobra.Command {
 				emitJSON(map[string]any{"ok": true, "os": runtime.GOOS, "arch": runtime.GOARCH, "tools": report})
 				return nil
 			}
-			fmt.Printf("slop %s  (%s/%s)\n", Version, runtime.GOOS, runtime.GOARCH)
+			fmt.Printf("safeslop %s  (%s/%s)\n", Version, runtime.GOOS, runtime.GOARCH)
 			names := make([]string, 0, len(report))
 			for n := range report {
 				names = append(names, n)
@@ -267,7 +267,7 @@ func cmdDown() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if !container.Available() && !vm.Available() {
-				return fmt.Errorf("nothing to tear down: neither docker nor tart is available (run: slop doctor)")
+				return fmt.Errorf("nothing to tear down: neither docker nor tart is available (run: safeslop doctor)")
 			}
 			if container.Available() {
 				dir, composeFile, err := container.ComposeForDown()
@@ -290,7 +290,7 @@ func cmdDown() *cobra.Command {
 func cmdServe() *cobra.Command {
 	return &cobra.Command{
 		Use:   "serve",
-		Short: "Run the gRPC control plane on ~/.slop/s.sock (drives the GUI app)",
+		Short: "Run the gRPC control plane on ~/.safeslop/s.sock (drives the GUI app)",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			return control.Serve(Version,
@@ -312,7 +312,7 @@ func cmdServe() *cobra.Command {
 
 // resolveSession turns a profile name into a control.SessionSpec: the (optionally toolchain-
 // wrapped) agent argv, the workspace, the profile's resolved secrets + staged credentials, and
-// the per-environment cleanup as OnClose. Credential parity with `slop run` (SP7c-3), minus ssh
+// the per-environment cleanup as OnClose. Credential parity with `safeslop run` (SP7c-3), minus ssh
 // deploy keys, which are deferred in the cockpit (they key off the workspace git origin).
 func resolveSession(profile, configPath string) (control.SessionSpec, error) {
 	path, err := findConfig(configPath)
@@ -340,11 +340,11 @@ func resolveSession(profile, configPath string) (control.SessionSpec, error) {
 	}
 
 	// Credential gates the cockpit can't satisfy yet (reject before staging anything):
-	// ssh mints a per-window deploy key scoped to the *workspace* git origin, but slop serve's
-	// cwd isn't the workspace — deferred to `slop run`. vm can't reach kube (mirrors runProfile).
+	// ssh mints a per-window deploy key scoped to the *workspace* git origin, but safeslop serve's
+	// cwd isn't the workspace — deferred to `safeslop run`. vm can't reach kube (mirrors runProfile).
 	if prof.Credentials != nil {
 		if prof.Credentials.Ssh != nil {
-			return control.SessionSpec{}, fmt.Errorf("ssh credentials aren't supported in cockpit sessions yet (the deploy key is scoped to the workspace git origin); use `slop run`")
+			return control.SessionSpec{}, fmt.Errorf("ssh credentials aren't supported in cockpit sessions yet (the deploy key is scoped to the workspace git origin); use `safeslop run`")
 		}
 		if prof.Environment == "vm" && prof.Credentials.Kube != nil {
 			return control.SessionSpec{}, fmt.Errorf("kube credentials are not supported with environment:%q; use environment:\"container\" (specs/0010)", prof.Environment)
@@ -352,7 +352,7 @@ func resolveSession(profile, configPath string) (control.SessionSpec, error) {
 	}
 
 	// Per-session stage dir (unique → N concurrent sessions don't collide; also the vm clone name).
-	base := filepath.Join(ws, ".slop", "runtime")
+	base := filepath.Join(ws, ".safeslop", "runtime")
 	if err := os.MkdirAll(base, 0o700); err != nil {
 		return control.SessionSpec{}, err
 	}
@@ -428,12 +428,12 @@ func cmdLaunch() *cobra.Command {
 	}
 }
 
-// launchProfile opens the user's preferred terminal (from ~/.config/slop/config.cue) running
-// `slop run <profile>`, so the real ctty handoff happens inside that window. Returns once the
-// terminal is spawned. configPath is reserved for the gRPC delegation (v1 resolves slop.cue
+// launchProfile opens the user's preferred terminal (from ~/.config/safeslop/config.cue) running
+// `safeslop run <profile>`, so the real ctty handoff happens inside that window. Returns once the
+// terminal is spawned. configPath is reserved for the gRPC delegation (v1 resolves safeslop.cue
 // from the workspace).
 // profileNameRe constrains launchable profile names: the name is embedded in the spawned
-// terminal's window title and SLOP_SESSION, so it must not carry shell/title metacharacters.
+// terminal's window title and SAFESLOP_SESSION, so it must not carry shell/title metacharacters.
 var profileNameRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
 func launchProfile(name, configPath string) (int, error) {
@@ -453,11 +453,11 @@ func launchProfile(name, configPath string) (int, error) {
 	if err != nil {
 		return 1, err
 	}
-	slopPath, err := os.Executable()
+	safeslopPath, err := os.Executable()
 	if err != nil {
 		return 1, err
 	}
-	cmd := launch.Command(slopPath, name, ws, uc.Tag.OSCTitle)
+	cmd := launch.Command(safeslopPath, name, ws, uc.Tag.OSCTitle)
 	argv := launch.AdapterArgv(uc.Terminal, uc.Shell, cmd)
 	if err := osexec.Command(argv[0], argv[1:]...).Run(); err != nil {
 		return 1, fmt.Errorf("open terminal (%s): %w", uc.Terminal, err)
@@ -523,7 +523,7 @@ func stageProfile(ctx context.Context, prof policy.Profile, stageDir string) (se
 func runProfile(name string, prof policy.Profile, argv []string, ws string) (int, error) {
 	ctx := context.Background()
 
-	stageDir := filepath.Join(ws, ".slop", "runtime", name)
+	stageDir := filepath.Join(ws, ".safeslop", "runtime", name)
 	defer os.RemoveAll(stageDir) // wipe staged secrets/.npmrc regardless of outcome
 
 	// kube/ssh creds need a file at a boundary-stable path; vm's scp'd stage path
@@ -557,7 +557,7 @@ func runProfile(name string, prof policy.Profile, argv []string, ws string) (int
 		return engexec.RunInTerminal(ctx, engexec.LaunchSpec{Argv: argv, Dir: ws, Env: env})
 	case "container":
 		// secrets go in secrets.env (sourced by the entrypoint); .npmrc and kubeconfig
-		// are staged in stageDir and reached via the /slop/runtime bind mount.
+		// are staged in stageDir and reached via the /safeslop/runtime bind mount.
 		return container.Launch(ctx, engexec.LaunchSpec{Argv: argv}, ws, prof.Network, secretEnv, stageDir)
 	case "vm":
 		// secrets ride secrets.env scp'd into the VM and sourced over ssh; the VM is destroyed on exit.
@@ -579,7 +579,7 @@ func hostOr(h string) string {
 }
 
 // validateAndLint loads + validates the config (returning any fatal error) and
-// returns non-fatal lint warnings. Shared by `slop validate` and `slop run`.
+// returns non-fatal lint warnings. Shared by `safeslop validate` and `safeslop run`.
 func validateAndLint(path string) ([]policy.Warning, error) {
 	cfg, err := policy.Load(path)
 	if err != nil {
@@ -603,7 +603,7 @@ func arg0(args []string) string {
 	return ""
 }
 
-// findConfig returns the explicit path if given, else the nearest slop.cue
+// findConfig returns the explicit path if given, else the nearest safeslop.cue
 // walking up from the current directory.
 func findConfig(explicit string) (string, error) {
 	if explicit != "" {
@@ -615,13 +615,13 @@ func findConfig(explicit string) (string, error) {
 	}
 	start := dir
 	for {
-		p := filepath.Join(dir, "slop.cue")
+		p := filepath.Join(dir, "safeslop.cue")
 		if _, err := os.Stat(p); err == nil {
 			return p, nil
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return "", fmt.Errorf("no slop.cue found in %s or any parent directory", start)
+			return "", fmt.Errorf("no safeslop.cue found in %s or any parent directory", start)
 		}
 		dir = parent
 	}
@@ -632,7 +632,7 @@ func selectProfile(cfg *policy.Config, requested string) (string, policy.Profile
 	if requested != "" {
 		p, ok := cfg.Profiles[requested]
 		if !ok {
-			return "", policy.Profile{}, fmt.Errorf("no profile %q in slop.cue", requested)
+			return "", policy.Profile{}, fmt.Errorf("no profile %q in safeslop.cue", requested)
 		}
 		return requested, p, nil
 	}
@@ -644,7 +644,7 @@ func selectProfile(cfg *policy.Config, requested string) (string, policy.Profile
 			return n, p, nil
 		}
 	}
-	return "", policy.Profile{}, fmt.Errorf("multiple profiles; name one of them (run `slop list`)")
+	return "", policy.Profile{}, fmt.Errorf("multiple profiles; name one of them (run `safeslop list`)")
 }
 
 // agentArgv maps a profile's agent to the command to launch.

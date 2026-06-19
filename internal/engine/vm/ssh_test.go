@@ -18,15 +18,15 @@ func TestSSHArgvTTYAndUser(t *testing.T) {
 }
 
 func TestScpArgv(t *testing.T) {
-	got := strings.Join(scpArgv("10.0.0.9", "/stage", "~/.slop-runtime"), " ")
-	if !strings.Contains(got, "-r /stage admin@10.0.0.9:~/.slop-runtime") {
+	got := strings.Join(scpArgv("10.0.0.9", "/stage", "~/.safeslop-runtime"), " ")
+	if !strings.Contains(got, "-r /stage admin@10.0.0.9:~/.safeslop-runtime") {
 		t.Fatalf("scpArgv wrong: %q", got)
 	}
 }
 
 func TestRemoteAgentCmdSourcesSecretsAndEscapes(t *testing.T) {
 	cmd := remoteAgentCmd([]string{"claude", "--flag with space"}, "")
-	if !strings.Contains(cmd, ". ~/.slop-runtime/secrets.env") || !strings.HasPrefix(cmd, "set -a;") {
+	if !strings.Contains(cmd, ". ~/.safeslop-runtime/secrets.env") || !strings.HasPrefix(cmd, "set -a;") {
 		t.Fatalf("missing secrets sourcing: %q", cmd)
 	}
 	if !strings.Contains(cmd, `exec 'claude' '--flag with space'`) {

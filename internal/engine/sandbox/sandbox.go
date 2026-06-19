@@ -108,7 +108,7 @@ func WrapArgv(agentArgv []string, workspace, network string) (argv []string, cle
 	if _, statErr := os.Stat(SandboxExecPath); statErr != nil {
 		return nil, func() {}, fmt.Errorf("sandbox environment requires macOS sandbox-exec at %s", SandboxExecPath)
 	}
-	f, err := os.CreateTemp("", "slop-sb-*.sb")
+	f, err := os.CreateTemp("", "safeslop-sb-*.sb")
 	if err != nil {
 		return nil, func() {}, err
 	}

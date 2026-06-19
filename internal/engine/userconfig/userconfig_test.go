@@ -16,7 +16,7 @@ func loadStr(t *testing.T, src string) (*Config, error) {
 }
 
 func TestLoadDefaults(t *testing.T) {
-	cfg, err := loadStr(t, "package slopcfg\n")
+	cfg, err := loadStr(t, "package safeslopcfg\n")
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -26,7 +26,7 @@ func TestLoadDefaults(t *testing.T) {
 }
 
 func TestLoadExplicit(t *testing.T) {
-	cfg, err := loadStr(t, `package slopcfg
+	cfg, err := loadStr(t, `package safeslopcfg
 terminal: "Ghostty"
 shell: "/bin/zsh"
 tag: {oscTitle: false, promptMarker: true}`)
@@ -46,14 +46,14 @@ func TestLoadMissingFileIsDefaults(t *testing.T) {
 }
 
 func TestLoadRejectsUnknownTerminal(t *testing.T) {
-	if _, err := loadStr(t, `package slopcfg
+	if _, err := loadStr(t, `package safeslopcfg
 terminal: "Hyper"`); err == nil {
 		t.Fatal("unknown terminal must be rejected by the schema")
 	}
 }
 
 func TestLoadAcceptsITerm2(t *testing.T) {
-	cfg, err := loadStr(t, "package slopcfg\nterminal: \"iTerm2\"")
+	cfg, err := loadStr(t, "package safeslopcfg\nterminal: \"iTerm2\"")
 	if err != nil || cfg.Terminal != "iTerm2" {
 		t.Fatalf("iTerm2 must be an accepted terminal: cfg=%+v err=%v", cfg, err)
 	}
@@ -61,7 +61,7 @@ func TestLoadAcceptsITerm2(t *testing.T) {
 
 func TestLoadAcceptsWezTermAndKitty(t *testing.T) {
 	for _, term := range []string{"WezTerm", "kitty"} {
-		cfg, err := loadStr(t, "package slopcfg\nterminal: \""+term+"\"")
+		cfg, err := loadStr(t, "package safeslopcfg\nterminal: \""+term+"\"")
 		if err != nil || cfg.Terminal != term {
 			t.Fatalf("%s must be an accepted terminal: cfg=%+v err=%v", term, cfg, err)
 		}

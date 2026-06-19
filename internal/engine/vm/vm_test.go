@@ -9,7 +9,7 @@ func TestImageIsPinned(t *testing.T) {
 }
 
 func TestSessionNamePerProfile(t *testing.T) {
-	if sessionName("review") != "slop-vm-review" {
+	if sessionName("review") != "safeslop-vm-review" {
 		t.Fatalf("got %q", sessionName("review"))
 	}
 }

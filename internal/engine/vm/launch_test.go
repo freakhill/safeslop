@@ -29,7 +29,7 @@ func TestLaunchRejectsWhenUnavailable(t *testing.T) {
 
 func TestLaunchDenyNeedsProxyURL(t *testing.T) {
 	t.Setenv("PATH", "")
-	t.Setenv("SLOP_VM_PROXY_URL", "")
+	t.Setenv("SAFESLOP_VM_PROXY_URL", "")
 	_, err := Launch(context.Background(), []string{"zsh"}, "deny", nil, t.TempDir(), "p", "")
 	if err == nil {
 		t.Fatal("expected error (tart unavailable and/or deny without proxy URL)")

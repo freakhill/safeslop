@@ -19,18 +19,18 @@ func TestWithRepoLockRunsBodyAndReleases(t *testing.T) {
 	if n != 2 {
 		t.Fatalf("body ran %d times, want 2", n)
 	}
-	if _, err := os.Stat(filepath.Join(repo, ".slop", "lock")); err != nil {
+	if _, err := os.Stat(filepath.Join(repo, ".safeslop", "lock")); err != nil {
 		t.Fatalf("lock file missing: %v", err)
 	}
 }
 
 func TestReconcileSweepsStaleMarkedDirs(t *testing.T) {
 	repo := t.TempDir()
-	stale := filepath.Join(repo, ".slop", "runtime", "old")
-	fresh := filepath.Join(repo, ".slop", "runtime", "new")
+	stale := filepath.Join(repo, ".safeslop", "runtime", "old")
+	fresh := filepath.Join(repo, ".safeslop", "runtime", "new")
 	for _, d := range []string{stale, fresh} {
 		os.MkdirAll(d, 0o755)
-		os.WriteFile(filepath.Join(d, ".slop-stage"), nil, 0o600)
+		os.WriteFile(filepath.Join(d, ".safeslop-stage"), nil, 0o600)
 		os.WriteFile(filepath.Join(d, "secrets.env"), []byte("K=v"), 0o600)
 	}
 	old := time.Now().Add(-2 * time.Hour)

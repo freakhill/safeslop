@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-const riskyCue = `package slop
-slop: {
+const riskyCue = `package safeslop
+safeslop: {
 	version: 1
 	profiles: risky: {
 		agent: "claude"
@@ -20,7 +20,7 @@ slop: {
 
 func TestValidateAndLintSurfacesWarning(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "slop.cue")
+	path := filepath.Join(dir, "safeslop.cue")
 	if err := os.WriteFile(path, []byte(riskyCue), 0o644); err != nil {
 		t.Fatal(err)
 	}

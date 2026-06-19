@@ -1,6 +1,6 @@
-package slop
+package safeslop
 
-// Embedded engine schema for slop.cue (specs/0001 §6.1). Compiled into the
+// Embedded engine schema for safeslop.cue (specs/0001 §6.1). Compiled into the
 // binary via go:embed; the external `cue` binary is never needed.
 //
 // SP1 scope: enough to launch claude/shell under the sandbox-exec boundary.
@@ -104,7 +104,7 @@ package slop
 	agent:       #Agent
 	environment: #Environment | *"sandbox"
 	// Directory the boundary confines file access to. Empty (default) means the
-	// directory slop was invoked from.
+	// directory safeslop was invoked from.
 	workspace?: string
 	network:    #Network | *"deny"
 	// Env var name -> secret ref; injected into the agent's environment at launch.
@@ -120,4 +120,4 @@ package slop
 	profiles: {[string]: #Profile}
 }
 
-slop: #Slop
+safeslop: #Slop

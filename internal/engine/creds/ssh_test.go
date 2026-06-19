@@ -11,19 +11,19 @@ import (
 )
 
 func TestKeygenArgv(t *testing.T) {
-	got := strings.Join(keygenArgv("/stage/.ssh/id", "slop-acme/repo-run1"), " ")
-	want := `ssh-keygen -t ed25519 -N  -C slop-acme/repo-run1 -f /stage/.ssh/id`
+	got := strings.Join(keygenArgv("/stage/.ssh/id", "safeslop-acme/repo-run1"), " ")
+	want := `ssh-keygen -t ed25519 -N  -C safeslop-acme/repo-run1 -f /stage/.ssh/id`
 	if got != want {
 		t.Fatalf("keygen argv = %q", got)
 	}
 }
 
 func TestGhRegisterArgv(t *testing.T) {
-	ro := strings.Join(ghRegisterArgv("acme", "repo", "slop-run1", "ssh-ed25519 AAAA", false), " ")
-	if ro != "gh api repos/acme/repo/keys -f title=slop-run1 -f key=ssh-ed25519 AAAA -F read_only=true" {
+	ro := strings.Join(ghRegisterArgv("acme", "repo", "safeslop-run1", "ssh-ed25519 AAAA", false), " ")
+	if ro != "gh api repos/acme/repo/keys -f title=safeslop-run1 -f key=ssh-ed25519 AAAA -F read_only=true" {
 		t.Fatalf("ro argv = %q", ro)
 	}
-	rw := strings.Join(ghRegisterArgv("acme", "repo", "slop-run1", "ssh-ed25519 AAAA", true), " ")
+	rw := strings.Join(ghRegisterArgv("acme", "repo", "safeslop-run1", "ssh-ed25519 AAAA", true), " ")
 	if !strings.Contains(rw, "-F read_only=false") {
 		t.Fatalf("rw argv = %q", rw)
 	}
@@ -65,13 +65,13 @@ func TestParseKeyID(t *testing.T) {
 }
 
 func TestRenderGitSSHCommand(t *testing.T) {
-	got := renderGitSSHCommand("/slop/runtime/.ssh/id", "/slop/runtime/.ssh/known_hosts")
+	got := renderGitSSHCommand("/safeslop/runtime/.ssh/id", "/safeslop/runtime/.ssh/known_hosts")
 	for _, want := range []string{
-		"ssh -i /slop/runtime/.ssh/id",
+		"ssh -i /safeslop/runtime/.ssh/id",
 		"-o IdentitiesOnly=yes",
 		"-o IdentityAgent=none",
 		"-o StrictHostKeyChecking=yes",
-		"-o UserKnownHostsFile=/slop/runtime/.ssh/known_hosts",
+		"-o UserKnownHostsFile=/safeslop/runtime/.ssh/known_hosts",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("GIT_SSH_COMMAND missing %q: %s", want, got)
@@ -96,7 +96,7 @@ func fakeStub(t *testing.T, dir, name, body string) {
 func TestStageSSHMintsReadOnly(t *testing.T) {
 	binDir := t.TempDir()
 	fakeStub(t, binDir, "git", `echo "git@github.com:acme/repo.git"`)
-	fakeStub(t, binDir, "ssh-keygen", `eval "p=\${$#}"; echo PRIV > "$p"; echo "ssh-ed25519 AAAAPUB slop" > "$p.pub"`)
+	fakeStub(t, binDir, "ssh-keygen", `eval "p=\${$#}"; echo PRIV > "$p"; echo "ssh-ed25519 AAAAPUB safeslop" > "$p.pub"`)
 	fakeStub(t, binDir, "gh", `echo '{"id":4242,"read_only":true}'`)
 	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
 

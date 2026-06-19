@@ -19,12 +19,12 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Control_Ping_FullMethodName         = "/slop.control.v1.Control/Ping"
-	Control_ListProfiles_FullMethodName = "/slop.control.v1.Control/ListProfiles"
-	Control_Launch_FullMethodName       = "/slop.control.v1.Control/Launch"
-	Control_OpenSession_FullMethodName  = "/slop.control.v1.Control/OpenSession"
-	Control_Attach_FullMethodName       = "/slop.control.v1.Control/Attach"
-	Control_CloseSession_FullMethodName = "/slop.control.v1.Control/CloseSession"
+	Control_Ping_FullMethodName         = "/safeslop.control.v1.Control/Ping"
+	Control_ListProfiles_FullMethodName = "/safeslop.control.v1.Control/ListProfiles"
+	Control_Launch_FullMethodName       = "/safeslop.control.v1.Control/Launch"
+	Control_OpenSession_FullMethodName  = "/safeslop.control.v1.Control/OpenSession"
+	Control_Attach_FullMethodName       = "/safeslop.control.v1.Control/Attach"
+	Control_CloseSession_FullMethodName = "/safeslop.control.v1.Control/CloseSession"
 )
 
 // ControlClient is the client API for Control service.
@@ -276,7 +276,7 @@ func _Control_CloseSession_Handler(srv interface{}, ctx context.Context, dec fun
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var Control_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "slop.control.v1.Control",
+	ServiceName: "safeslop.control.v1.Control",
 	HandlerType: (*ControlServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{

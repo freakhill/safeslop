@@ -17,8 +17,8 @@ import (
 // and the stage dir is wiped on exit. Hermetic — env: refs only, no live op.
 func TestRunProfileStagesSecretsAndNpmrcThenWipes(t *testing.T) {
 	ws := t.TempDir()
-	t.Setenv("SLOP_IT_SECRET", "topsecret")
-	t.Setenv("SLOP_IT_NPMTOK", "npmtok")
+	t.Setenv("SAFESLOP_IT_SECRET", "topsecret")
+	t.Setenv("SAFESLOP_IT_NPMTOK", "npmtok")
 	outFile := filepath.Join(ws, "out")
 
 	// The child fails (exit 9) if the .npmrc was not staged, otherwise records
@@ -29,9 +29,9 @@ func TestRunProfileStagesSecretsAndNpmrcThenWipes(t *testing.T) {
 		Agent:       "shell",
 		Environment: "host",
 		Network:     "deny",
-		Secrets:     map[string]string{"MY_SECRET": "env:SLOP_IT_SECRET"},
+		Secrets:     map[string]string{"MY_SECRET": "env:SAFESLOP_IT_SECRET"},
 		Credentials: &policy.Credentials{
-			Pnpm: []policy.PnpmRegistry{{Host: "registry.npmjs.org", Token: "env:SLOP_IT_NPMTOK"}},
+			Pnpm: []policy.PnpmRegistry{{Host: "registry.npmjs.org", Token: "env:SAFESLOP_IT_NPMTOK"}},
 		},
 	}
 
@@ -49,7 +49,7 @@ func TestRunProfileStagesSecretsAndNpmrcThenWipes(t *testing.T) {
 	if string(got) != "topsecret" {
 		t.Fatalf("secret not injected into child env: got %q", string(got))
 	}
-	if _, err := os.Stat(filepath.Join(ws, ".slop", "runtime", "probe")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(ws, ".safeslop", "runtime", "probe")); !os.IsNotExist(err) {
 		t.Fatalf("stage dir was not wiped on exit: err=%v", err)
 	}
 }

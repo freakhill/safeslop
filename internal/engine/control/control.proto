@@ -1,5 +1,5 @@
 syntax = "proto3";
-package slop.control.v1;
+package safeslop.control.v1;
 option go_package = "github.com/freakhill/safeslop/internal/engine/control/pb;pb";
 
 // Control is the app<->engine control plane (gRPC over a Unix-domain socket).
@@ -15,7 +15,7 @@ service Control {
 message PingRequest {}
 message PingResponse { string version = 1; }
 
-message ListProfilesRequest { string config_path = 1; } // dir holding slop.cue; empty = server cwd
+message ListProfilesRequest { string config_path = 1; } // dir holding safeslop.cue; empty = server cwd
 message Profile {
   string name = 1;
   string agent = 2;

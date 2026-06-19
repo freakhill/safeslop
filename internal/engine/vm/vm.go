@@ -17,12 +17,12 @@ const (
 	// scans *.cue/build configs, so the imageIsPinned() test is SP4's pin guard. Digest is the
 	// resolved ghcr.io/cirruslabs/macos-sonoma-base:latest as of 2026-06-17; bump deliberately.
 	sourceImage  = "ghcr.io/cirruslabs/macos-sonoma-base@sha256:41a4a6eef68363b23f9cfcd520fce5db5523aa90e10c0db70e51974bcc7f058c"
-	baseTemplate = "slop-vm-base"
+	baseTemplate = "safeslop-vm-base"
 	sshUser      = "admin"
 )
 
 // sessionName is the disposable per-profile VM name.
-func sessionName(profile string) string { return "slop-vm-" + profile }
+func sessionName(profile string) string { return "safeslop-vm-" + profile }
 
 // Available reports whether this host can run the VM boundary: the tart CLI on PATH.
 func Available() bool {
@@ -153,8 +153,8 @@ func Destroy(ctx context.Context, profile string) error {
 // Reconcile destroys a session VM orphaned by a crashed prior run.
 func Reconcile(ctx context.Context, profile string) error { return Destroy(ctx, profile) }
 
-// DestroyAll stops+deletes every disposable slop-vm-* session (never the base template).
-// Best-effort: a missing/unusable tart yields nil so `slop down` stays graceful.
+// DestroyAll stops+deletes every disposable safeslop-vm-* session (never the base template).
+// Best-effort: a missing/unusable tart yields nil so `safeslop down` stays graceful.
 func DestroyAll(ctx context.Context) error {
 	out, err := tartList(ctx)
 	if err != nil {
@@ -167,7 +167,7 @@ func DestroyAll(ctx context.Context) error {
 		return nil
 	}
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name, "slop-vm-") && e.Name != baseTemplate {
+		if strings.HasPrefix(e.Name, "safeslop-vm-") && e.Name != baseTemplate {
 			_ = runTart(ctx, "stop", e.Name)
 			_ = runTart(ctx, "delete", e.Name)
 		}

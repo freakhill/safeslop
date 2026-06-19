@@ -44,7 +44,7 @@ func TestRunProfileStagesCloudCredsThenWipes(t *testing.T) {
 	if !strings.Contains(string(got), "ya29.TOKEN") {
 		t.Fatalf("child did not get GCP token: %q", got)
 	}
-	if _, err := os.Stat(filepath.Join(ws, ".slop", "runtime", "cloud")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(ws, ".safeslop", "runtime", "cloud")); !os.IsNotExist(err) {
 		t.Fatalf("stage (with gcp token file) not wiped: %v", err)
 	}
 }
