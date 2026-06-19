@@ -1,7 +1,7 @@
-# slop — Go engine build (SP1). See specs/0003-sp1-go-engine-foundation.md.
+# safeslop — Go engine build (SP1). See specs/0003-sp1-go-engine-foundation.md.
 
-BINARY  := slop
-PKG     := ./cmd/slop
+BINARY  := safeslop
+PKG     := ./cmd/safeslop
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -X github.com/freakhill/safeslop/internal/cli.Version=$(VERSION)
 GOFILES := cmd internal

@@ -49,7 +49,7 @@ func Execute() {
 
 func newRoot() *cobra.Command {
 	root := &cobra.Command{
-		Use:           "slop",
+		Use:           "safeslop",
 		Short:         "Launch coding agents under isolation, driven by slop.cue",
 		Version:       Version,
 		SilenceUsage:  true,
