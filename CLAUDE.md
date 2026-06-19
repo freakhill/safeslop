@@ -22,11 +22,11 @@ with `README.md`. Read it before adding a new script or changing one.
 ## Stack at a glance
 
 This repo is mid-migration (strangler) from a fish + Python(uv) toolkit to a
-single signed **Go binary** (`slop`). Both stacks are live; new engine work goes
+single signed **Go binary** (`safeslop`). Both stacks are live; new engine work goes
 into Go (see `specs/0001`). The fish/Python notes below still govern the existing
 `scripts/` stack until each piece is ported.
 
-- **Go** is the engine + CLI: `cmd/slop` (thin cobra entry) over
+- **Go** is the engine + CLI: `cmd/safeslop` (thin cobra entry) over
   `internal/engine/*` — `policy` (embedded CUE via `cuelang.org/go`, **no external
   `cue`**), `exec` (ctty/PTY launch), `sandbox` (sandbox-exec boundary), plus
   `secrets`/`creds` as they land. Build with `make build`; gate with `make check`.
@@ -56,7 +56,7 @@ For the Go engine, also run:
 
 ```bash
 make check          # go vet + gofmt + go test ./...  (CI: .github/workflows/go.yml, macOS)
-make build          # static CGO_ENABLED=0 binary -> ./slop
+make build          # static CGO_ENABLED=0 binary -> ./safeslop
 ```
 
 CI runs all four fish gates plus the Go workflow. The Textual launcher has two

@@ -31,8 +31,8 @@ dependencies are pinned and reproducible across machines.
 
 ## Go engine
 
-The repo is migrating to a single signed Go binary (`slop`). Engine + CLI live
-in `cmd/slop` and `internal/engine/*`; the policy schema is embedded via
+The repo is migrating to a single signed Go binary (`safeslop`). Engine + CLI live
+in `cmd/safeslop` and `internal/engine/*`; the policy schema is embedded via
 `go:embed` (no external `cue`). See `specs/0001` for the design.
 
 - Format with `gofmt`; keep `go vet ./...` clean.
