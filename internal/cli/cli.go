@@ -477,7 +477,71 @@ func cmdInstall() *cobra.Command {
 			return nil
 		},
 	})
+	c.AddCommand(func() *cobra.Command {
+		var dryRun bool
+		ac := &cobra.Command{
+			Use:   "apply",
+			Short: "Download, verify (fail-closed), and install the pinned toolchains + runtimes",
+			Args:  cobra.NoArgs,
+			RunE: func(cmd *cobra.Command, _ []string) error {
+				res, err := installPlanResult(Version)
+				if err != nil {
+					return err
+				}
+				if dryRun {
+					if jsonOut {
+						out, _ := renderInstallApplyDryRunJSON(Version)
+						fmt.Println(out)
+						return nil
+					}
+					fmt.Printf("%d change(s) would be applied\n", res.Pending())
+					for _, a := range res.Actions {
+						if a.Kind != install.ActionOK {
+							fmt.Printf("  %-10s %-8s -> %s\n", a.Name, a.Kind, a.Desired)
+						}
+					}
+					return nil
+				}
+				dirs, err := install.DefaultDirs()
+				if err != nil {
+					return err
+				}
+				emit := func(e install.Event) {
+					if jsonOut {
+						emitJSON(map[string]any{"kind": e.Kind, "tool": e.Tool, "msg": e.Msg})
+					} else {
+						fmt.Printf("  [%s] %s %s\n", e.Tool, e.Kind, e.Msg)
+					}
+				}
+				if err := install.Apply(cmd.Context(), res, dirs, install.HTTPFetcher{}, emit); err != nil {
+					return err
+				}
+				warnIfNotOnPath(dirs.BinDir)
+				return nil
+			},
+		}
+		ac.Flags().BoolVar(&dryRun, "dry-run", false, "show what would be installed without doing it")
+		return ac
+	}())
 	return c
+}
+
+func renderInstallApplyDryRunJSON(version string) (string, error) {
+	res, err := installPlanResult(version)
+	if err != nil {
+		return "", err
+	}
+	b, _ := json.MarshalIndent(map[string]any{"dry_run": true, "actions": res.Actions}, "", "  ")
+	return string(b), nil
+}
+
+func warnIfNotOnPath(binDir string) {
+	for _, p := range filepath.SplitList(os.Getenv("PATH")) {
+		if p == binDir {
+			return
+		}
+	}
+	fmt.Fprintf(os.Stderr, "note: %s is not on your $PATH — add it so installed tools resolve\n", binDir)
 }
 
 func renderInstallStatusJSON(version string) string {

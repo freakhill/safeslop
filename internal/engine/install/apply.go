@@ -6,13 +6,49 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 )
 
-// Fetcher fetches an artifact URL. The CLI/server use HTTP; tests use a fake.
+// Fetcher fetches an artifact URL. The CLI/server use HTTPFetcher; tests use a fake.
 type Fetcher interface {
 	Fetch(ctx context.Context, url string) (io.ReadCloser, error)
+}
+
+// HTTPFetcher fetches over HTTPS with the default client, which on darwin consults the system
+// trust store — so a corporate WARP CA installed in the keychain is honored (toolchain cert-env
+// wiring for the tools we install is a separate slice; specs/0012 §10.3).
+type HTTPFetcher struct{}
+
+func (HTTPFetcher) Fetch(ctx context.Context, url string) (io.ReadCloser, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return nil, fmt.Errorf("GET %s: HTTP %d", url, resp.StatusCode)
+	}
+	return resp.Body, nil
+}
+
+// DefaultDirs are the standard install targets: ~/.local/bin for executables, ~/Applications for
+// .app bundles, and the OS temp dir for scratch.
+func DefaultDirs() (Dirs, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return Dirs{}, err
+	}
+	return Dirs{
+		BinDir: filepath.Join(home, ".local", "bin"),
+		AppDir: filepath.Join(home, "Applications"),
+		TmpDir: os.TempDir(),
+	}, nil
 }
 
 // Dirs are the install targets. BinDir gets executables (~/.local/bin); AppDir gets .app bundles
