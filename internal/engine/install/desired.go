@@ -8,6 +8,13 @@ package install
 //
 // Checksums are read from each release's official checksum file (mise SHASUMS256.txt,
 // tart_<ver>_checksums.txt). Bump version+sha256+url together when pinning a newer release.
+//
+// Upstream-signature pinning (Pin.Sig, specs/0012 §10.2) is built and tested (VerifyMinisign +
+// the Apply sig-chain tests) but NOT yet activated for these tools: mise publishes
+// SHASUMS256.txt.minisig but does not publish an authoritative minisign *public key* (its own
+// installer leaves "verify with minisign or gpg" as a TODO), and tart's releases ship only a
+// plain checksums file. Both therefore rely on the embedded-sha256 → notarized-binary trust chain
+// (still fail-closed). Add a Sig here as a one-line data edit once an authoritative pubkey exists.
 func DesiredState() []Pin {
 	return []Pin{
 		{

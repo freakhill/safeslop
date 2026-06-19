@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"aead.dev/minisign"
 )
 
 // tgz builds an in-memory .tar.gz from name->content entries (mode 0755).
@@ -104,6 +106,53 @@ func TestApplyInstallsAppTarball(t *testing.T) {
 	link := filepath.Join(dirs.BinDir, "tart")
 	if target, err := os.Readlink(link); err != nil || filepath.Base(target) != "tart" {
 		t.Fatalf("expected %s -> .../MacOS/tart symlink, got %q err=%v", link, target, err)
+	}
+}
+
+// sigFixture builds a fixture artifact plus a minisign-signed SHASUMS file covering it, and a
+// fakeFetcher wired for all three URLs. badSHA replaces the artifact's sha in the sums (so the
+// signature is valid but the artifact isn't covered → fail closed).
+func sigFixture(t *testing.T, badSHA bool) (Action, fakeFetcher, []byte) {
+	t.Helper()
+	pub, priv, err := minisign.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	art := tgz(t, map[string]string{"mise/bin/mise": "#!/bin/sh\necho mise\n"})
+	sumSHA := sha(art)
+	if badSHA {
+		sumSHA = "deadbeef00000000000000000000000000000000000000000000000000000000"
+	}
+	sums := []byte(sumSHA + "  ./mise.tar.gz\n")
+	sig := minisign.Sign(priv, sums)
+	const artURL, sumsURL, sigURL = "https://x/mise.tgz", "https://x/sums", "https://x/sig"
+	a := Action{
+		Name: "mise", Kind: ActionInstall, Desired: "2026.6.11", Format: FormatBinaryTarball,
+		SHA256: sha(art), URL: artURL,
+		Sig: &Sig{Scheme: "minisign", PubKey: pub.String(), SumsURL: sumsURL, SigURL: sigURL, Artifact: "./mise.tar.gz"},
+	}
+	return a, fakeFetcher{artURL: art, sumsURL: sums, sigURL: sig}, art
+}
+
+func TestApplyWithValidSigInstalls(t *testing.T) {
+	a, ff, _ := sigFixture(t, false)
+	dirs := Dirs{BinDir: t.TempDir(), AppDir: t.TempDir(), TmpDir: t.TempDir()}
+	if err := Apply(context.Background(), Result{Actions: []Action{a}}, dirs, ff, nil); err != nil {
+		t.Fatalf("valid sig chain should install: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dirs.BinDir, "mise")); err != nil {
+		t.Fatalf("mise should be installed after a verified sig: %v", err)
+	}
+}
+
+func TestApplyFailsClosedOnBadSig(t *testing.T) {
+	a, ff, _ := sigFixture(t, true) // artifact sha absent from the signed sums
+	dirs := Dirs{BinDir: t.TempDir(), AppDir: t.TempDir(), TmpDir: t.TempDir()}
+	if err := Apply(context.Background(), Result{Actions: []Action{a}}, dirs, ff, nil); err == nil {
+		t.Fatal("Apply must fail closed when the artifact isn't covered by the signed checksum file")
+	}
+	if _, err := os.Stat(filepath.Join(dirs.BinDir, "mise")); err == nil {
+		t.Fatal("nothing must be installed when sig verification fails")
 	}
 }
 
