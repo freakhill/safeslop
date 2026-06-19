@@ -408,6 +408,14 @@ func resolveSession(profile, configPath string) (control.SessionSpec, error) {
 	if err != nil {
 		return control.SessionSpec{}, err
 	}
+	// Fail-closed policy trust gate, identical to the CLI `run` path (specs/0022). The cockpit's
+	// in-process OpenSession data plane was the one launch chokepoint not gated, so a same-uid
+	// in-sandbox peer could rewrite safeslop.cue and OpenSession its way to environment:"host"
+	// (specs/0024 S1a). The GUI surfaces approval via `safeslop trust` (a wizard screen is a
+	// follow-on); allowTrust stays false here (the engine never auto-approves on the agent's behalf).
+	if err := enforceTrust(path, false); err != nil {
+		return control.SessionSpec{}, err
+	}
 	cfg, err := policy.Load(path)
 	if err != nil {
 		return control.SessionSpec{}, err
