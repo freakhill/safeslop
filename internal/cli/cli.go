@@ -21,6 +21,7 @@ import (
 	"github.com/freakhill/safeslop/internal/engine/control/pb"
 	"github.com/freakhill/safeslop/internal/engine/creds"
 	engexec "github.com/freakhill/safeslop/internal/engine/exec"
+	"github.com/freakhill/safeslop/internal/engine/install"
 	"github.com/freakhill/safeslop/internal/engine/launch"
 	"github.com/freakhill/safeslop/internal/engine/policy"
 	"github.com/freakhill/safeslop/internal/engine/sandbox"
@@ -56,7 +57,7 @@ func newRoot() *cobra.Command {
 		SilenceErrors: true,
 	}
 	root.PersistentFlags().BoolVar(&jsonOut, "json", false, "emit machine-readable JSON output")
-	root.AddCommand(cmdValidate(), cmdList(), cmdDoctor(), cmdRun(), cmdDown(), cmdServe(), cmdLaunch())
+	root.AddCommand(cmdValidate(), cmdList(), cmdDoctor(), cmdRun(), cmdDown(), cmdServe(), cmdLaunch(), cmdInstall())
 	return root
 }
 
@@ -413,6 +414,59 @@ func chainClose(fns ...func()) func() {
 				f()
 			}
 		}
+	}
+}
+
+func cmdInstall() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "install",
+		Short: "Inventory and (later) provision the safeslop toolchain",
+	}
+	c.AddCommand(&cobra.Command{
+		Use:   "status",
+		Short: "Report whether safeslop, its app, toolchains, and runtimes are installed",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if jsonOut {
+				fmt.Println(renderInstallStatusJSON(Version))
+				return nil
+			}
+			st := install.Status(context.Background(), Version)
+			fmt.Printf("safeslop %s  (on PATH: %v)\n", st.Self.Version, st.Self.OnPath)
+			if st.Self.Path != "" {
+				fmt.Printf("  binary: %s\n", st.Self.Path)
+			}
+			app := "not installed"
+			if st.App.Present {
+				app = st.App.Path
+			}
+			fmt.Printf("  app:    %s\n", app)
+			printTools("toolchains", st.Toolchains)
+			printTools("runtimes", st.Runtimes)
+			return nil
+		},
+	})
+	return c
+}
+
+func renderInstallStatusJSON(version string) string {
+	st := install.Status(context.Background(), version)
+	b, _ := json.MarshalIndent(st, "", "  ")
+	return string(b)
+}
+
+func printTools(label string, tools []install.Tool) {
+	fmt.Printf("  %s:\n", label)
+	for _, t := range tools {
+		mark := "no"
+		if t.Present {
+			mark = "yes"
+		}
+		v := t.Version
+		if v == "" {
+			v = "-"
+		}
+		fmt.Printf("    %-10s %-4s %s\n", t.Name, mark, v)
 	}
 }
 
