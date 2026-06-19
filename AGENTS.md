@@ -18,7 +18,7 @@ Before making changes, agents must read:
 - Preserve explicit host file-sharing boundaries for VM/container workflows.
 - Use comment best practices (why-focused, concise, linked to official references where needed).
 - All Python work goes through `uv` for isolation and repeatability. Helpers live in `scripts/_py/*.py` with PEP-723 inline metadata; fish wrappers invoke them as `uv run --script <file> <subcommand> ...`. Never reintroduce bare `python3 -c '...'` calls or `python3` as a `__require_tools` dependency.
-- The repo is migrating (strangler) to a single Go binary `slop` (`cmd/slop` + `internal/engine/*`); new engine work goes in Go. Go code must pass `gofmt`, `go vet ./...`, and `go test ./...` (CI: `.github/workflows/go.yml`). Keep engine tests hermetic — no live network/credential APIs. The fish/Python rules above still apply to the existing `scripts/` stack. See `specs/0001` for the design.
+- The repo is migrating (strangler) to a single Go binary `safeslop` (`cmd/safeslop` + `internal/engine/*`); new engine work goes in Go. Go code must pass `gofmt`, `go vet ./...`, and `go test ./...` (CI: `.github/workflows/go.yml`). Keep engine tests hermetic — no live network/credential APIs. The fish/Python rules above still apply to the existing `scripts/` stack. See `specs/0001` for the design.
 
 ## Skills, Docs, and Tests Must Stay In Sync
 
