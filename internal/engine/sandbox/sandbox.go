@@ -68,6 +68,18 @@ func Profile(workspace, network string) string {
 	line(`(allow file-read* (literal "/private/var/run/resolv.conf"))`)
 	line(`(allow file-read* (literal "/private/var/run/utmpx"))`)
 
+	// Interactive job control: a shell/agent on a PTY must issue tty ioctls on its
+	// controlling terminal — tcsetpgrp (TIOCSPGRP) to claim the foreground process
+	// group, plus window-size ioctls (TIOCGWINSZ/TIOCSWINSZ). Seatbelt treats these
+	// as `file-ioctl`, which is NOT implied by file-read* on /dev — so without this
+	// rule a sandboxed zsh prints "can't set tty pgrp: operation not permitted",
+	// becomes a background process group, and its commands suspend on SIGTTIN/SIGTTOU
+	// (the cockpit "shell opens but runs nothing" bug). Scoped to the BSD pty slaves
+	// (/dev/ttysNNN). Seatbelt can't filter by ioctl request code, so the residual
+	// TIOCSTI surface stays within this tier's honest threat model (mistake-guard:
+	// guards agent mistakes + accidental exfil, not a malicious-code escape).
+	line(`(allow file-ioctl (regex #"^/dev/ttys"))`)
+
 	ws := escape(workspace)
 	line(fmt.Sprintf(`(allow file-read* (subpath "%s"))`, ws))
 	line(fmt.Sprintf(`(allow file-write* (subpath "%s"))`, ws))
