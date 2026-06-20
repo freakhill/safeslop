@@ -67,6 +67,17 @@ final class CockpitSession {
     }
 
     private func run(cols: UInt32, rows: UInt32) async {
+        // Privilege boundary (specs/research/2026-06-20-cockpit-safe-by-design.md): launching the
+        // host tier (no isolation — the agent runs as you) requires proof-of-intent. Sandbox/
+        // container/vm launches are NOT gated, so biometrics stay a rare, meaningful signal.
+        if profile.environment == "host" {
+            let ok = await BiometricGate.confirm(
+                reason: "launch “\(profile.name)” on the host — it runs with no isolation, as you.")
+            if !ok {
+                await MainActor.run { self.state = .error("authentication required to launch the host tier") }
+                return
+            }
+        }
         do {
             let transport = try EngineConnection.makeTransport()
             try await withGRPCClient(transport: transport) { client in
@@ -128,11 +139,22 @@ final class CockpitSession {
     /// trust sheet after the user reviews the profile's capabilities (the safe-by-design trust flow,
     /// specs/research/2026-06-20-cockpit-safe-by-design.md). The engine's peer-auth (uid +
     /// process-tree) already gates who may approve.
-    func approveTrustAndRetry(cols: UInt32 = 80, rows: UInt32 = 24) {
-        state = .opening
+    /// requireAuth gates the approval behind biometrics — used when the policy *changed* since it was
+    /// trusted (an agent may have edited it), the design's "approve an edited policy" boundary. A
+    /// first-time (never-seen) policy is approved without biometrics; the user is already reviewing it.
+    func approveTrustAndRetry(requireAuth: Bool = false, cols: UInt32 = 80, rows: UInt32 = 24) {
         task?.cancel()
         task = nil
         Task {
+            if requireAuth {
+                let ok = await BiometricGate.confirm(
+                    reason: "re-approve the edited safeslop.cue for “\(profile.name)”.")
+                if !ok {
+                    await MainActor.run { self.state = .needsTrust("authentication required to re-approve an edited policy") }
+                    return
+                }
+            }
+            await MainActor.run { self.state = .opening }
             do {
                 _ = try await EngineConnection.trust(configPath: configPath)
             } catch {
