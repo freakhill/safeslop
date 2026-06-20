@@ -124,7 +124,8 @@ func Catalog() []Tool {
 		// Agents
 		{Name: "Claude Code", Category: CatAgents, Detect: []string{"claude"},
 			Script: "curl -fsSL https://claude.ai/install.sh | bash", Note: "the Claude Code agent"},
-		{Name: "Codex", Category: CatAgents, Detect: []string{"codex"}, Brew: "codex", Note: "the Codex agent"},
+		{Name: "Codex", Category: CatAgents, Detect: []string{"codex"},
+			Script: "npm install -g @openai/codex", Note: "the OpenAI Codex agent (needs npm)"},
 		{Name: "opencode", Category: CatAgents, Detect: []string{"opencode"}, Brew: "sst/tap/opencode",
 			Note: "the opencode agent"},
 	}
