@@ -14,25 +14,26 @@ struct ProfileRef: Codable, Hashable, Identifiable {
     var riskHeadline: String // arbiter one-liner consequence (policy.RiskSummary)
     var riskLevel: String    // "high" | "elevated" | "contained" — color only
     var riskLines: [String]  // break-glass consequence sentences
+    var techStack: [String]  // underlying technologies (policy.TechStack) — Launch hover tooltip
     var id: String { name }
 
     init(name: String, agent: String, environment: String, network: String,
          tier: String = "", tierNote: String = "", trustStatus: String = "untrusted", configDir: String = "",
-         riskHeadline: String = "", riskLevel: String = "contained", riskLines: [String] = []) {
+         riskHeadline: String = "", riskLevel: String = "contained", riskLines: [String] = [], techStack: [String] = []) {
         self.name = name; self.agent = agent; self.environment = environment; self.network = network
         self.tier = tier; self.tierNote = tierNote; self.trustStatus = trustStatus; self.configDir = configDir
-        self.riskHeadline = riskHeadline; self.riskLevel = riskLevel; self.riskLines = riskLines
+        self.riskHeadline = riskHeadline; self.riskLevel = riskLevel; self.riskLines = riskLines; self.techStack = techStack
     }
     init(_ p: Safeslop_Control_V1_Profile) {
         self.init(name: p.name, agent: p.agent, environment: p.environment, network: p.network,
                   tier: p.tier, tierNote: p.tierNote, trustStatus: p.trustStatus, configDir: p.configDir,
-                  riskHeadline: p.riskHeadline, riskLevel: p.riskLevel, riskLines: p.riskLines)
+                  riskHeadline: p.riskHeadline, riskLevel: p.riskLevel, riskLines: p.riskLines, techStack: p.techStack)
     }
     var proto: Safeslop_Control_V1_Profile {
         .with {
             $0.name = name; $0.agent = agent; $0.environment = environment; $0.network = network
             $0.tier = tier; $0.tierNote = tierNote; $0.trustStatus = trustStatus; $0.configDir = configDir
-            $0.riskHeadline = riskHeadline; $0.riskLevel = riskLevel; $0.riskLines = riskLines
+            $0.riskHeadline = riskHeadline; $0.riskLevel = riskLevel; $0.riskLines = riskLines; $0.techStack = techStack
         }
     }
 

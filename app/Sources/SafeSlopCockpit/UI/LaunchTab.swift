@@ -63,6 +63,8 @@ struct LaunchTab: View {
         }
         .buttonStyle(.plain)
         .disabled(missing)
+        // hover shows the underlying technologies powering this profile (policy.TechStack).
+        .help(ref.techStack.isEmpty ? ref.tierNote : ref.techStack.joined(separator: "\n"))
     }
 
     private func badge(_ text: String, _ color: Color) -> some View {

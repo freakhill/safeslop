@@ -220,6 +220,7 @@ func (s *server) ValidatePolicy(_ context.Context, req *pb.ValidatePolicyRequest
 			Name: n, Agent: prof.Agent, Environment: env, Network: prof.Network,
 			Tier: tier, TierNote: note,
 			RiskHeadline: risk.Headline, RiskLevel: risk.Level, RiskLines: risk.Lines,
+			TechStack: policy.TechStack(prof),
 		})
 	}
 	return resp, nil

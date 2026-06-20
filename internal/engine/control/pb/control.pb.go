@@ -308,6 +308,7 @@ type Profile struct {
 	RiskHeadline  string                 `protobuf:"bytes,9,opt,name=risk_headline,json=riskHeadline,proto3" json:"risk_headline,omitempty"` // arbiter one-liner consequence (policy.RiskSummary)
 	RiskLevel     string                 `protobuf:"bytes,10,opt,name=risk_level,json=riskLevel,proto3" json:"risk_level,omitempty"`         // "high" | "elevated" | "contained" — for color only
 	RiskLines     []string               `protobuf:"bytes,11,rep,name=risk_lines,json=riskLines,proto3" json:"risk_lines,omitempty"`         // break-glass consequence sentences
+	TechStack     []string               `protobuf:"bytes,12,rep,name=tech_stack,json=techStack,proto3" json:"tech_stack,omitempty"`         // underlying technologies (policy.TechStack) — Launch hover tooltip
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -415,6 +416,13 @@ func (x *Profile) GetRiskLevel() string {
 func (x *Profile) GetRiskLines() []string {
 	if x != nil {
 		return x.RiskLines
+	}
+	return nil
+}
+
+func (x *Profile) GetTechStack() []string {
+	if x != nil {
+		return x.TechStack
 	}
 	return nil
 }
@@ -1781,7 +1789,7 @@ const file_internal_engine_control_control_proto_rawDesc = "" +
 	"\aversion\x18\x01 \x01(\tR\aversion\"6\n" +
 	"\x13ListProfilesRequest\x12\x1f\n" +
 	"\vconfig_path\x18\x01 \x01(\tR\n" +
-	"configPath\"\xc5\x02\n" +
+	"configPath\"\xe4\x02\n" +
 	"\aProfile\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05agent\x18\x02 \x01(\tR\x05agent\x12 \n" +
@@ -1797,7 +1805,9 @@ const file_internal_engine_control_control_proto_rawDesc = "" +
 	"risk_level\x18\n" +
 	" \x01(\tR\triskLevel\x12\x1d\n" +
 	"\n" +
-	"risk_lines\x18\v \x03(\tR\triskLines\"P\n" +
+	"risk_lines\x18\v \x03(\tR\triskLines\x12\x1d\n" +
+	"\n" +
+	"tech_stack\x18\f \x03(\tR\ttechStack\"P\n" +
 	"\x14ListProfilesResponse\x128\n" +
 	"\bprofiles\x18\x01 \x03(\v2\x1c.safeslop.control.v1.ProfileR\bprofiles\"J\n" +
 	"\rLaunchRequest\x12\x18\n" +

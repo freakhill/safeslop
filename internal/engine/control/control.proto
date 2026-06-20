@@ -34,6 +34,7 @@ message Profile {
   string risk_headline = 9; // arbiter one-liner consequence (policy.RiskSummary)
   string risk_level = 10;   // "high" | "elevated" | "contained" — for color only
   repeated string risk_lines = 11; // break-glass consequence sentences
+  repeated string tech_stack = 12; // underlying technologies (policy.TechStack) — Launch hover tooltip
 }
 message ListProfilesResponse { repeated Profile profiles = 1; }
 

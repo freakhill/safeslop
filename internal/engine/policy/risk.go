@@ -45,6 +45,101 @@ func RiskSummary(p Profile) Risk {
 	return Risk{Headline: headline(env, p.Network), Lines: lines, Level: level(env, p.Network)}
 }
 
+// TechStack lists the underlying technologies a profile uses — the stack behind the tier label —
+// for the Launch tab's hover tooltip: which agent, which isolation mechanism (Seatbelt / Docker+squid
+// / Tart), the network mechanism, plus any toolchain + credential providers.
+func TechStack(p Profile) []string {
+	s := []string{
+		"Agent: " + agentLabel(p.Agent),
+		"Isolation: " + isolationTech(p.Environment),
+		"Network: " + networkTech(p.Environment, p.Network),
+	}
+	if p.Toolchain != nil && p.Toolchain.Kind != "" {
+		s = append(s, "Toolchain: "+p.Toolchain.Kind)
+	}
+	if cl := credLines(p.Credentials); len(cl) > 0 {
+		s = append(s, "Credentials: "+strings.Join(cl, ", "))
+	}
+	if len(p.Secrets) > 0 {
+		s = append(s, "Secrets channel: "+secretProviders(p.Secrets))
+	}
+	return s
+}
+
+func agentLabel(a string) string {
+	switch a {
+	case "claude":
+		return "Claude Code"
+	case "codex":
+		return "Codex"
+	case "opencode":
+		return "opencode"
+	case "", "shell":
+		return "shell"
+	default:
+		return a
+	}
+}
+
+func isolationTech(env string) string {
+	switch env {
+	case "host":
+		return "none — runs directly on macOS"
+	case "container":
+		return "Docker container + squid egress proxy"
+	case "vm":
+		return "Tart virtual machine"
+	default:
+		return "macOS Seatbelt (sandbox-exec)"
+	}
+}
+
+func networkTech(env, network string) string {
+	switch env {
+	case "host":
+		return "host network (unrestricted)"
+	case "container":
+		if network == "allow" {
+			return "open egress (bridge)"
+		}
+		return "squid egress allowlist"
+	case "vm":
+		if network == "allow" {
+			return "full VM network"
+		}
+		return "proxy egress"
+	default:
+		if network == "allow" {
+			return "Seatbelt: network allowed"
+		}
+		return "Seatbelt: network denied"
+	}
+}
+
+// secretProviders summarizes the secret backends in use (1Password op:// vs shell env:) without
+// revealing any value.
+func secretProviders(secrets map[string]string) string {
+	op, env := false, false
+	for _, ref := range secrets {
+		switch {
+		case strings.HasPrefix(ref, "op://"):
+			op = true
+		case strings.HasPrefix(ref, "env:"):
+			env = true
+		}
+	}
+	switch {
+	case op && env:
+		return "1Password + shell env"
+	case op:
+		return "1Password (op://)"
+	case env:
+		return "shell env"
+	default:
+		return "configured"
+	}
+}
+
 func networkReach(env, network string) string {
 	switch env {
 	case "host":

@@ -67,3 +67,22 @@ func TestRiskSummarySandboxDenyIsContainedOffline(t *testing.T) {
 		t.Errorf("sandbox deny should read offline:\n%v", r.Lines)
 	}
 }
+
+func TestTechStackListsUnderlyingTech(t *testing.T) {
+	s := TechStack(Profile{Agent: "claude", Environment: "container", Network: "deny",
+		Secrets: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "op://x/y/z"}})
+	j := strings.Join(s, "\n")
+	for _, want := range []string{"Claude Code", "Docker container + squid", "squid egress allowlist", "1Password"} {
+		if !strings.Contains(j, want) {
+			t.Errorf("tech stack missing %q:\n%s", want, j)
+		}
+	}
+	// the provider label "1Password (op://)" is fine; the actual ref/value must NOT appear.
+	if strings.Contains(j, "x/y/z") || strings.Contains(j, "CLAUDE_CODE_OAUTH_TOKEN") {
+		t.Errorf("secret ref/name leaked into tech stack:\n%s", j)
+	}
+	// sandbox uses Seatbelt
+	if !strings.Contains(strings.Join(TechStack(Profile{Agent: "shell", Environment: "sandbox"}), " "), "Seatbelt") {
+		t.Error("sandbox tech stack must mention Seatbelt")
+	}
+}
