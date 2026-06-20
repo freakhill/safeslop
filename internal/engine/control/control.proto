@@ -27,6 +27,7 @@ message Profile {
   string tier = 5;          // honest isolation tier from policy.EnvTier (e.g. "mistake-guard")
   string tier_note = 6;     // the one-line honest caveat from policy.EnvTier
   string trust_status = 7;  // per-policy trust gate state: "trusted" | "untrusted" | "changed"
+  string config_dir = 8;    // abs dir holding this safeslop.cue (the cockpit runs `safeslop run` here)
 }
 message ListProfilesResponse { repeated Profile profiles = 1; }
 

@@ -3,11 +3,15 @@ package sandbox
 import (
 	"context"
 	"os"
+	osexec "os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
+	"github.com/creack/pty"
 	"github.com/freakhill/safeslop/internal/engine/exec"
 )
 
@@ -19,6 +23,7 @@ func TestProfileContainsExpectedDirectives(t *testing.T) {
 		`(allow file-read* (subpath "/Users/x/repo"))`,
 		`(allow file-write* (subpath "/Users/x/repo"))`,
 		`(allow file-write* (subpath "/private/tmp"))`,
+		`(allow file-ioctl (regex #"^/dev/ttys"))`,
 		"(deny network*)",
 	} {
 		if !strings.Contains(p, want) {
@@ -104,6 +109,58 @@ func TestLaunchAllowsWorkspaceWriteOnDarwin(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(ws, "probe")); err != nil {
 		t.Fatalf("expected probe file written inside workspace: %v", err)
+	}
+}
+
+// TestLaunchAllowsTtyJobControlOnDarwin is the regression guard for the cockpit
+// "sandboxed shell opens but runs nothing" bug. An interactive shell on a PTY must
+// be able to ioctl its controlling terminal — tcsetpgrp (TIOCSPGRP) to claim the
+// foreground, and window-size ioctls. Seatbelt gates these as `file-ioctl`, which
+// is NOT implied by file-read* on /dev; without the rule the ioctl returns EPERM,
+// zsh prints "can't set tty pgrp", and commands suspend on SIGTTIN/SIGTTOU. We
+// exercise it with `stty size`, a TIOCGWINSZ ioctl on the tty: denied -> stty errors
+// and exits non-zero; allowed -> it prints "rows cols".
+func TestLaunchAllowsTtyJobControlOnDarwin(t *testing.T) {
+	if !Available() {
+		t.Skip("sandbox-exec unavailable (not macOS)")
+	}
+	ptmx, tty, err := pty.Open()
+	if err != nil {
+		t.Fatalf("pty.Open: %v", err)
+	}
+	defer func() { _ = ptmx.Close() }()
+
+	argv, cleanup, err := WrapArgv([]string{"/bin/stty", "size"}, t.TempDir(), "deny")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cmd := osexec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = tty, tty, tty
+	// Make the child a session leader owning the tty, so its stty ioctls the slave.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true}
+	if err := cmd.Start(); err != nil {
+		_ = tty.Close()
+		t.Fatalf("start stty under sandbox: %v", err)
+	}
+	_ = tty.Close() // the child holds the slave now
+
+	got := make(chan string, 1)
+	go func() {
+		buf := make([]byte, 256)
+		n, _ := ptmx.Read(buf)
+		got <- string(buf[:n])
+	}()
+	werr := cmd.Wait()
+	out := <-got
+	if werr != nil {
+		t.Fatalf("stty under sandbox failed — tty ioctl likely denied (file-ioctl rule missing?): err=%v out=%q", werr, out)
+	}
+	if !regexp.MustCompile(`\d+\s+\d+`).MatchString(out) {
+		t.Fatalf("stty size produced no numeric size — tty ioctl likely denied: %q", out)
 	}
 }
 

@@ -294,11 +294,22 @@ func cmdRun() *cobra.Command {
 // enforceTrust gates `run` on a host-recorded approval of the policy's exact bytes. With allowTrust
 // it records approval and proceeds; otherwise an untrusted or changed policy is a fail-closed error.
 // The store is host-side (~/.config/safeslop/trust.json), outside the agent-writable workspace.
-func enforceTrust(policyPath string, allowTrust bool) error {
-	abs, err := filepath.Abs(policyPath)
+// canonicalPolicyPath resolves a policy path to an absolute, symlink-free key so the trust gate
+// can't be fooled by /tmp vs /private/tmp (or any symlinked dir): the GUI approves a path the engine
+// reaches one way and `safeslop run` reaches the same file another way. Both must hash to one key.
+func canonicalPolicyPath(p string) string {
+	abs, err := filepath.Abs(p)
 	if err != nil {
-		return err
+		return p
 	}
+	if real, err := filepath.EvalSymlinks(abs); err == nil {
+		return real
+	}
+	return abs
+}
+
+func enforceTrust(policyPath string, allowTrust bool) error {
+	abs := canonicalPolicyPath(policyPath)
 	policyBytes, err := os.ReadFile(abs)
 	if err != nil {
 		return err
@@ -355,16 +366,16 @@ func cockpitListProfiles(configPath string) ([]*pb.Profile, error) {
 	// Per-policy trust state, surfaced so the launcher can badge it BEFORE launch (anti-ambush:
 	// the user sees "untrusted/changed" up front, not as a surprise prompt on click). Trust is
 	// per-file, so every profile in this safeslop.cue shares the status.
+	canon := canonicalPolicyPath(path) // symlink-free, so it matches what `safeslop run` keys on
 	trustStatus := trust.Untrusted.String()
-	if abs, aerr := filepath.Abs(path); aerr == nil {
-		if data, rerr := os.ReadFile(abs); rerr == nil {
-			if sp, perr := trust.DefaultPath(); perr == nil {
-				if store, lerr := trust.Load(sp); lerr == nil {
-					trustStatus = store.Check(abs, data).String()
-				}
+	if data, rerr := os.ReadFile(canon); rerr == nil {
+		if sp, perr := trust.DefaultPath(); perr == nil {
+			if store, lerr := trust.Load(sp); lerr == nil {
+				trustStatus = store.Check(canon, data).String()
 			}
 		}
 	}
+	configDir := filepath.Dir(canon)
 	out := make([]*pb.Profile, 0, len(cfg.Profiles))
 	for name, prof := range cfg.Profiles {
 		env := prof.Environment
@@ -380,6 +391,7 @@ func cockpitListProfiles(configPath string) ([]*pb.Profile, error) {
 			Tier:        tier,
 			TierNote:    note,
 			TrustStatus: trustStatus,
+			ConfigDir:   configDir,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
@@ -957,6 +969,10 @@ func arg0(args []string) string {
 // walking up from the current directory.
 func findConfig(explicit string) (string, error) {
 	if explicit != "" {
+		// A directory => the safeslop.cue inside it (the cockpit passes a config dir).
+		if fi, err := os.Stat(explicit); err == nil && fi.IsDir() {
+			return filepath.Join(explicit, "safeslop.cue"), nil
+		}
 		return explicit, nil
 	}
 	dir, err := os.Getwd()
