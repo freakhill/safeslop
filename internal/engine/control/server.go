@@ -2,12 +2,14 @@ package control
 
 import (
 	"context"
+	"strings"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/freakhill/safeslop/internal/engine/control/pb"
 	"github.com/freakhill/safeslop/internal/engine/install"
+	"github.com/freakhill/safeslop/internal/engine/tools"
 )
 
 // server implements pb.ControlServer. Launch delegation is wired in Serve via launchFn;
@@ -153,6 +155,41 @@ func (s *server) InstallApply(_ *pb.InstallApplyRequest, stream pb.Control_Insta
 		return nil
 	}
 	return s.installApplyFn(emit)
+}
+
+// ListTools returns the Installs-tab catalog with read-only detection (internal/engine/tools). A
+// present tool is never installable, so the GUI can't ask safeslop to clobber an existing install.
+// The peer is uid/process-tree-checked at Accept, so a sandboxed agent can't enumerate the host here.
+func (s *server) ListTools(_ context.Context, _ *pb.ListToolsRequest) (*pb.ListToolsResponse, error) {
+	out := &pb.ListToolsResponse{}
+	for _, st := range tools.DetectAll() {
+		ts := &pb.ToolStatus{
+			Name: st.Tool.Name, Category: st.Tool.Category, Note: st.Tool.Note,
+			Present: st.Present, Source: st.Source, Path: st.Path, Installable: st.Installable(),
+		}
+		if ts.Installable {
+			if argv, err := tools.InstallArgv(st); err == nil {
+				ts.InstallHint = strings.Join(argv, " ")
+			}
+		}
+		out.Tools = append(out.Tools, ts)
+	}
+	return out, nil
+}
+
+// InstallTool installs ONE missing catalog tool by name, streaming output lines. tools.InstallByName
+// refuses present tools (no-clobber). The command runs on the host as the user; the peer is already
+// uid/process-tree-checked at Accept, so a sandboxed agent can't trigger host installs.
+func (s *server) InstallTool(req *pb.InstallToolRequest, stream pb.Control_InstallToolServer) error {
+	emit := func(line string) {
+		_ = stream.Send(&pb.InstallToolEvent{Kind: pb.InstallToolEvent_LINE, Line: line})
+	}
+	if err := tools.InstallByName(req.Name, emit); err != nil {
+		_ = stream.Send(&pb.InstallToolEvent{Kind: pb.InstallToolEvent_ERROR, Line: err.Error()})
+		return nil
+	}
+	_ = stream.Send(&pb.InstallToolEvent{Kind: pb.InstallToolEvent_DONE})
+	return nil
 }
 
 // installEventToPB maps a pb-free install.Event onto the wire enum.

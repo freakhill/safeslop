@@ -122,6 +122,55 @@ func (InstallApplyEvent_Kind) EnumDescriptor() ([]byte, []int) {
 	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{21, 0}
 }
 
+type InstallToolEvent_Kind int32
+
+const (
+	InstallToolEvent_LINE  InstallToolEvent_Kind = 0
+	InstallToolEvent_DONE  InstallToolEvent_Kind = 1
+	InstallToolEvent_ERROR InstallToolEvent_Kind = 2
+)
+
+// Enum value maps for InstallToolEvent_Kind.
+var (
+	InstallToolEvent_Kind_name = map[int32]string{
+		0: "LINE",
+		1: "DONE",
+		2: "ERROR",
+	}
+	InstallToolEvent_Kind_value = map[string]int32{
+		"LINE":  0,
+		"DONE":  1,
+		"ERROR": 2,
+	}
+)
+
+func (x InstallToolEvent_Kind) Enum() *InstallToolEvent_Kind {
+	p := new(InstallToolEvent_Kind)
+	*p = x
+	return p
+}
+
+func (x InstallToolEvent_Kind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (InstallToolEvent_Kind) Descriptor() protoreflect.EnumDescriptor {
+	return file_internal_engine_control_control_proto_enumTypes[2].Descriptor()
+}
+
+func (InstallToolEvent_Kind) Type() protoreflect.EnumType {
+	return &file_internal_engine_control_control_proto_enumTypes[2]
+}
+
+func (x InstallToolEvent_Kind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use InstallToolEvent_Kind.Descriptor instead.
+func (InstallToolEvent_Kind) EnumDescriptor() ([]byte, []int) {
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{26, 0}
+}
+
 type PingRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -1310,6 +1359,287 @@ func (x *InstallApplyEvent) GetMsg() string {
 	return ""
 }
 
+// ListTools returns the Installs-tab catalog with read-only detection of what's already present and
+// how it was installed. A present tool is reported with its source and is NOT installable, so safeslop
+// never clobbers an existing install (internal/engine/tools).
+type ListToolsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListToolsRequest) Reset() {
+	*x = ListToolsRequest{}
+	mi := &file_internal_engine_control_control_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListToolsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListToolsRequest) ProtoMessage() {}
+
+func (x *ListToolsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_engine_control_control_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListToolsRequest.ProtoReflect.Descriptor instead.
+func (*ListToolsRequest) Descriptor() ([]byte, []int) {
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{22}
+}
+
+type ToolStatus struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Category      string                 `protobuf:"bytes,2,opt,name=category,proto3" json:"category,omitempty"`
+	Note          string                 `protobuf:"bytes,3,opt,name=note,proto3" json:"note,omitempty"`
+	Present       bool                   `protobuf:"varint,4,opt,name=present,proto3" json:"present,omitempty"`
+	Source        string                 `protobuf:"bytes,5,opt,name=source,proto3" json:"source,omitempty"` // brew | cask | app | standalone | missing
+	Path          string                 `protobuf:"bytes,6,opt,name=path,proto3" json:"path,omitempty"`
+	Installable   bool                   `protobuf:"varint,7,opt,name=installable,proto3" json:"installable,omitempty"`                   // true only when missing AND a route exists (no-clobber)
+	InstallHint   string                 `protobuf:"bytes,8,opt,name=install_hint,json=installHint,proto3" json:"install_hint,omitempty"` // the command that would run, e.g. "brew install uv" (display only)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ToolStatus) Reset() {
+	*x = ToolStatus{}
+	mi := &file_internal_engine_control_control_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ToolStatus) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ToolStatus) ProtoMessage() {}
+
+func (x *ToolStatus) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_engine_control_control_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ToolStatus.ProtoReflect.Descriptor instead.
+func (*ToolStatus) Descriptor() ([]byte, []int) {
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *ToolStatus) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ToolStatus) GetCategory() string {
+	if x != nil {
+		return x.Category
+	}
+	return ""
+}
+
+func (x *ToolStatus) GetNote() string {
+	if x != nil {
+		return x.Note
+	}
+	return ""
+}
+
+func (x *ToolStatus) GetPresent() bool {
+	if x != nil {
+		return x.Present
+	}
+	return false
+}
+
+func (x *ToolStatus) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
+func (x *ToolStatus) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *ToolStatus) GetInstallable() bool {
+	if x != nil {
+		return x.Installable
+	}
+	return false
+}
+
+func (x *ToolStatus) GetInstallHint() string {
+	if x != nil {
+		return x.InstallHint
+	}
+	return ""
+}
+
+type ListToolsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Tools         []*ToolStatus          `protobuf:"bytes,1,rep,name=tools,proto3" json:"tools,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListToolsResponse) Reset() {
+	*x = ListToolsResponse{}
+	mi := &file_internal_engine_control_control_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListToolsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListToolsResponse) ProtoMessage() {}
+
+func (x *ListToolsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_engine_control_control_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListToolsResponse.ProtoReflect.Descriptor instead.
+func (*ListToolsResponse) Descriptor() ([]byte, []int) {
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *ListToolsResponse) GetTools() []*ToolStatus {
+	if x != nil {
+		return x.Tools
+	}
+	return nil
+}
+
+// InstallTool installs ONE missing catalog tool by name, streaming combined output lines. Refuses a
+// present tool. People pick tools one at a time — there is no install-everything RPC.
+type InstallToolRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InstallToolRequest) Reset() {
+	*x = InstallToolRequest{}
+	mi := &file_internal_engine_control_control_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InstallToolRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InstallToolRequest) ProtoMessage() {}
+
+func (x *InstallToolRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_engine_control_control_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InstallToolRequest.ProtoReflect.Descriptor instead.
+func (*InstallToolRequest) Descriptor() ([]byte, []int) {
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *InstallToolRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+type InstallToolEvent struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Kind          InstallToolEvent_Kind  `protobuf:"varint,1,opt,name=kind,proto3,enum=safeslop.control.v1.InstallToolEvent_Kind" json:"kind,omitempty"`
+	Line          string                 `protobuf:"bytes,2,opt,name=line,proto3" json:"line,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InstallToolEvent) Reset() {
+	*x = InstallToolEvent{}
+	mi := &file_internal_engine_control_control_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InstallToolEvent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InstallToolEvent) ProtoMessage() {}
+
+func (x *InstallToolEvent) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_engine_control_control_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InstallToolEvent.ProtoReflect.Descriptor instead.
+func (*InstallToolEvent) Descriptor() ([]byte, []int) {
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *InstallToolEvent) GetKind() InstallToolEvent_Kind {
+	if x != nil {
+		return x.Kind
+	}
+	return InstallToolEvent_LINE
+}
+
+func (x *InstallToolEvent) GetLine() string {
+	if x != nil {
+		return x.Line
+	}
+	return ""
+}
+
 var File_internal_engine_control_control_proto protoreflect.FileDescriptor
 
 const file_internal_engine_control_control_proto_rawDesc = "" +
@@ -1395,7 +1725,29 @@ const file_internal_engine_control_control_proto_rawDesc = "" +
 	"\x05START\x10\x00\x12\f\n" +
 	"\bPROGRESS\x10\x01\x12\b\n" +
 	"\x04DONE\x10\x02\x12\t\n" +
-	"\x05ERROR\x10\x032\xbc\x06\n" +
+	"\x05ERROR\x10\x03\"\x12\n" +
+	"\x10ListToolsRequest\"\xdb\x01\n" +
+	"\n" +
+	"ToolStatus\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1a\n" +
+	"\bcategory\x18\x02 \x01(\tR\bcategory\x12\x12\n" +
+	"\x04note\x18\x03 \x01(\tR\x04note\x12\x18\n" +
+	"\apresent\x18\x04 \x01(\bR\apresent\x12\x16\n" +
+	"\x06source\x18\x05 \x01(\tR\x06source\x12\x12\n" +
+	"\x04path\x18\x06 \x01(\tR\x04path\x12 \n" +
+	"\vinstallable\x18\a \x01(\bR\vinstallable\x12!\n" +
+	"\finstall_hint\x18\b \x01(\tR\vinstallHint\"J\n" +
+	"\x11ListToolsResponse\x125\n" +
+	"\x05tools\x18\x01 \x03(\v2\x1f.safeslop.control.v1.ToolStatusR\x05tools\"(\n" +
+	"\x12InstallToolRequest\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\"\x8d\x01\n" +
+	"\x10InstallToolEvent\x12>\n" +
+	"\x04kind\x18\x01 \x01(\x0e2*.safeslop.control.v1.InstallToolEvent.KindR\x04kind\x12\x12\n" +
+	"\x04line\x18\x02 \x01(\tR\x04line\"%\n" +
+	"\x04Kind\x12\b\n" +
+	"\x04LINE\x10\x00\x12\b\n" +
+	"\x04DONE\x10\x01\x12\t\n" +
+	"\x05ERROR\x10\x022\xf9\a\n" +
 	"\aControl\x12K\n" +
 	"\x04Ping\x12 .safeslop.control.v1.PingRequest\x1a!.safeslop.control.v1.PingResponse\x12c\n" +
 	"\fListProfiles\x12(.safeslop.control.v1.ListProfilesRequest\x1a).safeslop.control.v1.ListProfilesResponse\x12P\n" +
@@ -1405,7 +1757,9 @@ const file_internal_engine_control_control_proto_rawDesc = "" +
 	"\fCloseSession\x12(.safeslop.control.v1.CloseSessionRequest\x1a).safeslop.control.v1.CloseSessionResponse\x12N\n" +
 	"\x05Trust\x12!.safeslop.control.v1.TrustRequest\x1a\".safeslop.control.v1.TrustResponse\x12`\n" +
 	"\vInstallPlan\x12'.safeslop.control.v1.InstallPlanRequest\x1a(.safeslop.control.v1.InstallPlanResponse\x12b\n" +
-	"\fInstallApply\x12(.safeslop.control.v1.InstallApplyRequest\x1a&.safeslop.control.v1.InstallApplyEvent0\x01B=Z;github.com/freakhill/safeslop/internal/engine/control/pb;pbb\x06proto3"
+	"\fInstallApply\x12(.safeslop.control.v1.InstallApplyRequest\x1a&.safeslop.control.v1.InstallApplyEvent0\x01\x12Z\n" +
+	"\tListTools\x12%.safeslop.control.v1.ListToolsRequest\x1a&.safeslop.control.v1.ListToolsResponse\x12_\n" +
+	"\vInstallTool\x12'.safeslop.control.v1.InstallToolRequest\x1a%.safeslop.control.v1.InstallToolEvent0\x01B=Z;github.com/freakhill/safeslop/internal/engine/control/pb;pbb\x06proto3"
 
 var (
 	file_internal_engine_control_control_proto_rawDescOnce sync.Once
@@ -1419,64 +1773,76 @@ func file_internal_engine_control_control_proto_rawDescGZIP() []byte {
 	return file_internal_engine_control_control_proto_rawDescData
 }
 
-var file_internal_engine_control_control_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_internal_engine_control_control_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_internal_engine_control_control_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
+var file_internal_engine_control_control_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
 var file_internal_engine_control_control_proto_goTypes = []any{
 	(LaunchEvent_Kind)(0),        // 0: safeslop.control.v1.LaunchEvent.Kind
 	(InstallApplyEvent_Kind)(0),  // 1: safeslop.control.v1.InstallApplyEvent.Kind
-	(*PingRequest)(nil),          // 2: safeslop.control.v1.PingRequest
-	(*PingResponse)(nil),         // 3: safeslop.control.v1.PingResponse
-	(*ListProfilesRequest)(nil),  // 4: safeslop.control.v1.ListProfilesRequest
-	(*Profile)(nil),              // 5: safeslop.control.v1.Profile
-	(*ListProfilesResponse)(nil), // 6: safeslop.control.v1.ListProfilesResponse
-	(*LaunchRequest)(nil),        // 7: safeslop.control.v1.LaunchRequest
-	(*LaunchEvent)(nil),          // 8: safeslop.control.v1.LaunchEvent
-	(*OpenSessionRequest)(nil),   // 9: safeslop.control.v1.OpenSessionRequest
-	(*OpenSessionResponse)(nil),  // 10: safeslop.control.v1.OpenSessionResponse
-	(*Resize)(nil),               // 11: safeslop.control.v1.Resize
-	(*ClientFrame)(nil),          // 12: safeslop.control.v1.ClientFrame
-	(*Exited)(nil),               // 13: safeslop.control.v1.Exited
-	(*ServerFrame)(nil),          // 14: safeslop.control.v1.ServerFrame
-	(*CloseSessionRequest)(nil),  // 15: safeslop.control.v1.CloseSessionRequest
-	(*CloseSessionResponse)(nil), // 16: safeslop.control.v1.CloseSessionResponse
-	(*TrustRequest)(nil),         // 17: safeslop.control.v1.TrustRequest
-	(*TrustResponse)(nil),        // 18: safeslop.control.v1.TrustResponse
-	(*InstallAction)(nil),        // 19: safeslop.control.v1.InstallAction
-	(*InstallPlanRequest)(nil),   // 20: safeslop.control.v1.InstallPlanRequest
-	(*InstallPlanResponse)(nil),  // 21: safeslop.control.v1.InstallPlanResponse
-	(*InstallApplyRequest)(nil),  // 22: safeslop.control.v1.InstallApplyRequest
-	(*InstallApplyEvent)(nil),    // 23: safeslop.control.v1.InstallApplyEvent
+	(InstallToolEvent_Kind)(0),   // 2: safeslop.control.v1.InstallToolEvent.Kind
+	(*PingRequest)(nil),          // 3: safeslop.control.v1.PingRequest
+	(*PingResponse)(nil),         // 4: safeslop.control.v1.PingResponse
+	(*ListProfilesRequest)(nil),  // 5: safeslop.control.v1.ListProfilesRequest
+	(*Profile)(nil),              // 6: safeslop.control.v1.Profile
+	(*ListProfilesResponse)(nil), // 7: safeslop.control.v1.ListProfilesResponse
+	(*LaunchRequest)(nil),        // 8: safeslop.control.v1.LaunchRequest
+	(*LaunchEvent)(nil),          // 9: safeslop.control.v1.LaunchEvent
+	(*OpenSessionRequest)(nil),   // 10: safeslop.control.v1.OpenSessionRequest
+	(*OpenSessionResponse)(nil),  // 11: safeslop.control.v1.OpenSessionResponse
+	(*Resize)(nil),               // 12: safeslop.control.v1.Resize
+	(*ClientFrame)(nil),          // 13: safeslop.control.v1.ClientFrame
+	(*Exited)(nil),               // 14: safeslop.control.v1.Exited
+	(*ServerFrame)(nil),          // 15: safeslop.control.v1.ServerFrame
+	(*CloseSessionRequest)(nil),  // 16: safeslop.control.v1.CloseSessionRequest
+	(*CloseSessionResponse)(nil), // 17: safeslop.control.v1.CloseSessionResponse
+	(*TrustRequest)(nil),         // 18: safeslop.control.v1.TrustRequest
+	(*TrustResponse)(nil),        // 19: safeslop.control.v1.TrustResponse
+	(*InstallAction)(nil),        // 20: safeslop.control.v1.InstallAction
+	(*InstallPlanRequest)(nil),   // 21: safeslop.control.v1.InstallPlanRequest
+	(*InstallPlanResponse)(nil),  // 22: safeslop.control.v1.InstallPlanResponse
+	(*InstallApplyRequest)(nil),  // 23: safeslop.control.v1.InstallApplyRequest
+	(*InstallApplyEvent)(nil),    // 24: safeslop.control.v1.InstallApplyEvent
+	(*ListToolsRequest)(nil),     // 25: safeslop.control.v1.ListToolsRequest
+	(*ToolStatus)(nil),           // 26: safeslop.control.v1.ToolStatus
+	(*ListToolsResponse)(nil),    // 27: safeslop.control.v1.ListToolsResponse
+	(*InstallToolRequest)(nil),   // 28: safeslop.control.v1.InstallToolRequest
+	(*InstallToolEvent)(nil),     // 29: safeslop.control.v1.InstallToolEvent
 }
 var file_internal_engine_control_control_proto_depIdxs = []int32{
-	5,  // 0: safeslop.control.v1.ListProfilesResponse.profiles:type_name -> safeslop.control.v1.Profile
+	6,  // 0: safeslop.control.v1.ListProfilesResponse.profiles:type_name -> safeslop.control.v1.Profile
 	0,  // 1: safeslop.control.v1.LaunchEvent.kind:type_name -> safeslop.control.v1.LaunchEvent.Kind
-	11, // 2: safeslop.control.v1.ClientFrame.resize:type_name -> safeslop.control.v1.Resize
-	13, // 3: safeslop.control.v1.ServerFrame.exited:type_name -> safeslop.control.v1.Exited
-	19, // 4: safeslop.control.v1.InstallPlanResponse.actions:type_name -> safeslop.control.v1.InstallAction
+	12, // 2: safeslop.control.v1.ClientFrame.resize:type_name -> safeslop.control.v1.Resize
+	14, // 3: safeslop.control.v1.ServerFrame.exited:type_name -> safeslop.control.v1.Exited
+	20, // 4: safeslop.control.v1.InstallPlanResponse.actions:type_name -> safeslop.control.v1.InstallAction
 	1,  // 5: safeslop.control.v1.InstallApplyEvent.kind:type_name -> safeslop.control.v1.InstallApplyEvent.Kind
-	2,  // 6: safeslop.control.v1.Control.Ping:input_type -> safeslop.control.v1.PingRequest
-	4,  // 7: safeslop.control.v1.Control.ListProfiles:input_type -> safeslop.control.v1.ListProfilesRequest
-	7,  // 8: safeslop.control.v1.Control.Launch:input_type -> safeslop.control.v1.LaunchRequest
-	9,  // 9: safeslop.control.v1.Control.OpenSession:input_type -> safeslop.control.v1.OpenSessionRequest
-	12, // 10: safeslop.control.v1.Control.Attach:input_type -> safeslop.control.v1.ClientFrame
-	15, // 11: safeslop.control.v1.Control.CloseSession:input_type -> safeslop.control.v1.CloseSessionRequest
-	17, // 12: safeslop.control.v1.Control.Trust:input_type -> safeslop.control.v1.TrustRequest
-	20, // 13: safeslop.control.v1.Control.InstallPlan:input_type -> safeslop.control.v1.InstallPlanRequest
-	22, // 14: safeslop.control.v1.Control.InstallApply:input_type -> safeslop.control.v1.InstallApplyRequest
-	3,  // 15: safeslop.control.v1.Control.Ping:output_type -> safeslop.control.v1.PingResponse
-	6,  // 16: safeslop.control.v1.Control.ListProfiles:output_type -> safeslop.control.v1.ListProfilesResponse
-	8,  // 17: safeslop.control.v1.Control.Launch:output_type -> safeslop.control.v1.LaunchEvent
-	10, // 18: safeslop.control.v1.Control.OpenSession:output_type -> safeslop.control.v1.OpenSessionResponse
-	14, // 19: safeslop.control.v1.Control.Attach:output_type -> safeslop.control.v1.ServerFrame
-	16, // 20: safeslop.control.v1.Control.CloseSession:output_type -> safeslop.control.v1.CloseSessionResponse
-	18, // 21: safeslop.control.v1.Control.Trust:output_type -> safeslop.control.v1.TrustResponse
-	21, // 22: safeslop.control.v1.Control.InstallPlan:output_type -> safeslop.control.v1.InstallPlanResponse
-	23, // 23: safeslop.control.v1.Control.InstallApply:output_type -> safeslop.control.v1.InstallApplyEvent
-	15, // [15:24] is the sub-list for method output_type
-	6,  // [6:15] is the sub-list for method input_type
-	6,  // [6:6] is the sub-list for extension type_name
-	6,  // [6:6] is the sub-list for extension extendee
-	0,  // [0:6] is the sub-list for field type_name
+	26, // 6: safeslop.control.v1.ListToolsResponse.tools:type_name -> safeslop.control.v1.ToolStatus
+	2,  // 7: safeslop.control.v1.InstallToolEvent.kind:type_name -> safeslop.control.v1.InstallToolEvent.Kind
+	3,  // 8: safeslop.control.v1.Control.Ping:input_type -> safeslop.control.v1.PingRequest
+	5,  // 9: safeslop.control.v1.Control.ListProfiles:input_type -> safeslop.control.v1.ListProfilesRequest
+	8,  // 10: safeslop.control.v1.Control.Launch:input_type -> safeslop.control.v1.LaunchRequest
+	10, // 11: safeslop.control.v1.Control.OpenSession:input_type -> safeslop.control.v1.OpenSessionRequest
+	13, // 12: safeslop.control.v1.Control.Attach:input_type -> safeslop.control.v1.ClientFrame
+	16, // 13: safeslop.control.v1.Control.CloseSession:input_type -> safeslop.control.v1.CloseSessionRequest
+	18, // 14: safeslop.control.v1.Control.Trust:input_type -> safeslop.control.v1.TrustRequest
+	21, // 15: safeslop.control.v1.Control.InstallPlan:input_type -> safeslop.control.v1.InstallPlanRequest
+	23, // 16: safeslop.control.v1.Control.InstallApply:input_type -> safeslop.control.v1.InstallApplyRequest
+	25, // 17: safeslop.control.v1.Control.ListTools:input_type -> safeslop.control.v1.ListToolsRequest
+	28, // 18: safeslop.control.v1.Control.InstallTool:input_type -> safeslop.control.v1.InstallToolRequest
+	4,  // 19: safeslop.control.v1.Control.Ping:output_type -> safeslop.control.v1.PingResponse
+	7,  // 20: safeslop.control.v1.Control.ListProfiles:output_type -> safeslop.control.v1.ListProfilesResponse
+	9,  // 21: safeslop.control.v1.Control.Launch:output_type -> safeslop.control.v1.LaunchEvent
+	11, // 22: safeslop.control.v1.Control.OpenSession:output_type -> safeslop.control.v1.OpenSessionResponse
+	15, // 23: safeslop.control.v1.Control.Attach:output_type -> safeslop.control.v1.ServerFrame
+	17, // 24: safeslop.control.v1.Control.CloseSession:output_type -> safeslop.control.v1.CloseSessionResponse
+	19, // 25: safeslop.control.v1.Control.Trust:output_type -> safeslop.control.v1.TrustResponse
+	22, // 26: safeslop.control.v1.Control.InstallPlan:output_type -> safeslop.control.v1.InstallPlanResponse
+	24, // 27: safeslop.control.v1.Control.InstallApply:output_type -> safeslop.control.v1.InstallApplyEvent
+	27, // 28: safeslop.control.v1.Control.ListTools:output_type -> safeslop.control.v1.ListToolsResponse
+	29, // 29: safeslop.control.v1.Control.InstallTool:output_type -> safeslop.control.v1.InstallToolEvent
+	19, // [19:30] is the sub-list for method output_type
+	8,  // [8:19] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_internal_engine_control_control_proto_init() }
@@ -1498,8 +1864,8 @@ func file_internal_engine_control_control_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_engine_control_control_proto_rawDesc), len(file_internal_engine_control_control_proto_rawDesc)),
-			NumEnums:      2,
-			NumMessages:   22,
+			NumEnums:      3,
+			NumMessages:   27,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

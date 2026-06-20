@@ -1,99 +1,122 @@
 import SwiftUI
 
-/// InstallsTab is the GUI over the engine's pinned, fail-closed installer (InstallPlan/InstallApply
-/// RPCs). It shows the desired-state diff (install/upgrade/ok per tool), then streams Apply progress.
-/// The engine does the pinning + signature verification; this tab only previews and triggers it.
+/// InstallsTab manages the dev tools, runtimes, container/VM hosts, secret managers, and agents
+/// safeslop works with (internal/engine/tools). It DETECTS what's already present and how it was
+/// installed (brew / cask / standalone), and only ever offers to install a MISSING tool — a present
+/// tool just shows its source, so safeslop never clobbers an existing install. People install one
+/// tool at a time; there is no install-everything button (specs/0029, the user's requirement).
 struct InstallsTab: View {
-    @State private var actions: [Safeslop_Control_V1_InstallAction] = []
-    @State private var status: String = "loading plan…"
-    @State private var applying = false
+    @State private var tools: [Safeslop_Control_V1_ToolStatus] = []
+    @State private var status = "detecting tools…"
+    @State private var installing: Set<String> = []
     @State private var log: [String] = []
+    @State private var activeTool: String?
 
-    private var needsWork: Bool { actions.contains { $0.kind != "ok" } }
+    /// catalog order preserved, grouped into (category, tools) sections.
+    private var sections: [(String, [Safeslop_Control_V1_ToolStatus])] {
+        var order: [String] = []
+        var byCat: [String: [Safeslop_Control_V1_ToolStatus]] = [:]
+        for t in tools {
+            if byCat[t.category] == nil { order.append(t.category) }
+            byCat[t.category, default: []].append(t)
+        }
+        return order.map { ($0, byCat[$0] ?? []) }
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("Tools").font(.title3.weight(.medium)).foregroundStyle(.secondary)
                 Spacer()
-                Button("Re-plan", systemImage: "arrow.clockwise") { Task { await loadPlan() } }
-                    .disabled(applying)
+                Text(status).font(.caption).foregroundStyle(.secondary)
+                Button("Re-detect", systemImage: "arrow.clockwise") { Task { await load() } }
+                    .disabled(!installing.isEmpty)
             }
-            Text(status).font(.callout).foregroundStyle(.secondary)
 
-            if actions.isEmpty {
-                ContentUnavailableView("No plan", systemImage: "shippingbox",
-                                       description: Text("The engine reported no install actions."))
-                    .frame(maxHeight: .infinity)
-            } else {
-                List(actions, id: \.name) { a in
-                    HStack {
-                        Image(systemName: symbol(a.kind)).foregroundStyle(color(a.kind))
-                        Text(a.name).font(.headline)
-                        Spacer()
-                        Text(a.kind == "ok" ? a.current : "\(a.current.isEmpty ? "—" : a.current) → \(a.desired)")
-                            .font(.caption.monospaced()).foregroundStyle(.secondary)
+            List {
+                ForEach(sections, id: \.0) { (category, items) in
+                    Section(category) {
+                        ForEach(items, id: \.name) { tool in row(tool) }
                     }
                 }
             }
 
-            if !log.isEmpty {
-                ScrollView { Text(log.joined(separator: "\n")).font(.caption.monospaced())
-                    .frame(maxWidth: .infinity, alignment: .leading) }
-                    .frame(height: 90)
+            if let active = activeTool {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("installing \(active)…").font(.caption.weight(.semibold))
+                    ScrollView {
+                        Text(log.joined(separator: "\n"))
+                            .font(.caption.monospaced())
+                            .frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
+                    }
+                    .frame(height: 110)
                     .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
-            }
-
-            HStack {
-                Spacer()
-                Button(applying ? "Applying…" : "Install / Upgrade") { Task { await apply() } }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(applying || !needsWork)
+                }
             }
         }
         .padding()
-        .task { await loadPlan() }
+        .task { await load() }
     }
 
-    private func loadPlan() async {
+    @ViewBuilder
+    private func row(_ t: Safeslop_Control_V1_ToolStatus) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: t.present ? "checkmark.circle.fill" : "circle.dashed")
+                .foregroundStyle(t.present ? .green : .secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(t.name).font(.headline)
+                Text(t.note).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if t.present {
+                Text(t.source).font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(.green.opacity(0.15), in: Capsule()).foregroundStyle(.green)
+                    .help(t.path)
+            } else if t.installable {
+                Button {
+                    Task { await install(t.name) }
+                } label: {
+                    if installing.contains(t.name) {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Text("Install")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(!installing.isEmpty)
+                .help(t.installHint.isEmpty ? "install \(t.name)" : t.installHint)
+            } else {
+                Text("manual").font(.caption2).foregroundStyle(.tertiary)
+                    .help("no automatic install route — install \(t.name) yourself")
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func load() async {
         guard await EngineConnection.ensureServing() else { status = "engine unreachable"; return }
         do {
-            actions = try await EngineConnection.installPlan()
-            let todo = actions.filter { $0.kind != "ok" }.count
-            status = todo == 0 ? "all tools up to date" : "\(todo) to install/upgrade"
+            tools = try await EngineConnection.listTools()
+            let missing = tools.filter { $0.installable }.count
+            let present = tools.filter { $0.present }.count
+            status = "\(present) installed · \(missing) available"
         } catch {
-            status = "plan failed: \(error)"
+            status = "detect failed: \(error)"
         }
     }
 
-    private func apply() async {
-        applying = true; log = []
-        defer { applying = false }
+    private func install(_ name: String) async {
+        installing.insert(name); activeTool = name; log = []
+        defer { installing.remove(name) }
         do {
-            try await EngineConnection.installApply { event in
-                await MainActor.run {
-                    let tool = event.tool.isEmpty ? "" : "[\(event.tool)] "
-                    log.append("\(tool)\(event.msg)")
-                }
+            try await EngineConnection.installTool(name: name) { line in
+                await MainActor.run { log.append(line) }
             }
-            await loadPlan()
+            log.append("— done —")
+            await load()
         } catch {
-            log.append("apply failed: \(error)")
-        }
-    }
-
-    private func symbol(_ kind: String) -> String {
-        switch kind {
-        case "install": return "arrow.down.circle"
-        case "upgrade": return "arrow.up.circle"
-        default: return "checkmark.circle"
-        }
-    }
-    private func color(_ kind: String) -> Color {
-        switch kind {
-        case "install": return .blue
-        case "upgrade": return .orange
-        default: return .green
+            log.append("install failed: \(error)")
         }
     }
 }

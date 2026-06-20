@@ -82,6 +82,29 @@ enum EngineConnection {
         }
     }
 
+    /// The Installs-tab tool catalog with read-only detection (present/source/installable).
+    static func listTools() async throws -> [Safeslop_Control_V1_ToolStatus] {
+        let transport = try makeTransport()
+        return try await withGRPCClient(transport: transport) { client in
+            let control = Safeslop_Control_V1_Control.Client(wrapping: client)
+            let resp = try await control.listTools(.init())
+            return resp.tools
+        }
+    }
+
+    /// Installs ONE missing tool by name, streaming output lines. The engine refuses present tools.
+    static func installTool(name: String, onLine: @Sendable @escaping (String) async -> Void) async throws {
+        let transport = try makeTransport()
+        try await withGRPCClient(transport: transport) { client in
+            let control = Safeslop_Control_V1_Control.Client(wrapping: client)
+            try await control.installTool(.with { $0.name = name }) { response in
+                for try await event in response.messages {
+                    if !event.line.isEmpty { await onLine(event.line) }
+                }
+            }
+        }
+    }
+
     /// Ensures `safeslop serve` is running: pings, and if unreachable spawns the binary and
     /// polls until the socket answers (or a timeout). `safeslop` is expected on PATH.
     @discardableResult

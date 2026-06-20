@@ -60,4 +60,5 @@ echo "==> engine up. Launching the cockpit — quit the app (Cmd-Q) to tear ever
 echo
 
 cd "$REPO/app"
-swift run
+# the app's exit code on Cmd-Q is not meaningful; don't let it fail `make cockpit`.
+swift run || true

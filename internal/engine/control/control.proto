@@ -13,6 +13,8 @@ service Control {
   rpc Trust(TrustRequest) returns (TrustResponse);
   rpc InstallPlan(InstallPlanRequest) returns (InstallPlanResponse);
   rpc InstallApply(InstallApplyRequest) returns (stream InstallApplyEvent);
+  rpc ListTools(ListToolsRequest) returns (ListToolsResponse);
+  rpc InstallTool(InstallToolRequest) returns (stream InstallToolEvent);
 }
 
 message PingRequest {}
@@ -99,4 +101,29 @@ message InstallApplyEvent {
   Kind kind = 1;
   string tool = 2;
   string msg = 3;
+}
+
+// ListTools returns the Installs-tab catalog with read-only detection of what's already present and
+// how it was installed. A present tool is reported with its source and is NOT installable, so safeslop
+// never clobbers an existing install (internal/engine/tools).
+message ListToolsRequest {}
+message ToolStatus {
+  string name = 1;
+  string category = 2;
+  string note = 3;
+  bool present = 4;
+  string source = 5;        // brew | cask | app | standalone | missing
+  string path = 6;
+  bool installable = 7;     // true only when missing AND a route exists (no-clobber)
+  string install_hint = 8;  // the command that would run, e.g. "brew install uv" (display only)
+}
+message ListToolsResponse { repeated ToolStatus tools = 1; }
+
+// InstallTool installs ONE missing catalog tool by name, streaming combined output lines. Refuses a
+// present tool. People pick tools one at a time — there is no install-everything RPC.
+message InstallToolRequest { string name = 1; }
+message InstallToolEvent {
+  enum Kind { LINE = 0; DONE = 1; ERROR = 2; }
+  Kind kind = 1;
+  string line = 2;
 }

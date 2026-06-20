@@ -28,6 +28,8 @@ const (
 	Control_Trust_FullMethodName        = "/safeslop.control.v1.Control/Trust"
 	Control_InstallPlan_FullMethodName  = "/safeslop.control.v1.Control/InstallPlan"
 	Control_InstallApply_FullMethodName = "/safeslop.control.v1.Control/InstallApply"
+	Control_ListTools_FullMethodName    = "/safeslop.control.v1.Control/ListTools"
+	Control_InstallTool_FullMethodName  = "/safeslop.control.v1.Control/InstallTool"
 )
 
 // ControlClient is the client API for Control service.
@@ -45,6 +47,8 @@ type ControlClient interface {
 	Trust(ctx context.Context, in *TrustRequest, opts ...grpc.CallOption) (*TrustResponse, error)
 	InstallPlan(ctx context.Context, in *InstallPlanRequest, opts ...grpc.CallOption) (*InstallPlanResponse, error)
 	InstallApply(ctx context.Context, in *InstallApplyRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[InstallApplyEvent], error)
+	ListTools(ctx context.Context, in *ListToolsRequest, opts ...grpc.CallOption) (*ListToolsResponse, error)
+	InstallTool(ctx context.Context, in *InstallToolRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[InstallToolEvent], error)
 }
 
 type controlClient struct {
@@ -166,6 +170,35 @@ func (c *controlClient) InstallApply(ctx context.Context, in *InstallApplyReques
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Control_InstallApplyClient = grpc.ServerStreamingClient[InstallApplyEvent]
 
+func (c *controlClient) ListTools(ctx context.Context, in *ListToolsRequest, opts ...grpc.CallOption) (*ListToolsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListToolsResponse)
+	err := c.cc.Invoke(ctx, Control_ListTools_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *controlClient) InstallTool(ctx context.Context, in *InstallToolRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[InstallToolEvent], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Control_ServiceDesc.Streams[3], Control_InstallTool_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[InstallToolRequest, InstallToolEvent]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Control_InstallToolClient = grpc.ServerStreamingClient[InstallToolEvent]
+
 // ControlServer is the server API for Control service.
 // All implementations must embed UnimplementedControlServer
 // for forward compatibility.
@@ -181,6 +214,8 @@ type ControlServer interface {
 	Trust(context.Context, *TrustRequest) (*TrustResponse, error)
 	InstallPlan(context.Context, *InstallPlanRequest) (*InstallPlanResponse, error)
 	InstallApply(*InstallApplyRequest, grpc.ServerStreamingServer[InstallApplyEvent]) error
+	ListTools(context.Context, *ListToolsRequest) (*ListToolsResponse, error)
+	InstallTool(*InstallToolRequest, grpc.ServerStreamingServer[InstallToolEvent]) error
 	mustEmbedUnimplementedControlServer()
 }
 
@@ -217,6 +252,12 @@ func (UnimplementedControlServer) InstallPlan(context.Context, *InstallPlanReque
 }
 func (UnimplementedControlServer) InstallApply(*InstallApplyRequest, grpc.ServerStreamingServer[InstallApplyEvent]) error {
 	return status.Error(codes.Unimplemented, "method InstallApply not implemented")
+}
+func (UnimplementedControlServer) ListTools(context.Context, *ListToolsRequest) (*ListToolsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListTools not implemented")
+}
+func (UnimplementedControlServer) InstallTool(*InstallToolRequest, grpc.ServerStreamingServer[InstallToolEvent]) error {
+	return status.Error(codes.Unimplemented, "method InstallTool not implemented")
 }
 func (UnimplementedControlServer) mustEmbedUnimplementedControlServer() {}
 func (UnimplementedControlServer) testEmbeddedByValue()                 {}
@@ -376,6 +417,35 @@ func _Control_InstallApply_Handler(srv interface{}, stream grpc.ServerStream) er
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Control_InstallApplyServer = grpc.ServerStreamingServer[InstallApplyEvent]
 
+func _Control_ListTools_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListToolsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ControlServer).ListTools(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Control_ListTools_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ControlServer).ListTools(ctx, req.(*ListToolsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Control_InstallTool_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(InstallToolRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(ControlServer).InstallTool(m, &grpc.GenericServerStream[InstallToolRequest, InstallToolEvent]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Control_InstallToolServer = grpc.ServerStreamingServer[InstallToolEvent]
+
 // Control_ServiceDesc is the grpc.ServiceDesc for Control service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -407,6 +477,10 @@ var Control_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "InstallPlan",
 			Handler:    _Control_InstallPlan_Handler,
 		},
+		{
+			MethodName: "ListTools",
+			Handler:    _Control_ListTools_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
@@ -423,6 +497,11 @@ var Control_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "InstallApply",
 			Handler:       _Control_InstallApply_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "InstallTool",
+			Handler:       _Control_InstallTool_Handler,
 			ServerStreams: true,
 		},
 	},
