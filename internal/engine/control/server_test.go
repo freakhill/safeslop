@@ -35,6 +35,26 @@ func TestTrustUnwiredErrors(t *testing.T) {
 	}
 }
 
+func TestListProfilesCallsListFn(t *testing.T) {
+	s := &server{listFn: func(cp string) ([]*pb.Profile, error) {
+		return []*pb.Profile{{Name: "dev", Agent: "claude", Environment: "sandbox", Network: "deny", Tier: "mistake-guard"}}, nil
+	}}
+	resp, err := s.ListProfiles(context.Background(), &pb.ListProfilesRequest{})
+	if err != nil {
+		t.Fatalf("ListProfiles: %v", err)
+	}
+	if len(resp.Profiles) != 1 || resp.Profiles[0].Tier != "mistake-guard" {
+		t.Fatalf("ListProfiles = %+v", resp.Profiles)
+	}
+}
+
+func TestListProfilesUnwiredErrors(t *testing.T) {
+	s := &server{}
+	if _, err := s.ListProfiles(context.Background(), &pb.ListProfilesRequest{}); err == nil {
+		t.Fatal("unwired ListProfiles must error")
+	}
+}
+
 func TestSocketPathIsShort(t *testing.T) {
 	p, err := socketPath()
 	if err != nil {

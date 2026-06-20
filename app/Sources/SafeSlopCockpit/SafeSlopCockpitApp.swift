@@ -41,10 +41,12 @@ struct LauncherView: View {
                 List(profiles) { ref in
                     Button { openWindow(id: "session", value: ref) } label: {
                         HStack {
-                            Circle().fill(ref.trustColor).frame(width: 10, height: 10)
+                            Image(systemName: ref.tierSymbol)
+                                .foregroundStyle(ref.trustColor)
+                                .help(ref.tierNote)
                             VStack(alignment: .leading) {
                                 Text(ref.name).font(.headline)
-                                Text("\(ref.agent) · \(ref.environment) · net:\(ref.network)")
+                                Text("\(ref.agent) · \(ref.tierLabel) · net:\(ref.network)")
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer()

@@ -24,6 +24,8 @@ message Profile {
   string agent = 2;
   string environment = 3;
   string network = 4;
+  string tier = 5;       // honest isolation tier from policy.EnvTier (e.g. "mistake-guard")
+  string tier_note = 6;  // the one-line honest caveat from policy.EnvTier
 }
 message ListProfilesResponse { repeated Profile profiles = 1; }
 

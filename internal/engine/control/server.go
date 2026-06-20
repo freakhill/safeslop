@@ -20,7 +20,23 @@ type server struct {
 	mgr            *Manager
 	resolveFn      func(profile, configPath string) (SessionSpec, error)
 	trustFn        func(configPath string) (string, error)
+	listFn         func(configPath string) ([]*pb.Profile, error)
 	installApplyFn func(emit func(*pb.InstallApplyEvent)) error
+}
+
+// ListProfiles returns the profiles declared in the safeslop.cue at req.ConfigPath, each carrying
+// its honest isolation tier (from policy.EnvTier) so the GUI renders one source of truth. Listing
+// is inspection (like `validate`/`list`), so it is not trust-gated; the peer is uid/process-tree-
+// checked at Accept (peerauth.go).
+func (s *server) ListProfiles(_ context.Context, req *pb.ListProfilesRequest) (*pb.ListProfilesResponse, error) {
+	if s.listFn == nil {
+		return nil, status.Errorf(codes.Unimplemented, "list profiles not wired")
+	}
+	profs, err := s.listFn(req.ConfigPath)
+	if err != nil {
+		return nil, err
+	}
+	return &pb.ListProfilesResponse{Profiles: profs}, nil
 }
 
 func (s *server) Ping(_ context.Context, _ *pb.PingRequest) (*pb.PingResponse, error) {
