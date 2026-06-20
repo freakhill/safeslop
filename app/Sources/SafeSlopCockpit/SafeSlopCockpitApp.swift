@@ -49,9 +49,18 @@ struct LauncherView: View {
                                 Text("\(ref.agent) · \(ref.tierLabel) · net:\(ref.network)")
                                     .font(.caption).foregroundStyle(.secondary)
                             }
+                            if let badge = ref.trustBadge {
+                                Text(badge.text)
+                                    .font(.caption2.weight(.semibold))
+                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                    .background(badge.color.opacity(0.18), in: Capsule())
+                                    .foregroundStyle(badge.color)
+                            }
                             Spacer()
                             Image(systemName: "arrow.up.forward.app")
                         }
+                        // Listed-but-muted until approved; the row still launches (→ trust sheet).
+                        .opacity(ref.isTrusted ? 1 : 0.6)
                     }
                     .buttonStyle(.plain)
                 }

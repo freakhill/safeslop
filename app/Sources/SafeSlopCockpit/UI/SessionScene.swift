@@ -9,20 +9,34 @@ struct ProfileRef: Codable, Hashable, Identifiable {
     var network: String
     var tier: String      // honest isolation tier from the engine (policy.EnvTier) — single source of truth
     var tierNote: String  // the one-line honest caveat
+    var trustStatus: String // "trusted" | "untrusted" | "changed" (the engine's trust gate state)
     var id: String { name }
 
-    init(name: String, agent: String, environment: String, network: String, tier: String = "", tierNote: String = "") {
+    init(name: String, agent: String, environment: String, network: String,
+         tier: String = "", tierNote: String = "", trustStatus: String = "untrusted") {
         self.name = name; self.agent = agent; self.environment = environment; self.network = network
-        self.tier = tier; self.tierNote = tierNote
+        self.tier = tier; self.tierNote = tierNote; self.trustStatus = trustStatus
     }
     init(_ p: Safeslop_Control_V1_Profile) {
         self.init(name: p.name, agent: p.agent, environment: p.environment, network: p.network,
-                  tier: p.tier, tierNote: p.tierNote)
+                  tier: p.tier, tierNote: p.tierNote, trustStatus: p.trustStatus)
     }
     var proto: Safeslop_Control_V1_Profile {
         .with {
             $0.name = name; $0.agent = agent; $0.environment = environment; $0.network = network
-            $0.tier = tier; $0.tierNote = tierNote
+            $0.tier = tier; $0.tierNote = tierNote; $0.trustStatus = trustStatus
+        }
+    }
+
+    var isTrusted: Bool { trustStatus == "trusted" }
+    /// A launcher badge for an unapproved policy (nil when trusted) — listed-but-muted until the
+    /// user approves it (specs/research/2026-06-20-cockpit-safe-by-design.md: absence of approval
+    /// is not consent; badge it before launch, don't ambush on click).
+    var trustBadge: (text: String, color: Color)? {
+        switch trustStatus {
+        case "changed": return ("changed — review", .red)
+        case "trusted": return nil
+        default: return ("not trusted", .orange)
         }
     }
 
