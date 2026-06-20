@@ -28,6 +28,7 @@ var (
 // Category groups tools in the UI.
 const (
 	CatRuntime   = "Runtimes & package managers"
+	CatForge     = "Source control & forges"
 	CatContainer = "Containers & VMs"
 	CatSecrets   = "Secret managers"
 	CatCore      = "safeslop core"
@@ -87,6 +88,14 @@ func Catalog() []Tool {
 		{Name: "nix", Category: CatRuntime, Detect: []string{"nix"},
 			Script: "curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install",
 			Note:   "Nix package manager (Determinate installer)"},
+
+		// Source control & forges (repo pull + ephemeral-key flows)
+		{Name: "git", Category: CatForge, Detect: []string{"git"}, Brew: "git",
+			Note: "version control — required for repo operations"},
+		{Name: "GitHub CLI", Category: CatForge, Detect: []string{"gh"}, Brew: "gh",
+			Note: "GitHub auth, PRs, ephemeral deploy keys/tokens"},
+		{Name: "tea", Category: CatForge, Detect: []string{"tea"}, Brew: "tea",
+			Note: "Gitea/Forgejo CLI — Forgejo auth + ephemeral keys"},
 
 		// Containers & VMs
 		{Name: "Docker CLI", Category: CatContainer, Detect: []string{"docker"}, Brew: "docker",

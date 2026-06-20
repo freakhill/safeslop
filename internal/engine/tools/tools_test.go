@@ -7,7 +7,7 @@ func TestCatalogIsPopulatedAndCategorized(t *testing.T) {
 	if len(cat) < 15 {
 		t.Fatalf("catalog unexpectedly small: %d", len(cat))
 	}
-	want := map[string]bool{CatRuntime: false, CatContainer: false, CatSecrets: false, CatCore: false, CatAgents: false}
+	want := map[string]bool{CatRuntime: false, CatForge: false, CatContainer: false, CatSecrets: false, CatCore: false, CatAgents: false}
 	names := map[string]bool{}
 	for _, tool := range cat {
 		if tool.Name == "" || tool.Category == "" {
@@ -29,8 +29,8 @@ func TestCatalogIsPopulatedAndCategorized(t *testing.T) {
 		}
 	}
 	// the user's named tools must all be present
-	for _, n := range []string{"uv", "bun", "pnpm", "mise", "nix", "Docker CLI", "OrbStack", "Tart",
-		"1Password CLI", "Bitwarden CLI", "KeePassXC", "Proton Pass"} {
+	for _, n := range []string{"uv", "bun", "pnpm", "mise", "nix", "git", "GitHub CLI", "tea",
+		"Docker CLI", "OrbStack", "Tart", "1Password CLI", "Bitwarden CLI", "KeePassXC", "Proton Pass"} {
 		if !names[n] {
 			t.Errorf("catalog missing required tool %q", n)
 		}
