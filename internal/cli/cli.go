@@ -383,15 +383,19 @@ func cockpitListProfiles(configPath string) ([]*pb.Profile, error) {
 			env = "sandbox" // schema default
 		}
 		tier, note := policy.EnvTier(env)
+		risk := policy.RiskSummary(prof)
 		out = append(out, &pb.Profile{
-			Name:        name,
-			Agent:       prof.Agent,
-			Environment: env,
-			Network:     prof.Network,
-			Tier:        tier,
-			TierNote:    note,
-			TrustStatus: trustStatus,
-			ConfigDir:   configDir,
+			Name:         name,
+			Agent:        prof.Agent,
+			Environment:  env,
+			Network:      prof.Network,
+			Tier:         tier,
+			TierNote:     note,
+			TrustStatus:  trustStatus,
+			ConfigDir:    configDir,
+			RiskHeadline: risk.Headline,
+			RiskLevel:    risk.Level,
+			RiskLines:    risk.Lines,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })

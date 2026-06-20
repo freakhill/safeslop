@@ -1,0 +1,69 @@
+package policy
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestRiskSummaryHostIsHighAndHonest(t *testing.T) {
+	r := RiskSummary(Profile{Agent: "claude", Environment: "host"})
+	if r.Level != "high" {
+		t.Errorf("host level = %q, want high", r.Level)
+	}
+	joined := strings.Join(r.Lines, "\n")
+	if !strings.Contains(joined, "ENTIRE account") {
+		t.Errorf("host risk must name full-account file access:\n%s", joined)
+	}
+	if !strings.Contains(joined, "no isolation") && !strings.Contains(r.Headline, "no isolation") {
+		t.Errorf("host headline must say no isolation: %q", r.Headline)
+	}
+}
+
+func TestRiskSummaryOpenEgressIsElevated(t *testing.T) {
+	r := RiskSummary(Profile{Environment: "container", Network: "allow"})
+	if r.Level != "elevated" {
+		t.Errorf("container+allow level = %q, want elevated", r.Level)
+	}
+	if !strings.Contains(strings.Join(r.Lines, " "), "OPEN egress") {
+		t.Errorf("open egress must be called out:\n%v", r.Lines)
+	}
+}
+
+func TestRiskSummaryAllowlistIsContained(t *testing.T) {
+	r := RiskSummary(Profile{Environment: "container", Network: "deny"})
+	if r.Level != "contained" {
+		t.Errorf("container+deny level = %q, want contained", r.Level)
+	}
+	if !strings.Contains(strings.Join(r.Lines, " "), "allowlist") {
+		t.Errorf("allowlist mode must be stated:\n%v", r.Lines)
+	}
+}
+
+func TestRiskSummaryListsSecretsAndCreds(t *testing.T) {
+	r := RiskSummary(Profile{
+		Environment: "container", Network: "deny",
+		Secrets:     map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "op://x/y/z", "FOO": "env:FOO"},
+		Credentials: &Credentials{Ssh: &SshCreds{Write: true}},
+	})
+	joined := strings.Join(r.Lines, "\n")
+	if !strings.Contains(joined, "CLAUDE_CODE_OAUTH_TOKEN") || !strings.Contains(joined, "FOO") {
+		t.Errorf("secret env names must be listed (sorted):\n%s", joined)
+	}
+	// names only — never a value
+	if strings.Contains(joined, "op://") || strings.Contains(joined, "env:FOO") {
+		t.Errorf("a secret REF/value leaked into the risk summary:\n%s", joined)
+	}
+	if !strings.Contains(joined, "read-WRITE") {
+		t.Errorf("write SSH key must be flagged:\n%s", joined)
+	}
+}
+
+func TestRiskSummarySandboxDenyIsContainedOffline(t *testing.T) {
+	r := RiskSummary(Profile{Environment: "sandbox", Network: "deny"})
+	if r.Level != "contained" {
+		t.Errorf("sandbox+deny level = %q, want contained", r.Level)
+	}
+	if !strings.Contains(strings.Join(r.Lines, " "), "offline") {
+		t.Errorf("sandbox deny should read offline:\n%v", r.Lines)
+	}
+}

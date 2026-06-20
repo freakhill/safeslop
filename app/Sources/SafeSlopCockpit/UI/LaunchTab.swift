@@ -42,10 +42,13 @@ struct LaunchTab: View {
         } label: {
             HStack {
                 Image(systemName: ref.tierSymbol).foregroundStyle(ref.trustColor).help(ref.tierNote)
-                VStack(alignment: .leading) {
+                VStack(alignment: .leading, spacing: 1) {
                     Text(ref.name).font(.headline)
                     Text("\(ref.agent) · \(ref.tierLabel) · net:\(ref.netLabel)")
                         .font(.caption).foregroundStyle(.secondary)
+                    if !ref.riskHeadline.isEmpty {
+                        Text(ref.riskHeadline).font(.caption2.weight(.medium)).foregroundStyle(ref.riskColor)
+                    }
                 }
                 if missing {
                     badge("missing path", .secondary)

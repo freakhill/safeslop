@@ -11,21 +11,37 @@ struct ProfileRef: Codable, Hashable, Identifiable {
     var tierNote: String    // the one-line honest caveat
     var trustStatus: String // "trusted" | "untrusted" | "changed" (the engine's trust gate state)
     var configDir: String   // abs dir holding this safeslop.cue; the cockpit runs `safeslop run` here
+    var riskHeadline: String // arbiter one-liner consequence (policy.RiskSummary)
+    var riskLevel: String    // "high" | "elevated" | "contained" — color only
+    var riskLines: [String]  // break-glass consequence sentences
     var id: String { name }
 
     init(name: String, agent: String, environment: String, network: String,
-         tier: String = "", tierNote: String = "", trustStatus: String = "untrusted", configDir: String = "") {
+         tier: String = "", tierNote: String = "", trustStatus: String = "untrusted", configDir: String = "",
+         riskHeadline: String = "", riskLevel: String = "contained", riskLines: [String] = []) {
         self.name = name; self.agent = agent; self.environment = environment; self.network = network
         self.tier = tier; self.tierNote = tierNote; self.trustStatus = trustStatus; self.configDir = configDir
+        self.riskHeadline = riskHeadline; self.riskLevel = riskLevel; self.riskLines = riskLines
     }
     init(_ p: Safeslop_Control_V1_Profile) {
         self.init(name: p.name, agent: p.agent, environment: p.environment, network: p.network,
-                  tier: p.tier, tierNote: p.tierNote, trustStatus: p.trustStatus, configDir: p.configDir)
+                  tier: p.tier, tierNote: p.tierNote, trustStatus: p.trustStatus, configDir: p.configDir,
+                  riskHeadline: p.riskHeadline, riskLevel: p.riskLevel, riskLines: p.riskLines)
     }
     var proto: Safeslop_Control_V1_Profile {
         .with {
             $0.name = name; $0.agent = agent; $0.environment = environment; $0.network = network
             $0.tier = tier; $0.tierNote = tierNote; $0.trustStatus = trustStatus; $0.configDir = configDir
+            $0.riskHeadline = riskHeadline; $0.riskLevel = riskLevel; $0.riskLines = riskLines
+        }
+    }
+
+    /// Arbiter color band (research finding #2): high = red, elevated = orange, contained = green.
+    var riskColor: Color {
+        switch riskLevel {
+        case "high": return .red
+        case "elevated": return .orange
+        default: return .green
         }
     }
 
@@ -260,6 +276,11 @@ struct TrustSheet: View {
             }
             .padding(12)
             .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+
+            // The arbiter's break-glass consequences — what the agent can do if compromised.
+            ArbiterPane(ref: ref)
+                .padding(12)
+                .background(ref.riskColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
 
             Text(ref.configDir).font(.caption.monospaced()).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.head)
 

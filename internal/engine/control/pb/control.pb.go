@@ -301,10 +301,13 @@ type Profile struct {
 	Agent         string                 `protobuf:"bytes,2,opt,name=agent,proto3" json:"agent,omitempty"`
 	Environment   string                 `protobuf:"bytes,3,opt,name=environment,proto3" json:"environment,omitempty"`
 	Network       string                 `protobuf:"bytes,4,opt,name=network,proto3" json:"network,omitempty"`
-	Tier          string                 `protobuf:"bytes,5,opt,name=tier,proto3" json:"tier,omitempty"`                                  // honest isolation tier from policy.EnvTier (e.g. "mistake-guard")
-	TierNote      string                 `protobuf:"bytes,6,opt,name=tier_note,json=tierNote,proto3" json:"tier_note,omitempty"`          // the one-line honest caveat from policy.EnvTier
-	TrustStatus   string                 `protobuf:"bytes,7,opt,name=trust_status,json=trustStatus,proto3" json:"trust_status,omitempty"` // per-policy trust gate state: "trusted" | "untrusted" | "changed"
-	ConfigDir     string                 `protobuf:"bytes,8,opt,name=config_dir,json=configDir,proto3" json:"config_dir,omitempty"`       // abs dir holding this safeslop.cue (the cockpit runs `safeslop run` here)
+	Tier          string                 `protobuf:"bytes,5,opt,name=tier,proto3" json:"tier,omitempty"`                                     // honest isolation tier from policy.EnvTier (e.g. "mistake-guard")
+	TierNote      string                 `protobuf:"bytes,6,opt,name=tier_note,json=tierNote,proto3" json:"tier_note,omitempty"`             // the one-line honest caveat from policy.EnvTier
+	TrustStatus   string                 `protobuf:"bytes,7,opt,name=trust_status,json=trustStatus,proto3" json:"trust_status,omitempty"`    // per-policy trust gate state: "trusted" | "untrusted" | "changed"
+	ConfigDir     string                 `protobuf:"bytes,8,opt,name=config_dir,json=configDir,proto3" json:"config_dir,omitempty"`          // abs dir holding this safeslop.cue (the cockpit runs `safeslop run` here)
+	RiskHeadline  string                 `protobuf:"bytes,9,opt,name=risk_headline,json=riskHeadline,proto3" json:"risk_headline,omitempty"` // arbiter one-liner consequence (policy.RiskSummary)
+	RiskLevel     string                 `protobuf:"bytes,10,opt,name=risk_level,json=riskLevel,proto3" json:"risk_level,omitempty"`         // "high" | "elevated" | "contained" — for color only
+	RiskLines     []string               `protobuf:"bytes,11,rep,name=risk_lines,json=riskLines,proto3" json:"risk_lines,omitempty"`         // break-glass consequence sentences
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -393,6 +396,27 @@ func (x *Profile) GetConfigDir() string {
 		return x.ConfigDir
 	}
 	return ""
+}
+
+func (x *Profile) GetRiskHeadline() string {
+	if x != nil {
+		return x.RiskHeadline
+	}
+	return ""
+}
+
+func (x *Profile) GetRiskLevel() string {
+	if x != nil {
+		return x.RiskLevel
+	}
+	return ""
+}
+
+func (x *Profile) GetRiskLines() []string {
+	if x != nil {
+		return x.RiskLines
+	}
+	return nil
 }
 
 type ListProfilesResponse struct {
@@ -1650,7 +1674,7 @@ const file_internal_engine_control_control_proto_rawDesc = "" +
 	"\aversion\x18\x01 \x01(\tR\aversion\"6\n" +
 	"\x13ListProfilesRequest\x12\x1f\n" +
 	"\vconfig_path\x18\x01 \x01(\tR\n" +
-	"configPath\"\xe2\x01\n" +
+	"configPath\"\xc5\x02\n" +
 	"\aProfile\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05agent\x18\x02 \x01(\tR\x05agent\x12 \n" +
@@ -1660,7 +1684,13 @@ const file_internal_engine_control_control_proto_rawDesc = "" +
 	"\ttier_note\x18\x06 \x01(\tR\btierNote\x12!\n" +
 	"\ftrust_status\x18\a \x01(\tR\vtrustStatus\x12\x1d\n" +
 	"\n" +
-	"config_dir\x18\b \x01(\tR\tconfigDir\"P\n" +
+	"config_dir\x18\b \x01(\tR\tconfigDir\x12#\n" +
+	"\rrisk_headline\x18\t \x01(\tR\friskHeadline\x12\x1d\n" +
+	"\n" +
+	"risk_level\x18\n" +
+	" \x01(\tR\triskLevel\x12\x1d\n" +
+	"\n" +
+	"risk_lines\x18\v \x03(\tR\triskLines\"P\n" +
 	"\x14ListProfilesResponse\x128\n" +
 	"\bprofiles\x18\x01 \x03(\v2\x1c.safeslop.control.v1.ProfileR\bprofiles\"J\n" +
 	"\rLaunchRequest\x12\x18\n" +
