@@ -10,7 +10,15 @@ CONTAINER_SRC := library/layer/container
 CONTAINER_DST := internal/engine/container/assets
 SYNCED        := allowlist.domains Dockerfile.agent Dockerfile.agent.tools
 
-.PHONY: build test vet fmt fmtcheck check check-assets sync-container-assets dist sign clean proto
+.PHONY: build test vet fmt fmtcheck check check-assets sync-container-assets dist sign clean proto cockpit cockpit-fresh
+
+## Click-test the SwiftUI cockpit with zero setup: build + seed a test repo + serve + run the app
+## (engine torn down on quit). You only deal with the GUI. `cockpit-fresh` also resets the trust store.
+cockpit:
+	@bash app/run-cockpit-test.sh
+
+cockpit-fresh:
+	@bash app/run-cockpit-test.sh --fresh
 
 ## Regenerate the gRPC control-plane stubs (dev-only; needs protoc + protoc-gen-go[-grpc]).
 ## Generated *.pb.go are committed, so CI/`make build` never run protoc.
