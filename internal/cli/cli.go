@@ -757,15 +757,20 @@ func printTools(label string, tools []install.Tool) {
 }
 
 func cmdLaunch() *cobra.Command {
-	return &cobra.Command{
+	var configDir string
+	cmd := &cobra.Command{
 		Use:   "launch <profile>",
 		Short: "Open a terminal window running the profile's agent (ctty intact)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			_, err := launchProfile(args[0], "")
+			_, err := launchProfile(args[0], configDir)
 			return err
 		},
 	}
+	// --config makes launch usable from a hotkey/skhd in ANY cwd: it resolves the workspace from
+	// here instead of os.Getwd() (specs/0028). Trust is still enforced by the launched `safeslop run`.
+	cmd.Flags().StringVar(&configDir, "config", "", "directory holding the safeslop.cue (for hotkeys/launchers from any cwd)")
+	return cmd
 }
 
 // launchProfile opens the user's preferred terminal (from ~/.config/safeslop/config.cue) running
@@ -776,12 +781,31 @@ func cmdLaunch() *cobra.Command {
 // terminal's window title and SAFESLOP_SESSION, so it must not carry shell/title metacharacters.
 var profileNameRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
+// launchWorkspace resolves the workspace directory for a launch: from --config (usable from any cwd,
+// e.g. a skhd hotkey) canonicalized so the spawned `safeslop run` computes the same trust key (the
+// /tmp vs /private/tmp fix, specs/0028), or the current directory when --config is empty. Extracted
+// so the resolution is unit-testable without spawning a terminal.
+func launchWorkspace(configPath string) (string, error) {
+	if configPath != "" {
+		cuePath, err := findConfig(configPath)
+		if err != nil {
+			return "", err
+		}
+		// Fail fast for a hotkey/launcher: a missing safeslop.cue should error here, not spawn a
+		// terminal that dies (findConfig constructs the path without checking existence).
+		if _, err := os.Stat(cuePath); err != nil {
+			return "", fmt.Errorf("no safeslop.cue under %s", configPath)
+		}
+		return filepath.Dir(canonicalPolicyPath(cuePath)), nil
+	}
+	return os.Getwd()
+}
+
 func launchProfile(name, configPath string) (int, error) {
-	_ = configPath
 	if !profileNameRe.MatchString(name) {
 		return 1, fmt.Errorf("invalid profile name %q (allowed: letters, digits, dot, underscore, hyphen)", name)
 	}
-	ws, err := os.Getwd()
+	ws, err := launchWorkspace(configPath)
 	if err != nil {
 		return 1, err
 	}
