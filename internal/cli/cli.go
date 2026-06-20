@@ -365,6 +365,10 @@ func cockpitListProfiles(configPath string) ([]*pb.Profile, error) {
 			}
 		}
 	}
+	configDir := ""
+	if abs, aerr := filepath.Abs(path); aerr == nil {
+		configDir = filepath.Dir(abs)
+	}
 	out := make([]*pb.Profile, 0, len(cfg.Profiles))
 	for name, prof := range cfg.Profiles {
 		env := prof.Environment
@@ -380,6 +384,7 @@ func cockpitListProfiles(configPath string) ([]*pb.Profile, error) {
 			Tier:        tier,
 			TierNote:    note,
 			TrustStatus: trustStatus,
+			ConfigDir:   configDir,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
