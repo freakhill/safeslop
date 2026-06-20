@@ -7,16 +7,23 @@ struct ProfileRef: Codable, Hashable, Identifiable {
     var agent: String
     var environment: String
     var network: String
+    var tier: String      // honest isolation tier from the engine (policy.EnvTier) — single source of truth
+    var tierNote: String  // the one-line honest caveat
     var id: String { name }
 
-    init(name: String, agent: String, environment: String, network: String) {
+    init(name: String, agent: String, environment: String, network: String, tier: String = "", tierNote: String = "") {
         self.name = name; self.agent = agent; self.environment = environment; self.network = network
+        self.tier = tier; self.tierNote = tierNote
     }
     init(_ p: Safeslop_Control_V1_Profile) {
-        self.init(name: p.name, agent: p.agent, environment: p.environment, network: p.network)
+        self.init(name: p.name, agent: p.agent, environment: p.environment, network: p.network,
+                  tier: p.tier, tierNote: p.tierNote)
     }
     var proto: Safeslop_Control_V1_Profile {
-        .with { $0.name = name; $0.agent = agent; $0.environment = environment; $0.network = network }
+        .with {
+            $0.name = name; $0.agent = agent; $0.environment = environment; $0.network = network
+            $0.tier = tier; $0.tierNote = tierNote
+        }
     }
 
     /// Trust color (specs/0014 §5): vm/container = amber; else red for open egress, green for deny.
@@ -24,6 +31,20 @@ struct ProfileRef: Codable, Hashable, Identifiable {
         if environment == "vm" || environment == "container" { return .orange }
         return network == "allow" ? .red : .green
     }
+
+    /// SF Symbol for the tier — presentation only; the honest tier *label* is `tier` (from the
+    /// engine's EnvTier), never re-derived here (specs/research/2026-06-20-cockpit-safe-by-design.md).
+    var tierSymbol: String {
+        switch environment {
+        case "host": return "exclamationmark.octagon.fill"
+        case "container": return "scope"
+        case "vm": return "externaldrive.connected.to.line.below.fill"
+        default: return "lock.shield.fill" // sandbox
+        }
+    }
+
+    /// The honest tier label, falling back to the environment if the engine didn't supply one.
+    var tierLabel: String { tier.isEmpty ? environment : tier }
 }
 
 /// SessionHostView owns the CockpitSession for a window and renders the cockpit chrome.
@@ -78,7 +99,11 @@ struct CockpitChrome: View {
     private var header: some View {
         HStack(spacing: 10) {
             Text(ref.name).font(.headline)
-            badge(ref.environment, .secondary)
+            // Honest tier from the engine (EnvTier); the note is the hover caveat.
+            Label(ref.tierLabel, systemImage: ref.tierSymbol)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(ref.trustColor)
+                .help(ref.tierNote)
             badge("net: \(ref.network)", ref.network == "allow" ? .red : .green)
             Spacer()
             Text("agent: \(ref.agent)").font(.caption).foregroundStyle(.secondary)

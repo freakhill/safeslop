@@ -339,6 +339,39 @@ func cockpitTrust(configPath string) (string, error) {
 	return filepath.Abs(path)
 }
 
+// cockpitListProfiles returns the safeslop.cue profiles for the GUI launcher, each tagged with its
+// honest isolation tier from policy.EnvTier — one source of truth for the cockpit's tier indicator
+// (specs/research/2026-06-20-cockpit-safe-by-design.md). Listing is inspection (ungated, like
+// `list`/`validate`); the socket peer check (control/peerauth.go) still applies.
+func cockpitListProfiles(configPath string) ([]*pb.Profile, error) {
+	path, err := findConfig(configPath)
+	if err != nil {
+		return nil, err
+	}
+	cfg, err := policy.Load(path)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*pb.Profile, 0, len(cfg.Profiles))
+	for name, prof := range cfg.Profiles {
+		env := prof.Environment
+		if env == "" {
+			env = "sandbox" // schema default
+		}
+		tier, note := policy.EnvTier(env)
+		out = append(out, &pb.Profile{
+			Name:        name,
+			Agent:       prof.Agent,
+			Environment: env,
+			Network:     prof.Network,
+			Tier:        tier,
+			TierNote:    note,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
 func cmdTrust() *cobra.Command {
 	return &cobra.Command{
 		Use:   "trust [safeslop.cue]",
@@ -411,6 +444,7 @@ func cmdServe() *cobra.Command {
 				},
 				resolveSession,
 				cockpitTrust,
+				cockpitListProfiles,
 			)
 		},
 	}

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/freakhill/safeslop/internal/engine/control/pb"
 	"github.com/freakhill/safeslop/internal/engine/sandbox"
 )
 
@@ -173,5 +174,36 @@ func TestCockpitTrustUnblocksResolveSession(t *testing.T) {
 	}
 	if _, err := resolveSession("h", path); err != nil {
 		t.Fatalf("after Trust, resolveSession must pass: %v", err)
+	}
+}
+
+// TestCockpitListProfiles: the GUI launcher's ListProfiles source returns each profile tagged with
+// its honest EnvTier tier + note (single source of truth for the cockpit's tier indicator).
+func TestCockpitListProfiles(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "safeslop.cue")
+	if err := os.WriteFile(path, []byte(resolverCue), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	profs, err := cockpitListProfiles(path) // listing is ungated — no trust needed
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]*pb.Profile{}
+	for _, p := range profs {
+		byName[p.Name] = p
+	}
+	want := map[string]string{"h": "none", "s": "mistake-guard", "c": "egress-allowlisted", "v": "adversary-grade"}
+	for name, tier := range want {
+		p := byName[name]
+		if p == nil {
+			t.Fatalf("profile %q missing from list", name)
+		}
+		if p.Tier != tier {
+			t.Errorf("profile %q tier = %q, want %q", name, p.Tier, tier)
+		}
+		if p.TierNote == "" {
+			t.Errorf("profile %q must carry a tier note", name)
+		}
 	}
 }

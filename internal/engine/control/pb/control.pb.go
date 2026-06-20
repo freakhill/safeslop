@@ -252,6 +252,8 @@ type Profile struct {
 	Agent         string                 `protobuf:"bytes,2,opt,name=agent,proto3" json:"agent,omitempty"`
 	Environment   string                 `protobuf:"bytes,3,opt,name=environment,proto3" json:"environment,omitempty"`
 	Network       string                 `protobuf:"bytes,4,opt,name=network,proto3" json:"network,omitempty"`
+	Tier          string                 `protobuf:"bytes,5,opt,name=tier,proto3" json:"tier,omitempty"`                         // honest isolation tier from policy.EnvTier (e.g. "mistake-guard")
+	TierNote      string                 `protobuf:"bytes,6,opt,name=tier_note,json=tierNote,proto3" json:"tier_note,omitempty"` // the one-line honest caveat from policy.EnvTier
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -310,6 +312,20 @@ func (x *Profile) GetEnvironment() string {
 func (x *Profile) GetNetwork() string {
 	if x != nil {
 		return x.Network
+	}
+	return ""
+}
+
+func (x *Profile) GetTier() string {
+	if x != nil {
+		return x.Tier
+	}
+	return ""
+}
+
+func (x *Profile) GetTierNote() string {
+	if x != nil {
+		return x.TierNote
 	}
 	return ""
 }
@@ -1288,12 +1304,14 @@ const file_internal_engine_control_control_proto_rawDesc = "" +
 	"\aversion\x18\x01 \x01(\tR\aversion\"6\n" +
 	"\x13ListProfilesRequest\x12\x1f\n" +
 	"\vconfig_path\x18\x01 \x01(\tR\n" +
-	"configPath\"o\n" +
+	"configPath\"\xa0\x01\n" +
 	"\aProfile\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05agent\x18\x02 \x01(\tR\x05agent\x12 \n" +
 	"\venvironment\x18\x03 \x01(\tR\venvironment\x12\x18\n" +
-	"\anetwork\x18\x04 \x01(\tR\anetwork\"P\n" +
+	"\anetwork\x18\x04 \x01(\tR\anetwork\x12\x12\n" +
+	"\x04tier\x18\x05 \x01(\tR\x04tier\x12\x1b\n" +
+	"\ttier_note\x18\x06 \x01(\tR\btierNote\"P\n" +
 	"\x14ListProfilesResponse\x128\n" +
 	"\bprofiles\x18\x01 \x03(\v2\x1c.safeslop.control.v1.ProfileR\bprofiles\"J\n" +
 	"\rLaunchRequest\x12\x18\n" +
