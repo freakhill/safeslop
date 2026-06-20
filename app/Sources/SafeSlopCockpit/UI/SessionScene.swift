@@ -49,12 +49,21 @@ struct CockpitChrome: View {
     let ref: ProfileRef
     let session: CockpitSession
     private let border: CGFloat = 3
+    // The trust signal is HOST-DRAWN chrome: the agent owns only the SwiftTerm buffer and cannot
+    // paint these views, so it can't fake a "safe" posture (specs/research/2026-06-20-cockpit-safe-
+    // by-design.md). A thin border stops registering after ~30 min (the TCC-dot effect), so the
+    // trust color is rendered as an AMBIENT tint — the header/footer materials and a faint wash over
+    // the terminal — so it keeps feeling different. Tune these opacities to taste:
+    private let barTint: Double = 0.18      // trust color over the header/footer bar material
+    private let ambientTint: Double = 0.05  // faint "lights on" wash over the terminal
 
     var body: some View {
         VStack(spacing: 0) {
             header
             TerminalBridge(session: session)
                 .frame(minWidth: 480, minHeight: 280)
+                // allowsHitTesting(false): never intercept keystrokes meant for the PTY.
+                .overlay(ref.trustColor.opacity(ambientTint).allowsHitTesting(false))
             footer
         }
         .padding(border)
@@ -75,6 +84,7 @@ struct CockpitChrome: View {
             Text("agent: \(ref.agent)").font(.caption).foregroundStyle(.secondary)
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
+        .background(ref.trustColor.opacity(barTint))
         .background(.bar)
     }
 
@@ -88,6 +98,7 @@ struct CockpitChrome: View {
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 4)
+        .background(ref.trustColor.opacity(barTint))
         .background(.bar)
     }
 
