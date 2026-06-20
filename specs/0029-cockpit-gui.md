@@ -78,6 +78,28 @@ intent, gate profile creation on NE-installed. Shares the Phase-1 capability voc
 
 ---
 
+## Progress (2026-06-20, autonomous night session)
+
+Branch `sp-cockpit-gui-spec`. Landed + gated (`make check`, swift build, fish suite, app mounts clean):
+
+- **Three-tab shell** (Launch / Installs / Create) over a shared `EngineModel`; Launch sorts
+  safest-tier-first and grays missing-config profiles. ✅ (Task 1)
+- **Installs tab** — reoriented per the user's later ask into a **per-tool, brew-aware, non-clobbering
+  catalog** (`internal/engine/tools` + `ListTools`/`InstallTool` RPCs): detects what's present and how
+  it was installed; only ever offers to install a *missing* tool (structural no-clobber); people pick
+  one at a time. Covers uv/bun/pnpm/mise/nix, docker/orbstack/tart, 1Password/Bitwarden/KeePassXC/
+  Proton Pass, go/fish, agents. (Supersedes Task 1's InstallPlan view; the pinned installer RPCs remain.)
+- **Safety arbiter** (`policy.RiskSummary`) — break-glass consequences, not a score; plumbed onto every
+  profile; shown on Launch rows + the trust sheet. ✅ (Task 4)
+- **Create tab** — the **text-canonical** half: a live CUE editor (`ValidatePolicy` RPC + `policy.
+  LoadBytes`) with inline cue-vet errors + a per-profile arbiter preview as you type. ✅ (Task 2 text side)
+- **CLI `safeslop launch --config <dir>`** for hotkeys (`launchWorkspace`, canonicalized, fail-fast). ✅ (Task 6 CLI)
+
+**Not yet done (Phase 1 remainder):** file-scope drag-drop + auto-deny-secrets (Task 3); trust-gate
+semantic diff (Task 5); dock menu + ephemeral-key HUD (Task 6 rest); the **visual** editor half (Task 2)
+— deferred pending the FLO hand-off on how much visual may author vs force-to-text. Editor save-to-disk
++ trust write-back is the next natural step on the Create tab.
+
 ## Phase 1 tasks
 
 Conventions: Swift code under `app/Sources/SafeSlopCockpit/`; Go engine changes under
