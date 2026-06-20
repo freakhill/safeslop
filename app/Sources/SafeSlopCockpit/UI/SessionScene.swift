@@ -56,6 +56,24 @@ struct ProfileRef: Codable, Hashable, Identifiable {
     }
     var tierLabel: String { tier.isEmpty ? environment : tier }
 
+    /// Safest-tier-first ordering for the Launch tab + dock menu (research G/H): vm < container <
+    /// sandbox < host, so the strongest isolation sorts to the top and host (no isolation) to the
+    /// bottom. The safe path is literally the first one you reach.
+    var tierRank: Int {
+        switch environment {
+        case "vm": return 0
+        case "container": return 1
+        case "sandbox": return 2
+        default: return 3 // host
+        }
+    }
+
+    /// A profile whose config dir no longer exists can't launch; the Launch tab grays it out and
+    /// nudges cleanup rather than failing at click time (research E/last-used hygiene).
+    var configDirMissing: Bool {
+        !configDir.isEmpty && !FileManager.default.fileExists(atPath: configDir)
+    }
+
     /// host tier has no sandbox, so `network` is NOT enforced there — say "unenforced" rather than
     /// claiming "deny" (the agent has full host network). Only sandbox/container/vm enforce it.
     var netEnforced: Bool { environment != "host" }

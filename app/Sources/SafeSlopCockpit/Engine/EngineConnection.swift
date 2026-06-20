@@ -57,6 +57,31 @@ enum EngineConnection {
         }
     }
 
+    /// The pinned desired-state install plan (the SP7b-2 diff) for the Installs tab to preview.
+    static func installPlan() async throws -> [Safeslop_Control_V1_InstallAction] {
+        let transport = try makeTransport()
+        return try await withGRPCClient(transport: transport) { client in
+            let control = Safeslop_Control_V1_Control.Client(wrapping: client)
+            let resp = try await control.installPlan(.init())
+            return resp.actions
+        }
+    }
+
+    /// Applies the install plan, streaming progress events (download, verify fail-closed, install).
+    /// `onEvent` is called on the engine's stream order; it runs off the main actor, so the caller
+    /// hops to @MainActor to mutate UI state.
+    static func installApply(onEvent: @Sendable @escaping (Safeslop_Control_V1_InstallApplyEvent) async -> Void) async throws {
+        let transport = try makeTransport()
+        try await withGRPCClient(transport: transport) { client in
+            let control = Safeslop_Control_V1_Control.Client(wrapping: client)
+            try await control.installApply(.init()) { response in
+                for try await event in response.messages {
+                    await onEvent(event)
+                }
+            }
+        }
+    }
+
     /// Ensures `safeslop serve` is running: pings, and if unreachable spawns the binary and
     /// polls until the socket answers (or a timeout). `safeslop` is expected on PATH.
     @discardableResult
