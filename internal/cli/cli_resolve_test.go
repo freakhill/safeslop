@@ -180,6 +180,7 @@ func TestCockpitTrustUnblocksResolveSession(t *testing.T) {
 // TestCockpitListProfiles: the GUI launcher's ListProfiles source returns each profile tagged with
 // its honest EnvTier tier + note (single source of truth for the cockpit's tier indicator).
 func TestCockpitListProfiles(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // isolate the trust-store read
 	dir := t.TempDir()
 	path := filepath.Join(dir, "safeslop.cue")
 	if err := os.WriteFile(path, []byte(resolverCue), 0o644); err != nil {
@@ -204,6 +205,38 @@ func TestCockpitListProfiles(t *testing.T) {
 		}
 		if p.TierNote == "" {
 			t.Errorf("profile %q must carry a tier note", name)
+		}
+	}
+}
+
+// TestCockpitListProfilesTrustStatus: the launcher source reports per-policy trust state so the
+// GUI can badge it before launch (anti-ambush). Fresh => untrusted; after cockpitTrust => trusted.
+func TestCockpitListProfilesTrustStatus(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // isolated trust store
+	dir := t.TempDir()
+	path := filepath.Join(dir, "safeslop.cue")
+	if err := os.WriteFile(path, []byte(resolverCue), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	profs, err := cockpitListProfiles(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range profs {
+		if p.TrustStatus != "untrusted" {
+			t.Fatalf("fresh policy must list as untrusted, got %q for %q", p.TrustStatus, p.Name)
+		}
+	}
+	if _, err := cockpitTrust(path); err != nil {
+		t.Fatal(err)
+	}
+	profs2, err := cockpitListProfiles(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range profs2 {
+		if p.TrustStatus != "trusted" {
+			t.Fatalf("after trust, must list as trusted, got %q for %q", p.TrustStatus, p.Name)
 		}
 	}
 }

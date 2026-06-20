@@ -352,6 +352,19 @@ func cockpitListProfiles(configPath string) ([]*pb.Profile, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Per-policy trust state, surfaced so the launcher can badge it BEFORE launch (anti-ambush:
+	// the user sees "untrusted/changed" up front, not as a surprise prompt on click). Trust is
+	// per-file, so every profile in this safeslop.cue shares the status.
+	trustStatus := trust.Untrusted.String()
+	if abs, aerr := filepath.Abs(path); aerr == nil {
+		if data, rerr := os.ReadFile(abs); rerr == nil {
+			if sp, perr := trust.DefaultPath(); perr == nil {
+				if store, lerr := trust.Load(sp); lerr == nil {
+					trustStatus = store.Check(abs, data).String()
+				}
+			}
+		}
+	}
 	out := make([]*pb.Profile, 0, len(cfg.Profiles))
 	for name, prof := range cfg.Profiles {
 		env := prof.Environment
@@ -366,6 +379,7 @@ func cockpitListProfiles(configPath string) ([]*pb.Profile, error) {
 			Network:     prof.Network,
 			Tier:        tier,
 			TierNote:    note,
+			TrustStatus: trustStatus,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
