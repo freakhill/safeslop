@@ -28,6 +28,7 @@ var (
 // Category groups tools in the UI.
 const (
 	CatRuntime   = "Runtimes & package managers"
+	CatLang      = "Languages & toolchains"
 	CatForge     = "Source control & forges"
 	CatContainer = "Containers & VMs"
 	CatSecrets   = "Secret managers"
@@ -89,6 +90,23 @@ func Catalog() []Tool {
 			Script: "curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install",
 			Note:   "Nix package manager (Determinate installer)"},
 
+		// Languages & toolchains
+		{Name: "Go", Category: CatLang, Detect: []string{"go"}, Brew: "go",
+			Note: "Go toolchain — also builds the safeslop engine"},
+		{Name: "Rust", Category: CatLang, Detect: []string{"cargo", "rustc"},
+			Script: "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y",
+			Note:   "Rust toolchain — cargo/rustc via rustup"},
+		{Name: "Swift", Category: CatLang, Detect: []string{"swift", "swiftc"}, Brew: "swiftly",
+			Note: "Swift toolchain — brew installs swiftly, then `swiftly install latest` (or comes with Xcode)"},
+		{Name: "Clojure", Category: CatLang, Detect: []string{"clojure", "clj"}, Brew: "clojure/tools/clojure",
+			Note: "Clojure CLI (clj/clojure)"},
+		{Name: "Babashka", Category: CatLang, Detect: []string{"bb"}, Brew: "borkdude/brew/babashka",
+			Note: "fast-starting Clojure scripting (bb)"},
+		{Name: "Lean 4", Category: CatLang, Detect: []string{"lean", "elan"}, Brew: "elan",
+			Note: "Lean 4 theorem prover (via the elan toolchain manager)"},
+		{Name: "Xcode", Category: CatLang, Detect: []string{"xcodebuild"}, AppPath: "/Applications/Xcode.app",
+			Note: "Apple IDE + SDKs — install from the App Store"},
+
 		// Source control & forges (repo pull + ephemeral-key flows)
 		{Name: "git", Category: CatForge, Detect: []string{"git"}, Brew: "git",
 			Note: "version control — required for repo operations"},
@@ -118,7 +136,6 @@ func Catalog() []Tool {
 			Note: "Proton Pass app"},
 
 		// safeslop core
-		{Name: "Go", Category: CatCore, Detect: []string{"go"}, Brew: "go", Note: "builds the safeslop engine"},
 		{Name: "fish", Category: CatCore, Detect: []string{"fish"}, Brew: "fish", Note: "shell for the scripts stack"},
 
 		// Agents
