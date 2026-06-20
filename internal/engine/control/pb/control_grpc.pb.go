@@ -19,17 +19,18 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Control_Ping_FullMethodName         = "/safeslop.control.v1.Control/Ping"
-	Control_ListProfiles_FullMethodName = "/safeslop.control.v1.Control/ListProfiles"
-	Control_Launch_FullMethodName       = "/safeslop.control.v1.Control/Launch"
-	Control_OpenSession_FullMethodName  = "/safeslop.control.v1.Control/OpenSession"
-	Control_Attach_FullMethodName       = "/safeslop.control.v1.Control/Attach"
-	Control_CloseSession_FullMethodName = "/safeslop.control.v1.Control/CloseSession"
-	Control_Trust_FullMethodName        = "/safeslop.control.v1.Control/Trust"
-	Control_InstallPlan_FullMethodName  = "/safeslop.control.v1.Control/InstallPlan"
-	Control_InstallApply_FullMethodName = "/safeslop.control.v1.Control/InstallApply"
-	Control_ListTools_FullMethodName    = "/safeslop.control.v1.Control/ListTools"
-	Control_InstallTool_FullMethodName  = "/safeslop.control.v1.Control/InstallTool"
+	Control_Ping_FullMethodName           = "/safeslop.control.v1.Control/Ping"
+	Control_ListProfiles_FullMethodName   = "/safeslop.control.v1.Control/ListProfiles"
+	Control_Launch_FullMethodName         = "/safeslop.control.v1.Control/Launch"
+	Control_OpenSession_FullMethodName    = "/safeslop.control.v1.Control/OpenSession"
+	Control_Attach_FullMethodName         = "/safeslop.control.v1.Control/Attach"
+	Control_CloseSession_FullMethodName   = "/safeslop.control.v1.Control/CloseSession"
+	Control_Trust_FullMethodName          = "/safeslop.control.v1.Control/Trust"
+	Control_InstallPlan_FullMethodName    = "/safeslop.control.v1.Control/InstallPlan"
+	Control_InstallApply_FullMethodName   = "/safeslop.control.v1.Control/InstallApply"
+	Control_ListTools_FullMethodName      = "/safeslop.control.v1.Control/ListTools"
+	Control_InstallTool_FullMethodName    = "/safeslop.control.v1.Control/InstallTool"
+	Control_ValidatePolicy_FullMethodName = "/safeslop.control.v1.Control/ValidatePolicy"
 )
 
 // ControlClient is the client API for Control service.
@@ -49,6 +50,7 @@ type ControlClient interface {
 	InstallApply(ctx context.Context, in *InstallApplyRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[InstallApplyEvent], error)
 	ListTools(ctx context.Context, in *ListToolsRequest, opts ...grpc.CallOption) (*ListToolsResponse, error)
 	InstallTool(ctx context.Context, in *InstallToolRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[InstallToolEvent], error)
+	ValidatePolicy(ctx context.Context, in *ValidatePolicyRequest, opts ...grpc.CallOption) (*ValidatePolicyResponse, error)
 }
 
 type controlClient struct {
@@ -199,6 +201,16 @@ func (c *controlClient) InstallTool(ctx context.Context, in *InstallToolRequest,
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Control_InstallToolClient = grpc.ServerStreamingClient[InstallToolEvent]
 
+func (c *controlClient) ValidatePolicy(ctx context.Context, in *ValidatePolicyRequest, opts ...grpc.CallOption) (*ValidatePolicyResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ValidatePolicyResponse)
+	err := c.cc.Invoke(ctx, Control_ValidatePolicy_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ControlServer is the server API for Control service.
 // All implementations must embed UnimplementedControlServer
 // for forward compatibility.
@@ -216,6 +228,7 @@ type ControlServer interface {
 	InstallApply(*InstallApplyRequest, grpc.ServerStreamingServer[InstallApplyEvent]) error
 	ListTools(context.Context, *ListToolsRequest) (*ListToolsResponse, error)
 	InstallTool(*InstallToolRequest, grpc.ServerStreamingServer[InstallToolEvent]) error
+	ValidatePolicy(context.Context, *ValidatePolicyRequest) (*ValidatePolicyResponse, error)
 	mustEmbedUnimplementedControlServer()
 }
 
@@ -258,6 +271,9 @@ func (UnimplementedControlServer) ListTools(context.Context, *ListToolsRequest) 
 }
 func (UnimplementedControlServer) InstallTool(*InstallToolRequest, grpc.ServerStreamingServer[InstallToolEvent]) error {
 	return status.Error(codes.Unimplemented, "method InstallTool not implemented")
+}
+func (UnimplementedControlServer) ValidatePolicy(context.Context, *ValidatePolicyRequest) (*ValidatePolicyResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ValidatePolicy not implemented")
 }
 func (UnimplementedControlServer) mustEmbedUnimplementedControlServer() {}
 func (UnimplementedControlServer) testEmbeddedByValue()                 {}
@@ -446,6 +462,24 @@ func _Control_InstallTool_Handler(srv interface{}, stream grpc.ServerStream) err
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Control_InstallToolServer = grpc.ServerStreamingServer[InstallToolEvent]
 
+func _Control_ValidatePolicy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ValidatePolicyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ControlServer).ValidatePolicy(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Control_ValidatePolicy_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ControlServer).ValidatePolicy(ctx, req.(*ValidatePolicyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Control_ServiceDesc is the grpc.ServiceDesc for Control service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -480,6 +514,10 @@ var Control_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListTools",
 			Handler:    _Control_ListTools_Handler,
+		},
+		{
+			MethodName: "ValidatePolicy",
+			Handler:    _Control_ValidatePolicy_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

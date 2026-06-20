@@ -15,6 +15,7 @@ service Control {
   rpc InstallApply(InstallApplyRequest) returns (stream InstallApplyEvent);
   rpc ListTools(ListToolsRequest) returns (ListToolsResponse);
   rpc InstallTool(InstallToolRequest) returns (stream InstallToolEvent);
+  rpc ValidatePolicy(ValidatePolicyRequest) returns (ValidatePolicyResponse);
 }
 
 message PingRequest {}
@@ -129,4 +130,14 @@ message InstallToolEvent {
   enum Kind { LINE = 0; DONE = 1; ERROR = 2; }
   Kind kind = 1;
   string line = 2;
+}
+
+// ValidatePolicy vets unsaved safeslop.cue TEXT from the editor (policy.LoadBytes), returning a
+// cue-vet-quality error or the parsed profiles each tagged with their tier + arbiter risk summary —
+// the live feedback loop for the Create tab. trust_status/config_dir are empty (text isn't on disk).
+message ValidatePolicyRequest { string cue_text = 1; }
+message ValidatePolicyResponse {
+  bool valid = 1;
+  string error = 2;             // empty when valid; cue/errors.Details otherwise
+  repeated Profile profiles = 3;
 }

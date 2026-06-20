@@ -126,6 +126,17 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
+	cfg, err := LoadBytes(data)
+	if err != nil {
+		return nil, fmt.Errorf("%s:\n%w", path, err)
+	}
+	return cfg, nil
+}
+
+// LoadBytes validates + decodes safeslop.cue content held in memory — the path-free core of Load,
+// used by the GUI editor's live validation (so it can vet unsaved text without a temp file). Errors
+// carry cue/errors.Details for cue-vet-quality messages.
+func LoadBytes(data []byte) (*Config, error) {
 	ctx := cuecontext.New()
 	overlay := map[string]load.Source{
 		filepath.Join(virtualDir, "cue.mod", "module.cue"): load.FromString(`module: "safeslop.local/cfg"` + "\n" + `language: version: "v0.9.0"`),
@@ -134,21 +145,21 @@ func Load(path string) (*Config, error) {
 	}
 	insts := load.Instances([]string{"."}, &load.Config{Dir: virtualDir, Overlay: overlay})
 	if len(insts) == 0 {
-		return nil, fmt.Errorf("no CUE instance produced for %s", path)
+		return nil, fmt.Errorf("no CUE instance produced")
 	}
 	if insts[0].Err != nil {
-		return nil, fmt.Errorf("load %s:\n%s", path, errors.Details(insts[0].Err, nil))
+		return nil, fmt.Errorf("load:\n%s", errors.Details(insts[0].Err, nil))
 	}
 	val := ctx.BuildInstance(insts[0])
 	if err := val.Err(); err != nil {
-		return nil, fmt.Errorf("build %s:\n%s", path, errors.Details(err, nil))
+		return nil, fmt.Errorf("build:\n%s", errors.Details(err, nil))
 	}
 	if err := val.Validate(cue.Concrete(true)); err != nil {
-		return nil, fmt.Errorf("invalid %s:\n%s", path, errors.Details(err, nil))
+		return nil, fmt.Errorf("invalid:\n%s", errors.Details(err, nil))
 	}
 	var cfg Config
 	if err := val.LookupPath(cue.ParsePath("safeslop")).Decode(&cfg); err != nil {
-		return nil, fmt.Errorf("decode %s: %w", path, err)
+		return nil, fmt.Errorf("decode: %w", err)
 	}
 	return &cfg, nil
 }

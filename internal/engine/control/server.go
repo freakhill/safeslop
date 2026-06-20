@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"sort"
 	"strings"
 
 	"google.golang.org/grpc/codes"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/freakhill/safeslop/internal/engine/control/pb"
 	"github.com/freakhill/safeslop/internal/engine/install"
+	"github.com/freakhill/safeslop/internal/engine/policy"
 	"github.com/freakhill/safeslop/internal/engine/tools"
 )
 
@@ -190,6 +192,37 @@ func (s *server) InstallTool(req *pb.InstallToolRequest, stream pb.Control_Insta
 	}
 	_ = stream.Send(&pb.InstallToolEvent{Kind: pb.InstallToolEvent_DONE})
 	return nil
+}
+
+// ValidatePolicy vets unsaved CUE text from the editor (policy.LoadBytes) and returns either a
+// cue-vet error or the parsed profiles, each tagged with tier + arbiter risk — the Create tab's live
+// feedback loop. Pure parsing; no host mutation.
+func (s *server) ValidatePolicy(_ context.Context, req *pb.ValidatePolicyRequest) (*pb.ValidatePolicyResponse, error) {
+	cfg, err := policy.LoadBytes([]byte(req.CueText))
+	if err != nil {
+		return &pb.ValidatePolicyResponse{Valid: false, Error: err.Error()}, nil
+	}
+	resp := &pb.ValidatePolicyResponse{Valid: true}
+	names := make([]string, 0, len(cfg.Profiles))
+	for n := range cfg.Profiles {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		prof := cfg.Profiles[n]
+		env := prof.Environment
+		if env == "" {
+			env = "sandbox"
+		}
+		tier, note := policy.EnvTier(env)
+		risk := policy.RiskSummary(prof)
+		resp.Profiles = append(resp.Profiles, &pb.Profile{
+			Name: n, Agent: prof.Agent, Environment: env, Network: prof.Network,
+			Tier: tier, TierNote: note,
+			RiskHeadline: risk.Headline, RiskLevel: risk.Level, RiskLines: risk.Lines,
+		})
+	}
+	return resp, nil
 }
 
 // installEventToPB maps a pb-free install.Event onto the wire enum.

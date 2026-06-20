@@ -105,6 +105,16 @@ enum EngineConnection {
         }
     }
 
+    /// Validates unsaved safeslop.cue text from the editor, returning a cue-vet error or the parsed
+    /// profiles tagged with their tier + arbiter risk (the Create tab's live feedback loop).
+    static func validatePolicy(_ cueText: String) async throws -> Safeslop_Control_V1_ValidatePolicyResponse {
+        let transport = try makeTransport()
+        return try await withGRPCClient(transport: transport) { client in
+            let control = Safeslop_Control_V1_Control.Client(wrapping: client)
+            return try await control.validatePolicy(.with { $0.cueText = cueText })
+        }
+    }
+
     /// Ensures `safeslop serve` is running: pings, and if unreachable spawns the binary and
     /// polls until the socket answers (or a timeout). `safeslop` is expected on PATH.
     @discardableResult
