@@ -29,7 +29,7 @@ struct InstallsTab: View {
                 Text("Tools").font(.title3.weight(.medium)).foregroundStyle(.secondary)
                 Spacer()
                 Text(status).font(.caption).foregroundStyle(.secondary)
-                Button("Re-detect", systemImage: "arrow.clockwise") { Task { await load() } }
+                Button("Re-detect", systemImage: "arrow.clockwise") { Task { await load(catalogOnly: false) } }
                     .disabled(!installing.isEmpty)
             }
 
@@ -55,20 +55,27 @@ struct InstallsTab: View {
             }
         }
         .padding()
-        .task { await load() }
+        // instant first paint (every tool with a "?"), then the real brew-backed detection.
+        .task {
+            await load(catalogOnly: true)
+            await load(catalogOnly: false)
+        }
     }
 
     @ViewBuilder
     private func row(_ t: Safeslop_Control_V1_ToolStatus) -> some View {
+        let unknown = t.source == "unknown"
         HStack(spacing: 10) {
-            Image(systemName: t.present ? "checkmark.circle.fill" : "circle.dashed")
-                .foregroundStyle(t.present ? .green : .secondary)
+            Image(systemName: unknown ? "questionmark.circle" : (t.present ? "checkmark.circle.fill" : "circle.dashed"))
+                .foregroundStyle(unknown ? .secondary : (t.present ? .green : .secondary))
             VStack(alignment: .leading, spacing: 1) {
                 Text(t.name).font(.headline)
                 Text(t.note).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            if t.present {
+            if unknown {
+                Text("?").font(.callout.weight(.bold)).foregroundStyle(.secondary).help("detecting…")
+            } else if t.present {
                 Text(t.source).font(.caption2.weight(.semibold))
                     .padding(.horizontal, 6).padding(.vertical, 2)
                     .background(.green.opacity(0.15), in: Capsule()).foregroundStyle(.green)
@@ -92,15 +99,20 @@ struct InstallsTab: View {
             }
         }
         .padding(.vertical, 2)
+        .opacity(unknown ? 0.6 : 1)
     }
 
-    private func load() async {
+    private func load(catalogOnly: Bool) async {
         guard await EngineConnection.ensureServing() else { status = "engine unreachable"; return }
         do {
-            tools = try await EngineConnection.listTools()
-            let missing = tools.filter { $0.installable }.count
-            let present = tools.filter { $0.present }.count
-            status = "\(present) installed · \(missing) available"
+            tools = try await EngineConnection.listTools(catalogOnly: catalogOnly)
+            if catalogOnly {
+                status = "detecting…"
+            } else {
+                let missing = tools.filter { $0.installable }.count
+                let present = tools.filter { $0.present }.count
+                status = "\(present) installed · \(missing) available"
+            }
         } catch {
             status = "detect failed: \(error)"
         }

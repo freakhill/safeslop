@@ -111,7 +111,9 @@ message InstallApplyEvent {
 // ListTools returns the Installs-tab catalog with read-only detection of what's already present and
 // how it was installed. A present tool is reported with its source and is NOT installable, so safeslop
 // never clobbers an existing install (internal/engine/tools).
-message ListToolsRequest {}
+message ListToolsRequest {
+  bool catalog_only = 1; // true = instant catalog with detection deferred (Source "unknown")
+}
 message ToolStatus {
   string name = 1;
   string category = 2;

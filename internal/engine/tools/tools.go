@@ -68,10 +68,23 @@ type Status struct {
 	Path    string // resolved binary or app path ("" when missing)
 }
 
-// Installable reports whether safeslop should offer to install this tool: only when it is missing AND
-// at least one install route exists. Present tools are never installable (no-clobber guarantee).
+// Installable reports whether safeslop should offer to install this tool: only when detection has run
+// (Source != "unknown"), the tool is missing, AND an install route exists. Present tools are never
+// installable (no-clobber guarantee); undetected tools show no Install button until classified.
 func (s Status) Installable() bool {
-	return !s.Present && (s.Tool.Brew != "" || s.Tool.Cask != "" || s.Tool.Script != "")
+	return s.Source != "unknown" && !s.Present && (s.Tool.Brew != "" || s.Tool.Cask != "" || s.Tool.Script != "")
+}
+
+// CatalogStatuses returns the whole catalog with detection DEFERRED (Source "unknown") — an instant
+// first paint for the Installs tab, so every tool is listed immediately with a "?" while the
+// brew-dependent detection pass runs.
+func CatalogStatuses() []Status {
+	cat := Catalog()
+	out := make([]Status, 0, len(cat))
+	for _, t := range cat {
+		out = append(out, Status{Tool: t, Present: false, Source: "unknown"})
+	}
+	return out
 }
 
 // Catalog is the data-driven tool list. Add a row to extend; nothing else needs to change.

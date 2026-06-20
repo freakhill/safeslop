@@ -162,9 +162,13 @@ func (s *server) InstallApply(_ *pb.InstallApplyRequest, stream pb.Control_Insta
 // ListTools returns the Installs-tab catalog with read-only detection (internal/engine/tools). A
 // present tool is never installable, so the GUI can't ask safeslop to clobber an existing install.
 // The peer is uid/process-tree-checked at Accept, so a sandboxed agent can't enumerate the host here.
-func (s *server) ListTools(_ context.Context, _ *pb.ListToolsRequest) (*pb.ListToolsResponse, error) {
+func (s *server) ListTools(_ context.Context, req *pb.ListToolsRequest) (*pb.ListToolsResponse, error) {
+	statuses := tools.DetectAll()
+	if req.CatalogOnly {
+		statuses = tools.CatalogStatuses() // instant first paint, detection deferred
+	}
 	out := &pb.ListToolsResponse{}
-	for _, st := range tools.DetectAll() {
+	for _, st := range statuses {
 		ts := &pb.ToolStatus{
 			Name: st.Tool.Name, Category: st.Tool.Category, Note: st.Tool.Note,
 			Present: st.Present, Source: st.Source, Path: st.Path, Installable: st.Installable(),

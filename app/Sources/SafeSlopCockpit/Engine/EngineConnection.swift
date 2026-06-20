@@ -82,12 +82,13 @@ enum EngineConnection {
         }
     }
 
-    /// The Installs-tab tool catalog with read-only detection (present/source/installable).
-    static func listTools() async throws -> [Safeslop_Control_V1_ToolStatus] {
+    /// The Installs-tab tool catalog. catalogOnly=true returns instantly with detection deferred
+    /// (every tool Source "unknown") for a first paint; false runs the real (brew-backed) detection.
+    static func listTools(catalogOnly: Bool = false) async throws -> [Safeslop_Control_V1_ToolStatus] {
         let transport = try makeTransport()
         return try await withGRPCClient(transport: transport) { client in
             let control = Safeslop_Control_V1_Control.Client(wrapping: client)
-            let resp = try await control.listTools(.init())
+            let resp = try await control.listTools(.with { $0.catalogOnly = catalogOnly })
             return resp.tools
         }
     }

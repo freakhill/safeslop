@@ -1396,6 +1396,7 @@ func (x *InstallApplyEvent) GetMsg() string {
 // never clobbers an existing install (internal/engine/tools).
 type ListToolsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	CatalogOnly   bool                   `protobuf:"varint,1,opt,name=catalog_only,json=catalogOnly,proto3" json:"catalog_only,omitempty"` // true = instant catalog with detection deferred (Source "unknown")
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1428,6 +1429,13 @@ func (x *ListToolsRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ListToolsRequest.ProtoReflect.Descriptor instead.
 func (*ListToolsRequest) Descriptor() ([]byte, []int) {
 	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *ListToolsRequest) GetCatalogOnly() bool {
+	if x != nil {
+		return x.CatalogOnly
+	}
+	return false
 }
 
 type ToolStatus struct {
@@ -1872,8 +1880,9 @@ const file_internal_engine_control_control_proto_rawDesc = "" +
 	"\x05START\x10\x00\x12\f\n" +
 	"\bPROGRESS\x10\x01\x12\b\n" +
 	"\x04DONE\x10\x02\x12\t\n" +
-	"\x05ERROR\x10\x03\"\x12\n" +
-	"\x10ListToolsRequest\"\xdb\x01\n" +
+	"\x05ERROR\x10\x03\"5\n" +
+	"\x10ListToolsRequest\x12!\n" +
+	"\fcatalog_only\x18\x01 \x01(\bR\vcatalogOnly\"\xdb\x01\n" +
 	"\n" +
 	"ToolStatus\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1a\n" +
