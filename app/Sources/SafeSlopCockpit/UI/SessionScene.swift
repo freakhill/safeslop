@@ -61,11 +61,20 @@ struct ProfileRef: Codable, Hashable, Identifiable {
     var netEnforced: Bool { environment != "host" }
     var netLabel: String { netEnforced ? network : "unenforced" }
 
-    /// The command the session window runs: `safeslop run <profile>` in the policy's directory.
-    /// `safeslop run` does the trust gate + isolation + ctty; we just host its terminal.
-    var runArgv: [String] {
-        ["/bin/sh", "-c", "cd '\(configDir)' && exec safeslop run \(name)"]
+    /// Defense in depth: the profile name must be shell-safe-ish and the config dir absolute — even
+    /// though we never invoke a shell (the terminal runs `safeslop` via an argv list, below).
+    static let safeName = try! NSRegularExpression(pattern: "^[A-Za-z0-9._-]+$")
+    var runnable: Bool {
+        configDir.hasPrefix("/") &&
+            ProfileRef.safeName.firstMatch(in: name, range: NSRange(name.startIndex..., in: name)) != nil
     }
+    /// The session terminal runs `safeslop run <profile>` DIRECTLY — no shell, an argv list, with cwd
+    /// set to the policy dir via posix_spawn. /usr/bin/env finds safeslop on PATH; each arg is a
+    /// literal, so a hostile profile name / path can't inject host commands (the trust gate + run
+    /// happen as the user, before the sandbox). `safeslop run` itself does the gate + isolation + ctty.
+    var runExecutable: String { "/usr/bin/env" }
+    var runArgs: [String] { ["safeslop", "run", name] }
+    var runCwd: String { configDir }
 }
 
 /// SessionHostView drives one session window: gate trust (and Touch ID for the privilege boundary),
@@ -93,7 +102,8 @@ struct SessionHostView: View {
                            onApprove: { Task { await approve(changed: changed) } },
                            onCancel: { dismissWindow(value: ref) })
             case .running:
-                LocalTerminal(argv: ref.runArgv, onExit: { _ in dismissWindow(value: ref) })
+                LocalTerminal(executable: ref.runExecutable, args: ref.runArgs, currentDirectory: ref.runCwd,
+                              onExit: { _ in dismissWindow(value: ref) })
             case .denied(let why):
                 ContentUnavailableView("Cannot start", systemImage: "xmark.octagon",
                                        description: Text(why))
@@ -126,6 +136,9 @@ struct SessionHostView: View {
     }
 
     private func afterTrust() async {
+        guard ref.runnable else {
+            phase = .denied("refusing to launch: profile name or config path is not valid"); return
+        }
         if ref.environment == "host" { // launching with no isolation -> Touch ID
             let ok = await BiometricGate.confirm(reason: "launch “\(ref.name)” on the host — it runs with no isolation, as you.")
             if !ok { phase = .denied("authentication required to launch the host tier"); return }

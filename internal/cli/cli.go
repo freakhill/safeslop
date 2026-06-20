@@ -962,6 +962,10 @@ func arg0(args []string) string {
 // walking up from the current directory.
 func findConfig(explicit string) (string, error) {
 	if explicit != "" {
+		// A directory => the safeslop.cue inside it (the cockpit passes a config dir).
+		if fi, err := os.Stat(explicit); err == nil && fi.IsDir() {
+			return filepath.Join(explicit, "safeslop.cue"), nil
+		}
 		return explicit, nil
 	}
 	dir, err := os.Getwd()

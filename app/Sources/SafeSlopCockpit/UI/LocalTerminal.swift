@@ -8,7 +8,9 @@ import SwiftTerm
 /// no hand-rolled PTY-over-gRPC bridge (specs/research/2026-06-20-cockpit-safe-by-design.md).
 /// `onExit` fires when the process terminates, so the window can close itself.
 struct LocalTerminal: NSViewRepresentable {
-    let argv: [String]
+    let executable: String      // absolute path (e.g. /usr/bin/env)
+    let args: [String]          // argv — passed verbatim, NEVER through a shell (no injection)
+    let currentDirectory: String
     let onExit: @MainActor (Int32?) -> Void
 
     func makeNSView(context: Context) -> LocalProcessTerminalView {
@@ -16,7 +18,9 @@ struct LocalTerminal: NSViewRepresentable {
         tv.processDelegate = context.coordinator
         // Inherit the app's environment (PATH must contain `safeslop`); SwiftTerm wants KEY=VALUE.
         let env = ProcessInfo.processInfo.environment.map { "\($0.key)=\($0.value)" }
-        tv.startProcess(executable: argv[0], args: Array(argv.dropFirst()), environment: env)
+        // No shell: an argv list + posix_spawn working directory. Each arg is a literal, so a hostile
+        // profile name / path can't inject host commands (the trust gate runs as the user, pre-sandbox).
+        tv.startProcess(executable: executable, args: args, environment: env, currentDirectory: currentDirectory)
         DispatchQueue.main.async { [weak tv] in tv?.window?.makeFirstResponder(tv) }
         return tv
     }
