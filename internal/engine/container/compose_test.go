@@ -91,6 +91,34 @@ func TestComposeHasNoHostBridgeLeak(t *testing.T) {
 	}
 }
 
+// In deny/allowlist mode the agent is internal-only (squid is the sole egress, so the
+// allowlist is enforced). In open-egress mode the agent ALSO joins the egress bridge so
+// it has a real route + working DNS (ping/ssh/direct resolution) — otherwise "network:
+// allow" is misleadingly limited to HTTP(S)-via-proxy and DNS fails entirely.
+func TestComposeOpenEgressJoinsAgentToBridge(t *testing.T) {
+	deny, err := renderCompose(composeParams{RuntimeDir: "/r", Workspace: "/w", StageDir: "/r", OpenEgress: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(deny, "networks: [internal]") {
+		t.Fatalf("deny: agent must stay internal-only (squid is the sole egress):\n%s", deny)
+	}
+	if n := strings.Count(deny, "networks: [internal, egress]"); n != 1 {
+		t.Fatalf("deny: only the proxy joins egress, got %d such lines:\n%s", n, deny)
+	}
+
+	open, err := renderCompose(composeParams{RuntimeDir: "/r", Workspace: "/w", StageDir: "/r", OpenEgress: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(open, "networks: [internal]") {
+		t.Fatalf("open: agent must also join the egress bridge, not stay internal-only:\n%s", open)
+	}
+	if n := strings.Count(open, "networks: [internal, egress]"); n != 2 {
+		t.Fatalf("open: proxy + agent must both be on egress, got %d such lines:\n%s", n, open)
+	}
+}
+
 func TestRenderComposeKubeconfig(t *testing.T) {
 	with, err := renderCompose(composeParams{RuntimeDir: "/r", Workspace: "/w", StageDir: "/r", Kubeconfig: true})
 	if err != nil {

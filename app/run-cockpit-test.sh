@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Click-test the cockpit with zero manual setup. Builds safeslop, seeds a throwaway repo with a few
-# profiles (green deny / red open-egress / host), starts the engine FROM that repo, launches the
-# SwiftUI cockpit, and tears the engine down when you quit the app. You only deal with the GUI.
+# profiles (sandbox deny/allow, host, container deny=allowlist / allow=open-egress), starts the engine
+# FROM that repo, launches the SwiftUI cockpit, and tears everything (engine + any container stack)
+# down when you quit the app. You only deal with the GUI.
 #
 #   bash app/run-cockpit-test.sh            # build + serve + run the cockpit
 #   bash app/run-cockpit-test.sh --fresh    # also wipe the trust store, so all profiles start "not trusted"
@@ -28,9 +29,11 @@ package safeslop
 safeslop: {
 	version: 1
 	profiles: {
-		safe:  {agent: "shell", environment: "sandbox", network: "deny"}   // green chrome
-		net:   {agent: "shell", environment: "sandbox", network: "allow"}  // red chrome (open egress)
-		risky: {agent: "shell", environment: "host"}                        // host tier -> Touch ID
+		safe:   {agent: "shell", environment: "sandbox",   network: "deny"}   // green chrome
+		net:    {agent: "shell", environment: "sandbox",   network: "allow"}  // red chrome (open egress)
+		risky:  {agent: "shell", environment: "host"}                          // host tier -> Touch ID
+		box:    {agent: "shell", environment: "container", network: "deny"}   // egress-allowlisted (amber)
+		boxnet: {agent: "shell", environment: "container", network: "allow"}  // open egress (red)
 	}
 }
 CUE
@@ -39,7 +42,14 @@ echo "==> starting the engine (safeslop serve) from the test repo"
 pkill -f 'safeslop serve' 2>/dev/null || true
 sleep 0.3
 ( cd "$TESTREPO" && exec safeslop serve ) &
-trap 'echo; echo "==> stopping engine"; pkill -f "safeslop serve" 2>/dev/null || true' EXIT INT TERM
+cleanup() {
+  echo; echo "==> stopping engine"
+  pkill -f "safeslop serve" 2>/dev/null || true
+  # reap any container-tier stack a session left behind (squid proxy + agent run containers)
+  ids=$(docker ps -aq --filter "name=box" 2>/dev/null || true)
+  [ -n "$ids" ] && { echo "==> reaping container stack"; docker rm -f $ids >/dev/null 2>&1 || true; }
+}
+trap cleanup EXIT INT TERM
 
 # wait for the control socket
 for _ in $(seq 1 60); do [ -S "$HOME/.safeslop/s.sock" ] && break; sleep 0.1; done

@@ -1021,11 +1021,24 @@ func agentArgv(p policy.Profile) ([]string, error) {
 	case "opencode":
 		return []string{"opencode"}, nil
 	case "shell":
-		sh := os.Getenv("SHELL")
-		if sh == "" {
-			sh = "/bin/sh"
+		// The host's $SHELL is an absolute host path (e.g. /bin/zsh, /opt/homebrew/bin/fish).
+		// That path is correct for host/sandbox (the agent runs on the host) but does NOT exist
+		// inside a container or VM guest, where exec would fail ("/bin/zsh: not found"). For those
+		// tiers, name a shell guaranteed to exist in the image instead — resolved via the guest's
+		// PATH, not the host path.
+		switch p.Environment {
+		case "container":
+			// The agent image (node:22-bookworm + fish) always has bash.
+			return []string{"bash"}, nil
+		case "vm":
+			return []string{"/bin/sh"}, nil
+		default: // host, sandbox
+			sh := os.Getenv("SHELL")
+			if sh == "" {
+				sh = "/bin/sh"
+			}
+			return []string{sh}, nil
 		}
-		return []string{sh}, nil
 	default:
 		return nil, fmt.Errorf("unknown agent %q", p.Agent)
 	}

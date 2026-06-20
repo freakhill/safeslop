@@ -18,6 +18,7 @@ type composeParams struct {
 	Term       string
 	NpmConfig  bool // true when a staged .npmrc exists
 	Kubeconfig bool // true when a staged kubeconfig exists (KUBECONFIG -> bind-mount path)
+	OpenEgress bool // true in network:allow -> agent also joins the egress bridge (real route + DNS)
 }
 
 func renderCompose(p composeParams) (string, error) {

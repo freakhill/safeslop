@@ -27,7 +27,11 @@ services:
     cap_drop: [ALL]
     security_opt:
       - "no-new-privileges:true"
-    networks: [internal]
+    # internal-only by default: the squid proxy is the ONLY egress, so the allowlist is
+    # enforced and there is no direct DNS/route (deny tier). In open-egress mode the agent
+    # also joins the egress bridge so it has a real route + working DNS (ping, ssh, direct
+    # resolution) — "network: allow" means actually-open, not just HTTP(S)-via-proxy.
+    networks: [internal{{if .OpenEgress}}, egress{{end}}]
 networks:
   internal:
     internal: true

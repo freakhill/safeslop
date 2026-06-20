@@ -80,6 +80,7 @@ func provision(ctx context.Context, agentArgv []string, workspace, network strin
 		NpmConfig:  npmErr == nil,
 		Kubeconfig: kubeErr == nil,
 		SshKey:     sshErr == nil,
+		OpenEgress: network == "allow",
 	}
 	composeFile, err = materializeRun(p, network == "allow")
 	if err != nil {
