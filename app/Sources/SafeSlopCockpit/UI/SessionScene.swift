@@ -140,6 +140,13 @@ struct TrustSheet: View {
     let session: CockpitSession
 
     private var openEgress: Bool { ref.network == "allow" }
+    /// The policy changed since it was trusted (an agent may have edited it) — higher risk than a
+    /// first-time approval, so the approve action is gated behind Touch ID.
+    private var edited: Bool { message.contains("changed since you trusted") }
+    private var buttonTitle: String {
+        if edited { return "Re-trust edited policy (Touch ID)" }
+        return openEgress ? "Trust & Launch — allows open network" : "Trust & Launch"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -165,8 +172,8 @@ struct TrustSheet: View {
             HStack {
                 Button("Cancel", role: .cancel) { session.close() }
                 Spacer()
-                Button(openEgress ? "Trust & Launch — allows open network" : "Trust & Launch") {
-                    session.approveTrustAndRetry()
+                Button(buttonTitle) {
+                    session.approveTrustAndRetry(requireAuth: edited)
                 }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
