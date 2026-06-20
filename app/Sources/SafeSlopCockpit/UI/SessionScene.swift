@@ -59,6 +59,11 @@ struct ProfileRef: Codable, Hashable, Identifiable {
 
     /// The honest tier label, falling back to the environment if the engine didn't supply one.
     var tierLabel: String { tier.isEmpty ? environment : tier }
+
+    /// host tier has no sandbox, so `network` is NOT enforced there — say "unenforced" rather than
+    /// claiming "deny" (a lie: the agent has full host network). Only sandbox/container/vm enforce it.
+    var netEnforced: Bool { environment != "host" }
+    var netLabel: String { netEnforced ? network : "unenforced" }
 }
 
 /// SessionHostView owns the CockpitSession for a window and renders the cockpit chrome.
@@ -118,7 +123,7 @@ struct CockpitChrome: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(ref.trustColor)
                 .help(ref.tierNote)
-            badge("net: \(ref.network)", ref.network == "allow" ? .red : .green)
+            badge("net: \(ref.netLabel)", ref.netEnforced ? (ref.network == "allow" ? .red : .green) : .secondary)
             Spacer()
             Text("agent: \(ref.agent)").font(.caption).foregroundStyle(.secondary)
         }

@@ -13,10 +13,18 @@ struct TerminalBridge: NSViewRepresentable {
         // PTY output (from the Attach stream) is fed straight into the emulator on the main actor.
         session.onOutput = { [weak tv] bytes in tv?.feed(byteArray: bytes[...]) }
         session.start()
+        // Grab keyboard focus once the view is in its (key) window, so typing lands here without a
+        // click. Needs the window to be able to become key — see AppDelegate's activation policy.
+        DispatchQueue.main.async { [weak tv] in tv?.window?.makeFirstResponder(tv) }
         return tv
     }
 
-    func updateNSView(_ nsView: TerminalView, context: Context) {}
+    func updateNSView(_ nsView: TerminalView, context: Context) {
+        // Re-assert first responder if the terminal lost it (e.g. after the trust sheet dismissed).
+        if let win = nsView.window, win.firstResponder !== nsView, win.isKeyWindow {
+            win.makeFirstResponder(nsView)
+        }
+    }
 
     func makeCoordinator() -> Coordinator { Coordinator(session: session) }
 

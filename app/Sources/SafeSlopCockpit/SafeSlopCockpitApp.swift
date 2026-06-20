@@ -1,9 +1,12 @@
 import SwiftUI
+import AppKit
 
 // SafeSlop cockpit entry point. A launcher window lists the engine's profiles; opening one spawns
 // a per-session window (specs/0014 §4 — WindowGroup, one window == one session).
 @main
 struct SafeSlopCockpitApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
     var body: some Scene {
         WindowGroup("SafeSlop", id: "launcher") {
             LauncherView()
@@ -17,6 +20,16 @@ struct SafeSlopCockpitApp: App {
     }
 }
 
+/// Launched as a bare `swift run` executable (no .app bundle), the app would otherwise come up unable
+/// to become the key/active app — its windows take mouse clicks but never keyboard focus, so the
+/// embedded terminal can't receive keystrokes. Force a regular foreground app on launch.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
 /// LauncherView ensures `safeslop serve` is up, lists profiles, and opens a session window per pick.
 struct LauncherView: View {
     @Environment(\.openWindow) private var openWindow
@@ -27,7 +40,9 @@ struct LauncherView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("SafeSlop").font(.largeTitle.bold())
+                Text("practice safe slop")
+                    .font(.title3.weight(.medium))
+                    .foregroundStyle(.secondary)
                 Spacer()
                 if let version { Text("engine \(version)").font(.caption.monospaced()).foregroundStyle(.secondary) }
             }
@@ -46,7 +61,7 @@ struct LauncherView: View {
                                 .help(ref.tierNote)
                             VStack(alignment: .leading) {
                                 Text(ref.name).font(.headline)
-                                Text("\(ref.agent) · \(ref.tierLabel) · net:\(ref.network)")
+                                Text("\(ref.agent) · \(ref.tierLabel) · net:\(ref.netLabel)")
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                             if let badge = ref.trustBadge {
