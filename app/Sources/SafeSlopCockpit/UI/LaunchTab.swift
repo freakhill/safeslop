@@ -41,7 +41,8 @@ struct LaunchTab: View {
             if !missing { openWindow(id: "session", value: ref) }
         } label: {
             HStack {
-                Image(systemName: ref.tierSymbol).foregroundStyle(ref.trustColor).help(ref.tierNote)
+                // colored ecusson: danger level is the chip background; the glyph stays white.
+                RiskBadge(symbol: ref.tierSymbol, color: ref.riskColor).help(ref.tierNote)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(ref.name).font(.headline)
                     Text("\(ref.agent) · \(ref.tierLabel) · net:\(ref.netLabel)")
