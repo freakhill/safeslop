@@ -67,7 +67,7 @@ struct InstallsTab: View {
         let unknown = t.source == "unknown"
         HStack(spacing: 10) {
             Image(systemName: unknown ? "questionmark.circle" : (t.present ? "checkmark.circle.fill" : "circle.dashed"))
-                .foregroundStyle(unknown ? .secondary : (t.present ? .green : .secondary))
+                .foregroundStyle(unknown ? Color.gray : (t.present ? .green : .gray))
             VStack(alignment: .leading, spacing: 1) {
                 Text(t.name).font(.headline)
                 Text(t.note).font(.caption).foregroundStyle(.secondary)
@@ -126,7 +126,7 @@ struct InstallsTab: View {
                 await MainActor.run { log.append(line) }
             }
             log.append("— done —")
-            await load()
+            await load(catalogOnly: false)
         } catch {
             log.append("install failed: \(error)")
         }

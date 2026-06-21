@@ -50,6 +50,11 @@ struct CreateTab: View {
                         }
                     }
                 }
+                DisclosureGroup("File scope helper") {
+                    FileScopeEditor()
+                }
+                .font(.callout.weight(.medium))
+
                 Spacer()
                 Text("Editing is live-validated. Saving to a repo + the trust gate land next (specs/0029).")
                     .font(.caption2).foregroundStyle(.tertiary)
