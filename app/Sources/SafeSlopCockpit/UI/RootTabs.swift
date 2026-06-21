@@ -24,7 +24,7 @@ struct RootTabs: View {
                 .tag("create")
         }
         .environment(engine)
-        .frame(minWidth: 460, minHeight: 480)
+        .frame(minWidth: 520, minHeight: 480)
         .onAppear { tab = RootTabs.initialTab } // honor COCKPIT_TAB (no-op for the default "launch")
         .task { await engine.refresh() }
     }
