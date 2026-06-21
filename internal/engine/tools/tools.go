@@ -65,10 +65,11 @@ func (t Tool) brewLeaf() string {
 
 // Status is a tool plus what detection found. Source is "brew" | "cask" | "standalone" | "missing".
 type Status struct {
-	Tool    Tool
-	Present bool
-	Source  string
-	Path    string // resolved binary or app path ("" when missing)
+	Tool          Tool
+	Present       bool
+	Source        string
+	Path          string   // resolved binary or app path ("" when missing)
+	ShadowedPaths []string // other executables of the same name later on PATH (shadowed by Path); nil if none
 }
 
 // Installable reports whether safeslop should offer to install this tool: only when detection has run
@@ -167,6 +168,7 @@ func Catalog() []Tool {
 // probe is the injectable host environment detection reads (so DetectAll is testable without brew).
 type probe struct {
 	lookPath   func(string) (string, bool) // resolve a binary on PATH
+	lookAll    func(string) []string       // all PATH matches for a binary (which -a); nil disables shadow detection
 	appExists  func(string) bool           // does /Applications/X.app exist
 	formulae   map[string]bool             // installed brew formula leaf names
 	casks      map[string]bool             // installed brew cask names
@@ -183,7 +185,13 @@ func detect(p probe, t Tool) Status {
 			} else if p.brewPrefix != "" && strings.HasPrefix(path, p.brewPrefix) {
 				src = "brew"
 			}
-			return Status{Tool: t, Present: true, Source: src, Path: path}
+			st := Status{Tool: t, Present: true, Source: src, Path: path}
+			if p.lookAll != nil {
+				if all := p.lookAll(bin); len(all) > 1 {
+					st.ShadowedPaths = all[1:] // all[0] is the winner (== path); the rest are shadowed
+				}
+			}
+			return st
 		}
 	}
 	if t.AppPath != "" && p.appExists(t.AppPath) {
@@ -202,14 +210,14 @@ func detect(p probe, t Tool) Status {
 // rich env is for host-side discovery only and never crosses into a sandbox).
 func realProbe() probe {
 	env := hostenv.Reconstruct()
-	return probeFromEnv(env.LookPath, env.Environ())
+	return probeFromEnv(env.LookPath, env.LookAll, env.Environ())
 }
 
 // probeFromEnv builds a host probe from a reconstructed lookPath + environment. brew is resolved via
 // the reconstructed PATH and run with that environment; if brew can't be found the formula/cask sets
 // are empty (present binaries then read as "standalone", cask-only tools simply aren't installable) —
 // detection degrades, it does not crash.
-func probeFromEnv(lookPath func(string) (string, bool), environ []string) probe {
+func probeFromEnv(lookPath func(string) (string, bool), lookAll func(string) []string, environ []string) probe {
 	br := brewRunner{lookPath: lookPath, environ: environ}
 	prefix := ""
 	if out, err := br.output("--prefix"); err == nil {
@@ -217,6 +225,7 @@ func probeFromEnv(lookPath func(string) (string, bool), environ []string) probe 
 	}
 	return probe{
 		lookPath: lookPath,
+		lookAll:  lookAll,
 		appExists: func(p string) bool {
 			_, err := os.Stat(p)
 			return err == nil

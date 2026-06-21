@@ -94,6 +94,36 @@ func TestDetectClassifiesSource(t *testing.T) {
 	}
 }
 
+func TestDetectFlagsShadowedBinary(t *testing.T) {
+	// Two `docker` on PATH: the earlier one wins (Path); the later one is shadowed.
+	p := probe{
+		lookPath: func(b string) (string, bool) { return "/opt/homebrew/bin/docker", b == "docker" },
+		lookAll:  func(b string) []string { return []string{"/opt/homebrew/bin/docker", "/usr/local/bin/docker"} },
+	}
+	s := detect(p, Tool{Name: "Docker", Detect: []string{"docker"}})
+	if !s.Present || s.Path != "/opt/homebrew/bin/docker" {
+		t.Fatalf("detect = %+v", s)
+	}
+	if len(s.ShadowedPaths) != 1 || s.ShadowedPaths[0] != "/usr/local/bin/docker" {
+		t.Errorf("ShadowedPaths = %v, want the shadowed /usr/local path", s.ShadowedPaths)
+	}
+
+	// A single match is not shadowed.
+	p2 := probe{
+		lookPath: func(b string) (string, bool) { return "/opt/homebrew/bin/uv", b == "uv" },
+		lookAll:  func(b string) []string { return []string{"/opt/homebrew/bin/uv"} },
+	}
+	if s := detect(p2, Tool{Name: "uv", Detect: []string{"uv"}}); len(s.ShadowedPaths) != 0 {
+		t.Errorf("single match should not be shadowed: %v", s.ShadowedPaths)
+	}
+
+	// A nil lookAll (a probe built without the seam) degrades to no shadow info, not a crash.
+	p3 := probe{lookPath: func(b string) (string, bool) { return "/usr/bin/git", b == "git" }}
+	if s := detect(p3, Tool{Name: "git", Detect: []string{"git"}}); len(s.ShadowedPaths) != 0 {
+		t.Errorf("nil lookAll should yield no shadows: %v", s.ShadowedPaths)
+	}
+}
+
 func TestProbeFromEnvUsesReconstructedPathAndDegradesWithoutBrew(t *testing.T) {
 	// Reconstructed lookPath resolves git off a brew dir but cannot find brew itself (the bundled-app
 	// failure mode: brew not on the process PATH). Detection must still find git, and the brew-derived
@@ -104,7 +134,7 @@ func TestProbeFromEnvUsesReconstructedPathAndDegradesWithoutBrew(t *testing.T) {
 		}
 		return "", false
 	}
-	p := probeFromEnv(lp, nil)
+	p := probeFromEnv(lp, nil, nil)
 	if len(p.formulae) != 0 || len(p.casks) != 0 {
 		t.Errorf("no brew → empty formula/cask sets, got %v / %v", p.formulae, p.casks)
 	}
