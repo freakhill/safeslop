@@ -11,6 +11,7 @@ service Control {
   rpc Attach(stream ClientFrame) returns (stream ServerFrame);
   rpc CloseSession(CloseSessionRequest) returns (CloseSessionResponse);
   rpc Trust(TrustRequest) returns (TrustResponse);
+  rpc Untrust(UntrustRequest) returns (UntrustResponse);
   rpc InstallPlan(InstallPlanRequest) returns (InstallPlanResponse);
   rpc InstallApply(InstallApplyRequest) returns (stream InstallApplyEvent);
   rpc ListTools(ListToolsRequest) returns (ListToolsResponse);
@@ -100,6 +101,12 @@ message CloseSessionResponse {}
 // The GUI calls this after the user reviews and approves (specs/0024 S1a follow-on).
 message TrustRequest { string config_path = 1; } // dir/file holding safeslop.cue; empty = server cwd
 message TrustResponse { string trusted_path = 1; } // absolute path that was approved
+
+// Untrust removes a repo's recorded approval (trust.Store.Revoke), so the next list shows it untrusted
+// and a launch re-gates through the trust sheet. The reverse of Trust — symmetric revoke (ayo #3). The
+// peer is uid/process-tree-checked at Accept, so a sandboxed agent can't revoke (or grant) on its own.
+message UntrustRequest { string config_path = 1; }  // dir/file holding safeslop.cue; empty = server cwd
+message UntrustResponse { string untrusted_path = 1; } // absolute path whose approval was removed
 
 // InstallPlan returns the pinned desired-state diff (the SP7b-2 plan) for the wizard to preview.
 message InstallAction {

@@ -119,7 +119,7 @@ func (x InstallApplyEvent_Kind) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use InstallApplyEvent_Kind.Descriptor instead.
 func (InstallApplyEvent_Kind) EnumDescriptor() ([]byte, []int) {
-	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{22, 0}
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{24, 0}
 }
 
 type InstallToolEvent_Kind int32
@@ -168,7 +168,7 @@ func (x InstallToolEvent_Kind) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use InstallToolEvent_Kind.Descriptor instead.
 func (InstallToolEvent_Kind) EnumDescriptor() ([]byte, []int) {
-	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{27, 0}
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{29, 0}
 }
 
 type PingRequest struct {
@@ -1224,6 +1224,97 @@ func (x *TrustResponse) GetTrustedPath() string {
 	return ""
 }
 
+// Untrust removes a repo's recorded approval (trust.Store.Revoke), so the next list shows it untrusted
+// and a launch re-gates through the trust sheet. The reverse of Trust — symmetric revoke (ayo #3). The
+// peer is uid/process-tree-checked at Accept, so a sandboxed agent can't revoke (or grant) on its own.
+type UntrustRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ConfigPath    string                 `protobuf:"bytes,1,opt,name=config_path,json=configPath,proto3" json:"config_path,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UntrustRequest) Reset() {
+	*x = UntrustRequest{}
+	mi := &file_internal_engine_control_control_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UntrustRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UntrustRequest) ProtoMessage() {}
+
+func (x *UntrustRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_engine_control_control_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UntrustRequest.ProtoReflect.Descriptor instead.
+func (*UntrustRequest) Descriptor() ([]byte, []int) {
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *UntrustRequest) GetConfigPath() string {
+	if x != nil {
+		return x.ConfigPath
+	}
+	return ""
+}
+
+type UntrustResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UntrustedPath string                 `protobuf:"bytes,1,opt,name=untrusted_path,json=untrustedPath,proto3" json:"untrusted_path,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UntrustResponse) Reset() {
+	*x = UntrustResponse{}
+	mi := &file_internal_engine_control_control_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UntrustResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UntrustResponse) ProtoMessage() {}
+
+func (x *UntrustResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_engine_control_control_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UntrustResponse.ProtoReflect.Descriptor instead.
+func (*UntrustResponse) Descriptor() ([]byte, []int) {
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *UntrustResponse) GetUntrustedPath() string {
+	if x != nil {
+		return x.UntrustedPath
+	}
+	return ""
+}
+
 // InstallPlan returns the pinned desired-state diff (the SP7b-2 plan) for the wizard to preview.
 type InstallAction struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1237,7 +1328,7 @@ type InstallAction struct {
 
 func (x *InstallAction) Reset() {
 	*x = InstallAction{}
-	mi := &file_internal_engine_control_control_proto_msgTypes[18]
+	mi := &file_internal_engine_control_control_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1249,7 +1340,7 @@ func (x *InstallAction) String() string {
 func (*InstallAction) ProtoMessage() {}
 
 func (x *InstallAction) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_engine_control_control_proto_msgTypes[18]
+	mi := &file_internal_engine_control_control_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1262,7 +1353,7 @@ func (x *InstallAction) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InstallAction.ProtoReflect.Descriptor instead.
 func (*InstallAction) Descriptor() ([]byte, []int) {
-	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{18}
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *InstallAction) GetName() string {
@@ -1301,7 +1392,7 @@ type InstallPlanRequest struct {
 
 func (x *InstallPlanRequest) Reset() {
 	*x = InstallPlanRequest{}
-	mi := &file_internal_engine_control_control_proto_msgTypes[19]
+	mi := &file_internal_engine_control_control_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1313,7 +1404,7 @@ func (x *InstallPlanRequest) String() string {
 func (*InstallPlanRequest) ProtoMessage() {}
 
 func (x *InstallPlanRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_engine_control_control_proto_msgTypes[19]
+	mi := &file_internal_engine_control_control_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1326,7 +1417,7 @@ func (x *InstallPlanRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InstallPlanRequest.ProtoReflect.Descriptor instead.
 func (*InstallPlanRequest) Descriptor() ([]byte, []int) {
-	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{19}
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{21}
 }
 
 type InstallPlanResponse struct {
@@ -1338,7 +1429,7 @@ type InstallPlanResponse struct {
 
 func (x *InstallPlanResponse) Reset() {
 	*x = InstallPlanResponse{}
-	mi := &file_internal_engine_control_control_proto_msgTypes[20]
+	mi := &file_internal_engine_control_control_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1350,7 +1441,7 @@ func (x *InstallPlanResponse) String() string {
 func (*InstallPlanResponse) ProtoMessage() {}
 
 func (x *InstallPlanResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_engine_control_control_proto_msgTypes[20]
+	mi := &file_internal_engine_control_control_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1363,7 +1454,7 @@ func (x *InstallPlanResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InstallPlanResponse.ProtoReflect.Descriptor instead.
 func (*InstallPlanResponse) Descriptor() ([]byte, []int) {
-	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{20}
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *InstallPlanResponse) GetActions() []*InstallAction {
@@ -1382,7 +1473,7 @@ type InstallApplyRequest struct {
 
 func (x *InstallApplyRequest) Reset() {
 	*x = InstallApplyRequest{}
-	mi := &file_internal_engine_control_control_proto_msgTypes[21]
+	mi := &file_internal_engine_control_control_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1394,7 +1485,7 @@ func (x *InstallApplyRequest) String() string {
 func (*InstallApplyRequest) ProtoMessage() {}
 
 func (x *InstallApplyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_engine_control_control_proto_msgTypes[21]
+	mi := &file_internal_engine_control_control_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1407,7 +1498,7 @@ func (x *InstallApplyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InstallApplyRequest.ProtoReflect.Descriptor instead.
 func (*InstallApplyRequest) Descriptor() ([]byte, []int) {
-	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{21}
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{23}
 }
 
 type InstallApplyEvent struct {
@@ -1421,7 +1512,7 @@ type InstallApplyEvent struct {
 
 func (x *InstallApplyEvent) Reset() {
 	*x = InstallApplyEvent{}
-	mi := &file_internal_engine_control_control_proto_msgTypes[22]
+	mi := &file_internal_engine_control_control_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1433,7 +1524,7 @@ func (x *InstallApplyEvent) String() string {
 func (*InstallApplyEvent) ProtoMessage() {}
 
 func (x *InstallApplyEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_engine_control_control_proto_msgTypes[22]
+	mi := &file_internal_engine_control_control_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1446,7 +1537,7 @@ func (x *InstallApplyEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InstallApplyEvent.ProtoReflect.Descriptor instead.
 func (*InstallApplyEvent) Descriptor() ([]byte, []int) {
-	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{22}
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *InstallApplyEvent) GetKind() InstallApplyEvent_Kind {
@@ -1482,7 +1573,7 @@ type ListToolsRequest struct {
 
 func (x *ListToolsRequest) Reset() {
 	*x = ListToolsRequest{}
-	mi := &file_internal_engine_control_control_proto_msgTypes[23]
+	mi := &file_internal_engine_control_control_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1494,7 +1585,7 @@ func (x *ListToolsRequest) String() string {
 func (*ListToolsRequest) ProtoMessage() {}
 
 func (x *ListToolsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_engine_control_control_proto_msgTypes[23]
+	mi := &file_internal_engine_control_control_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1507,7 +1598,7 @@ func (x *ListToolsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListToolsRequest.ProtoReflect.Descriptor instead.
 func (*ListToolsRequest) Descriptor() ([]byte, []int) {
-	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{23}
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *ListToolsRequest) GetCatalogOnly() bool {
@@ -1533,7 +1624,7 @@ type ToolStatus struct {
 
 func (x *ToolStatus) Reset() {
 	*x = ToolStatus{}
-	mi := &file_internal_engine_control_control_proto_msgTypes[24]
+	mi := &file_internal_engine_control_control_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1545,7 +1636,7 @@ func (x *ToolStatus) String() string {
 func (*ToolStatus) ProtoMessage() {}
 
 func (x *ToolStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_engine_control_control_proto_msgTypes[24]
+	mi := &file_internal_engine_control_control_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1558,7 +1649,7 @@ func (x *ToolStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolStatus.ProtoReflect.Descriptor instead.
 func (*ToolStatus) Descriptor() ([]byte, []int) {
-	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{24}
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *ToolStatus) GetName() string {
@@ -1626,7 +1717,7 @@ type ListToolsResponse struct {
 
 func (x *ListToolsResponse) Reset() {
 	*x = ListToolsResponse{}
-	mi := &file_internal_engine_control_control_proto_msgTypes[25]
+	mi := &file_internal_engine_control_control_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1638,7 +1729,7 @@ func (x *ListToolsResponse) String() string {
 func (*ListToolsResponse) ProtoMessage() {}
 
 func (x *ListToolsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_engine_control_control_proto_msgTypes[25]
+	mi := &file_internal_engine_control_control_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1651,7 +1742,7 @@ func (x *ListToolsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListToolsResponse.ProtoReflect.Descriptor instead.
 func (*ListToolsResponse) Descriptor() ([]byte, []int) {
-	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{25}
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *ListToolsResponse) GetTools() []*ToolStatus {
@@ -1672,7 +1763,7 @@ type InstallToolRequest struct {
 
 func (x *InstallToolRequest) Reset() {
 	*x = InstallToolRequest{}
-	mi := &file_internal_engine_control_control_proto_msgTypes[26]
+	mi := &file_internal_engine_control_control_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1684,7 +1775,7 @@ func (x *InstallToolRequest) String() string {
 func (*InstallToolRequest) ProtoMessage() {}
 
 func (x *InstallToolRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_engine_control_control_proto_msgTypes[26]
+	mi := &file_internal_engine_control_control_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1697,7 +1788,7 @@ func (x *InstallToolRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InstallToolRequest.ProtoReflect.Descriptor instead.
 func (*InstallToolRequest) Descriptor() ([]byte, []int) {
-	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{26}
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *InstallToolRequest) GetName() string {
@@ -1717,7 +1808,7 @@ type InstallToolEvent struct {
 
 func (x *InstallToolEvent) Reset() {
 	*x = InstallToolEvent{}
-	mi := &file_internal_engine_control_control_proto_msgTypes[27]
+	mi := &file_internal_engine_control_control_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1729,7 +1820,7 @@ func (x *InstallToolEvent) String() string {
 func (*InstallToolEvent) ProtoMessage() {}
 
 func (x *InstallToolEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_engine_control_control_proto_msgTypes[27]
+	mi := &file_internal_engine_control_control_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1742,7 +1833,7 @@ func (x *InstallToolEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InstallToolEvent.ProtoReflect.Descriptor instead.
 func (*InstallToolEvent) Descriptor() ([]byte, []int) {
-	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{27}
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *InstallToolEvent) GetKind() InstallToolEvent_Kind {
@@ -1771,7 +1862,7 @@ type ValidatePolicyRequest struct {
 
 func (x *ValidatePolicyRequest) Reset() {
 	*x = ValidatePolicyRequest{}
-	mi := &file_internal_engine_control_control_proto_msgTypes[28]
+	mi := &file_internal_engine_control_control_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1783,7 +1874,7 @@ func (x *ValidatePolicyRequest) String() string {
 func (*ValidatePolicyRequest) ProtoMessage() {}
 
 func (x *ValidatePolicyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_engine_control_control_proto_msgTypes[28]
+	mi := &file_internal_engine_control_control_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1796,7 +1887,7 @@ func (x *ValidatePolicyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ValidatePolicyRequest.ProtoReflect.Descriptor instead.
 func (*ValidatePolicyRequest) Descriptor() ([]byte, []int) {
-	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{28}
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *ValidatePolicyRequest) GetCueText() string {
@@ -1817,7 +1908,7 @@ type ValidatePolicyResponse struct {
 
 func (x *ValidatePolicyResponse) Reset() {
 	*x = ValidatePolicyResponse{}
-	mi := &file_internal_engine_control_control_proto_msgTypes[29]
+	mi := &file_internal_engine_control_control_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1829,7 +1920,7 @@ func (x *ValidatePolicyResponse) String() string {
 func (*ValidatePolicyResponse) ProtoMessage() {}
 
 func (x *ValidatePolicyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_engine_control_control_proto_msgTypes[29]
+	mi := &file_internal_engine_control_control_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1842,7 +1933,7 @@ func (x *ValidatePolicyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ValidatePolicyResponse.ProtoReflect.Descriptor instead.
 func (*ValidatePolicyResponse) Descriptor() ([]byte, []int) {
-	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{29}
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *ValidatePolicyResponse) GetValid() bool {
@@ -1876,7 +1967,7 @@ type ListPresetsRequest struct {
 
 func (x *ListPresetsRequest) Reset() {
 	*x = ListPresetsRequest{}
-	mi := &file_internal_engine_control_control_proto_msgTypes[30]
+	mi := &file_internal_engine_control_control_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1888,7 +1979,7 @@ func (x *ListPresetsRequest) String() string {
 func (*ListPresetsRequest) ProtoMessage() {}
 
 func (x *ListPresetsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_engine_control_control_proto_msgTypes[30]
+	mi := &file_internal_engine_control_control_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1901,7 +1992,7 @@ func (x *ListPresetsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPresetsRequest.ProtoReflect.Descriptor instead.
 func (*ListPresetsRequest) Descriptor() ([]byte, []int) {
-	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{30}
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{32}
 }
 
 type Preset struct {
@@ -1915,7 +2006,7 @@ type Preset struct {
 
 func (x *Preset) Reset() {
 	*x = Preset{}
-	mi := &file_internal_engine_control_control_proto_msgTypes[31]
+	mi := &file_internal_engine_control_control_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1927,7 +2018,7 @@ func (x *Preset) String() string {
 func (*Preset) ProtoMessage() {}
 
 func (x *Preset) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_engine_control_control_proto_msgTypes[31]
+	mi := &file_internal_engine_control_control_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1940,7 +2031,7 @@ func (x *Preset) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Preset.ProtoReflect.Descriptor instead.
 func (*Preset) Descriptor() ([]byte, []int) {
-	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{31}
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *Preset) GetName() string {
@@ -1973,7 +2064,7 @@ type ListPresetsResponse struct {
 
 func (x *ListPresetsResponse) Reset() {
 	*x = ListPresetsResponse{}
-	mi := &file_internal_engine_control_control_proto_msgTypes[32]
+	mi := &file_internal_engine_control_control_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1985,7 +2076,7 @@ func (x *ListPresetsResponse) String() string {
 func (*ListPresetsResponse) ProtoMessage() {}
 
 func (x *ListPresetsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_engine_control_control_proto_msgTypes[32]
+	mi := &file_internal_engine_control_control_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1998,7 +2089,7 @@ func (x *ListPresetsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPresetsResponse.ProtoReflect.Descriptor instead.
 func (*ListPresetsResponse) Descriptor() ([]byte, []int) {
-	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{32}
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *ListPresetsResponse) GetPresets() []*Preset {
@@ -2022,7 +2113,7 @@ type PreflightHostLaunchRequest struct {
 
 func (x *PreflightHostLaunchRequest) Reset() {
 	*x = PreflightHostLaunchRequest{}
-	mi := &file_internal_engine_control_control_proto_msgTypes[33]
+	mi := &file_internal_engine_control_control_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2034,7 +2125,7 @@ func (x *PreflightHostLaunchRequest) String() string {
 func (*PreflightHostLaunchRequest) ProtoMessage() {}
 
 func (x *PreflightHostLaunchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_engine_control_control_proto_msgTypes[33]
+	mi := &file_internal_engine_control_control_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2047,7 +2138,7 @@ func (x *PreflightHostLaunchRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PreflightHostLaunchRequest.ProtoReflect.Descriptor instead.
 func (*PreflightHostLaunchRequest) Descriptor() ([]byte, []int) {
-	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{33}
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *PreflightHostLaunchRequest) GetProfile() string {
@@ -2075,7 +2166,7 @@ type ConsentStatement struct {
 
 func (x *ConsentStatement) Reset() {
 	*x = ConsentStatement{}
-	mi := &file_internal_engine_control_control_proto_msgTypes[34]
+	mi := &file_internal_engine_control_control_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2087,7 +2178,7 @@ func (x *ConsentStatement) String() string {
 func (*ConsentStatement) ProtoMessage() {}
 
 func (x *ConsentStatement) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_engine_control_control_proto_msgTypes[34]
+	mi := &file_internal_engine_control_control_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2100,7 +2191,7 @@ func (x *ConsentStatement) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConsentStatement.ProtoReflect.Descriptor instead.
 func (*ConsentStatement) Descriptor() ([]byte, []int) {
-	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{34}
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *ConsentStatement) GetText() string {
@@ -2135,7 +2226,7 @@ type PreflightHostLaunchResponse struct {
 
 func (x *PreflightHostLaunchResponse) Reset() {
 	*x = PreflightHostLaunchResponse{}
-	mi := &file_internal_engine_control_control_proto_msgTypes[35]
+	mi := &file_internal_engine_control_control_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2147,7 +2238,7 @@ func (x *PreflightHostLaunchResponse) String() string {
 func (*PreflightHostLaunchResponse) ProtoMessage() {}
 
 func (x *PreflightHostLaunchResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_engine_control_control_proto_msgTypes[35]
+	mi := &file_internal_engine_control_control_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2160,7 +2251,7 @@ func (x *PreflightHostLaunchResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PreflightHostLaunchResponse.ProtoReflect.Descriptor instead.
 func (*PreflightHostLaunchResponse) Descriptor() ([]byte, []int) {
-	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{35}
+	return file_internal_engine_control_control_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *PreflightHostLaunchResponse) GetHeadlineBody() string {
@@ -2267,7 +2358,12 @@ const file_internal_engine_control_control_proto_rawDesc = "" +
 	"\vconfig_path\x18\x01 \x01(\tR\n" +
 	"configPath\"2\n" +
 	"\rTrustResponse\x12!\n" +
-	"\ftrusted_path\x18\x01 \x01(\tR\vtrustedPath\"k\n" +
+	"\ftrusted_path\x18\x01 \x01(\tR\vtrustedPath\"1\n" +
+	"\x0eUntrustRequest\x12\x1f\n" +
+	"\vconfig_path\x18\x01 \x01(\tR\n" +
+	"configPath\"8\n" +
+	"\x0fUntrustResponse\x12%\n" +
+	"\x0euntrusted_path\x18\x01 \x01(\tR\runtrustedPath\"k\n" +
 	"\rInstallAction\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x18\n" +
@@ -2337,8 +2433,7 @@ const file_internal_engine_control_control_proto_rawDesc = "" +
 	"scope_line\x18\x02 \x01(\tR\tscopeLine\x12E\n" +
 	"\n" +
 	"statements\x18\x03 \x03(\v2%.safeslop.control.v1.ConsentStatementR\n" +
-	"statements2\xc0\n" +
-	"\n" +
+	"statements2\x96\v\n" +
 	"\aControl\x12K\n" +
 	"\x04Ping\x12 .safeslop.control.v1.PingRequest\x1a!.safeslop.control.v1.PingResponse\x12c\n" +
 	"\fListProfiles\x12(.safeslop.control.v1.ListProfilesRequest\x1a).safeslop.control.v1.ListProfilesResponse\x12P\n" +
@@ -2346,7 +2441,8 @@ const file_internal_engine_control_control_proto_rawDesc = "" +
 	"\vOpenSession\x12'.safeslop.control.v1.OpenSessionRequest\x1a(.safeslop.control.v1.OpenSessionResponse\x12P\n" +
 	"\x06Attach\x12 .safeslop.control.v1.ClientFrame\x1a .safeslop.control.v1.ServerFrame(\x010\x01\x12c\n" +
 	"\fCloseSession\x12(.safeslop.control.v1.CloseSessionRequest\x1a).safeslop.control.v1.CloseSessionResponse\x12N\n" +
-	"\x05Trust\x12!.safeslop.control.v1.TrustRequest\x1a\".safeslop.control.v1.TrustResponse\x12`\n" +
+	"\x05Trust\x12!.safeslop.control.v1.TrustRequest\x1a\".safeslop.control.v1.TrustResponse\x12T\n" +
+	"\aUntrust\x12#.safeslop.control.v1.UntrustRequest\x1a$.safeslop.control.v1.UntrustResponse\x12`\n" +
 	"\vInstallPlan\x12'.safeslop.control.v1.InstallPlanRequest\x1a(.safeslop.control.v1.InstallPlanResponse\x12b\n" +
 	"\fInstallApply\x12(.safeslop.control.v1.InstallApplyRequest\x1a&.safeslop.control.v1.InstallApplyEvent0\x01\x12Z\n" +
 	"\tListTools\x12%.safeslop.control.v1.ListToolsRequest\x1a&.safeslop.control.v1.ListToolsResponse\x12_\n" +
@@ -2368,7 +2464,7 @@ func file_internal_engine_control_control_proto_rawDescGZIP() []byte {
 }
 
 var file_internal_engine_control_control_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_internal_engine_control_control_proto_msgTypes = make([]protoimpl.MessageInfo, 36)
+var file_internal_engine_control_control_proto_msgTypes = make([]protoimpl.MessageInfo, 38)
 var file_internal_engine_control_control_proto_goTypes = []any{
 	(LaunchEvent_Kind)(0),               // 0: safeslop.control.v1.LaunchEvent.Kind
 	(InstallApplyEvent_Kind)(0),         // 1: safeslop.control.v1.InstallApplyEvent.Kind
@@ -2391,24 +2487,26 @@ var file_internal_engine_control_control_proto_goTypes = []any{
 	(*CloseSessionResponse)(nil),        // 18: safeslop.control.v1.CloseSessionResponse
 	(*TrustRequest)(nil),                // 19: safeslop.control.v1.TrustRequest
 	(*TrustResponse)(nil),               // 20: safeslop.control.v1.TrustResponse
-	(*InstallAction)(nil),               // 21: safeslop.control.v1.InstallAction
-	(*InstallPlanRequest)(nil),          // 22: safeslop.control.v1.InstallPlanRequest
-	(*InstallPlanResponse)(nil),         // 23: safeslop.control.v1.InstallPlanResponse
-	(*InstallApplyRequest)(nil),         // 24: safeslop.control.v1.InstallApplyRequest
-	(*InstallApplyEvent)(nil),           // 25: safeslop.control.v1.InstallApplyEvent
-	(*ListToolsRequest)(nil),            // 26: safeslop.control.v1.ListToolsRequest
-	(*ToolStatus)(nil),                  // 27: safeslop.control.v1.ToolStatus
-	(*ListToolsResponse)(nil),           // 28: safeslop.control.v1.ListToolsResponse
-	(*InstallToolRequest)(nil),          // 29: safeslop.control.v1.InstallToolRequest
-	(*InstallToolEvent)(nil),            // 30: safeslop.control.v1.InstallToolEvent
-	(*ValidatePolicyRequest)(nil),       // 31: safeslop.control.v1.ValidatePolicyRequest
-	(*ValidatePolicyResponse)(nil),      // 32: safeslop.control.v1.ValidatePolicyResponse
-	(*ListPresetsRequest)(nil),          // 33: safeslop.control.v1.ListPresetsRequest
-	(*Preset)(nil),                      // 34: safeslop.control.v1.Preset
-	(*ListPresetsResponse)(nil),         // 35: safeslop.control.v1.ListPresetsResponse
-	(*PreflightHostLaunchRequest)(nil),  // 36: safeslop.control.v1.PreflightHostLaunchRequest
-	(*ConsentStatement)(nil),            // 37: safeslop.control.v1.ConsentStatement
-	(*PreflightHostLaunchResponse)(nil), // 38: safeslop.control.v1.PreflightHostLaunchResponse
+	(*UntrustRequest)(nil),              // 21: safeslop.control.v1.UntrustRequest
+	(*UntrustResponse)(nil),             // 22: safeslop.control.v1.UntrustResponse
+	(*InstallAction)(nil),               // 23: safeslop.control.v1.InstallAction
+	(*InstallPlanRequest)(nil),          // 24: safeslop.control.v1.InstallPlanRequest
+	(*InstallPlanResponse)(nil),         // 25: safeslop.control.v1.InstallPlanResponse
+	(*InstallApplyRequest)(nil),         // 26: safeslop.control.v1.InstallApplyRequest
+	(*InstallApplyEvent)(nil),           // 27: safeslop.control.v1.InstallApplyEvent
+	(*ListToolsRequest)(nil),            // 28: safeslop.control.v1.ListToolsRequest
+	(*ToolStatus)(nil),                  // 29: safeslop.control.v1.ToolStatus
+	(*ListToolsResponse)(nil),           // 30: safeslop.control.v1.ListToolsResponse
+	(*InstallToolRequest)(nil),          // 31: safeslop.control.v1.InstallToolRequest
+	(*InstallToolEvent)(nil),            // 32: safeslop.control.v1.InstallToolEvent
+	(*ValidatePolicyRequest)(nil),       // 33: safeslop.control.v1.ValidatePolicyRequest
+	(*ValidatePolicyResponse)(nil),      // 34: safeslop.control.v1.ValidatePolicyResponse
+	(*ListPresetsRequest)(nil),          // 35: safeslop.control.v1.ListPresetsRequest
+	(*Preset)(nil),                      // 36: safeslop.control.v1.Preset
+	(*ListPresetsResponse)(nil),         // 37: safeslop.control.v1.ListPresetsResponse
+	(*PreflightHostLaunchRequest)(nil),  // 38: safeslop.control.v1.PreflightHostLaunchRequest
+	(*ConsentStatement)(nil),            // 39: safeslop.control.v1.ConsentStatement
+	(*PreflightHostLaunchResponse)(nil), // 40: safeslop.control.v1.PreflightHostLaunchResponse
 }
 var file_internal_engine_control_control_proto_depIdxs = []int32{
 	7,  // 0: safeslop.control.v1.Profile.risk_axes:type_name -> safeslop.control.v1.RiskAxis
@@ -2416,13 +2514,13 @@ var file_internal_engine_control_control_proto_depIdxs = []int32{
 	0,  // 2: safeslop.control.v1.LaunchEvent.kind:type_name -> safeslop.control.v1.LaunchEvent.Kind
 	13, // 3: safeslop.control.v1.ClientFrame.resize:type_name -> safeslop.control.v1.Resize
 	15, // 4: safeslop.control.v1.ServerFrame.exited:type_name -> safeslop.control.v1.Exited
-	21, // 5: safeslop.control.v1.InstallPlanResponse.actions:type_name -> safeslop.control.v1.InstallAction
+	23, // 5: safeslop.control.v1.InstallPlanResponse.actions:type_name -> safeslop.control.v1.InstallAction
 	1,  // 6: safeslop.control.v1.InstallApplyEvent.kind:type_name -> safeslop.control.v1.InstallApplyEvent.Kind
-	27, // 7: safeslop.control.v1.ListToolsResponse.tools:type_name -> safeslop.control.v1.ToolStatus
+	29, // 7: safeslop.control.v1.ListToolsResponse.tools:type_name -> safeslop.control.v1.ToolStatus
 	2,  // 8: safeslop.control.v1.InstallToolEvent.kind:type_name -> safeslop.control.v1.InstallToolEvent.Kind
 	6,  // 9: safeslop.control.v1.ValidatePolicyResponse.profiles:type_name -> safeslop.control.v1.Profile
-	34, // 10: safeslop.control.v1.ListPresetsResponse.presets:type_name -> safeslop.control.v1.Preset
-	37, // 11: safeslop.control.v1.PreflightHostLaunchResponse.statements:type_name -> safeslop.control.v1.ConsentStatement
+	36, // 10: safeslop.control.v1.ListPresetsResponse.presets:type_name -> safeslop.control.v1.Preset
+	39, // 11: safeslop.control.v1.PreflightHostLaunchResponse.statements:type_name -> safeslop.control.v1.ConsentStatement
 	3,  // 12: safeslop.control.v1.Control.Ping:input_type -> safeslop.control.v1.PingRequest
 	5,  // 13: safeslop.control.v1.Control.ListProfiles:input_type -> safeslop.control.v1.ListProfilesRequest
 	9,  // 14: safeslop.control.v1.Control.Launch:input_type -> safeslop.control.v1.LaunchRequest
@@ -2430,29 +2528,31 @@ var file_internal_engine_control_control_proto_depIdxs = []int32{
 	14, // 16: safeslop.control.v1.Control.Attach:input_type -> safeslop.control.v1.ClientFrame
 	17, // 17: safeslop.control.v1.Control.CloseSession:input_type -> safeslop.control.v1.CloseSessionRequest
 	19, // 18: safeslop.control.v1.Control.Trust:input_type -> safeslop.control.v1.TrustRequest
-	22, // 19: safeslop.control.v1.Control.InstallPlan:input_type -> safeslop.control.v1.InstallPlanRequest
-	24, // 20: safeslop.control.v1.Control.InstallApply:input_type -> safeslop.control.v1.InstallApplyRequest
-	26, // 21: safeslop.control.v1.Control.ListTools:input_type -> safeslop.control.v1.ListToolsRequest
-	29, // 22: safeslop.control.v1.Control.InstallTool:input_type -> safeslop.control.v1.InstallToolRequest
-	31, // 23: safeslop.control.v1.Control.ValidatePolicy:input_type -> safeslop.control.v1.ValidatePolicyRequest
-	33, // 24: safeslop.control.v1.Control.ListPresets:input_type -> safeslop.control.v1.ListPresetsRequest
-	36, // 25: safeslop.control.v1.Control.PreflightHostLaunch:input_type -> safeslop.control.v1.PreflightHostLaunchRequest
-	4,  // 26: safeslop.control.v1.Control.Ping:output_type -> safeslop.control.v1.PingResponse
-	8,  // 27: safeslop.control.v1.Control.ListProfiles:output_type -> safeslop.control.v1.ListProfilesResponse
-	10, // 28: safeslop.control.v1.Control.Launch:output_type -> safeslop.control.v1.LaunchEvent
-	12, // 29: safeslop.control.v1.Control.OpenSession:output_type -> safeslop.control.v1.OpenSessionResponse
-	16, // 30: safeslop.control.v1.Control.Attach:output_type -> safeslop.control.v1.ServerFrame
-	18, // 31: safeslop.control.v1.Control.CloseSession:output_type -> safeslop.control.v1.CloseSessionResponse
-	20, // 32: safeslop.control.v1.Control.Trust:output_type -> safeslop.control.v1.TrustResponse
-	23, // 33: safeslop.control.v1.Control.InstallPlan:output_type -> safeslop.control.v1.InstallPlanResponse
-	25, // 34: safeslop.control.v1.Control.InstallApply:output_type -> safeslop.control.v1.InstallApplyEvent
-	28, // 35: safeslop.control.v1.Control.ListTools:output_type -> safeslop.control.v1.ListToolsResponse
-	30, // 36: safeslop.control.v1.Control.InstallTool:output_type -> safeslop.control.v1.InstallToolEvent
-	32, // 37: safeslop.control.v1.Control.ValidatePolicy:output_type -> safeslop.control.v1.ValidatePolicyResponse
-	35, // 38: safeslop.control.v1.Control.ListPresets:output_type -> safeslop.control.v1.ListPresetsResponse
-	38, // 39: safeslop.control.v1.Control.PreflightHostLaunch:output_type -> safeslop.control.v1.PreflightHostLaunchResponse
-	26, // [26:40] is the sub-list for method output_type
-	12, // [12:26] is the sub-list for method input_type
+	21, // 19: safeslop.control.v1.Control.Untrust:input_type -> safeslop.control.v1.UntrustRequest
+	24, // 20: safeslop.control.v1.Control.InstallPlan:input_type -> safeslop.control.v1.InstallPlanRequest
+	26, // 21: safeslop.control.v1.Control.InstallApply:input_type -> safeslop.control.v1.InstallApplyRequest
+	28, // 22: safeslop.control.v1.Control.ListTools:input_type -> safeslop.control.v1.ListToolsRequest
+	31, // 23: safeslop.control.v1.Control.InstallTool:input_type -> safeslop.control.v1.InstallToolRequest
+	33, // 24: safeslop.control.v1.Control.ValidatePolicy:input_type -> safeslop.control.v1.ValidatePolicyRequest
+	35, // 25: safeslop.control.v1.Control.ListPresets:input_type -> safeslop.control.v1.ListPresetsRequest
+	38, // 26: safeslop.control.v1.Control.PreflightHostLaunch:input_type -> safeslop.control.v1.PreflightHostLaunchRequest
+	4,  // 27: safeslop.control.v1.Control.Ping:output_type -> safeslop.control.v1.PingResponse
+	8,  // 28: safeslop.control.v1.Control.ListProfiles:output_type -> safeslop.control.v1.ListProfilesResponse
+	10, // 29: safeslop.control.v1.Control.Launch:output_type -> safeslop.control.v1.LaunchEvent
+	12, // 30: safeslop.control.v1.Control.OpenSession:output_type -> safeslop.control.v1.OpenSessionResponse
+	16, // 31: safeslop.control.v1.Control.Attach:output_type -> safeslop.control.v1.ServerFrame
+	18, // 32: safeslop.control.v1.Control.CloseSession:output_type -> safeslop.control.v1.CloseSessionResponse
+	20, // 33: safeslop.control.v1.Control.Trust:output_type -> safeslop.control.v1.TrustResponse
+	22, // 34: safeslop.control.v1.Control.Untrust:output_type -> safeslop.control.v1.UntrustResponse
+	25, // 35: safeslop.control.v1.Control.InstallPlan:output_type -> safeslop.control.v1.InstallPlanResponse
+	27, // 36: safeslop.control.v1.Control.InstallApply:output_type -> safeslop.control.v1.InstallApplyEvent
+	30, // 37: safeslop.control.v1.Control.ListTools:output_type -> safeslop.control.v1.ListToolsResponse
+	32, // 38: safeslop.control.v1.Control.InstallTool:output_type -> safeslop.control.v1.InstallToolEvent
+	34, // 39: safeslop.control.v1.Control.ValidatePolicy:output_type -> safeslop.control.v1.ValidatePolicyResponse
+	37, // 40: safeslop.control.v1.Control.ListPresets:output_type -> safeslop.control.v1.ListPresetsResponse
+	40, // 41: safeslop.control.v1.Control.PreflightHostLaunch:output_type -> safeslop.control.v1.PreflightHostLaunchResponse
+	27, // [27:42] is the sub-list for method output_type
+	12, // [12:27] is the sub-list for method input_type
 	12, // [12:12] is the sub-list for extension type_name
 	12, // [12:12] is the sub-list for extension extendee
 	0,  // [0:12] is the sub-list for field type_name
@@ -2478,7 +2578,7 @@ func file_internal_engine_control_control_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_engine_control_control_proto_rawDesc), len(file_internal_engine_control_control_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   36,
+			NumMessages:   38,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

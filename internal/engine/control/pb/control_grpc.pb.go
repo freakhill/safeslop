@@ -26,6 +26,7 @@ const (
 	Control_Attach_FullMethodName              = "/safeslop.control.v1.Control/Attach"
 	Control_CloseSession_FullMethodName        = "/safeslop.control.v1.Control/CloseSession"
 	Control_Trust_FullMethodName               = "/safeslop.control.v1.Control/Trust"
+	Control_Untrust_FullMethodName             = "/safeslop.control.v1.Control/Untrust"
 	Control_InstallPlan_FullMethodName         = "/safeslop.control.v1.Control/InstallPlan"
 	Control_InstallApply_FullMethodName        = "/safeslop.control.v1.Control/InstallApply"
 	Control_ListTools_FullMethodName           = "/safeslop.control.v1.Control/ListTools"
@@ -48,6 +49,7 @@ type ControlClient interface {
 	Attach(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ClientFrame, ServerFrame], error)
 	CloseSession(ctx context.Context, in *CloseSessionRequest, opts ...grpc.CallOption) (*CloseSessionResponse, error)
 	Trust(ctx context.Context, in *TrustRequest, opts ...grpc.CallOption) (*TrustResponse, error)
+	Untrust(ctx context.Context, in *UntrustRequest, opts ...grpc.CallOption) (*UntrustResponse, error)
 	InstallPlan(ctx context.Context, in *InstallPlanRequest, opts ...grpc.CallOption) (*InstallPlanResponse, error)
 	InstallApply(ctx context.Context, in *InstallApplyRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[InstallApplyEvent], error)
 	ListTools(ctx context.Context, in *ListToolsRequest, opts ...grpc.CallOption) (*ListToolsResponse, error)
@@ -141,6 +143,16 @@ func (c *controlClient) Trust(ctx context.Context, in *TrustRequest, opts ...grp
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(TrustResponse)
 	err := c.cc.Invoke(ctx, Control_Trust_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *controlClient) Untrust(ctx context.Context, in *UntrustRequest, opts ...grpc.CallOption) (*UntrustResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UntrustResponse)
+	err := c.cc.Invoke(ctx, Control_Untrust_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -248,6 +260,7 @@ type ControlServer interface {
 	Attach(grpc.BidiStreamingServer[ClientFrame, ServerFrame]) error
 	CloseSession(context.Context, *CloseSessionRequest) (*CloseSessionResponse, error)
 	Trust(context.Context, *TrustRequest) (*TrustResponse, error)
+	Untrust(context.Context, *UntrustRequest) (*UntrustResponse, error)
 	InstallPlan(context.Context, *InstallPlanRequest) (*InstallPlanResponse, error)
 	InstallApply(*InstallApplyRequest, grpc.ServerStreamingServer[InstallApplyEvent]) error
 	ListTools(context.Context, *ListToolsRequest) (*ListToolsResponse, error)
@@ -285,6 +298,9 @@ func (UnimplementedControlServer) CloseSession(context.Context, *CloseSessionReq
 }
 func (UnimplementedControlServer) Trust(context.Context, *TrustRequest) (*TrustResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Trust not implemented")
+}
+func (UnimplementedControlServer) Untrust(context.Context, *UntrustRequest) (*UntrustResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Untrust not implemented")
 }
 func (UnimplementedControlServer) InstallPlan(context.Context, *InstallPlanRequest) (*InstallPlanResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method InstallPlan not implemented")
@@ -436,6 +452,24 @@ func _Control_Trust_Handler(srv interface{}, ctx context.Context, dec func(inter
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Control_Untrust_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UntrustRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ControlServer).Untrust(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Control_Untrust_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ControlServer).Untrust(ctx, req.(*UntrustRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Control_InstallPlan_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(InstallPlanRequest)
 	if err := dec(in); err != nil {
@@ -574,6 +608,10 @@ var Control_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Trust",
 			Handler:    _Control_Trust_Handler,
+		},
+		{
+			MethodName: "Untrust",
+			Handler:    _Control_Untrust_Handler,
 		},
 		{
 			MethodName: "InstallPlan",
