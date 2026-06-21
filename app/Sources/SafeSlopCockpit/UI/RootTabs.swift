@@ -6,7 +6,10 @@ import SwiftUI
 /// separate WindowGroups opened from the Launch tab.
 struct RootTabs: View {
     @State private var engine = EngineModel()
-    @State private var tab = RootTabs.initialTab
+    // Start on "launch", then switch to the deep-linked tab in .onAppear. macOS TabView does NOT honor a
+    // selection set from a @State *default* (it shows the first tab regardless), and re-asserting the same
+    // value is a no-op — so the COCKPIT_TAB deep-link needs a real launch→target CHANGE after appear.
+    @State private var tab = "launch"
 
     var body: some View {
         TabView(selection: $tab) {
@@ -22,6 +25,7 @@ struct RootTabs: View {
         }
         .environment(engine)
         .frame(minWidth: 460, minHeight: 480)
+        .onAppear { tab = RootTabs.initialTab } // honor COCKPIT_TAB (no-op for the default "launch")
         .task { await engine.refresh() }
     }
 
