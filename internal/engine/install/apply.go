@@ -197,11 +197,30 @@ func installApp(name, srcRoot, appDir, binDir string) error {
 		return err
 	}
 	dest := filepath.Join(appDir, name+".app")
-	_ = os.RemoveAll(dest)
-	if err := os.Rename(app, dest); err != nil {
-		if cerr := copyTree(app, dest); cerr != nil { // cross-device fallback
+	staged := dest + ".new"
+	_ = os.RemoveAll(staged)
+	if err := os.Rename(app, staged); err != nil {
+		if cerr := copyTree(app, staged); cerr != nil { // cross-device fallback
 			return cerr
 		}
+	}
+	// Keep the prior version for rollback instead of deleting it up front: a failed commit must never
+	// leave the user with no app (the old destructive RemoveAll-then-rename lost the app on any failure).
+	backup := dest + ".bak"
+	_ = os.RemoveAll(backup)
+	hadOld := false
+	if _, err := os.Stat(dest); err == nil {
+		if err := os.Rename(dest, backup); err != nil {
+			return fmt.Errorf("back up existing %s.app: %w", name, err)
+		}
+		hadOld = true
+	}
+	if err := os.Rename(staged, dest); err != nil {
+		if hadOld {
+			_ = os.Rename(backup, dest) // roll back to the prior version
+		}
+		_ = os.RemoveAll(staged)
+		return fmt.Errorf("commit %s.app: %w", name, err)
 	}
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		return err

@@ -156,6 +156,37 @@ func TestApplyFailsClosedOnBadSig(t *testing.T) {
 	}
 }
 
+// TestInstallAppUpgradeKeepsBackup verifies an .app upgrade is non-destructive: the new version lands
+// at dest and the PRIOR version is preserved at dest+".bak" (the rollback copy) — the old code did
+// os.RemoveAll(dest) BEFORE the rename, so any failure left the user with no app.
+func TestInstallAppUpgradeKeepsBackup(t *testing.T) {
+	dirs := Dirs{BinDir: t.TempDir(), AppDir: t.TempDir(), TmpDir: t.TempDir()}
+	mk := func(body string) []byte {
+		return tgz(t, map[string]string{
+			"tart.app/Contents/MacOS/tart": body,
+			"tart.app/Contents/Info.plist": "<plist/>",
+		})
+	}
+	install := func(art []byte) {
+		url := "https://x/tart.tgz"
+		res := Result{Actions: []Action{{Name: "tart", Kind: ActionInstall, Desired: "v", Format: FormatAppTarball, SHA256: sha(art), URL: url}}}
+		if err := Apply(context.Background(), res, dirs, fakeFetcher{url: art}, nil); err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+	}
+	install(mk("#!/bin/sh\necho v1\n"))
+	install(mk("#!/bin/sh\necho v2\n")) // upgrade over the existing app
+
+	got, err := os.ReadFile(filepath.Join(dirs.AppDir, "tart.app", "Contents", "MacOS", "tart"))
+	if err != nil || string(got) != "#!/bin/sh\necho v2\n" {
+		t.Fatalf("dest must hold the new v2, got %q err=%v", got, err)
+	}
+	bak, err := os.ReadFile(filepath.Join(dirs.AppDir, "tart.app.bak", "Contents", "MacOS", "tart"))
+	if err != nil || string(bak) != "#!/bin/sh\necho v1\n" {
+		t.Fatalf(".bak must preserve the prior v1 for rollback, got %q err=%v", bak, err)
+	}
+}
+
 func TestApplySkipsOKActions(t *testing.T) {
 	res := Result{Actions: []Action{{Name: "mise", Kind: ActionOK, Format: FormatBinaryTarball}}}
 	dirs := Dirs{BinDir: t.TempDir(), AppDir: t.TempDir(), TmpDir: t.TempDir()}
