@@ -142,6 +142,7 @@ message ToolStatus {
   string path = 6;
   bool installable = 7;     // true only when missing AND a route exists (no-clobber)
   string install_hint = 8;  // the command that would run, e.g. "brew install uv" (display only)
+  repeated string shadowed_paths = 9; // other same-name executables later on PATH (shadowed by `path`)
 }
 message ListToolsResponse { repeated ToolStatus tools = 1; }
 

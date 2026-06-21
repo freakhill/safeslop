@@ -200,6 +200,7 @@ func (s *server) ListTools(_ context.Context, req *pb.ListToolsRequest) (*pb.Lis
 		ts := &pb.ToolStatus{
 			Name: st.Tool.Name, Category: st.Tool.Category, Note: st.Tool.Note,
 			Present: st.Present, Source: st.Source, Path: st.Path, Installable: st.Installable(),
+			ShadowedPaths: st.ShadowedPaths,
 		}
 		if ts.Installable {
 			if argv, err := tools.InstallArgv(st); err == nil {

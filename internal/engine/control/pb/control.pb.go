@@ -1616,8 +1616,9 @@ type ToolStatus struct {
 	Present       bool                   `protobuf:"varint,4,opt,name=present,proto3" json:"present,omitempty"`
 	Source        string                 `protobuf:"bytes,5,opt,name=source,proto3" json:"source,omitempty"` // brew | cask | app | standalone | missing
 	Path          string                 `protobuf:"bytes,6,opt,name=path,proto3" json:"path,omitempty"`
-	Installable   bool                   `protobuf:"varint,7,opt,name=installable,proto3" json:"installable,omitempty"`                   // true only when missing AND a route exists (no-clobber)
-	InstallHint   string                 `protobuf:"bytes,8,opt,name=install_hint,json=installHint,proto3" json:"install_hint,omitempty"` // the command that would run, e.g. "brew install uv" (display only)
+	Installable   bool                   `protobuf:"varint,7,opt,name=installable,proto3" json:"installable,omitempty"`                         // true only when missing AND a route exists (no-clobber)
+	InstallHint   string                 `protobuf:"bytes,8,opt,name=install_hint,json=installHint,proto3" json:"install_hint,omitempty"`       // the command that would run, e.g. "brew install uv" (display only)
+	ShadowedPaths []string               `protobuf:"bytes,9,rep,name=shadowed_paths,json=shadowedPaths,proto3" json:"shadowed_paths,omitempty"` // other same-name executables later on PATH (shadowed by `path`)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1706,6 +1707,13 @@ func (x *ToolStatus) GetInstallHint() string {
 		return x.InstallHint
 	}
 	return ""
+}
+
+func (x *ToolStatus) GetShadowedPaths() []string {
+	if x != nil {
+		return x.ShadowedPaths
+	}
+	return nil
 }
 
 type ListToolsResponse struct {
@@ -2383,7 +2391,7 @@ const file_internal_engine_control_control_proto_rawDesc = "" +
 	"\x04DONE\x10\x02\x12\t\n" +
 	"\x05ERROR\x10\x03\"5\n" +
 	"\x10ListToolsRequest\x12!\n" +
-	"\fcatalog_only\x18\x01 \x01(\bR\vcatalogOnly\"\xdb\x01\n" +
+	"\fcatalog_only\x18\x01 \x01(\bR\vcatalogOnly\"\x82\x02\n" +
 	"\n" +
 	"ToolStatus\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1a\n" +
@@ -2393,7 +2401,8 @@ const file_internal_engine_control_control_proto_rawDesc = "" +
 	"\x06source\x18\x05 \x01(\tR\x06source\x12\x12\n" +
 	"\x04path\x18\x06 \x01(\tR\x04path\x12 \n" +
 	"\vinstallable\x18\a \x01(\bR\vinstallable\x12!\n" +
-	"\finstall_hint\x18\b \x01(\tR\vinstallHint\"J\n" +
+	"\finstall_hint\x18\b \x01(\tR\vinstallHint\x12%\n" +
+	"\x0eshadowed_paths\x18\t \x03(\tR\rshadowedPaths\"J\n" +
 	"\x11ListToolsResponse\x125\n" +
 	"\x05tools\x18\x01 \x03(\v2\x1f.safeslop.control.v1.ToolStatusR\x05tools\"(\n" +
 	"\x12InstallToolRequest\x12\x12\n" +
