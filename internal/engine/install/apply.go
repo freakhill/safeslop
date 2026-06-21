@@ -2,6 +2,8 @@ package install
 
 import (
 	"archive/tar"
+	"archive/zip"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"fmt"
@@ -134,13 +136,21 @@ func applyOne(ctx context.Context, a Action, dirs Dirs, fetch Fetcher, emit func
 		return err
 	}
 	defer os.RemoveAll(work)
-	if err := extractTarGz(data, work); err != nil {
-		return fmt.Errorf("extract: %w", err)
-	}
 	switch a.Format {
 	case FormatBinaryTarball:
+		if err := extractTarGz(data, work); err != nil {
+			return fmt.Errorf("extract: %w", err)
+		}
+		return installBinary(a.Name, work, dirs.BinDir)
+	case FormatBinaryZip:
+		if err := extractZip(data, work); err != nil {
+			return fmt.Errorf("extract: %w", err)
+		}
 		return installBinary(a.Name, work, dirs.BinDir)
 	case FormatAppTarball:
+		if err := extractTarGz(data, work); err != nil {
+			return fmt.Errorf("extract: %w", err)
+		}
 		return installApp(a.Name, work, dirs.AppDir, dirs.BinDir)
 	default:
 		return fmt.Errorf("unknown format %q", a.Format)
@@ -334,6 +344,51 @@ func extractTarGz(data []byte, dest string) error {
 			_ = os.Symlink(h.Linkname, target)
 		}
 	}
+}
+
+// extractZip unpacks a .zip (e.g. bun's release) into dest, rejecting path traversal and preserving
+// the executable bit zip carries in its external attributes. Symlinks inside a zip are skipped (the
+// binary releases we pin don't use them; allowing arbitrary zip symlinks is an escape vector).
+func extractZip(data []byte, dest string) error {
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return err
+	}
+	for _, f := range zr.File {
+		target, err := safeJoin(dest, f.Name) // reject path traversal
+		if err != nil {
+			return err
+		}
+		info := f.FileInfo()
+		if info.IsDir() {
+			if err := os.MkdirAll(target, 0o755); err != nil {
+				return err
+			}
+			continue
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			continue // skip symlinks — not needed for the binary releases we pin
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return err
+		}
+		out, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, info.Mode().Perm()|0o200)
+		if err != nil {
+			rc.Close()
+			return err
+		}
+		_, cpErr := io.Copy(out, rc)
+		out.Close()
+		rc.Close()
+		if cpErr != nil {
+			return cpErr
+		}
+	}
+	return nil
 }
 
 // safeJoin joins name under root and rejects anything that escapes root (path traversal).

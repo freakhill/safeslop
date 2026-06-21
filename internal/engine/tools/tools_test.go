@@ -217,6 +217,35 @@ func TestUvUsesPinnedBinaryNotCurlSh(t *testing.T) {
 	}
 }
 
+// TestBunPnpmRouteToPinNotCurlSh extends the uv guarantee to the other pinned curl|sh tools (Task 5):
+// a missing bun/pnpm must route to the verified pin when brew is absent, never to their install script.
+func TestBunPnpmRouteToPinNotCurlSh(t *testing.T) {
+	for _, name := range []string{"bun", "pnpm"} {
+		var tool Tool
+		for _, c := range Catalog() {
+			if c.Name == name {
+				tool = c
+			}
+		}
+		if tool.Name != name {
+			t.Fatalf("%s must be in the catalog", name)
+		}
+		if pin, ok := pinFor(name); !ok || pin.SHA256 == "" || pin.Version == "" {
+			t.Fatalf("%s must have a fully-specified embedded pin, got %+v ok=%v", name, pin, ok)
+		}
+		missing := Status{Tool: tool, Present: false, Source: "missing"}
+		if _, err := installArgv(missing, false); !errors.Is(err, errUsePin) {
+			t.Fatalf("%s without brew must route to the verified pin, got err=%v", name, err)
+		}
+		for _, brewAvail := range []bool{true, false} {
+			argv, err := installArgv(missing, brewAvail)
+			if err == nil && len(argv) >= 3 && argv[0] == "/bin/sh" && strings.Contains(argv[2], "curl") {
+				t.Fatalf("%s must never resolve to a curl|sh argv (brewAvail=%v): %v", name, brewAvail, argv)
+			}
+		}
+	}
+}
+
 func TestInstallArgvRefusesPresentAndPicksRoute(t *testing.T) {
 	if _, err := InstallArgv(Status{Tool: Tool{Brew: "uv"}, Present: true}); err == nil {
 		t.Fatal("InstallArgv must refuse a present tool")

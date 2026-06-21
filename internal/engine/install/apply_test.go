@@ -2,6 +2,7 @@ package install
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -14,6 +15,29 @@ import (
 
 	"aead.dev/minisign"
 )
+
+// zipBytes builds an in-memory .zip from name->content entries (mode 0755), mirroring tgz for the
+// FormatBinaryZip path (bun ships a zip).
+func zipBytes(t *testing.T, entries map[string]string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for name, content := range entries {
+		fh := &zip.FileHeader{Name: name, Method: zip.Deflate}
+		fh.SetMode(0o755)
+		w, err := zw.CreateHeader(fh)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write([]byte(content)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
 
 // tgz builds an in-memory .tar.gz from name->content entries (mode 0755).
 func tgz(t *testing.T, entries map[string]string) []byte {
@@ -91,6 +115,25 @@ func TestInstallBinaryUpgradeKeepsBackup(t *testing.T) {
 	bak, err := os.ReadFile(filepath.Join(dirs.BinDir, "mise.bak"))
 	if err != nil || string(bak) != "#!/bin/sh\necho v1\n" {
 		t.Fatalf(".bak must preserve the prior v1 for rollback, got %q err=%v", bak, err)
+	}
+}
+
+// TestApplyInstallsBinaryZip exercises the FormatBinaryZip route (bun): extract the zip, install the
+// inner binary executable into BinDir.
+func TestApplyInstallsBinaryZip(t *testing.T) {
+	art := zipBytes(t, map[string]string{"bun-darwin-aarch64/bun": "#!/bin/sh\necho bun\n"})
+	url := "https://x/bun.zip"
+	res := Result{Actions: []Action{{
+		Name: "bun", Kind: ActionInstall, Desired: "1.3.14",
+		Format: FormatBinaryZip, SHA256: sha(art), URL: url,
+	}}}
+	dirs := Dirs{BinDir: t.TempDir(), AppDir: t.TempDir(), TmpDir: t.TempDir()}
+	if err := Apply(context.Background(), res, dirs, fakeFetcher{url: art}, nil); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	got := filepath.Join(dirs.BinDir, "bun")
+	if fi, err := os.Stat(got); err != nil || fi.Mode()&0o111 == 0 {
+		t.Fatalf("bun not installed executable at %s (err=%v)", got, err)
 	}
 }
 

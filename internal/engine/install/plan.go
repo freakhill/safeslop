@@ -7,7 +7,8 @@ import (
 
 // Artifact formats Apply knows how to install (specs/0021).
 const (
-	FormatBinaryTarball = "binary-tarball" // tar.gz containing <name>/bin/<name>; install to BinDir
+	FormatBinaryTarball = "binary-tarball" // tar.gz containing the <name> binary; install to BinDir
+	FormatBinaryZip     = "binary-zip"     // .zip containing the <name> binary (e.g. bun); install to BinDir
 	FormatAppTarball    = "app-tarball"    // tar.gz containing <name>.app; install to AppDir + symlink
 )
 
@@ -61,8 +62,8 @@ func ValidateDesired(pins []Pin) error {
 		if p.URL == "" {
 			return fmt.Errorf("install: pin %q must declare a source url", p.Name)
 		}
-		if p.Format != FormatBinaryTarball && p.Format != FormatAppTarball {
-			return fmt.Errorf("install: pin %q has invalid format %q (want %s|%s)", p.Name, p.Format, FormatBinaryTarball, FormatAppTarball)
+		if p.Format != FormatBinaryTarball && p.Format != FormatBinaryZip && p.Format != FormatAppTarball {
+			return fmt.Errorf("install: pin %q has invalid format %q (want %s|%s|%s)", p.Name, p.Format, FormatBinaryTarball, FormatBinaryZip, FormatAppTarball)
 		}
 		if p.Sig != nil {
 			if p.Sig.Scheme != "minisign" {

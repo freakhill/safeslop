@@ -46,5 +46,31 @@ func DesiredState() []Pin {
 			SHA256:  "71ef9de85db820749b3b12b7585624ee279e9c5afcbc6f8236bc3d628c4305b0",
 			URL:     "https://github.com/astral-sh/uv/releases/download/0.11.23/uv-aarch64-apple-darwin.tar.gz",
 		},
+		{
+			// bun ships a darwin-arm64 .zip; sha256 verified to match bun's published SHASUMS256.txt on
+			// 2026-06-21. Pinning it routes the cockpit install through verified Route A instead of
+			// `curl -fsSL https://bun.sh/install | bash` (specs/0036 Task 5). The zip holds
+			// bun-darwin-aarch64/bun; installBinary's findFile resolves it. No minisig published.
+			Name:    "bun",
+			Kind:    "runtime",
+			Format:  FormatBinaryZip,
+			Version: "1.3.14",
+			SHA256:  "d8b96221828ad6f97ac7ac0ab7e95872341af763001e8803e8267652c2652620",
+			URL:     "https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-darwin-aarch64.zip",
+		},
+		{
+			// pnpm ships a darwin-arm64 tar.gz whose root `pnpm` is a self-contained Node SEA binary
+			// (the bundled dist/ is redundant at runtime). Pinning it replaces
+			// `curl -fsSL https://get.pnpm.io/install.sh | sh -` with verified Route A (specs/0036 Task 5).
+			// pnpm publishes NO checksum or signature asset, so this sha256 (computed from the GitHub
+			// release over TLS on 2026-06-21) is the trust floor — still fail-closed on every install,
+			// but with weaker pin-time provenance than uv/bun/mise; revisit if pnpm starts publishing sums.
+			Name:    "pnpm",
+			Kind:    "runtime",
+			Format:  FormatBinaryTarball,
+			Version: "11.8.0",
+			SHA256:  "7c9ef7523abf1190a2fde2b81dd652260d1679ba471c09950e8a08fa772c06e2",
+			URL:     "https://github.com/pnpm/pnpm/releases/download/v11.8.0/pnpm-darwin-arm64.tar.gz",
+		},
 	}
 }
