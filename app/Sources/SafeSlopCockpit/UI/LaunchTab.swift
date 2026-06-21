@@ -20,10 +20,25 @@ struct LaunchTab: View {
             Text(engine.status).font(.callout).foregroundStyle(.secondary)
 
             if engine.profiles.isEmpty {
-                ContentUnavailableView("No profiles", systemImage: "tray",
-                                       description: Text("Add a safeslop.cue with profiles, then Refresh."))
-                    .frame(maxHeight: .infinity)
+                if engine.reachable {
+                    ContentUnavailableView("No profiles", systemImage: "tray",
+                                           description: Text("Add a safeslop.cue with profiles, then Refresh."))
+                        .frame(maxHeight: .infinity)
+                } else {
+                    // Distinguish "engine down" from "no profiles" — the wrong message sends the user to
+                    // edit a safeslop.cue when the real fix is the engine reconnecting (ayo #8).
+                    ContentUnavailableView("Engine unreachable", systemImage: "bolt.horizontal.circle",
+                                           description: Text("Couldn't reach `safeslop serve` — it reconnects automatically when the engine is back."))
+                        .frame(maxHeight: .infinity)
+                }
             } else {
+                if !engine.reachable {
+                    // Last-known rows, not a blank grid: say so honestly, with when they were last fresh.
+                    Label("Engine unreachable — showing last sync \(engine.lastSyncLabel ?? "—")",
+                          systemImage: "bolt.horizontal.circle")
+                        .font(.caption.weight(.medium)).foregroundStyle(.orange)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
                 List(engine.profiles) { ref in
                     row(ref)
                 }
@@ -81,9 +96,9 @@ struct LaunchTab: View {
                 .foregroundStyle(.secondary)
         }
         // muted until approved; grayed harder when its config dir is gone.
-        .opacity(missing ? 0.4 : (ref.isTrusted ? 1 : 0.6))
+        .opacity(missing ? 0.4 : (!engine.reachable ? 0.5 : (ref.isTrusted ? 1 : 0.6)))
         .contentShape(Rectangle())
-        .onTapGesture { if !missing { openWindow(id: "session", value: ref) } }
+        .onTapGesture { if !missing && engine.reachable { openWindow(id: "session", value: ref) } }
         // hover shows the underlying technologies powering this profile (policy.TechStack).
         .help(ref.techStack.isEmpty ? ref.tierNote : ref.techStack.joined(separator: "\n"))
     }
