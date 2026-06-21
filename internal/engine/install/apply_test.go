@@ -69,6 +69,31 @@ func TestApplyInstallsBinaryTarball(t *testing.T) {
 	}
 }
 
+// TestInstallBinaryUpgradeKeepsBackup verifies a binary upgrade commits atomically and preserves the
+// prior binary at <name>.bak for rollback (the old code overwrote in place via copyFile).
+func TestInstallBinaryUpgradeKeepsBackup(t *testing.T) {
+	dirs := Dirs{BinDir: t.TempDir(), AppDir: t.TempDir(), TmpDir: t.TempDir()}
+	install := func(body string) {
+		art := tgz(t, map[string]string{"mise/bin/mise": body})
+		url := "https://x/mise.tgz"
+		res := Result{Actions: []Action{{Name: "mise", Kind: ActionInstall, Desired: "v", Format: FormatBinaryTarball, SHA256: sha(art), URL: url}}}
+		if err := Apply(context.Background(), res, dirs, fakeFetcher{url: art}, nil); err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+	}
+	install("#!/bin/sh\necho v1\n")
+	install("#!/bin/sh\necho v2\n") // upgrade
+
+	got, err := os.ReadFile(filepath.Join(dirs.BinDir, "mise"))
+	if err != nil || string(got) != "#!/bin/sh\necho v2\n" {
+		t.Fatalf("dest must hold the new v2, got %q err=%v", got, err)
+	}
+	bak, err := os.ReadFile(filepath.Join(dirs.BinDir, "mise.bak"))
+	if err != nil || string(bak) != "#!/bin/sh\necho v1\n" {
+		t.Fatalf(".bak must preserve the prior v1 for rollback, got %q err=%v", bak, err)
+	}
+}
+
 func TestApplyFailsClosedOnSHAMismatch(t *testing.T) {
 	art := tgz(t, map[string]string{"mise/bin/mise": "x"})
 	url := "https://x/mise.tgz"

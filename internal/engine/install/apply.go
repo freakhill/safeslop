@@ -184,7 +184,31 @@ func installBinary(name, srcRoot, binDir string) error {
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		return err
 	}
-	return copyFile(src, filepath.Join(binDir, name), 0o755)
+	// Stage beside the destination (same dir → same filesystem → the commit rename is atomic, so a
+	// reader mid-exec never sees a torn file), keep any prior binary at <name>.bak for rollback, then
+	// commit by rename; restore the backup on a commit failure.
+	dest := filepath.Join(binDir, name)
+	staged := dest + ".new"
+	if err := copyFile(src, staged, 0o755); err != nil {
+		return err
+	}
+	backup := dest + ".bak"
+	_ = os.Remove(backup)
+	hadOld := false
+	if _, err := os.Stat(dest); err == nil {
+		if err := os.Rename(dest, backup); err != nil {
+			return fmt.Errorf("back up existing %q: %w", name, err)
+		}
+		hadOld = true
+	}
+	if err := os.Rename(staged, dest); err != nil {
+		if hadOld {
+			_ = os.Rename(backup, dest)
+		}
+		_ = os.Remove(staged)
+		return fmt.Errorf("commit %q: %w", name, err)
+	}
+	return nil
 }
 
 // installApp moves <name>.app into appDir and symlinks its inner binary into binDir.
