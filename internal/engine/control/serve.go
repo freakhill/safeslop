@@ -49,7 +49,21 @@ func Serve(version string,
 		return err
 	}
 	gs := grpc.NewServer()
-	pb.RegisterControlServer(gs, &server{
+	pb.RegisterControlServer(gs, NewControlServer(version, launchFn, resolveFn, trustFn, listFn))
+	return gs.Serve(peerAuthListener{ln})
+}
+
+// NewControlServer builds the Control service implementation with the given engine wiring. Exposed so
+// an in-process harness can serve it over a bufconn listener with the REAL fns — the headless analog
+// of click-testing every cockpit tab's RPC (see internal/cli cockpit-backend smoke). Production goes
+// through Serve, which binds the peer-authed UDS and registers exactly this.
+func NewControlServer(version string,
+	launchFn func(profile, configPath string, emit func(*pb.LaunchEvent)) error,
+	resolveFn func(profile, configPath string) (SessionSpec, error),
+	trustFn func(configPath string) (string, error),
+	listFn func(configPath string) ([]*pb.Profile, error),
+) pb.ControlServer {
+	return &server{
 		version:        version,
 		launchFn:       launchFn,
 		mgr:            NewManager(),
@@ -57,8 +71,7 @@ func Serve(version string,
 		trustFn:        trustFn,
 		listFn:         listFn,
 		installApplyFn: defaultInstallApply(version),
-	})
-	return gs.Serve(peerAuthListener{ln})
+	}
 }
 
 // defaultInstallApply runs the pinned plan over the same HTTP fetcher + dirs the CLI uses,
