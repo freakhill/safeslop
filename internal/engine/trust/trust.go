@@ -105,3 +105,21 @@ func (s *Store) Approve(absPath string, policyBytes []byte) error {
 	}
 	return os.WriteFile(s.path, b, 0o600)
 }
+
+// Revoke removes absPath's approval and persists the store, so a previously trusted policy returns to
+// Untrusted (the symmetric reverse of Approve — ayo Actionable #3). Revoking an entry that isn't present
+// is a no-op success. It rewrites the file rather than mutating in place, so a crash can't half-revoke.
+func (s *Store) Revoke(absPath string) error {
+	if _, ok := s.entries[absPath]; !ok {
+		return nil
+	}
+	delete(s.entries, absPath)
+	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(storeFile{Version: storeVersion, Entries: s.entries}, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(s.path, b, 0o600)
+}

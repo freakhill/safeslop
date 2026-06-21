@@ -40,3 +40,35 @@ func TestHashStable(t *testing.T) {
 		t.Fatal("Hash must be deterministic and content-sensitive")
 	}
 }
+
+func TestRevokeReturnsToUntrusted(t *testing.T) {
+	dir := t.TempDir()
+	store := &Store{path: filepath.Join(dir, "trust.json"), entries: map[string]string{}}
+	policy := []byte("safeslop: {version: 1}")
+	abs := "/repo/safeslop.cue"
+
+	if err := store.Approve(abs, policy); err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
+	if store.Check(abs, policy) != Trusted {
+		t.Fatalf("precondition: want Trusted after Approve")
+	}
+	if err := store.Revoke(abs); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+	if got := store.Check(abs, policy); got != Untrusted {
+		t.Errorf("after Revoke = %v, want Untrusted", got)
+	}
+	// Revoking an absent entry is a no-op success (idempotent).
+	if err := store.Revoke(abs); err != nil {
+		t.Errorf("second Revoke should be a no-op, got %v", err)
+	}
+	// The removal persisted: a fresh Load no longer trusts it.
+	reloaded, err := Load(store.path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if reloaded.Check(abs, policy) != Untrusted {
+		t.Errorf("revocation did not persist")
+	}
+}
