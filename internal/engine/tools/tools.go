@@ -17,12 +17,15 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/freakhill/safeslop/internal/engine/hostenv"
 )
 
 var (
 	errAlreadyPresent = errors.New("tool already installed — safeslop won't touch an existing install")
 	errNeedsBrew      = errors.New("this tool installs via Homebrew, which isn't on PATH (install brew first)")
 	errNoRoute        = errors.New("no install route for this tool")
+	errNoBrew         = errors.New("brew is not resolvable on the reconstructed PATH")
 )
 
 // Category groups tools in the UI.
@@ -193,37 +196,64 @@ func detect(p probe, t Tool) Status {
 	return Status{Tool: t, Present: false, Source: "missing"}
 }
 
-// realProbe builds the live host probe: PATH lookups, /Applications checks, and a one-shot read of the
-// installed brew formula + cask sets (empty when brew is absent — present binaries then read as
-// "standalone", and cask-only tools simply aren't installable).
+// realProbe builds the live host probe against the RECONSTRUCTED host environment, so detection works
+// from a Finder-launched .app (stripped process PATH) exactly as it does from a terminal. PATH lookups
+// and brew both resolve via hostenv; see internal/engine/hostenv for the two-environment firewall (the
+// rich env is for host-side discovery only and never crosses into a sandbox).
 func realProbe() probe {
+	env := hostenv.Reconstruct()
+	return probeFromEnv(env.LookPath, env.Environ())
+}
+
+// probeFromEnv builds a host probe from a reconstructed lookPath + environment. brew is resolved via
+// the reconstructed PATH and run with that environment; if brew can't be found the formula/cask sets
+// are empty (present binaries then read as "standalone", cask-only tools simply aren't installable) —
+// detection degrades, it does not crash.
+func probeFromEnv(lookPath func(string) (string, bool), environ []string) probe {
+	br := brewRunner{lookPath: lookPath, environ: environ}
 	prefix := ""
-	if out, err := exec.Command("brew", "--prefix").Output(); err == nil {
-		prefix = strings.TrimSpace(string(out))
+	if out, err := br.output("--prefix"); err == nil {
+		prefix = strings.TrimSpace(out)
 	}
 	return probe{
-		lookPath: func(bin string) (string, bool) {
-			path, err := exec.LookPath(bin)
-			return path, err == nil
-		},
+		lookPath: lookPath,
 		appExists: func(p string) bool {
 			_, err := os.Stat(p)
 			return err == nil
 		},
-		formulae:   brewList("--formula"),
-		casks:      brewList("--cask"),
+		formulae:   br.list("--formula"),
+		casks:      br.list("--cask"),
 		brewPrefix: prefix,
 	}
 }
 
-// brewList returns the set of installed names for `brew list <kind> -1`; empty when brew is missing.
-func brewList(kind string) map[string]bool {
+// brewRunner resolves brew on the reconstructed PATH and runs it with the reconstructed environment,
+// so brew works under a Finder launch (where bare `brew` is off the process PATH).
+type brewRunner struct {
+	lookPath func(string) (string, bool)
+	environ  []string
+}
+
+// output runs `brew <args...>` and returns stdout, or errNoBrew when brew can't be resolved.
+func (b brewRunner) output(args ...string) (string, error) {
+	brew, ok := b.lookPath("brew")
+	if !ok {
+		return "", errNoBrew
+	}
+	cmd := exec.Command(brew, args...)
+	cmd.Env = b.environ
+	out, err := cmd.Output()
+	return string(out), err
+}
+
+// list returns the set of installed names for `brew list <kind> -1`; empty when brew is missing.
+func (b brewRunner) list(kind string) map[string]bool {
 	set := map[string]bool{}
-	out, err := exec.Command("brew", "list", kind, "-1").Output()
+	out, err := b.output("list", kind, "-1")
 	if err != nil {
 		return set
 	}
-	for _, line := range strings.Split(string(out), "\n") {
+	for _, line := range strings.Split(out, "\n") {
 		if name := strings.TrimSpace(line); name != "" {
 			// casks/formulae may print as full paths under some configs; keep the leaf.
 			set[filepath.Base(name)] = true
@@ -265,8 +295,8 @@ func InstallArgv(s Status) ([]string, error) {
 }
 
 func brewOnPath() bool {
-	_, err := exec.LookPath("brew")
-	return err == nil
+	_, ok := hostenv.Reconstruct().LookPath("brew")
+	return ok
 }
 
 // Detect classifies a single named tool against the live host, or false if the name isn't in the
@@ -293,7 +323,17 @@ func InstallByName(name string, emit func(line string)) error {
 		return err
 	}
 	emit("$ " + strings.Join(argv, " "))
-	cmd := exec.Command(argv[0], argv[1:]...)
+	// Resolve the binary and run with the reconstructed environment so the install works under a
+	// Finder launch: `brew` is resolved to its absolute path, and a curl|sh script inherits a PATH
+	// that can find curl/sh. This runs on the host as the user — the rich env is correct here (the
+	// sandbox firewall in cli.childEnv governs only what crosses into an isolated agent).
+	env := hostenv.Reconstruct()
+	bin := argv[0]
+	if resolved, ok := env.LookPath(bin); ok {
+		bin = resolved
+	}
+	cmd := exec.Command(bin, argv[1:]...)
+	cmd.Env = env.Environ()
 	lw := &lineWriter{emit: emit}
 	cmd.Stdout = lw
 	cmd.Stderr = lw // both streams share the writer (it is mutex-guarded)

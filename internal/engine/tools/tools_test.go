@@ -94,6 +94,39 @@ func TestDetectClassifiesSource(t *testing.T) {
 	}
 }
 
+func TestProbeFromEnvUsesReconstructedPathAndDegradesWithoutBrew(t *testing.T) {
+	// Reconstructed lookPath resolves git off a brew dir but cannot find brew itself (the bundled-app
+	// failure mode: brew not on the process PATH). Detection must still find git, and the brew-derived
+	// sets must degrade to empty rather than crash.
+	lp := func(b string) (string, bool) {
+		if b == "git" {
+			return "/opt/homebrew/bin/git", true
+		}
+		return "", false
+	}
+	p := probeFromEnv(lp, nil)
+	if len(p.formulae) != 0 || len(p.casks) != 0 {
+		t.Errorf("no brew → empty formula/cask sets, got %v / %v", p.formulae, p.casks)
+	}
+	if p.brewPrefix != "" {
+		t.Errorf("no brew → empty prefix, got %q", p.brewPrefix)
+	}
+	git := Tool{Name: "git", Detect: []string{"git"}}
+	if s := detect(p, git); !s.Present || s.Path != "/opt/homebrew/bin/git" {
+		t.Errorf("git must be found via the reconstructed PATH: present=%v path=%q", s.Present, s.Path)
+	}
+}
+
+func TestBrewRunnerRefusesWhenBrewUnresolvable(t *testing.T) {
+	br := brewRunner{lookPath: func(string) (string, bool) { return "", false }}
+	if _, err := br.output("--prefix"); err != errNoBrew {
+		t.Errorf("output without brew should return errNoBrew, got %v", err)
+	}
+	if got := br.list("--formula"); len(got) != 0 {
+		t.Errorf("list without brew should be empty, got %v", got)
+	}
+}
+
 func TestInstallableOnlyWhenMissing(t *testing.T) {
 	// no-clobber: a present tool is never installable, regardless of route
 	present := Status{Tool: Tool{Name: "uv", Brew: "uv", Script: "x"}, Present: true, Source: "brew"}

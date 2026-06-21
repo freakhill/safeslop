@@ -22,6 +22,7 @@ import (
 	"github.com/freakhill/safeslop/internal/engine/creds"
 	engexec "github.com/freakhill/safeslop/internal/engine/exec"
 	"github.com/freakhill/safeslop/internal/engine/gitguard"
+	"github.com/freakhill/safeslop/internal/engine/hostenv"
 	"github.com/freakhill/safeslop/internal/engine/install"
 	"github.com/freakhill/safeslop/internal/engine/launch"
 	"github.com/freakhill/safeslop/internal/engine/policy"
@@ -548,9 +549,11 @@ func resolveSession(profile, configPath string) (control.SessionSpec, error) {
 
 	switch prof.Environment {
 	case "host":
+		argv = resolveHostBinary(argv) // Finder launch: resolve "claude" off the reconstructed PATH
 		env := childEnv(secretEnv, pathEnv)
 		return control.SessionSpec{Argv: argv, Dir: ws, Env: env, OnClose: wipe}, nil
 	case "sandbox", "": // sandbox is the default
+		argv = resolveHostBinary(argv)
 		wrapped, wrapCleanup, err := sandbox.WrapArgv(argv, ws, prof.Network, sandboxScope(prof.Files))
 		if err != nil {
 			_ = os.RemoveAll(stageDir)
@@ -922,9 +925,11 @@ func runProfile(name string, prof policy.Profile, argv []string, ws string) (int
 
 	switch prof.Environment {
 	case "sandbox":
+		argv = resolveHostBinary(argv) // Finder launch: resolve "claude" off the reconstructed PATH
 		env := childEnv(secretEnv, pathEnv)
 		return sandbox.Launch(ctx, engexec.LaunchSpec{Argv: argv, Dir: ws, Env: env}, ws, prof.Network, sandboxScope(prof.Files))
 	case "host":
+		argv = resolveHostBinary(argv)
 		env := childEnv(secretEnv, pathEnv)
 		return engexec.RunInTerminal(ctx, engexec.LaunchSpec{Argv: argv, Dir: ws, Env: env})
 	case "container":
@@ -1079,6 +1084,30 @@ func agentArgv(p policy.Profile) ([]string, error) {
 	default:
 		return nil, fmt.Errorf("unknown agent %q", p.Agent)
 	}
+}
+
+// resolveHostBinary makes argv[0] an absolute path via the reconstructed host PATH, for the host and
+// sandbox tiers where the agent runs in the host process namespace. Under a Finder/launchd launch the
+// process PATH is stripped, so a bare "claude"/"opencode" would fail to exec; resolving it against the
+// host_discovery_env recovers the real location. Container/VM tiers resolve inside the guest and must
+// NOT be passed through here. Uses the same rich-env-for-discovery path as detection (the sandbox
+// firewall is childEnv, not this).
+func resolveHostBinary(argv []string) []string {
+	return resolveBinaryWith(argv, func(name string) (string, bool) {
+		return hostenv.Reconstruct().LookPath(name)
+	})
+}
+
+// resolveBinaryWith resolves argv[0] to an absolute path using lookPath, leaving an already-absolute
+// path or an unresolvable name unchanged (extracted from resolveHostBinary so it is testable).
+func resolveBinaryWith(argv []string, lookPath func(string) (string, bool)) []string {
+	if len(argv) == 0 || filepath.IsAbs(argv[0]) {
+		return argv
+	}
+	if abs, ok := lookPath(argv[0]); ok {
+		return append([]string{abs}, argv[1:]...)
+	}
+	return argv
 }
 
 func emitJSON(v any) {

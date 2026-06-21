@@ -49,8 +49,11 @@ func TestResolveSessionHostAndSandbox(t *testing.T) {
 	if err != nil {
 		t.Fatalf("host resolve: %v", err)
 	}
-	if len(h.Argv) == 0 || h.Argv[0] != "claude" {
-		t.Fatalf("host argv = %v, want it to start with claude", h.Argv)
+	// host/sandbox resolve argv[0] to an absolute path via the reconstructed PATH when the binary is
+	// installed (a Finder launch otherwise can't find bare "claude"); on a host without claude it stays
+	// "claude". Either way the basename is claude — assert that so the test is hermetic.
+	if len(h.Argv) == 0 || filepath.Base(h.Argv[0]) != "claude" {
+		t.Fatalf("host argv = %v, want argv[0] basename claude", h.Argv)
 	}
 	if h.OnClose == nil {
 		t.Fatal("host session must carry a cleanup (per-session stage-dir wipe)")
