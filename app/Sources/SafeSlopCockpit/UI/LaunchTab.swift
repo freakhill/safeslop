@@ -37,59 +37,85 @@ struct LaunchTab: View {
     @ViewBuilder
     private func row(_ ref: ProfileRef) -> some View {
         let missing = ref.configDirMissing
-        Button {
-            if !missing { openWindow(id: "session", value: ref) }
-        } label: {
-            HStack {
-                // Ecusson: color is the chip background; the border WEIGHT (rank) is the non-color danger
-                // channel so the chip reads in grayscale / for the colorblind (ayo S2). Glyph = tier.
-                RiskBadge(symbol: ref.tierSymbol, color: ref.riskColor, rank: ref.dangerRank).help(ref.tierNote)
-                VStack(alignment: .leading, spacing: 1) {
-                    HStack(spacing: 6) {
-                        Text(ref.name).font(.headline)
-                        // symbol+word+color triad (macOS TCC / Little Snitch): the WORD carries danger,
-                        // not the color alone.
-                        Text(ref.dangerWord)
-                            .font(.caption2.weight(.bold))
-                            .padding(.horizontal, 5).padding(.vertical, 1)
-                            .background(ref.riskColor.opacity(0.18), in: Capsule())
-                            .foregroundStyle(ref.riskColor)
-                    }
-                    Text("\(ref.agent) · \(ref.tierLabel) · net:\(ref.netLabel)")
-                        .font(.caption).foregroundStyle(.secondary)
-                    // Show what's UNRESTRICTED as loudly as the line above shows what's bounded (ayo S2):
-                    // a fully-contained profile shows no chips — honest, not scary.
-                    let openAxes = ref.riskAxes.filter { !$0.restricted }
-                    if !openAxes.isEmpty {
-                        HStack(spacing: 4) {
-                            ForEach(openAxes) { ax in
-                                Text("\(ax.name): \(ax.value)")
-                                    .font(.caption2.weight(.semibold))
-                                    .padding(.horizontal, 5).padding(.vertical, 1)
-                                    .background(ax.color.opacity(0.18), in: Capsule())
-                                    .foregroundStyle(ax.color)
-                            }
+        HStack {
+            // Ecusson: color is the chip background; the border WEIGHT (rank) is the non-color danger
+            // channel so the chip reads in grayscale / for the colorblind (ayo S2). Glyph = tier.
+            RiskBadge(symbol: ref.tierSymbol, color: ref.riskColor, rank: ref.dangerRank).help(ref.tierNote)
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 6) {
+                    Text(ref.name).font(.headline)
+                    // symbol+word+color triad (macOS TCC / Little Snitch): the WORD carries danger.
+                    Text(ref.dangerWord)
+                        .font(.caption2.weight(.bold))
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(ref.riskColor.opacity(0.18), in: Capsule())
+                        .foregroundStyle(ref.riskColor)
+                }
+                Text("\(ref.agent) · \(ref.tierLabel) · net:\(ref.netLabel)")
+                    .font(.caption).foregroundStyle(.secondary)
+                // Show what's UNRESTRICTED as loudly as the line above shows what's bounded (ayo S2):
+                // a fully-contained profile shows no chips — honest, not scary.
+                let openAxes = ref.riskAxes.filter { !$0.restricted }
+                if !openAxes.isEmpty {
+                    HStack(spacing: 4) {
+                        ForEach(openAxes) { ax in
+                            Text("\(ax.name): \(ax.value)")
+                                .font(.caption2.weight(.semibold))
+                                .padding(.horizontal, 5).padding(.vertical, 1)
+                                .background(ax.color.opacity(0.18), in: Capsule())
+                                .foregroundStyle(ax.color)
                         }
                     }
-                    if !ref.riskHeadline.isEmpty {
-                        Text(ref.riskHeadline).font(.caption2.weight(.medium)).foregroundStyle(ref.riskColor)
-                    }
                 }
-                if missing {
-                    badge("missing path", .secondary)
-                } else if let b = ref.trustBadge {
-                    badge(b.text, b.color)
+                if !ref.riskHeadline.isEmpty {
+                    Text(ref.riskHeadline).font(.caption2.weight(.medium)).foregroundStyle(ref.riskColor)
                 }
-                Spacer()
-                Image(systemName: missing ? "exclamationmark.triangle" : "arrow.up.forward.app")
             }
-            // muted until approved; grayed harder when its config dir is gone.
-            .opacity(missing ? 0.4 : (ref.isTrusted ? 1 : 0.6))
+            if missing {
+                badge("missing path", .secondary)
+            } else {
+                trustControl(ref)
+            }
+            Spacer()
+            Image(systemName: missing ? "exclamationmark.triangle" : "arrow.up.forward.app")
+                .foregroundStyle(.secondary)
         }
-        .buttonStyle(.plain)
-        .disabled(missing)
+        // muted until approved; grayed harder when its config dir is gone.
+        .opacity(missing ? 0.4 : (ref.isTrusted ? 1 : 0.6))
+        .contentShape(Rectangle())
+        .onTapGesture { if !missing { openWindow(id: "session", value: ref) } }
         // hover shows the underlying technologies powering this profile (policy.TechStack).
         .help(ref.techStack.isEmpty ? ref.tierNote : ref.techStack.joined(separator: "\n"))
+    }
+
+    /// The trailing trust control. When trusted it is a clickable menu whose one action is Revoke (the
+    /// symmetric reverse of granting — ayo #3; one click, no biometric, since revoke removes privilege).
+    /// When untrusted/changed it is the existing badge. The Menu consumes its own clicks, so tapping it
+    /// never falls through to the row's launch gesture.
+    @ViewBuilder
+    private func trustControl(_ ref: ProfileRef) -> some View {
+        if ref.isTrusted {
+            Menu {
+                Button("Revoke trust", role: .destructive) { Task { await revoke(ref) } }
+            } label: {
+                Label("trusted", systemImage: "checkmark.shield.fill")
+                    .font(.caption2.weight(.semibold)).foregroundStyle(.green)
+            }
+            .menuStyle(.borderlessButton).fixedSize()
+            .help("Trusted — click to revoke")
+        } else if let b = ref.trustBadge {
+            badge(b.text, b.color)
+        }
+    }
+
+    /// Revoke this profile's trust, then refresh so the row reflects the new (untrusted) state.
+    private func revoke(_ ref: ProfileRef) async {
+        do {
+            try await EngineConnection.untrust(configPath: ref.configDir)
+        } catch {
+            // Best-effort: a failed revoke leaves trust intact; the refresh below re-reads ground truth.
+        }
+        await engine.refresh()
     }
 
     private func badge(_ text: String, _ color: Color) -> some View {

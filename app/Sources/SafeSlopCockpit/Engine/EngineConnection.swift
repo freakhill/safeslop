@@ -87,6 +87,18 @@ enum EngineConnection {
         }
     }
 
+    /// Removes the host approval of the safeslop.cue at configPath (the Launch row's Revoke). The
+    /// reverse of `trust` — a re-list then reports the profiles untrusted. Returns the path revoked.
+    @discardableResult
+    static func untrust(configPath: String = "") async throws -> String {
+        let transport = try makeTransport()
+        return try await withGRPCClient(transport: transport) { client in
+            let control = Safeslop_Control_V1_Control.Client(wrapping: client)
+            let resp = try await control.untrust(.with { $0.configPath = configPath })
+            return resp.untrustedPath
+        }
+    }
+
     /// The pinned desired-state install plan (the SP7b-2 diff) for the Installs tab to preview.
     static func installPlan() async throws -> [Safeslop_Control_V1_InstallAction] {
         let transport = try makeTransport()
