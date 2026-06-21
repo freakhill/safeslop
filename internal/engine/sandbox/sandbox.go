@@ -47,9 +47,45 @@ func toolchainReadPaths() []string {
 	return paths
 }
 
-// Profile renders a Seatbelt profile confining writes to workspace (+ temp) and
-// applying the network policy ("allow" or, by default, "deny").
-func Profile(workspace, network string) string {
+// Scope adds paths to the sandbox boundary beyond the workspace (from policy.FileScope): Read/Write
+// are extra allowed paths; Deny is emitted last so it overrides any allow (Seatbelt is last-match).
+type Scope struct {
+	Read  []string
+	Write []string
+	Deny  []string
+}
+
+// expandHome turns a leading "~" into the user's home directory; other paths pass through.
+func expandHome(p string) string {
+	if p == "~" || strings.HasPrefix(p, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, strings.TrimPrefix(p, "~"))
+		}
+	}
+	return p
+}
+
+// canonicalizeScope expands ~ and resolves symlinks for every scope path that exists, so Seatbelt's
+// resolved-path matching (e.g. /var -> /private/var) holds. Non-existent paths pass through expanded.
+func canonicalizeScope(s Scope) Scope {
+	resolve := func(paths []string) []string {
+		out := make([]string, 0, len(paths))
+		for _, p := range paths {
+			ep := expandHome(p)
+			if real, err := filepath.EvalSymlinks(ep); err == nil {
+				ep = real
+			}
+			out = append(out, ep)
+		}
+		return out
+	}
+	return Scope{Read: resolve(s.Read), Write: resolve(s.Write), Deny: resolve(s.Deny)}
+}
+
+// Profile renders a Seatbelt profile confining writes to workspace (+ temp), applying the network
+// policy ("allow" or, by default, "deny"), plus any extra file Scope (read/write add allowances;
+// deny is emitted last and wins).
+func Profile(workspace, network string, scope Scope) string {
 	var b strings.Builder
 	line := func(s string) { b.WriteString(s); b.WriteByte('\n') }
 
@@ -89,10 +125,28 @@ func Profile(workspace, network string) string {
 		line(fmt.Sprintf(`(allow file-write* (subpath "%s"))`, escape(p)))
 	}
 
+	// Extra allowed scope (read first, then write-implies-read).
+	for _, p := range scope.Read {
+		line(fmt.Sprintf(`(allow file-read* (subpath "%s"))`, escape(expandHome(p))))
+	}
+	for _, p := range scope.Write {
+		ep := escape(expandHome(p))
+		line(fmt.Sprintf(`(allow file-read* (subpath "%s"))`, ep))
+		line(fmt.Sprintf(`(allow file-write* (subpath "%s"))`, ep))
+	}
+
 	if network == "allow" {
 		line("(allow network*)")
 	} else {
 		line("(deny network*)")
+	}
+
+	// Deny LAST so it overrides any allow above (Seatbelt = last matching rule wins) — the explicit
+	// subtractive scope (e.g. carve ~/.ssh back out of a broad read).
+	for _, p := range scope.Deny {
+		ep := escape(expandHome(p))
+		line(fmt.Sprintf(`(deny file-read* (subpath "%s"))`, ep))
+		line(fmt.Sprintf(`(deny file-write* (subpath "%s"))`, ep))
 	}
 	return b.String()
 }
@@ -116,7 +170,7 @@ func Available() bool {
 // WrapArgv writes a Seatbelt profile for (workspace, network) to a temp file and returns
 // the argv that runs agentArgv under it, plus a cleanup that removes the file. The caller
 // runs the argv (e.g. on a PTY) and calls cleanup when the process exits.
-func WrapArgv(agentArgv []string, workspace, network string) (argv []string, cleanup func(), err error) {
+func WrapArgv(agentArgv []string, workspace, network string, scope Scope) (argv []string, cleanup func(), err error) {
 	if _, statErr := os.Stat(SandboxExecPath); statErr != nil {
 		return nil, func() {}, fmt.Errorf("sandbox environment requires macOS sandbox-exec at %s", SandboxExecPath)
 	}
@@ -124,7 +178,7 @@ func WrapArgv(agentArgv []string, workspace, network string) (argv []string, cle
 	if err != nil {
 		return nil, func() {}, err
 	}
-	if _, err := f.WriteString(Profile(workspace, network)); err != nil {
+	if _, err := f.WriteString(Profile(workspace, network, scope)); err != nil {
 		_ = f.Close()
 		_ = os.Remove(f.Name())
 		return nil, func() {}, err
@@ -135,8 +189,8 @@ func WrapArgv(agentArgv []string, workspace, network string) (argv []string, cle
 }
 
 // Launch runs spec.Argv under sandbox-exec with a profile generated for the
-// given workspace and network policy.
-func Launch(ctx context.Context, spec exec.LaunchSpec, workspace, network string) (int, error) {
+// given workspace, network policy, and extra file scope.
+func Launch(ctx context.Context, spec exec.LaunchSpec, workspace, network string, scope Scope) (int, error) {
 	if !Available() {
 		return 1, fmt.Errorf("sandbox environment requires macOS sandbox-exec at %s", SandboxExecPath)
 	}
@@ -148,8 +202,9 @@ func Launch(ctx context.Context, spec exec.LaunchSpec, workspace, network string
 	if real, err := filepath.EvalSymlinks(workspace); err == nil {
 		workspace = real
 	}
+	scope = canonicalizeScope(scope) // resolve ~ + symlinks so Seatbelt path matching holds
 
-	argv, cleanup, err := WrapArgv(spec.Argv, workspace, network)
+	argv, cleanup, err := WrapArgv(spec.Argv, workspace, network, scope)
 	if err != nil {
 		return 1, err
 	}

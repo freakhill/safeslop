@@ -16,7 +16,7 @@ import (
 )
 
 func TestProfileContainsExpectedDirectives(t *testing.T) {
-	p := Profile("/Users/x/repo", "deny")
+	p := Profile("/Users/x/repo", "deny", Scope{})
 	for _, want := range []string{
 		"(version 1)",
 		`(import "system.sb")`,
@@ -33,7 +33,7 @@ func TestProfileContainsExpectedDirectives(t *testing.T) {
 }
 
 func TestWrapArgvWritesProfileAndWraps(t *testing.T) {
-	argv, cleanup, err := WrapArgv([]string{"claude"}, "/ws", "deny")
+	argv, cleanup, err := WrapArgv([]string{"claude"}, "/ws", "deny", Scope{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestWrapArgvWritesProfileAndWraps(t *testing.T) {
 }
 
 func TestProfileNetworkAllow(t *testing.T) {
-	p := Profile("/w", "allow")
+	p := Profile("/w", "allow", Scope{})
 	if !strings.Contains(p, "(allow network*)") {
 		t.Errorf("network=allow profile missing (allow network*)")
 	}
@@ -65,7 +65,7 @@ func TestProfileNetworkAllow(t *testing.T) {
 }
 
 func TestProfileEscapesQuotes(t *testing.T) {
-	p := Profile(`/tmp/a"b\c`, "deny")
+	p := Profile(`/tmp/a"b\c`, "deny", Scope{})
 	if !strings.Contains(p, `/tmp/a\"b\\c`) {
 		t.Errorf("profile did not escape quotes/backslashes in workspace path:\n%s", p)
 	}
@@ -82,7 +82,7 @@ func TestLaunchRunsCommandOnDarwin(t *testing.T) {
 	code, err := Launch(ctx, exec.LaunchSpec{
 		Argv:   []string{"/usr/bin/true"},
 		Stdout: &strings.Builder{},
-	}, t.TempDir(), "deny")
+	}, t.TempDir(), "deny", Scope{})
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestLaunchAllowsWorkspaceWriteOnDarwin(t *testing.T) {
 		Argv:   []string{"/bin/sh", "-c", "echo ok > " + filepath.Join(ws, "probe")},
 		Stdout: &out,
 		Stderr: &out,
-	}, ws, "deny")
+	}, ws, "deny", Scope{})
 	if err != nil || code != 0 {
 		t.Fatalf("workspace write failed: code=%d err=%v out=%q", code, err, out.String())
 	}
@@ -130,7 +130,7 @@ func TestLaunchAllowsTtyJobControlOnDarwin(t *testing.T) {
 	}
 	defer func() { _ = ptmx.Close() }()
 
-	argv, cleanup, err := WrapArgv([]string{"/bin/stty", "size"}, t.TempDir(), "deny")
+	argv, cleanup, err := WrapArgv([]string{"/bin/stty", "size"}, t.TempDir(), "deny", Scope{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,11 +179,72 @@ func TestLaunchDeniesWriteOutsideWorkspaceOnDarwin(t *testing.T) {
 		Argv:   []string{"/bin/sh", "-c", "echo x > " + outside},
 		Stdout: &strings.Builder{},
 		Stderr: &strings.Builder{},
-	}, ws, "deny")
+	}, ws, "deny", Scope{})
 	if code == 0 {
 		t.Fatalf("write outside workspace unexpectedly succeeded (confinement broken)")
 	}
 	if _, err := os.Stat(outside); err == nil {
 		t.Fatalf("file was written outside the workspace — confinement failed")
+	}
+}
+
+func TestProfileHonorsFileScope(t *testing.T) {
+	p := Profile("/ws", "deny", Scope{
+		Read:  []string{"/extra/ro"},
+		Write: []string{"/extra/rw"},
+		Deny:  []string{"/ws/secret"},
+	})
+	for _, want := range []string{
+		`(allow file-read* (subpath "/extra/ro"))`,
+		`(allow file-write* (subpath "/extra/rw"))`,
+		`(deny file-read* (subpath "/ws/secret"))`,
+		`(deny file-write* (subpath "/ws/secret"))`,
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("profile missing %q\n---\n%s", want, p)
+		}
+	}
+	// deny must be emitted AFTER the workspace allow so it wins (Seatbelt = last match).
+	if strings.Index(p, `(deny file-write* (subpath "/ws/secret"))`) <
+		strings.Index(p, `(allow file-write* (subpath "/ws"))`) {
+		t.Error("deny rules must come after the workspace allow")
+	}
+}
+
+func TestLaunchFileScopeWritesAndDeniesOnDarwin(t *testing.T) {
+	if !Available() {
+		t.Skip("sandbox-exec unavailable (not macOS)")
+	}
+	ws := t.TempDir()
+	extra := t.TempDir() // outside ws
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	// With a Write scope, the agent may write into `extra` (which is outside the workspace).
+	probe := filepath.Join(extra, "probe")
+	code, err := Launch(ctx, exec.LaunchSpec{
+		Argv: []string{"/bin/sh", "-c", "echo ok > " + probe}, Stdout: &strings.Builder{}, Stderr: &strings.Builder{},
+	}, ws, "deny", Scope{Write: []string{extra}})
+	if err != nil || code != 0 {
+		t.Fatalf("scoped write failed: code=%d err=%v", code, err)
+	}
+	if _, err := os.Stat(probe); err != nil {
+		t.Fatalf("scoped write not present: %v", err)
+	}
+
+	// Deny wins: grant write to `extra` but deny a subdir — writing there must fail.
+	denied := filepath.Join(extra, "secret")
+	if err := os.Mkdir(denied, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	leak := filepath.Join(denied, "leak")
+	code, _ = Launch(ctx, exec.LaunchSpec{
+		Argv: []string{"/bin/sh", "-c", "echo x > " + leak}, Stdout: &strings.Builder{}, Stderr: &strings.Builder{},
+	}, ws, "deny", Scope{Write: []string{extra}, Deny: []string{denied}})
+	if code == 0 {
+		t.Fatal("deny scope did not override the write allow")
+	}
+	if _, err := os.Stat(leak); err == nil {
+		t.Fatal("file was written into a denied subpath — deny did not win")
 	}
 }

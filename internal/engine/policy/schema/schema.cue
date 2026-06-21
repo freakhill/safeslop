@@ -109,13 +109,25 @@ package safeslop
 	run?: string
 }
 
+// #FileScope adds paths to the sandbox boundary. read/write are extra allowed paths; deny is
+// subtracted last and always wins. Paths are absolute (or "~"-relative, expanded at launch).
+#FileScope: {
+	read?:  [...string]
+	write?: [...string]
+	deny?:  [...string]
+}
+
 #Profile: {
 	agent:       #Agent
 	environment: #Environment | *"sandbox"
 	// Directory the boundary confines file access to. Empty (default) means the
 	// directory safeslop was invoked from.
 	workspace?: string
-	network:    #Network | *"deny"
+	// Extra file scope for the sandbox boundary beyond the workspace. read/write add allowed paths;
+	// deny overrides (deny always wins in Seatbelt). Honored by environment:sandbox today;
+	// container/vm support + auto-deny of secret-bearing children are tracked in specs/0029.
+	files?: #FileScope
+	network: #Network | *"deny"
 	// Env var name -> secret ref; injected into the agent's environment at launch.
 	secrets?: {[string]: #SecretRef}
 	// Credentials staged before launch and wiped on exit.

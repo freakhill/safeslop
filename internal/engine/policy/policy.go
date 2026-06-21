@@ -94,12 +94,21 @@ type Toolchain struct {
 	Run  string `json:"run,omitempty"`
 }
 
+// FileScope adds paths to the sandbox boundary: Read/Write are extra allowed paths, Deny is
+// subtracted last (deny wins in Seatbelt). Honored by environment:sandbox today (specs/0029).
+type FileScope struct {
+	Read  []string `json:"read,omitempty"`
+	Write []string `json:"write,omitempty"`
+	Deny  []string `json:"deny,omitempty"`
+}
+
 // Profile is one launchable configuration from safeslop.cue.
 type Profile struct {
-	Agent       string `json:"agent"`
-	Environment string `json:"environment"`
-	Workspace   string `json:"workspace,omitempty"`
-	Network     string `json:"network"`
+	Agent       string     `json:"agent"`
+	Environment string     `json:"environment"`
+	Workspace   string     `json:"workspace,omitempty"`
+	Files       *FileScope `json:"files,omitempty"`
+	Network     string     `json:"network"`
 	// Secrets maps an env var name to a secret ref (op://... or env:NAME),
 	// resolved at launch and injected into the agent's environment.
 	Secrets map[string]string `json:"secrets,omitempty"`

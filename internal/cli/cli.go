@@ -240,7 +240,7 @@ func cmdRun() *cobra.Command {
 					out["pnpm"] = prof.Credentials.Pnpm // token field is a ref, not a value
 				}
 				if prof.Environment == "sandbox" {
-					out["sandbox_profile"] = sandbox.Profile(ws, prof.Network)
+					out["sandbox_profile"] = sandbox.Profile(ws, prof.Network, sandboxScope(prof.Files))
 				}
 				if jsonOut {
 					emitJSON(out)
@@ -263,7 +263,7 @@ func cmdRun() *cobra.Command {
 						}
 					}
 					if prof.Environment == "sandbox" {
-						fmt.Printf("--- seatbelt profile ---\n%s", sandbox.Profile(ws, prof.Network))
+						fmt.Printf("--- seatbelt profile ---\n%s", sandbox.Profile(ws, prof.Network, sandboxScope(prof.Files)))
 					}
 				}
 				return nil
@@ -551,7 +551,7 @@ func resolveSession(profile, configPath string) (control.SessionSpec, error) {
 		env := childEnv(secretEnv, pathEnv)
 		return control.SessionSpec{Argv: argv, Dir: ws, Env: env, OnClose: wipe}, nil
 	case "sandbox", "": // sandbox is the default
-		wrapped, wrapCleanup, err := sandbox.WrapArgv(argv, ws, prof.Network)
+		wrapped, wrapCleanup, err := sandbox.WrapArgv(argv, ws, prof.Network, sandboxScope(prof.Files))
 		if err != nil {
 			_ = os.RemoveAll(stageDir)
 			return control.SessionSpec{}, err
@@ -923,7 +923,7 @@ func runProfile(name string, prof policy.Profile, argv []string, ws string) (int
 	switch prof.Environment {
 	case "sandbox":
 		env := childEnv(secretEnv, pathEnv)
-		return sandbox.Launch(ctx, engexec.LaunchSpec{Argv: argv, Dir: ws, Env: env}, ws, prof.Network)
+		return sandbox.Launch(ctx, engexec.LaunchSpec{Argv: argv, Dir: ws, Env: env}, ws, prof.Network, sandboxScope(prof.Files))
 	case "host":
 		env := childEnv(secretEnv, pathEnv)
 		return engexec.RunInTerminal(ctx, engexec.LaunchSpec{Argv: argv, Dir: ws, Env: env})
@@ -1040,6 +1040,14 @@ func selectProfile(cfg *policy.Config, requested string) (string, policy.Profile
 		}
 	}
 	return "", policy.Profile{}, fmt.Errorf("multiple profiles; name one of them (run `safeslop list`)")
+}
+
+// sandboxScope maps a profile's optional file scope to the sandbox boundary's extra paths.
+func sandboxScope(f *policy.FileScope) sandbox.Scope {
+	if f == nil {
+		return sandbox.Scope{}
+	}
+	return sandbox.Scope{Read: f.Read, Write: f.Write, Deny: f.Deny}
 }
 
 // agentArgv maps a profile's agent to the command to launch.
