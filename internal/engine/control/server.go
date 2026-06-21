@@ -25,6 +25,7 @@ type server struct {
 	resolveFn      func(profile, configPath string) (SessionSpec, error)
 	trustFn        func(configPath string) (string, error)
 	listFn         func(configPath string) ([]*pb.Profile, error)
+	preflightFn    func(profile, configPath string) (*pb.PreflightHostLaunchResponse, error)
 	installApplyFn func(emit func(*pb.InstallApplyEvent)) error
 }
 
@@ -41,6 +42,17 @@ func (s *server) ListProfiles(_ context.Context, req *pb.ListProfilesRequest) (*
 		return nil, err
 	}
 	return &pb.ListProfilesResponse{Profiles: profs}, nil
+}
+
+// PreflightHostLaunch authors the per-launch host comprehension gate (specs/0030): the fixed honesty
+// headline, a live-state scope line, and the shuffled consent rows (>=1 true host statement + >=1 false
+// cross-tier decoy). Host-tier ONLY, and a pure read — nothing is recorded, so the gate re-draws every
+// entry (consent is per-launch, never persisted). The peer is uid/process-tree-checked at Accept.
+func (s *server) PreflightHostLaunch(_ context.Context, req *pb.PreflightHostLaunchRequest) (*pb.PreflightHostLaunchResponse, error) {
+	if s.preflightFn == nil {
+		return nil, status.Errorf(codes.Unimplemented, "preflight host launch not wired")
+	}
+	return s.preflightFn(req.Profile, req.ConfigPath)
 }
 
 func (s *server) Ping(_ context.Context, _ *pb.PingRequest) (*pb.PingResponse, error) {

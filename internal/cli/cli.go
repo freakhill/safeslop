@@ -7,12 +7,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"os"
 	osexec "os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"sort"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -404,6 +406,57 @@ func cockpitListProfiles(configPath string) ([]*pb.Profile, error) {
 	return out, nil
 }
 
+// cockpitPreflightHostLaunch authors the host-launch comprehension gate for the cockpit (specs/0030).
+// It resolves the profile, refuses anything but the host tier (a more-isolated profile has nothing to
+// comprehend here — its isolation is real), and returns the engine-authored headline + live scope line
+// + shuffled consent rows. Pure read: no trust mutation, nothing persisted, fresh draw every call.
+func cockpitPreflightHostLaunch(profile, configPath string) (*pb.PreflightHostLaunchResponse, error) {
+	path, err := findConfig(configPath)
+	if err != nil {
+		return nil, err
+	}
+	cfg, err := policy.Load(path)
+	if err != nil {
+		return nil, err
+	}
+	name, prof, err := selectProfile(cfg, profile)
+	if err != nil {
+		return nil, err
+	}
+	if prof.Environment != "host" {
+		return nil, fmt.Errorf("profile %q is environment %q, not host — the host comprehension gate is host-tier only", name, prof.Environment)
+	}
+	stmts := policy.HostConsentStatements(3, rand.New(rand.NewSource(time.Now().UnixNano())))
+	out := &pb.PreflightHostLaunchResponse{
+		HeadlineBody: policy.HostHeadlineBody(name),
+		ScopeLine:    policy.HostScopeLine(prof, mountedVolumes()),
+	}
+	for _, st := range stmts {
+		out.Statements = append(out.Statements, &pb.ConsentStatement{
+			Text: st.Text, Expected: st.Expected, TierOrigin: st.TierOrigin,
+		})
+	}
+	return out, nil
+}
+
+// mountedVolumes lists the non-boot volumes under /Volumes — a best-effort live-state snapshot for the
+// host scope line. The boot volume self-links as /Volumes/Macintosh HD; failures degrade to an empty
+// list rather than blocking the launch gate.
+func mountedVolumes() []string {
+	entries, err := os.ReadDir("/Volumes")
+	if err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.Name() == "Macintosh HD" {
+			continue
+		}
+		out = append(out, "/Volumes/"+e.Name())
+	}
+	return out
+}
+
 func cmdTrust() *cobra.Command {
 	return &cobra.Command{
 		Use:   "trust [safeslop.cue]",
@@ -477,6 +530,7 @@ func cmdServe() *cobra.Command {
 				resolveSession,
 				cockpitTrust,
 				cockpitListProfiles,
+				cockpitPreflightHostLaunch,
 			)
 		},
 	}

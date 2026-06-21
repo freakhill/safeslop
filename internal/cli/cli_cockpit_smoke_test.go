@@ -108,6 +108,38 @@ func TestCockpitBackendSmoke(t *testing.T) {
 	if err != nil || tr.TrustedPath == "" {
 		t.Fatalf("Trust = %+v err=%v", tr, err)
 	}
+
+	// Host comprehension gate — PreflightHostLaunch authors the per-launch consent for the host
+	// profile "h": a headline, a live scope line, and shuffled rows with at least one true host
+	// statement and at least one false cross-tier decoy (the anti-habituation invariant, specs/0030).
+	pf, err := cl.PreflightHostLaunch(ctx, &pb.PreflightHostLaunchRequest{Profile: "h", ConfigPath: cuePath})
+	if err != nil {
+		t.Fatalf("PreflightHostLaunch(h): %v", err)
+	}
+	if pf.HeadlineBody == "" || pf.ScopeLine == "" {
+		t.Errorf("PreflightHostLaunch: empty headline/scope (%+v)", pf)
+	}
+	if len(pf.Statements) != 3 {
+		t.Fatalf("PreflightHostLaunch: got %d statements, want 3", len(pf.Statements))
+	}
+	var trues, falses int
+	for _, st := range pf.Statements {
+		if st.Text == "" {
+			t.Errorf("PreflightHostLaunch: empty statement text")
+		}
+		if st.Expected {
+			trues++
+		} else {
+			falses++
+		}
+	}
+	if trues < 1 || falses < 1 {
+		t.Errorf("PreflightHostLaunch: mix invariant broken — %d true / %d false", trues, falses)
+	}
+	// Host-tier ONLY: a sandbox profile has no comprehension gate to author.
+	if _, err := cl.PreflightHostLaunch(ctx, &pb.PreflightHostLaunchRequest{Profile: "s", ConfigPath: cuePath}); err == nil {
+		t.Errorf("PreflightHostLaunch(s): want error for non-host profile, got nil")
+	}
 }
 
 // startCockpitBackend serves the real Control implementation over an in-memory bufconn and returns a
@@ -119,7 +151,7 @@ func startCockpitBackend(t *testing.T) (pb.ControlClient, func()) {
 	gs := grpc.NewServer()
 	pb.RegisterControlServer(gs, control.NewControlServer("vSMOKE",
 		nil, // launchFn: the Launch RPC has real side effects and is out of scope for the smoke.
-		resolveSession, cockpitTrust, cockpitListProfiles,
+		resolveSession, cockpitTrust, cockpitListProfiles, cockpitPreflightHostLaunch,
 	))
 	go func() { _ = gs.Serve(lis) }()
 
