@@ -66,15 +66,8 @@ struct LaunchTab: View {
                         .background(ref.riskColor.opacity(0.18), in: Capsule())
                         .foregroundStyle(ref.riskColor)
                 }
-                // Fixed-width columns so the eye scans one axis (agent / tier / network) straight down the
-                // list instead of re-parsing a free-flowing "a · b · c" per row (ayo S2). The window is
-                // sized to fit these without truncation; a narrow window tail-truncates rather than wraps.
-                HStack(spacing: 8) {
-                    Text(ref.agent).frame(width: 64, alignment: .leading)
-                    Text(ref.tierLabel).frame(width: 124, alignment: .leading)
-                    Text("net:\(ref.netLabel)").frame(width: 96, alignment: .leading)
-                }
-                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Text("\(ref.agent) · \(ref.tierLabel) · net:\(ref.netLabel)")
+                    .font(.caption).foregroundStyle(.secondary)
                 // Show what's UNRESTRICTED as loudly as the line above shows what's bounded (ayo S2):
                 // a fully-contained profile shows no chips — honest, not scary.
                 let openAxes = ref.riskAxes.filter { !$0.restricted }
@@ -93,12 +86,18 @@ struct LaunchTab: View {
                     Text(ref.riskHeadline).font(.caption2.weight(.medium)).foregroundStyle(ref.riskColor)
                 }
             }
-            if missing {
-                badge("missing path", .secondary)
-            } else {
-                trustControl(ref)
+            Spacer(minLength: 8)
+            // Align the trust control into a fixed trailing column so "trusted" / "not trusted" line up
+            // across rows at a glance — the one field worth column-aligning (the agent/tier/net metadata
+            // is too dense for columns, per jojo).
+            Group {
+                if missing {
+                    badge("missing path", .secondary)
+                } else {
+                    trustControl(ref)
+                }
             }
-            Spacer()
+            .frame(width: 104, alignment: .trailing)
             Image(systemName: missing ? "exclamationmark.triangle" : "arrow.up.forward.app")
                 .foregroundStyle(.secondary)
         }

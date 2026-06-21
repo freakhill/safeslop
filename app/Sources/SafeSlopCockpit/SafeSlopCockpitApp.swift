@@ -18,7 +18,7 @@ struct SafeSlopCockpitApp: App {
                 RootTabs()
             }
         }
-        .defaultSize(width: 580, height: 560)
+        .defaultSize(width: 480, height: 520)
 
         WindowGroup(id: "session", for: ProfileRef.self) { $ref in
             if let ref { SessionHostView(ref: ref) }
