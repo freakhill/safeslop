@@ -20,6 +20,11 @@ cockpit:
 cockpit-fresh:
 	@bash app/run-cockpit-test.sh --fresh
 
+## Visual smoke: build + seed + serve + launch the cockpit, screenshot it to a PNG, then tear down.
+## No click-test needed — inspect $$COCKPIT_SHOT (default /tmp/safeslop-cockpit.png). Needs a GUI session.
+cockpit-shot:
+	@bash app/screenshot-cockpit.sh
+
 ## Assemble the signed-ish SafeSlop.app bundle (icon + Info.plist) in app/.build/SafeSlop.app.
 cockpit-app:
 	@bash app/packaging/build-app.sh
