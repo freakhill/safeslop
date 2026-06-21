@@ -10,6 +10,17 @@ struct CreateTab: View {
     @State private var error: String?
     @State private var profiles: [ProfileRef] = []
     @State private var validating = false
+    @State private var scopeExpanded = true
+    @State private var selectedProfile = ""
+
+    /// The merge target: the picked profile, or the only one. Empty when none/invalid.
+    private var mergeTarget: String {
+        if !selectedProfile.isEmpty && profiles.contains(where: { $0.name == selectedProfile }) { return selectedProfile }
+        return profiles.first?.name ?? ""
+    }
+    /// Merge is allowed only when there's a target and no `files:` block exists yet (avoid a
+    /// duplicate-field error; re-scoping an existing block is a manual edit for now).
+    private var canMerge: Bool { !mergeTarget.isEmpty && !cueText.contains("files:") }
 
     var body: some View {
         HSplitView {
@@ -23,13 +34,30 @@ struct CreateTab: View {
             }
             .padding(10)
 
-            // Right: live validation + arbiter preview.
+            // Right: file-scope helper (top, open), then live validation + arbiter preview.
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 6) {
                     Image(systemName: statusIcon).foregroundStyle(statusColor)
                     Text(statusText).font(.callout.weight(.medium)).foregroundStyle(statusColor)
                     if validating { ProgressView().controlSize(.small) }
                 }
+
+                DisclosureGroup("File scope helper", isExpanded: $scopeExpanded) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        if profiles.count > 1 {
+                            Picker("Target", selection: $selectedProfile) {
+                                ForEach(profiles.map(\.name), id: \.self) { Text($0).tag($0) }
+                            }
+                            .pickerStyle(.menu).font(.caption)
+                        }
+                        FileScopeEditor(mergeLabel: mergeTarget, mergeEnabled: canMerge, onMerge: merge)
+                    }
+                    .padding(.top, 4)
+                }
+                .font(.callout.weight(.medium))
+
+                Divider()
+
                 if let error {
                     ScrollView {
                         Text(error).font(.caption.monospaced()).foregroundStyle(.red)
@@ -50,16 +78,10 @@ struct CreateTab: View {
                         }
                     }
                 }
-                DisclosureGroup("File scope helper") {
-                    FileScopeEditor()
-                }
-                .font(.callout.weight(.medium))
-
-                Spacer()
                 Text("Editing is live-validated. Saving to a repo + the trust gate land next (specs/0029).")
                     .font(.caption2).foregroundStyle(.tertiary)
             }
-            .frame(minWidth: 280)
+            .frame(minWidth: 300, maxHeight: .infinity, alignment: .top)
             .padding(10)
         }
         // debounced live validation: .task(id:) cancels + restarts on each keystroke.
@@ -89,6 +111,9 @@ struct CreateTab: View {
             if resp.valid {
                 error = nil
                 profiles = resp.profiles.map(ProfileRef.init)
+                if !profiles.contains(where: { $0.name == selectedProfile }) {
+                    selectedProfile = profiles.first?.name ?? ""
+                }
             } else {
                 error = resp.error
                 profiles = []
@@ -97,6 +122,19 @@ struct CreateTab: View {
             self.error = "validate failed: \(error)"
             profiles = []
         }
+    }
+
+    /// Splice a generated `files:` block into the target profile's CUE block, right after its opening
+    /// brace. Guarded by canMerge (no existing files:), so this can't create a duplicate field. A
+    /// targeted text edit — it leaves the rest of the canonical text untouched.
+    private func merge(_ snippet: String) {
+        let name = mergeTarget
+        guard !name.isEmpty,
+              let nameRange = cueText.range(of: name + ":"),
+              let braceRange = cueText.range(of: "{", range: nameRange.upperBound..<cueText.endIndex)
+        else { return }
+        let indented = "\n\t\t\t" + snippet.replacingOccurrences(of: "\n", with: "\n\t\t\t")
+        cueText.insert(contentsOf: indented, at: braceRange.upperBound)
     }
 
     /// A non-blank starter (research: never start with a blank editor) — a deny-network sandbox, the

@@ -6,6 +6,12 @@ import UniformTypeIdentifiers
 /// profile rather than rewriting the canonical CUE text, so it can't corrupt hand-written policy
 /// (the text-canonical rule) and doesn't depend on the deferred visual-authoring decision (specs/0029).
 struct FileScopeEditor: View {
+    /// When set, a "Merge into <profile>" button calls this with the generated snippet so the host
+    /// can splice it into the canonical CUE text. mergeLabel names the target; mergeEnabled gates it.
+    var mergeLabel: String = ""
+    var mergeEnabled: Bool = false
+    var onMerge: ((String) -> Void)? = nil
+
     @State private var read: [String] = []
     @State private var write: [String] = []
     @State private var deny: [String] = []
@@ -29,7 +35,16 @@ struct FileScopeEditor: View {
                         .font(.caption2).foregroundStyle(.green)
                 }
                 HStack {
-                    Button("Copy snippet", systemImage: "doc.on.doc") { copy() }
+                    if let onMerge {
+                        Button(mergeLabel.isEmpty ? "Merge" : "Merge into \(mergeLabel)", systemImage: "arrow.down.doc") {
+                            onMerge(snippet); read = []; write = []; deny = []
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!mergeEnabled)
+                        .help(mergeEnabled ? "splice this files: block into \(mergeLabel)"
+                                           : "select a profile that has no files: block yet")
+                    }
+                    Button("Copy", systemImage: "doc.on.doc") { copy() }
                     Button("Clear", role: .destructive) { read = []; write = []; deny = [] }
                     Spacer()
                 }
