@@ -68,6 +68,34 @@ func (e *Env) LookPath(file string) (string, bool) {
 	return "", false
 }
 
+// LookAll resolves file against EVERY directory in the reconstructed PATH, returning all existing
+// executable matches in PATH order (like `which -a`). The first is the one LookPath returns (the winner);
+// any others are shadowed — a later-PATH install the user may have meant. Flagging this matters because
+// picking the wrong binary can silently differ from what the user expects. A slash-containing name is
+// checked directly (zero or one result).
+func (e *Env) LookAll(file string) []string {
+	if strings.Contains(file, "/") {
+		if e.isExec(file) {
+			return []string{file}
+		}
+		return nil
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, dir := range strings.Split(e.PATH(), ":") {
+		if dir == "" {
+			continue
+		}
+		full := filepath.Join(dir, file)
+		if seen[full] || !e.isExec(full) {
+			continue
+		}
+		out = append(out, full)
+		seen[full] = true
+	}
+	return out
+}
+
 // reconstructor holds the (injectable) host seams plus the in-memory session cache. All exported
 // entry points go through the package-level default; tests build one directly with fake seams.
 type reconstructor struct {

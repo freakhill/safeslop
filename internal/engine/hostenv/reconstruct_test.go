@@ -25,6 +25,23 @@ func TestMergePATH(t *testing.T) {
 	}
 }
 
+func TestEnvLookAllFindsShadows(t *testing.T) {
+	e := &Env{
+		vars:   map[string]string{"PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin"},
+		isExec: func(p string) bool { return p == "/opt/homebrew/bin/docker" || p == "/usr/local/bin/docker" || p == "/usr/bin/git" },
+	}
+	all := e.LookAll("docker")
+	if len(all) != 2 || all[0] != "/opt/homebrew/bin/docker" || all[1] != "/usr/local/bin/docker" {
+		t.Errorf("LookAll(docker)=%v, want both matches in PATH order", all)
+	}
+	if g := e.LookAll("git"); len(g) != 1 || g[0] != "/usr/bin/git" {
+		t.Errorf("LookAll(git)=%v, want a single match", g)
+	}
+	if n := e.LookAll("nonesuch"); n != nil {
+		t.Errorf("LookAll(nonesuch)=%v, want nil", n)
+	}
+}
+
 func TestEnvLookPath(t *testing.T) {
 	e := &Env{
 		vars:   map[string]string{"PATH": "/opt/homebrew/bin:/usr/bin"},
