@@ -144,6 +144,17 @@ func Catalog() []Tool {
 		{Name: "mise", Category: CatRuntime, Detect: []string{"mise"}, Brew: "mise",
 			Script: "curl https://mise.run | sh", Note: "polyglot tool-version manager"},
 		{Name: "nix", Category: CatRuntime, Detect: []string{"nix"},
+			Installer: &VerifiedInstaller{
+				// The `… | sh -s -- install` one-liner just downloads this versioned Determinate
+				// nix-installer and runs it; pinning + sha256-verifying the binary replaces the unverified
+				// remote script. Determinate publishes no checksum sidecar, so this sha256 (computed from
+				// the pinned tag over TLS, 2026-06-22) is the trust floor — fail-closed on every install,
+				// weaker pin-time provenance (same posture as pnpm).
+				URL:     "https://install.determinate.systems/nix/tag/v3.21.2/nix-installer-aarch64-darwin",
+				SHA256:  "17c0845f0133c9544b293449d853f5873ef9692b61cea1fe2ddf3b3a2500b81b",
+				Version: "3.21.2",
+				Args:    []string{"install", "--no-confirm"},
+			},
 			Script: "curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install",
 			Note:   "Nix package manager (Determinate installer)"},
 
