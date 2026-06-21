@@ -57,6 +57,20 @@ struct LaunchTab: View {
                     }
                     Text("\(ref.agent) · \(ref.tierLabel) · net:\(ref.netLabel)")
                         .font(.caption).foregroundStyle(.secondary)
+                    // Show what's UNRESTRICTED as loudly as the line above shows what's bounded (ayo S2):
+                    // a fully-contained profile shows no chips — honest, not scary.
+                    let openAxes = ref.riskAxes.filter { !$0.restricted }
+                    if !openAxes.isEmpty {
+                        HStack(spacing: 4) {
+                            ForEach(openAxes) { ax in
+                                Text("\(ax.name): \(ax.value)")
+                                    .font(.caption2.weight(.semibold))
+                                    .padding(.horizontal, 5).padding(.vertical, 1)
+                                    .background(ax.color.opacity(0.18), in: Capsule())
+                                    .foregroundStyle(ax.color)
+                            }
+                        }
+                    }
                     if !ref.riskHeadline.isEmpty {
                         Text(ref.riskHeadline).font(.caption2.weight(.medium)).foregroundStyle(ref.riskColor)
                     }

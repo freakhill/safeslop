@@ -63,9 +63,12 @@ struct ProfileRefTests {
     @Test
     func protoRoundTripPreservesFields() {
         let original = ProfileRef(name: "dev", agent: "claude", environment: "container",
-                                  network: "allow", tier: "blast-box", riskLevel: "elevated")
+                                  network: "allow", tier: "blast-box", riskLevel: "elevated",
+                                  riskAxes: [RiskAxis(name: "network", value: "open egress",
+                                                      restricted: false, severity: "elevated")])
         let restored = ProfileRef(original.proto)
         #expect(restored == original)
+        #expect(restored.riskAxes.first?.value == "open egress")
     }
 
     // helpers

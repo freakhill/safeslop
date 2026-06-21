@@ -1,5 +1,35 @@
 import SwiftUI
 
+/// RiskAxis mirrors the engine's Safeslop_Control_V1_RiskAxis: one capability dimension's restriction
+/// status. The Launch row renders the unrestricted ones (restricted == false) as loud amber/red chips —
+/// what's OPEN, shown as prominently as what's bounded (ayo S2, specs/0032).
+struct RiskAxis: Codable, Hashable, Identifiable {
+    let name: String
+    let value: String
+    let restricted: Bool
+    let severity: String
+    var id: String { name }
+
+    /// Color band by severity (value carries the meaning; color is the redundant channel).
+    var color: Color {
+        switch severity {
+        case "high": return .red
+        case "elevated": return .orange
+        default: return .green
+        }
+    }
+
+    init(name: String, value: String, restricted: Bool, severity: String) {
+        self.name = name; self.value = value; self.restricted = restricted; self.severity = severity
+    }
+    init(_ p: Safeslop_Control_V1_RiskAxis) {
+        self.init(name: p.name, value: p.value, restricted: p.restricted, severity: p.severity)
+    }
+    var proto: Safeslop_Control_V1_RiskAxis {
+        .with { $0.name = name; $0.value = value; $0.restricted = restricted; $0.severity = severity }
+    }
+}
+
 /// A Codable handle for a profile, used as the value type for the per-session WindowGroup so a
 /// session window can be reopened/restored. Mirrors the engine's Safeslop_Control_V1_Profile.
 struct ProfileRef: Codable, Hashable, Identifiable {
@@ -15,25 +45,30 @@ struct ProfileRef: Codable, Hashable, Identifiable {
     var riskLevel: String    // "high" | "elevated" | "contained" — color only
     var riskLines: [String]  // break-glass consequence sentences
     var techStack: [String]  // underlying technologies (policy.TechStack) — Launch hover tooltip
+    var riskAxes: [RiskAxis] // per-dimension restriction status — Launch shows the unrestricted ones loud
     var id: String { name }
 
     init(name: String, agent: String, environment: String, network: String,
          tier: String = "", tierNote: String = "", trustStatus: String = "untrusted", configDir: String = "",
-         riskHeadline: String = "", riskLevel: String = "contained", riskLines: [String] = [], techStack: [String] = []) {
+         riskHeadline: String = "", riskLevel: String = "contained", riskLines: [String] = [], techStack: [String] = [],
+         riskAxes: [RiskAxis] = []) {
         self.name = name; self.agent = agent; self.environment = environment; self.network = network
         self.tier = tier; self.tierNote = tierNote; self.trustStatus = trustStatus; self.configDir = configDir
         self.riskHeadline = riskHeadline; self.riskLevel = riskLevel; self.riskLines = riskLines; self.techStack = techStack
+        self.riskAxes = riskAxes
     }
     init(_ p: Safeslop_Control_V1_Profile) {
         self.init(name: p.name, agent: p.agent, environment: p.environment, network: p.network,
                   tier: p.tier, tierNote: p.tierNote, trustStatus: p.trustStatus, configDir: p.configDir,
-                  riskHeadline: p.riskHeadline, riskLevel: p.riskLevel, riskLines: p.riskLines, techStack: p.techStack)
+                  riskHeadline: p.riskHeadline, riskLevel: p.riskLevel, riskLines: p.riskLines, techStack: p.techStack,
+                  riskAxes: p.riskAxes.map(RiskAxis.init))
     }
     var proto: Safeslop_Control_V1_Profile {
         .with {
             $0.name = name; $0.agent = agent; $0.environment = environment; $0.network = network
             $0.tier = tier; $0.tierNote = tierNote; $0.trustStatus = trustStatus; $0.configDir = configDir
             $0.riskHeadline = riskHeadline; $0.riskLevel = riskLevel; $0.riskLines = riskLines; $0.techStack = techStack
+            $0.riskAxes = riskAxes.map(\.proto)
         }
     }
 
