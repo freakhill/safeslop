@@ -45,6 +45,63 @@ func RiskSummary(p Profile) Risk {
 	return Risk{Headline: headline(env, p.Network), Lines: lines, Level: level(env, p.Network)}
 }
 
+// RiskAxis is one capability dimension with its restriction status, so the cockpit can show what is
+// UNRESTRICTED as loudly as what is restricted (ayo S2 — hiding an absence is a dark pattern). Computed
+// engine-side alongside RiskSummary so the GUI never re-derives "is this open" (single source of truth).
+type RiskAxis struct {
+	Name       string // "network" | "files"
+	Value      string // short status: "unrestricted" | "open egress" | "whole account" | "workspace-only" | ...
+	Restricted bool   // true = bounded; false = unrestricted/open (the loud, amber/red case)
+	Severity   string // "high" | "elevated" | "contained" — color only; Value carries the meaning
+}
+
+// RiskAxes returns the per-dimension restriction status for a profile — network + files, the two
+// dimensions whose "unrestricted" state is the high-impact danger the meta line's positives hide.
+// Secrets/credentials stay in RiskSummary.Lines (the break-glass enumeration); these two are the ones
+// that need loud surfacing on the compact Launch row.
+func RiskAxes(p Profile) []RiskAxis {
+	env := p.Environment
+	if env == "" {
+		env = "sandbox"
+	}
+	return []RiskAxis{networkAxis(env, p.Network), filesAxis(env)}
+}
+
+func networkAxis(env, network string) RiskAxis {
+	switch env {
+	case "host":
+		return RiskAxis{"network", "unrestricted", false, "high"}
+	case "container":
+		if network == "allow" {
+			return RiskAxis{"network", "open egress", false, "elevated"}
+		}
+		return RiskAxis{"network", "egress-allowlisted", true, "contained"}
+	case "vm":
+		if network == "allow" {
+			return RiskAxis{"network", "full VM network", false, "elevated"}
+		}
+		return RiskAxis{"network", "proxy-only", true, "contained"}
+	default: // sandbox
+		if network == "allow" {
+			return RiskAxis{"network", "open egress", false, "elevated"}
+		}
+		return RiskAxis{"network", "offline", true, "contained"}
+	}
+}
+
+func filesAxis(env string) RiskAxis {
+	switch env {
+	case "host":
+		return RiskAxis{"files", "whole account", false, "high"}
+	case "container":
+		return RiskAxis{"files", "workspace-only", true, "contained"}
+	case "vm":
+		return RiskAxis{"files", "VM-only", true, "contained"}
+	default: // sandbox
+		return RiskAxis{"files", "workspace + temp", true, "contained"}
+	}
+}
+
 // TechStack lists the underlying technologies a profile uses — the stack behind the tier label —
 // for the Launch tab's hover tooltip: which agent, which isolation mechanism (Seatbelt / Docker+squid
 // / Tart), the network mechanism, plus any toolchain + credential providers.

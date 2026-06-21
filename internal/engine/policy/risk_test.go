@@ -68,6 +68,42 @@ func TestRiskSummarySandboxDenyIsContainedOffline(t *testing.T) {
 	}
 }
 
+func axesByName(axes []RiskAxis) map[string]RiskAxis {
+	m := map[string]RiskAxis{}
+	for _, a := range axes {
+		m[a.Name] = a
+	}
+	return m
+}
+
+func TestRiskAxesHostIsAllUnrestricted(t *testing.T) {
+	by := axesByName(RiskAxes(Profile{Environment: "host"}))
+	if n := by["network"]; n.Restricted || n.Severity != "high" {
+		t.Errorf("host network axis = %+v, want unrestricted high", n)
+	}
+	if f := by["files"]; f.Restricted || f.Severity != "high" {
+		t.Errorf("host files axis = %+v, want unrestricted high", f)
+	}
+}
+
+func TestRiskAxesSandboxDenyIsAllRestricted(t *testing.T) {
+	for _, a := range RiskAxes(Profile{Environment: "sandbox", Network: "deny"}) {
+		if !a.Restricted {
+			t.Errorf("sandbox+deny axis %q=%q should be restricted", a.Name, a.Value)
+		}
+	}
+}
+
+func TestRiskAxesOpenEgressIsLoudButFilesBounded(t *testing.T) {
+	by := axesByName(RiskAxes(Profile{Environment: "sandbox", Network: "allow"}))
+	if by["network"].Restricted || by["network"].Severity != "elevated" {
+		t.Errorf("sandbox+allow network = %+v, want unrestricted elevated", by["network"])
+	}
+	if !by["files"].Restricted {
+		t.Errorf("sandbox files should be bounded: %+v", by["files"])
+	}
+}
+
 func TestTechStackListsUnderlyingTech(t *testing.T) {
 	s := TechStack(Profile{Agent: "claude", Environment: "container", Network: "deny",
 		Secrets: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "op://x/y/z"}})
