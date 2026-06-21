@@ -10,7 +10,7 @@ CONTAINER_SRC := library/layer/container
 CONTAINER_DST := internal/engine/container/assets
 SYNCED        := allowlist.domains Dockerfile.agent Dockerfile.agent.tools
 
-.PHONY: build test vet fmt fmtcheck check check-assets sync-container-assets dist sign clean proto cockpit cockpit-fresh
+.PHONY: build test vet fmt fmtcheck check check-assets sync-container-assets dist sign clean proto cockpit cockpit-fresh cockpit-app cockpit-icon
 
 ## Click-test the SwiftUI cockpit with zero setup: build + seed a test repo + serve + run the app
 ## (engine torn down on quit). You only deal with the GUI. `cockpit-fresh` also resets the trust store.
@@ -19,6 +19,14 @@ cockpit:
 
 cockpit-fresh:
 	@bash app/run-cockpit-test.sh --fresh
+
+## Assemble the signed-ish SafeSlop.app bundle (icon + Info.plist) in app/.build/SafeSlop.app.
+cockpit-app:
+	@bash app/packaging/build-app.sh
+
+## Regenerate app/packaging/SafeSlop.icns from the icon generator (run after editing the design).
+cockpit-icon:
+	@bash app/packaging/make-icns.sh
 
 ## Regenerate the gRPC control-plane stubs (dev-only; needs protoc + protoc-gen-go[-grpc]).
 ## Generated *.pb.go are committed, so CI/`make build` never run protoc.
