@@ -46,6 +46,28 @@ struct ProfileRef: Codable, Hashable, Identifiable {
         }
     }
 
+    /// Danger level as a WORD — the non-color channel the ecusson's background color must not be the
+    /// sole carrier of (ayo S2, headline finding 2). Mirrors `riskLevel`, uppercased for the badge, so
+    /// risk reads in grayscale, for the ~8% red-green colorblind, and in a screenshot. Unknown bands
+    /// fall back to the safe word, matching `riskColor`'s green default.
+    var dangerWord: String {
+        switch riskLevel {
+        case "high": return "HIGH"
+        case "elevated": return "ELEVATED"
+        default: return "CONTAINED"
+        }
+    }
+
+    /// Danger as a SHAPE channel: the ecusson's border weight scales with this rank (high 2 / elevated 1
+    /// / contained 0), so the chip alone signals danger with color stripped. Redundant with `riskColor`.
+    var dangerRank: Int {
+        switch riskLevel {
+        case "high": return 2
+        case "elevated": return 1
+        default: return 0
+        }
+    }
+
     var isTrusted: Bool { trustStatus == "trusted" }
     /// A launcher badge for an unapproved policy (nil when trusted).
     var trustBadge: (text: String, color: Color)? {

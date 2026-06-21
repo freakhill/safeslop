@@ -22,6 +22,25 @@ struct ProfileRefTests {
     }
 
     @Test
+    func dangerWordIsRedundantWithColorBand() {
+        // The word carries danger level without color — survives grayscale / colorblindness / screenshots.
+        #expect(ref(risk: "high").dangerWord == "HIGH")
+        #expect(ref(risk: "elevated").dangerWord == "ELEVATED")
+        #expect(ref(risk: "contained").dangerWord == "CONTAINED")
+        #expect(ref(risk: "anything-else").dangerWord == "CONTAINED") // default band is contained
+    }
+
+    @Test
+    func dangerRankOrdersBySeverity() {
+        // The rank drives the ecusson border weight — a second, shape-based danger channel.
+        #expect(ref(risk: "high").dangerRank == 2)
+        #expect(ref(risk: "elevated").dangerRank == 1)
+        #expect(ref(risk: "contained").dangerRank == 0)
+        #expect(ref(risk: "high").dangerRank > ref(risk: "elevated").dangerRank)
+        #expect(ref(risk: "elevated").dangerRank > ref(risk: "contained").dangerRank)
+    }
+
+    @Test
     func networkHonestyOnHostTier() {
         // host has no sandbox, so a declared network is NOT enforced — the UI must say so, not "deny".
         let host = ProfileRef(name: "h", agent: "claude", environment: "host", network: "deny")
