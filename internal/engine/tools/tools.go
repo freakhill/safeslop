@@ -13,6 +13,7 @@ package tools
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -335,6 +336,102 @@ func installArgv(s Status, brewAvail bool) ([]string, error) {
 	default:
 		return nil, errNoRoute
 	}
+}
+
+// Verification classifies how trustworthy a missing tool's install route is — the axis the cockpit
+// consent gate and hover tooltip surface (specs/0037).
+type Verification string
+
+const (
+	VerifiedPin   Verification = "verified-pin"   // sha256-pinned binary, notarized-trust chain, no remote code
+	BrewManaged   Verification = "brew"           // delegated to Homebrew (its own verification)
+	UnverifiedRun Verification = "unverified-run" // runs a remote script with user privileges — highest blast radius
+)
+
+const (
+	verifiedPrecautions = "safeslop downloads this from the pinned release over HTTPS and verifies its " +
+		"SHA-256 against a checksum compiled into the notarized safeslop binary before installing — no remote " +
+		"script runs. The previous version is kept for one-command rollback."
+	brewPrecautions = "safeslop installs this through your existing Homebrew (brew install). safeslop runs " +
+		"no remote code itself; Homebrew performs its own download and checksum verification."
+	unverifiedPrecautions = "⚠︎ No checksum-pinned release exists for this tool, so installing it runs " +
+		"a script downloaded from the internet with your user privileges. safeslop shows you the exact command and " +
+		"requires explicit confirmation before running it — but nothing is verified beyond HTTPS transport."
+	needsBrewPrecautions = "Requires Homebrew, which isn't on PATH — install Homebrew first, then safeslop can " +
+		"install this via brew (no remote code run by safeslop)."
+)
+
+func manualPrecautions(name string) string {
+	return "No automatic install route — safeslop won't fetch or run anything. Install " + name + " yourself."
+}
+
+// Preview describes how a missing tool would be installed and the precautions safeslop takes. It is the
+// single source of truth shared by the cockpit hover tooltip and the install consent gate (specs/0037),
+// so the two surfaces can never disagree about what an install does. An empty Route means the tool is
+// present (no-clobber) or has no actionable route.
+type Preview struct {
+	Name         string
+	Route        string // brew | cask | verified-pin | script | needs-brew
+	Command      string // the literal command that runs, or the verified-install description
+	SourceURL    string // pin URL (verified) or "" (brew/script source lives in Command)
+	SHA256       string // pinned sha256 (verified-pin only)
+	Version      string // pinned version (verified-pin only)
+	Verification Verification
+	Precautions  string
+	NeedsConsent bool // unverified-run → the gate demands typed confirmation; verified/brew are one-click
+}
+
+// InstallPreview classifies a missing tool's install route against the live host (brew availability).
+func InstallPreview(s Status) Preview { return installPreview(s, brewOnPath()) }
+
+// installPreview is the pure classifier; brewAvail is injected so it is testable without a live brew. It
+// mirrors installArgv's route order exactly, so the gate's preview matches what InstallByName will run.
+func installPreview(s Status, brewAvail bool) Preview {
+	p := Preview{Name: s.Tool.Name}
+	if s.Present {
+		return p // present tools are not installable; Precautions handles their text
+	}
+	t := s.Tool
+	switch {
+	case t.Brew != "" && brewAvail:
+		p.Route, p.Verification, p.Command, p.Precautions = "brew", BrewManaged, "brew install "+t.Brew, brewPrecautions
+	case t.Cask != "" && brewAvail:
+		p.Route, p.Verification, p.Command, p.Precautions = "cask", BrewManaged, "brew install --cask "+t.Cask, brewPrecautions
+	case hasPin(t.Name):
+		pin, _ := pinFor(t.Name)
+		p.Route, p.Verification = "verified-pin", VerifiedPin
+		p.SourceURL, p.SHA256, p.Version = pin.URL, pin.SHA256, pin.Version
+		p.Command = "verified install: " + pin.Name + " " + pin.Version + " (sha256-pinned binary)"
+		p.Precautions = verifiedPrecautions
+	case t.Script != "":
+		p.Route, p.Verification, p.NeedsConsent = "script", UnverifiedRun, true
+		p.Command, p.Precautions = t.Script, unverifiedPrecautions
+	case t.Brew != "" || t.Cask != "":
+		p.Route, p.Precautions = "needs-brew", needsBrewPrecautions
+	default:
+		p.Precautions = manualPrecautions(t.Name)
+	}
+	return p
+}
+
+// Precautions is the hover-tooltip text for ANY tool — present (no-clobber, plus a shadow note),
+// installable (the route's precautions), or manual (no route). Shares InstallPreview for installables.
+func Precautions(s Status) string {
+	if s.Present {
+		base := "Already installed"
+		if s.Source != "" && s.Source != "missing" {
+			base += " via " + s.Source
+		}
+		base += ". safeslop never modifies, upgrades, or clobbers an existing install."
+		if n := len(s.ShadowedPaths); n > 0 {
+			base += fmt.Sprintf(" It resolves to %s and shadows %d other executable(s) of the same name later on PATH.", s.Path, n)
+		}
+		return base
+	}
+	if s.Installable() {
+		return InstallPreview(s).Precautions
+	}
+	return manualPrecautions(s.Tool.Name)
 }
 
 // InstallRouteHint returns a human-readable description of how a missing tool would be installed — the

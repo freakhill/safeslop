@@ -246,6 +246,51 @@ func TestBunPnpmRouteToPinNotCurlSh(t *testing.T) {
 	}
 }
 
+// TestInstallPreview locks the shared backend that drives the cockpit hover tooltip + consent gate
+// (specs/0037): verified-pin is one-click with url/sha/version; an unverified remote script demands
+// consent; a present tool promises no-clobber.
+func TestInstallPreview(t *testing.T) {
+	get := func(name string) Tool {
+		for _, c := range Catalog() {
+			if c.Name == name {
+				return c
+			}
+		}
+		t.Fatalf("%s not in catalog", name)
+		return Tool{}
+	}
+	// Verified pin (uv, brew unavailable → the pin route): one-click, carries url/sha/version.
+	uv := installPreview(Status{Tool: get("uv"), Present: false, Source: "missing"}, false)
+	if uv.Verification != VerifiedPin || uv.NeedsConsent {
+		t.Fatalf("uv should be a one-click verified pin, got %+v", uv)
+	}
+	if uv.SHA256 == "" || uv.Version == "" || uv.SourceURL == "" {
+		t.Fatalf("verified pin preview must carry url/sha/version: %+v", uv)
+	}
+	if !strings.Contains(uv.Precautions, "checksum") {
+		t.Fatalf("verified precautions should mention the checksum: %q", uv.Precautions)
+	}
+	// Brew route (uv with brew available) is preferred and brew-managed.
+	if b := installPreview(Status{Tool: get("uv"), Present: false, Source: "missing"}, true); b.Verification != BrewManaged {
+		t.Fatalf("uv with brew should be brew-managed, got %+v", b)
+	}
+	// Unverified remote script (Rust/rustup — no brew formula, no pin): needs consent, shows the command.
+	rust := installPreview(Status{Tool: get("Rust"), Present: false, Source: "missing"}, true)
+	if rust.Verification != UnverifiedRun || !rust.NeedsConsent {
+		t.Fatalf("rustup is an unverified remote script needing consent, got %+v", rust)
+	}
+	if !strings.Contains(rust.Command, "rustup") {
+		t.Fatalf("unverified preview must show the literal command, got %q", rust.Command)
+	}
+	// Present tool → no-clobber promise; a shadowed one notes the shadowing.
+	if p := Precautions(Status{Tool: get("git"), Present: true, Source: "brew", Path: "/opt/homebrew/bin/git"}); !strings.Contains(p, "clobber") {
+		t.Fatalf("present precaution should promise no-clobber, got %q", p)
+	}
+	if p := Precautions(Status{Tool: get("Docker CLI"), Present: true, Source: "standalone", Path: "/a/docker", ShadowedPaths: []string{"/b/docker"}}); !strings.Contains(p, "shadows") {
+		t.Fatalf("shadowed present tool should note shadowing, got %q", p)
+	}
+}
+
 func TestInstallArgvRefusesPresentAndPicksRoute(t *testing.T) {
 	if _, err := InstallArgv(Status{Tool: Tool{Brew: "uv"}, Present: true}); err == nil {
 		t.Fatal("InstallArgv must refuse a present tool")
