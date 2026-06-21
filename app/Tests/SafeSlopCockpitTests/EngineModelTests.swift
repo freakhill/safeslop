@@ -98,4 +98,25 @@ struct EngineModelTests {
         #expect(model.reachable == true) // engine WAS reachable; the list call is what failed
         #expect(model.status.contains("listProfiles failed"))
     }
+
+    @Test @MainActor
+    func refreshFailureKeepsLastKnownProfilesAndSync() async {
+        let fake = FakeEngineClient()
+        fake.profilesResult = .success([profile("a", env: "sandbox"), profile("b", env: "host")])
+        let model = EngineModel(engine: fake)
+
+        await model.refresh() // success
+        #expect(model.profiles.count == 2)
+        #expect(model.reachable == true)
+        #expect(model.lastSync != nil)
+        #expect(model.lastSyncLabel != nil)
+
+        // engine goes down on the next refresh
+        fake.serving = false
+        await model.refresh() // failure
+
+        #expect(model.reachable == false)
+        #expect(model.profiles.count == 2) // last-known preserved, NOT an empty grid
+        #expect(model.lastSync != nil)     // the prior sync time is retained
+    }
 }

@@ -11,6 +11,11 @@ final class EngineModel {
     var profiles: [ProfileRef] = []
     var reachable: Bool = false
 
+    /// When the last SUCCESSFUL profile list landed — stamped only on success, so it survives a later
+    /// unreachable refresh and the Launch tab can show "last sync HH:MM" over the last-known rows
+    /// instead of an empty grid (ayo #8). nil until the first successful sync.
+    var lastSync: Date?
+
     /// The control-plane client. Defaults to the live UDS gRPC; tests inject a fake EngineClient.
     @ObservationIgnored private let engine: EngineClient
     init(engine: EngineClient = LiveEngineClient()) { self.engine = engine }
@@ -33,9 +38,15 @@ final class EngineModel {
                 if a.tierRank != b.tierRank { return a.tierRank < b.tierRank }
                 return a.name < b.name
             }
+            lastSync = Date()
             status = profiles.isEmpty ? "connected — no profiles found" : "connected"
         } catch {
             status = "listProfiles failed: \(error)"
         }
+    }
+
+    /// The last successful sync as a short local time (e.g. "2:31 PM"), or nil if never synced.
+    var lastSyncLabel: String? {
+        lastSync?.formatted(date: .omitted, time: .shortened)
     }
 }
