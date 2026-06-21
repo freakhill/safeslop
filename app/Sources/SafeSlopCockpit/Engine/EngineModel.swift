@@ -11,18 +11,22 @@ final class EngineModel {
     var profiles: [ProfileRef] = []
     var reachable: Bool = false
 
+    /// The control-plane client. Defaults to the live UDS gRPC; tests inject a fake EngineClient.
+    @ObservationIgnored private let engine: EngineClient
+    init(engine: EngineClient = LiveEngineClient()) { self.engine = engine }
+
     /// Ensure the engine is up, then refresh version + profiles. Idempotent (ping-first).
     func refresh() async {
         status = "ensuring safeslop serve…"
-        guard await EngineConnection.ensureServing() else {
+        guard await engine.ensureServing() else {
             reachable = false
             status = "could not reach or start `safeslop serve` (is safeslop on PATH?)"
             return
         }
         reachable = true
-        version = await EngineConnection.ping()
+        version = await engine.ping()
         do {
-            let list = try await EngineConnection.listProfiles()
+            let list = try await engine.listProfiles(configPath: "")
             // safest tier first (vm→container→sandbox→host), then by name (research G/H).
             let refs = list.map(ProfileRef.init)
             profiles = refs.sorted { a, b in

@@ -29,6 +29,13 @@ let package = Package(
             plugins: [
                 .plugin(name: "GRPCProtobufGenerator", package: "grpc-swift-protobuf")
             ]
-        )
+        ),
+        // Headless model-layer tests (`swift test`): EngineModel's state machine via a fake EngineClient
+        // and the pure ProfileRef logic that drives the views (tier ordering, risk→color, trust/network
+        // honesty). No window server — the SwiftUI `--mount-check` analog.
+        .testTarget(
+            name: "SafeSlopCockpitTests",
+            dependencies: ["SafeSlopCockpit"]
+        ),
     ]
 )

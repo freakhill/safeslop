@@ -2,6 +2,25 @@ import Foundation
 import GRPCCore
 import GRPCNIOTransportHTTP2
 
+/// EngineClient is the slice of the control plane that EngineModel depends on, behind a protocol so
+/// the model's state machine (ensure → ping → list → sort) can be unit-tested with an in-memory fake,
+/// no live `safeslop serve` required. Production uses LiveEngineClient (the real UDS gRPC).
+@MainActor
+protocol EngineClient {
+    func ensureServing() async -> Bool
+    func ping() async -> String?
+    func listProfiles(configPath: String) async throws -> [Safeslop_Control_V1_Profile]
+}
+
+/// LiveEngineClient forwards to the static EngineConnection — the real engine over the UDS socket.
+struct LiveEngineClient: EngineClient {
+    func ensureServing() async -> Bool { await EngineConnection.ensureServing() }
+    func ping() async -> String? { await EngineConnection.ping() }
+    func listProfiles(configPath: String) async throws -> [Safeslop_Control_V1_Profile] {
+        try await EngineConnection.listProfiles(configPath: configPath)
+    }
+}
+
 // EngineConnection centralizes how the app reaches the safeslop engine: the UDS socket path,
 // building a plaintext HTTP/2-over-UDS transport, and launch-on-demand of `safeslop serve`
 // (specs/0014 §10 — the app starts the engine if Ping fails, then retries).
