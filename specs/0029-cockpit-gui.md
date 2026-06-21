@@ -95,10 +95,20 @@ Branch `sp-cockpit-gui-spec`. Landed + gated (`make check`, swift build, fish su
   LoadBytes`) with inline cue-vet errors + a per-profile arbiter preview as you type. ✅ (Task 2 text side)
 - **CLI `safeslop launch --config <dir>`** for hotkeys (`launchWorkspace`, canonicalized, fail-fast). ✅ (Task 6 CLI)
 
-**Not yet done (Phase 1 remainder):** file-scope drag-drop + auto-deny-secrets (Task 3); trust-gate
-semantic diff (Task 5); dock menu + ephemeral-key HUD (Task 6 rest); the **visual** editor half (Task 2)
-— deferred pending the FLO hand-off on how much visual may author vs force-to-text. Editor save-to-disk
-+ trust write-back is the next natural step on the Create tab.
+**File scope (Task 3) — engine landed 2026-06-21:**
+- CUE `files: { read, write, deny }` field; the **sandbox** honors it (read/write add allowances, deny
+  wins). Paths expand `~` + symlink-canonicalize.
+- **Auto-deny-secrets**: when a profile grants extra scope, the sandbox auto-denies a curated set of
+  home credential stores (SSH private keys, ~/.gnupg, ~/.aws/credentials, gcloud/azure tokens, vault,
+  op/lpass, ~/.pgpass/.my.cnf, ~/.netrc, shell/REPL histories, pulumi/doctl/scaleway). Decided via a
+  cross-model (GLM) review: deny SSH *keys* not the dir (git-over-ssh needs config/known_hosts);
+  EXCLUDE the ambiguous bucket (~/.npmrc, ~/.cargo, ~/.m2, ~/.kube, ~/.docker, ~/.gitconfig, workspace
+  .git/.env) since child tools need them; only with a granted scope; explicit grant opts a path out.
+
+**Not yet done (Phase 1 remainder):** file-scope **container/vm** support + the **drag-drop UI** (Task 3
+visual half); trust-gate semantic diff (Task 5); dock menu + ephemeral-key HUD (Task 6 rest); the
+**visual** editor half (Task 2) — pending the FLO hand-off on how much visual may author vs force-to-text.
+Editor save-to-disk + trust write-back is the next natural step on the Create tab.
 
 ## Phase 1 tasks
 
