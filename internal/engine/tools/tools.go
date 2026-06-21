@@ -33,6 +33,9 @@ var (
 	// installs via the fail-closed verified Route A (install.Apply), not an argv. InstallByName catches
 	// it and runs installPinned; it is never surfaced to a caller as a failure.
 	errUsePin = errors.New("install via verified embedded pin")
+	// errUseInstaller is the analogous sentinel for a checksum-pinned installer binary (rustup-init): it
+	// is fetched + verified, then executed. InstallByName catches it and runs installVerifiedInstaller.
+	errUseInstaller = errors.New("install via verified installer binary")
 )
 
 // pinFor returns the embedded verified-install pin for a catalog tool, when one exists. A tool with a
@@ -67,14 +70,27 @@ const (
 // optional .app for GUI-only tools (cask apps). Brew/Cask/Script are install routes, tried in that
 // preference order and ONLY when the tool is missing.
 type Tool struct {
-	Name     string   // display name + stable id
-	Category string   // one of the Cat* constants
-	Detect   []string // candidate CLI names; first found on PATH wins
-	AppPath  string   // optional /Applications/X.app (for cask apps without a CLI)
-	Brew     string   // brew formula (may be tapped, e.g. "cirruslabs/cli/tart")
-	Cask     string   // brew cask name
-	Script   string   // fallback install one-liner when brew is unavailable/unsuitable
-	Note     string   // honest one-line description
+	Name      string             // display name + stable id
+	Category  string             // one of the Cat* constants
+	Detect    []string           // candidate CLI names; first found on PATH wins
+	AppPath   string             // optional /Applications/X.app (for cask apps without a CLI)
+	Brew      string             // brew formula (may be tapped, e.g. "cirruslabs/cli/tart")
+	Cask      string             // brew cask name
+	Installer *VerifiedInstaller // checksum-pinned installer binary — the verified replacement for Script
+	Script    string             // fallback install one-liner when brew is unavailable/unsuitable
+	Note      string             // honest one-line description
+}
+
+// VerifiedInstaller is a checksum-pinned installer binary (e.g. rustup-init) that safeslop fetches,
+// sha256-verifies, then EXECUTES with Args — the verified replacement for a `curl … | sh` Script. Most
+// "script-only" tools (rustup, nix) just download a versioned installer and run it; pinning that binary
+// (Route A trust) eliminates the unverified remote code. Unlike a placed-binary pin it runs and may
+// modify the environment, so the cockpit classifies it as "verified-installer" (specs/0036 Task 6).
+type VerifiedInstaller struct {
+	URL     string   // the versioned, pinnable installer binary URL (never "latest")
+	SHA256  string   // sha256 of that binary
+	Version string   // pinned installer version
+	Args    []string // args to run the installer with, e.g. ["-y"]
 }
 
 // brewLeaf is the formula name brew reports in `brew list` for a (possibly tapped) Brew field:
@@ -135,6 +151,16 @@ func Catalog() []Tool {
 		{Name: "Go", Category: CatLang, Detect: []string{"go"}, Brew: "go",
 			Note: "Go toolchain — also builds the safeslop engine"},
 		{Name: "Rust", Category: CatLang, Detect: []string{"cargo", "rustc"},
+			Installer: &VerifiedInstaller{
+				// `curl https://sh.rustup.rs | sh` just downloads this versioned rustup-init and runs it;
+				// pinning + sha256-verifying it (matches rustup's published .sha256, 2026-06-22) replaces
+				// the unverified remote script. rustup-init then fetches the toolchain, which rustup
+				// verifies against its own signed manifests.
+				URL:     "https://static.rust-lang.org/rustup/archive/1.29.0/aarch64-apple-darwin/rustup-init",
+				SHA256:  "aeb4105778ca1bd3c6b0e75768f581c656633cd51368fa61289b6a71696ac7e1",
+				Version: "1.29.0",
+				Args:    []string{"-y"},
+			},
 			Script: "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y",
 			Note:   "Rust toolchain — cargo/rustc via rustup"},
 		{Name: "Swift", Category: CatLang, Detect: []string{"swift", "swiftc"}, Brew: "swiftly",
@@ -329,6 +355,8 @@ func installArgv(s Status, brewAvail bool) ([]string, error) {
 		return []string{"brew", "install", "--cask", t.Cask}, nil
 	case hasPin(t.Name):
 		return nil, errUsePin // verified embedded-pin install — not an argv (kills the curl|sh route)
+	case t.Installer != nil:
+		return nil, errUseInstaller // verified installer binary — fetched, verified, then executed
 	case t.Script != "":
 		return []string{"/bin/sh", "-c", t.Script}, nil
 	case t.Cask != "" || t.Brew != "":
@@ -343,9 +371,10 @@ func installArgv(s Status, brewAvail bool) ([]string, error) {
 type Verification string
 
 const (
-	VerifiedPin   Verification = "verified-pin"   // sha256-pinned binary, notarized-trust chain, no remote code
-	BrewManaged   Verification = "brew"           // delegated to Homebrew (its own verification)
-	UnverifiedRun Verification = "unverified-run" // runs a remote script with user privileges — highest blast radius
+	VerifiedPin            Verification = "verified-pin"       // sha256-pinned binary, notarized-trust chain, no remote code
+	VerifiedInstallerRoute Verification = "verified-installer" // sha256-pinned installer binary, fetched+verified, then run
+	BrewManaged            Verification = "brew"               // delegated to Homebrew (its own verification)
+	UnverifiedRun          Verification = "unverified-run"     // runs a remote script with user privileges — highest blast radius
 )
 
 const (
@@ -354,6 +383,10 @@ const (
 		"script runs. The previous version is kept for one-command rollback."
 	brewPrecautions = "safeslop installs this through your existing Homebrew (brew install). safeslop runs " +
 		"no remote code itself; Homebrew performs its own download and checksum verification."
+	installerPrecautions = "safeslop downloads this tool's official installer over HTTPS and verifies its " +
+		"SHA-256 against a value compiled into the notarized safeslop binary before running it — replacing an " +
+		"unverified `curl | sh`. The verified installer then runs and may modify your shell profile and home " +
+		"directory, exactly as the upstream install would."
 	unverifiedPrecautions = "⚠︎ No checksum-pinned release exists for this tool, so installing it runs " +
 		"a script downloaded from the internet with your user privileges. safeslop shows you the exact command and " +
 		"requires explicit confirmation before running it — but nothing is verified beyond HTTPS transport."
@@ -403,6 +436,11 @@ func installPreview(s Status, brewAvail bool) Preview {
 		p.SourceURL, p.SHA256, p.Version = pin.URL, pin.SHA256, pin.Version
 		p.Command = "verified install: " + pin.Name + " " + pin.Version + " (sha256-pinned binary)"
 		p.Precautions = verifiedPrecautions
+	case t.Installer != nil:
+		p.Route, p.Verification = "verified-installer", VerifiedInstallerRoute
+		p.SourceURL, p.SHA256, p.Version = t.Installer.URL, t.Installer.SHA256, t.Installer.Version
+		p.Command = strings.Join(append([]string{filepath.Base(t.Installer.URL)}, t.Installer.Args...), " ")
+		p.Precautions = installerPrecautions
 	case t.Script != "":
 		p.Route, p.Verification, p.NeedsConsent = "script", UnverifiedRun, true
 		p.Command, p.Precautions = t.Script, unverifiedPrecautions
@@ -438,16 +476,7 @@ func Precautions(s Status) string {
 // brew/cask/script argv joined, or the verified-pin route for a tool with an embedded checksum pin. ""
 // when not installable. Used by the cockpit Installs-tab preview (the control server's InstallHint).
 func InstallRouteHint(s Status) string {
-	if s.Present {
-		return ""
-	}
-	if argv, err := InstallArgv(s); err == nil {
-		return strings.Join(argv, " ")
-	}
-	if pin, ok := pinFor(s.Tool.Name); ok {
-		return "verified install: " + pin.Name + " " + pin.Version + " (sha256-pinned binary, no curl|sh)"
-	}
-	return ""
+	return InstallPreview(s).Command // single source of truth for "what runs" across every route
 }
 
 func brewOnPath() bool {
@@ -477,6 +506,9 @@ func InstallByName(name string, emit func(line string)) error {
 	argv, err := InstallArgv(s)
 	if errors.Is(err, errUsePin) {
 		return installPinned(name, emit) // verified Route A instead of curl|sh
+	}
+	if errors.Is(err, errUseInstaller) {
+		return installVerifiedInstaller(s.Tool, emit) // fetch+verify+run the pinned installer
 	}
 	if err != nil {
 		return err
@@ -522,6 +554,39 @@ func installPinned(name string, emit func(line string)) error {
 	return install.Apply(context.Background(), res, dirs, install.HTTPFetcher{}, func(e install.Event) {
 		emit("  [" + e.Tool + "] " + string(e.Kind) + " " + e.Msg)
 	})
+}
+
+// installVerifiedInstaller fetches the tool's pinned installer binary, sha256-verifies it (fail-closed
+// via install.FetchVerified), then executes the VERIFIED local file with its args — running known,
+// checksum-matched code instead of piping an unverified remote script into a shell. The installer runs
+// on the host as the user with the reconstructed environment, like the curl|sh it replaces; sandboxing
+// the installer's own egress (squid allowlist) is a deferred second layer (specs/0036 Task 6).
+func installVerifiedInstaller(t Tool, emit func(line string)) error {
+	in := t.Installer
+	if in == nil {
+		return errNoRoute
+	}
+	dirs, err := install.DefaultDirs()
+	if err != nil {
+		return err
+	}
+	emit("$ safeslop verified-installer " + t.Name + " " + in.Version + " (sha256-pinned, no curl|sh)")
+	emit("  downloading + verifying " + in.URL)
+	path, cleanup, err := install.FetchVerified(context.Background(), in.URL, in.SHA256, dirs.TmpDir, install.HTTPFetcher{})
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	emit("  verified — running installer")
+	env := hostenv.Reconstruct()
+	cmd := exec.Command(path, in.Args...)
+	cmd.Env = env.Environ()
+	lw := &lineWriter{emit: emit}
+	cmd.Stdout = lw
+	cmd.Stderr = lw
+	runErr := cmd.Run()
+	lw.flush()
+	return runErr
 }
 
 // lineWriter turns arbitrary Write chunks into whole emitted lines. Stdout and Stderr both target it,

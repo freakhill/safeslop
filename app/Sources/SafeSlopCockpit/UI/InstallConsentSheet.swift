@@ -35,7 +35,7 @@ struct InstallConsentSheet: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(8)
                     .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
-                if tool.verification == "verified-pin" { provenance }
+                if tool.verification == "verified-pin" || tool.verification == "verified-installer" { provenance }
             }
 
             if unverified {
@@ -64,6 +64,7 @@ struct InstallConsentSheet: View {
     @ViewBuilder private var badge: some View {
         switch tool.verification {
         case "verified-pin": pill("sha256-verified pin", "checkmark.seal.fill", .green)
+        case "verified-installer": pill("sha256-verified installer", "checkmark.seal.fill", .teal)
         case "brew": pill("installed via Homebrew", "mug.fill", .blue)
         case "unverified-run": pill("unverified remote script", "exclamationmark.triangle.fill", .orange)
         default: EmptyView()

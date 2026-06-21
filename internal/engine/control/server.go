@@ -204,7 +204,7 @@ func (s *server) ListTools(_ context.Context, req *pb.ListToolsRequest) (*pb.Lis
 		}
 		if ts.Installable {
 			pv := tools.InstallPreview(st) // the consent gate's preview (specs/0037)
-			ts.InstallHint = tools.InstallRouteHint(st)
+			ts.InstallHint = pv.Command
 			ts.Verification = string(pv.Verification)
 			ts.SourceUrl = pv.SourceURL
 			ts.Sha256 = pv.SHA256

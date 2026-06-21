@@ -2,6 +2,7 @@ package tools
 
 import (
 	"errors"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -274,13 +275,13 @@ func TestInstallPreview(t *testing.T) {
 	if b := installPreview(Status{Tool: get("uv"), Present: false, Source: "missing"}, true); b.Verification != BrewManaged {
 		t.Fatalf("uv with brew should be brew-managed, got %+v", b)
 	}
-	// Unverified remote script (Rust/rustup — no brew formula, no pin): needs consent, shows the command.
-	rust := installPreview(Status{Tool: get("Rust"), Present: false, Source: "missing"}, true)
-	if rust.Verification != UnverifiedRun || !rust.NeedsConsent {
-		t.Fatalf("rustup is an unverified remote script needing consent, got %+v", rust)
+	// Unverified remote script (Claude Code — script-only, no brew/pin/installer): needs consent.
+	script := installPreview(Status{Tool: get("Claude Code"), Present: false, Source: "missing"}, true)
+	if script.Verification != UnverifiedRun || !script.NeedsConsent {
+		t.Fatalf("a script-only tool is an unverified remote script needing consent, got %+v", script)
 	}
-	if !strings.Contains(rust.Command, "rustup") {
-		t.Fatalf("unverified preview must show the literal command, got %q", rust.Command)
+	if !strings.Contains(script.Command, "claude") {
+		t.Fatalf("unverified preview must show the literal command, got %q", script.Command)
 	}
 	// Present tool → no-clobber promise; a shadowed one notes the shadowing.
 	if p := Precautions(Status{Tool: get("git"), Present: true, Source: "brew", Path: "/opt/homebrew/bin/git"}); !strings.Contains(p, "clobber") {
@@ -288,6 +289,58 @@ func TestInstallPreview(t *testing.T) {
 	}
 	if p := Precautions(Status{Tool: get("Docker CLI"), Present: true, Source: "standalone", Path: "/a/docker", ShadowedPaths: []string{"/b/docker"}}); !strings.Contains(p, "shadows") {
 		t.Fatalf("shadowed present tool should note shadowing, got %q", p)
+	}
+}
+
+// TestRustupUsesVerifiedInstallerNotCurlSh locks specs/0036 Task 6: rustup installs via a fetched +
+// sha256-verified rustup-init binary, never its `curl … | sh` script.
+func TestRustupUsesVerifiedInstallerNotCurlSh(t *testing.T) {
+	var rust Tool
+	for _, c := range Catalog() {
+		if c.Name == "Rust" {
+			rust = c
+		}
+	}
+	if rust.Installer == nil {
+		t.Fatal("Rust must carry a VerifiedInstaller")
+	}
+	missing := Status{Tool: rust, Present: false, Source: "missing"}
+	// Route resolves to the verified installer regardless of brew (Rust has no brew formula).
+	for _, brewAvail := range []bool{true, false} {
+		if _, err := installArgv(missing, brewAvail); !errors.Is(err, errUseInstaller) {
+			t.Fatalf("rustup must route to the verified installer (brewAvail=%v), got %v", brewAvail, err)
+		}
+	}
+	pv := installPreview(missing, true)
+	if pv.Verification != VerifiedInstallerRoute || pv.NeedsConsent {
+		t.Fatalf("rustup should be a one-click verified installer, got %+v", pv)
+	}
+	if pv.SHA256 == "" || pv.Version == "" || !strings.Contains(pv.SourceURL, "rustup-init") {
+		t.Fatalf("verified installer preview must carry url/sha/version: %+v", pv)
+	}
+	if strings.Contains(pv.Command, "curl") {
+		t.Fatalf("rustup command must be the verified installer, not curl|sh: %q", pv.Command)
+	}
+}
+
+// TestCatalogInstallersAreFullyPinned is the fail-closed gate for VerifiedInstaller entries: every one
+// must declare a 64-hex sha256, a non-empty version, and a versioned (never "latest") URL.
+func TestCatalogInstallersAreFullyPinned(t *testing.T) {
+	sha256Re := regexp.MustCompile(`^[0-9a-f]{64}$`)
+	for _, c := range Catalog() {
+		if c.Installer == nil {
+			continue
+		}
+		in := c.Installer
+		if !sha256Re.MatchString(in.SHA256) {
+			t.Fatalf("%s installer must declare a 64-hex sha256, got %q", c.Name, in.SHA256)
+		}
+		if in.Version == "" || in.Version == "latest" {
+			t.Fatalf("%s installer must pin an exact version, got %q", c.Name, in.Version)
+		}
+		if in.URL == "" || strings.Contains(in.URL, "latest") {
+			t.Fatalf("%s installer URL must be versioned, never latest: %q", c.Name, in.URL)
+		}
 	}
 }
 
