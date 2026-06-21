@@ -22,6 +22,7 @@ import (
 
 	"github.com/freakhill/safeslop/internal/engine/hostenv"
 	"github.com/freakhill/safeslop/internal/engine/install"
+	"github.com/freakhill/safeslop/internal/engine/sandbox"
 )
 
 var (
@@ -110,6 +111,11 @@ type VerifiedInstaller struct {
 	SHA256  string   // sha256 of that binary
 	Version string   // pinned installer version
 	Args    []string // args to run the installer with, e.g. ["-y"]
+	// Confine runs the installer under sandbox-exec with the secret-read-deny scope (specs/0038): a
+	// confinable installer (rustup) gets broad home write + network but cannot read the user's SSH keys,
+	// cloud creds, or shell history. Installers needing root + system-wide changes (nix) set this false
+	// and run unconfined.
+	Confine bool
 }
 
 // brewLeaf is the formula name brew reports in `brew list` for a (possibly tapped) Brew field:
@@ -173,6 +179,7 @@ func Catalog() []Tool {
 				SHA256:  "17c0845f0133c9544b293449d853f5873ef9692b61cea1fe2ddf3b3a2500b81b",
 				Version: "3.21.2",
 				Args:    []string{"install", "--no-confirm"},
+				Confine: false, // creates /nix + a daemon via sudo — cannot run under a user sandbox
 			},
 			Script: "curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install",
 			Note:   "Nix package manager (Determinate installer)"},
@@ -190,6 +197,7 @@ func Catalog() []Tool {
 				SHA256:  "aeb4105778ca1bd3c6b0e75768f581c656633cd51368fa61289b6a71696ac7e1",
 				Version: "1.29.0",
 				Args:    []string{"-y"},
+				Confine: true, // user-space install (~/.rustup, ~/.cargo) — sandbox it with secret-deny
 			},
 			Script: "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y",
 			Note:   "Rust toolchain — cargo/rustc via rustup"},
@@ -413,10 +421,14 @@ const (
 		"script runs. The previous version is kept for one-command rollback."
 	brewPrecautions = "safeslop installs this through your existing Homebrew (brew install). safeslop runs " +
 		"no remote code itself; Homebrew performs its own download and checksum verification."
-	installerPrecautions = "safeslop downloads this tool's official installer over HTTPS and verifies its " +
+	installerVerifyPrefix = "safeslop downloads this tool's official installer over HTTPS and verifies its " +
 		"SHA-256 against a value compiled into the notarized safeslop binary before running it — replacing an " +
-		"unverified `curl | sh`. The verified installer then runs and may modify your shell profile and home " +
-		"directory, exactly as the upstream install would."
+		"unverified `curl | sh`. "
+	installerConfinedPrecautions = installerVerifyPrefix + "It then runs under a macOS sandbox that blocks " +
+		"it from reading your SSH keys, cloud credentials, and shell history, and confines its writes to your " +
+		"home directory."
+	installerUnconfinedPrecautions = installerVerifyPrefix + "⚠︎ This installer needs administrator privileges " +
+		"and makes system-wide changes, so it runs UNCONFINED — only proceed if you trust it."
 	unverifiedPrecautions = "⚠︎ No checksum-pinned release exists for this tool, so installing it runs " +
 		"a script downloaded from the internet with your user privileges. safeslop shows you the exact command and " +
 		"requires explicit confirmation before running it — but nothing is verified beyond HTTPS transport."
@@ -470,7 +482,11 @@ func installPreview(s Status, brewAvail bool) Preview {
 		p.Route, p.Verification = "verified-installer", VerifiedInstallerRoute
 		p.SourceURL, p.SHA256, p.Version = t.Installer.URL, t.Installer.SHA256, t.Installer.Version
 		p.Command = strings.Join(append([]string{filepath.Base(t.Installer.URL)}, t.Installer.Args...), " ")
-		p.Precautions = installerPrecautions
+		if t.Installer.Confine {
+			p.Precautions = installerConfinedPrecautions
+		} else {
+			p.Precautions = installerUnconfinedPrecautions
+		}
 	case t.Script != "":
 		p.Route, p.Verification, p.NeedsConsent = "script", UnverifiedRun, true
 		p.Command, p.Precautions = t.Script, unverifiedPrecautions
@@ -607,9 +623,16 @@ func installVerifiedInstaller(t Tool, emit func(line string)) error {
 		return err
 	}
 	defer cleanup()
-	emit("  verified — running installer")
+
+	argv, sbCleanup, confined := installerRunArgv(in, path)
+	defer sbCleanup()
+	if confined {
+		emit("  verified — running installer under a sandbox (no access to your secrets)")
+	} else {
+		emit("  verified — running installer (unconfined: needs admin privileges)")
+	}
 	env := hostenv.Reconstruct()
-	cmd := exec.Command(path, in.Args...)
+	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Env = env.Environ()
 	lw := &lineWriter{emit: emit}
 	cmd.Stdout = lw
@@ -617,6 +640,28 @@ func installVerifiedInstaller(t Tool, emit func(line string)) error {
 	runErr := cmd.Run()
 	lw.flush()
 	return runErr
+}
+
+// installerRunArgv builds the command to run a verified installer at binPath, wrapping it under
+// sandbox-exec with the secret-read-deny scope when the installer is confinable AND sandbox-exec is
+// available (specs/0038). Returns the argv, a cleanup for any sandbox temp profile, and whether confined.
+// Confinement grants broad home write + network so the install works, but the sandbox's auto-denied
+// credential set means the installer can't read or exfiltrate the user's secrets.
+func installerRunArgv(in *VerifiedInstaller, binPath string) (argv []string, cleanup func(), confined bool) {
+	base := append([]string{binPath}, in.Args...)
+	if !in.Confine || !sandbox.Available() {
+		return base, func() {}, false
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return base, func() {}, false
+	}
+	wrapped, cl, err := sandbox.WrapArgv(base, home, "allow", sandbox.Scope{Write: []string{"~"}})
+	if err != nil {
+		return base, func() {}, false // fail-open to unconfined: a verified installer that can't be
+		// sandboxed should still install, not silently no-op
+	}
+	return wrapped, cl, true
 }
 
 // lineWriter turns arbitrary Write chunks into whole emitted lines. Stdout and Stderr both target it,

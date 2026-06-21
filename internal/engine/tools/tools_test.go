@@ -2,9 +2,12 @@ package tools
 
 import (
 	"errors"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/freakhill/safeslop/internal/engine/sandbox"
 )
 
 func TestCatalogIsPopulatedAndCategorized(t *testing.T) {
@@ -368,6 +371,40 @@ func TestClaudeUsesPinnedBinaryNotCurlSh(t *testing.T) {
 	pv := installPreview(missing, true)
 	if pv.Verification != VerifiedPin || strings.Contains(pv.Command, "curl") {
 		t.Fatalf("Claude Code should be a verified pin, not curl|sh: %+v", pv)
+	}
+}
+
+// TestInstallerConfinement verifies specs/0038: a confinable installer (rustup) runs sandbox-wrapped
+// with the secret-deny scope, while an unconfined one (nix) runs bare.
+func TestInstallerConfinement(t *testing.T) {
+	nix := &VerifiedInstaller{URL: "https://x/nix-installer", Args: []string{"install"}, Confine: false}
+	argv, cleanup, confined := installerRunArgv(nix, "/tmp/nix-installer")
+	cleanup()
+	if confined || len(argv) == 0 || argv[0] != "/tmp/nix-installer" {
+		t.Fatalf("nix must run unconfined, got confined=%v argv=%v", confined, argv)
+	}
+
+	if !sandbox.Available() {
+		t.Skip("sandbox-exec unavailable — confinement path not exercised on this host")
+	}
+	rustup := &VerifiedInstaller{URL: "https://x/rustup-init", Args: []string{"-y"}, Confine: true}
+	argv, cleanup, confined = installerRunArgv(rustup, "/tmp/rustup-init")
+	defer cleanup()
+	if !confined || argv[0] != sandbox.SandboxExecPath {
+		t.Fatalf("rustup must be sandbox-wrapped, got confined=%v argv0=%q", confined, argv[0])
+	}
+	var sbFile string
+	for i, a := range argv {
+		if a == "-f" && i+1 < len(argv) {
+			sbFile = argv[i+1]
+		}
+	}
+	prof, err := os.ReadFile(sbFile)
+	if err != nil {
+		t.Fatalf("read sandbox profile: %v", err)
+	}
+	if !strings.Contains(string(prof), "id_ed25519") || !strings.Contains(string(prof), "deny file-read") {
+		t.Fatalf("a confined installer's profile must deny reading ssh private keys:\n%s", prof)
 	}
 }
 
