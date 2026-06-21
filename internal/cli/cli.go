@@ -734,6 +734,9 @@ func cmdInstall() *cobra.Command {
 			if len(res.Actions) == 0 {
 				fmt.Println("  (desired-state manifest is empty)")
 			}
+			if msg := install.Freshness(time.Now()).Message(); msg != "" {
+				fmt.Printf("\nnote: %s\n", msg) // advisory freshness floor — warn, never block
+			}
 			return nil
 		},
 	})
@@ -841,7 +844,10 @@ func renderInstallPlanJSON(version string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	b, _ := json.MarshalIndent(res, "", "  ")
+	b, _ := json.MarshalIndent(map[string]any{
+		"actions":   res.Actions,
+		"freshness": install.Freshness(time.Now()),
+	}, "", "  ")
 	return string(b), nil
 }
 
