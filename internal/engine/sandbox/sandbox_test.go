@@ -248,3 +248,47 @@ func TestLaunchFileScopeWritesAndDeniesOnDarwin(t *testing.T) {
 		t.Fatal("file was written into a denied subpath — deny did not win")
 	}
 }
+
+func TestAutoDenyCredentialsOnlyWithScope(t *testing.T) {
+	home, _ := os.UserHomeDir()
+	awsCreds := home + "/.aws/credentials"
+	sshKey := home + "/.ssh/id_ed25519"
+
+	// default workspace-only sandbox: NO auto-deny (creds already out of scope, keep profile clean)
+	plain := Profile("/ws", "deny", Scope{})
+	if strings.Contains(plain, awsCreds) {
+		t.Errorf("default sandbox should not carry credential auto-deny:\n%s", plain)
+	}
+
+	// granting an extra read turns on the auto-deny for the credential set
+	scoped := Profile("/ws", "deny", Scope{Read: []string{home}})
+	for _, want := range []string{
+		`(deny file-read* (literal "` + awsCreds + `"))`,
+		`(deny file-read* (literal "` + sshKey + `"))`,
+		`(deny file-read* (subpath "` + home + `/.gnupg"))`,
+	} {
+		if !strings.Contains(scoped, want) {
+			t.Errorf("scoped sandbox missing auto-deny %q\n%s", want, scoped)
+		}
+	}
+	// the ambiguous bucket must NOT be auto-denied (child tools need them)
+	for _, bad := range []string{home + "/.npmrc", home + "/.kube/config", home + "/.docker/config.json", home + "/.gitconfig", "/.git\""} {
+		if strings.Contains(scoped, `(deny file-read* (literal "`+bad+`"`) || strings.Contains(scoped, `(deny file-read* (subpath "`+bad+`"`) {
+			t.Errorf("ambiguous path %q must NOT be auto-denied (breaks tools):\n%s", bad, scoped)
+		}
+	}
+	// SSH private key denied but the dir itself is not (config/known_hosts stay readable)
+	if strings.Contains(scoped, `(deny file-read* (subpath "`+home+`/.ssh"))`) {
+		t.Error("must not deny the whole ~/.ssh — only the private keys")
+	}
+}
+
+func TestAutoDenyExplicitGrantWins(t *testing.T) {
+	home, _ := os.UserHomeDir()
+	awsCreds := home + "/.aws/credentials"
+	// explicitly granting a credential path opts it out of the auto-deny
+	p := Profile("/ws", "deny", Scope{Read: []string{awsCreds}})
+	if strings.Contains(p, `(deny file-read* (literal "`+awsCreds+`"))`) {
+		t.Errorf("explicit read of %q must override the auto-deny:\n%s", awsCreds, p)
+	}
+}

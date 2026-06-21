@@ -142,13 +142,76 @@ func Profile(workspace, network string, scope Scope) string {
 	}
 
 	// Deny LAST so it overrides any allow above (Seatbelt = last matching rule wins) — the explicit
-	// subtractive scope (e.g. carve ~/.ssh back out of a broad read).
+	// subtractive scope (e.g. carve a subdir back out of a broad read).
 	for _, p := range scope.Deny {
 		ep := escape(expandHome(p))
 		line(fmt.Sprintf(`(deny file-read* (subpath "%s"))`, ep))
 		line(fmt.Sprintf(`(deny file-write* (subpath "%s"))`, ep))
 	}
+
+	// Auto-deny credential stores when an extra scope is granted, so a broad files.read (e.g. ["~"])
+	// can't leak credentials. Skipped for the default workspace-only sandbox (creds are already out of
+	// scope) and for any path the profile EXPLICITLY granted (intent wins). Curated to the unambiguous
+	// set — see secretDenyTargets.
+	if len(scope.Read) > 0 || len(scope.Write) > 0 {
+		granted := map[string]bool{}
+		for _, p := range append(append([]string{}, scope.Read...), scope.Write...) {
+			granted[expandHome(p)] = true
+		}
+		for _, t := range secretDenyTargets() {
+			ep := expandHome(t.path)
+			if granted[ep] {
+				continue // the profile explicitly asked for this path
+			}
+			line(fmt.Sprintf(`(deny file-read* (%s "%s"))`, t.form, escape(ep)))
+			line(fmt.Sprintf(`(deny file-write* (%s "%s"))`, t.form, escape(ep)))
+		}
+	}
 	return b.String()
+}
+
+// denyTarget is one auto-denied credential path; form is "literal" (a file) or "subpath" (a dir).
+type denyTarget struct {
+	path string
+	form string
+}
+
+// secretDenyTargets is the curated, UNAMBIGUOUS set of home-relative credential stores a coding agent
+// never needs to read directly — auto-denied when a profile grants extra file scope (the mistake-guard,
+// specs/0029; cross-model review 2026-06-21). It deliberately OMITS the ambiguous bucket that child
+// tools legitimately need — package-registry creds (~/.npmrc, ~/.cargo/credentials, ~/.m2,
+// ~/.gem/credentials), ~/.kube/config, ~/.docker/config.json, ~/.gitconfig + git credential stores —
+// plus workspace .git/.env, since denying those breaks npm/cargo/kubectl/docker/git. SSH: deny the
+// private KEYS, not the directory, so ~/.ssh/config + known_hosts + *.pub stay readable (git-over-ssh).
+func secretDenyTargets() []denyTarget {
+	return []denyTarget{
+		// SSH private keys (well-known names; the dir stays readable for config/known_hosts/*.pub)
+		{"~/.ssh/id_rsa", "literal"}, {"~/.ssh/id_dsa", "literal"}, {"~/.ssh/id_ecdsa", "literal"},
+		{"~/.ssh/id_ed25519", "literal"}, {"~/.ssh/id_ed25519_sk", "literal"},
+		{"~/.ssh/id_ecdsa_sk", "literal"}, {"~/.ssh/identity", "literal"},
+		// GPG / encryption keys
+		{"~/.gnupg", "subpath"},
+		// cloud provider credentials
+		{"~/.aws/credentials", "literal"},
+		{"~/.config/gcloud/credentials.db", "literal"},
+		{"~/.config/gcloud/application_default_credentials.json", "literal"},
+		{"~/.config/gcloud/legacy_credentials", "subpath"},
+		{"~/.azure", "subpath"},
+		// vault + password-manager CLIs
+		{"~/.vault-token", "literal"}, {"~/.config/op", "subpath"}, {"~/.lpass", "subpath"},
+		// database password files
+		{"~/.pgpass", "literal"}, {"~/.my.cnf", "literal"},
+		// universal HTTP auth
+		{"~/.netrc", "literal"}, {"~/._netrc", "literal"},
+		// shell / REPL history (the #1 accidental-secret leak vector)
+		{"~/.bash_history", "literal"}, {"~/.zsh_history", "literal"},
+		{"~/.python_history", "literal"}, {"~/.node_repl_history", "literal"},
+		{"~/.psql_history", "literal"}, {"~/.rediscli_history", "literal"},
+		// infra / cloud CLIs
+		{"~/.pulumi/credentials.json", "literal"},
+		{"~/.config/doctl/config.yaml", "literal"},
+		{"~/.config/scaleway/config.yaml", "literal"},
+	}
 }
 
 // escape quotes a path for inclusion in a Seatbelt double-quoted string.
