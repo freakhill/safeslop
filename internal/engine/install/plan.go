@@ -3,11 +3,15 @@ package install
 import (
 	"fmt"
 	"regexp"
+	"strconv"
+	"strings"
 )
 
 // Artifact formats Apply knows how to install (specs/0021).
 const (
-	FormatBinaryTarball = "binary-tarball" // tar.gz containing <name>/bin/<name>; install to BinDir
+	FormatBinaryTarball = "binary-tarball" // tar.gz containing the <name> binary; install to BinDir
+	FormatBinaryZip     = "binary-zip"     // .zip containing the <name> binary (e.g. bun); install to BinDir
+	FormatRawBinary     = "raw-binary"     // the artifact IS the <name> binary, no archive (e.g. claude); install to BinDir
 	FormatAppTarball    = "app-tarball"    // tar.gz containing <name>.app; install to AppDir + symlink
 )
 
@@ -26,14 +30,31 @@ type Sig struct {
 // (SP7b-3) downloads URL, verifies SHA256, installs Version. The manifest is fail-closed: every
 // field is mandatory and Version is never "latest" (specs/0012 §5).
 type Pin struct {
-	Name    string `json:"name"`          // matches Tool.Name from Status (e.g. "mise", "tart")
-	Kind    string `json:"kind"`          // "toolchain" | "runtime" — informs apply's provisioner
-	Format  string `json:"format"`        // binary-tarball | app-tarball
-	Version string `json:"version"`       // exact pinned version, never "latest"
-	SHA256  string `json:"sha256"`        // sha256 of the darwin-arm64 artifact (provenance)
-	URL     string `json:"url"`           // download source for that artifact
-	Sig     *Sig   `json:"sig,omitempty"` // optional upstream signature
+	Name    string `json:"name"`    // matches Tool.Name from Status (e.g. "mise", "tart")
+	Kind    string `json:"kind"`    // "toolchain" | "runtime" — informs apply's provisioner
+	Format  string `json:"format"`  // binary-tarball | app-tarball
+	Version string `json:"version"` // exact pinned version, never "latest"
+	SHA256  string `json:"sha256"`  // sha256 of the darwin-arm64 artifact
+	URL     string `json:"url"`     // download source for that artifact
+	// Provenance records how SHA256 was obtained, so the cockpit can tell a vendor-published checksum
+	// apart from one safeslop computed from the download itself (trust-on-first-use). ProvenanceVendor =
+	// the pin matches a checksum the vendor publishes; ProvenanceTLS/"" = no vendor checksum exists, so
+	// the pin is the hash safeslop recorded over TLS (weaker provenance). It is a legibility label, NOT a
+	// security gate — the SHA verification is identical either way — so it is optional and defaults to the
+	// more cautious TLS reading when unset (fail-safe: an un-annotated pin never over-claims "vendor").
+	Provenance string `json:"provenance,omitempty"`
+	Sig        *Sig   `json:"sig,omitempty"` // optional upstream signature
 }
+
+// Provenance values for Pin.Provenance / VerifiedInstaller.Provenance.
+const (
+	ProvenanceVendor = "vendor" // the pinned SHA matches a checksum the vendor publishes for the release
+	ProvenanceTLS    = "tls"    // no vendor checksum exists; the pin is safeslop's own hash, recorded over TLS
+)
+
+// VendorChecksum reports whether the pin's SHA256 matches a vendor-published checksum (vs trust-on-
+// first-use). Unset provenance is treated as the weaker TOFU case, so the UI never over-claims.
+func (p Pin) VendorChecksum() bool { return p.Provenance == ProvenanceVendor }
 
 var sha256Re = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
@@ -61,8 +82,15 @@ func ValidateDesired(pins []Pin) error {
 		if p.URL == "" {
 			return fmt.Errorf("install: pin %q must declare a source url", p.Name)
 		}
-		if p.Format != FormatBinaryTarball && p.Format != FormatAppTarball {
-			return fmt.Errorf("install: pin %q has invalid format %q (want %s|%s)", p.Name, p.Format, FormatBinaryTarball, FormatAppTarball)
+		switch p.Format {
+		case FormatBinaryTarball, FormatBinaryZip, FormatRawBinary, FormatAppTarball:
+		default:
+			return fmt.Errorf("install: pin %q has invalid format %q", p.Name, p.Format)
+		}
+		// Provenance is optional (defaults to the cautious TLS reading), but a non-empty value must be a
+		// known label — a typo here would silently mislabel the cockpit's trust badge, so catch it at build.
+		if p.Provenance != "" && p.Provenance != ProvenanceVendor && p.Provenance != ProvenanceTLS {
+			return fmt.Errorf("install: pin %q has invalid provenance %q (want vendor|tls)", p.Name, p.Provenance)
 		}
 		if p.Sig != nil {
 			if p.Sig.Scheme != "minisign" {
@@ -136,7 +164,9 @@ func Plan(state State, desired []Pin) (Result, error) {
 		switch {
 		case !found || !tool.Present:
 			a.Kind = ActionInstall
-		case cur == p.Version:
+		case cur == p.Version || cmpVersion(cur, p.Version) > 0:
+			// Already at the pin, or NEWER than it — never downgrade a tool the user already has (some
+			// tools, e.g. claude, self-update past the pin; apply must not roll them back).
 			a.Kind = ActionOK
 			a.Current = cur
 		default:
@@ -152,4 +182,31 @@ func Plan(state State, desired []Pin) (Result, error) {
 // "2.0.0" matches probe output like "tart version: 2.0.0 (build 7)". Returns "" if none.
 func extractVersion(s string) string {
 	return versionRe.FindString(s)
+}
+
+// cmpVersion compares two dotted-numeric versions ("2.1.185" vs "2.1.176"), returning -1/0/1. Missing
+// or non-numeric components compare as 0 — a best-effort downgrade guard, not full semver (pre-release
+// tags are ignored). Used by Plan to avoid rolling a newer install back to an older pin.
+func cmpVersion(a, b string) int {
+	as, bs := strings.Split(a, "."), strings.Split(b, ".")
+	n := len(as)
+	if len(bs) > n {
+		n = len(bs)
+	}
+	for i := 0; i < n; i++ {
+		var ai, bi int
+		if i < len(as) {
+			ai, _ = strconv.Atoi(as[i])
+		}
+		if i < len(bs) {
+			bi, _ = strconv.Atoi(bs[i])
+		}
+		if ai != bi {
+			if ai < bi {
+				return -1
+			}
+			return 1
+		}
+	}
+	return 0
 }

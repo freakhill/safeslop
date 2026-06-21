@@ -4,6 +4,13 @@ BINARY  := safeslop
 PKG     := ./cmd/safeslop
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -X github.com/freakhill/safeslop/internal/cli.Version=$(VERSION)
+# RELEASE=1 stamps the binary as the notarized release artifact, which lets the cockpit claim the
+# notarization-backed root of trust in its install precautions (internal/engine/buildinfo). Only
+# `make sign` sets it (it rebuilds dist with RELEASE=1 right before notarizing). Dev `make build`
+# leaves Release=false so the precaution wording stays honest about an unsigned/adhoc binary.
+ifeq ($(RELEASE),1)
+LDFLAGS += -X github.com/freakhill/safeslop/internal/engine/buildinfo.Release=true
+endif
 GOFILES := cmd internal
 
 CONTAINER_SRC := library/layer/container
@@ -80,8 +87,11 @@ dist:
 	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o dist/$(BINARY)-darwin-arm64 $(PKG)
 	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o dist/$(BINARY)-darwin-amd64 $(PKG)
 
-## Codesign + notarize the dist artifacts (needs an Apple Developer cert; see the script).
-sign: dist
+## Codesign + notarize the dist artifacts (needs an Apple Developer cert; see the script). Rebuilds
+## dist with RELEASE=1 first, so the binary that gets notarized is the one stamped to claim the
+## notarization-backed root of trust in the cockpit (internal/engine/buildinfo).
+sign:
+	$(MAKE) dist RELEASE=1
 	bash scripts/sign-notarize.sh dist/$(BINARY)-darwin-arm64 dist/$(BINARY)-darwin-amd64
 
 clean:

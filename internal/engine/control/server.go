@@ -3,7 +3,6 @@ package control
 import (
 	"context"
 	"sort"
-	"strings"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -201,11 +200,17 @@ func (s *server) ListTools(_ context.Context, req *pb.ListToolsRequest) (*pb.Lis
 			Name: st.Tool.Name, Category: st.Tool.Category, Note: st.Tool.Note,
 			Present: st.Present, Source: st.Source, Path: st.Path, Installable: st.Installable(),
 			ShadowedPaths: st.ShadowedPaths,
+			Precautions:   tools.Precautions(st), // hover tooltip — set for every tool
 		}
 		if ts.Installable {
-			if argv, err := tools.InstallArgv(st); err == nil {
-				ts.InstallHint = strings.Join(argv, " ")
-			}
+			pv := tools.InstallPreview(st) // the consent gate's preview (specs/0037)
+			ts.InstallHint = pv.Command
+			ts.Verification = string(pv.Verification)
+			ts.SourceUrl = pv.SourceURL
+			ts.Sha256 = pv.SHA256
+			ts.PinnedVersion = pv.Version
+			ts.NeedsConsent = pv.NeedsConsent
+			ts.Provenance = pv.Provenance
 		}
 		out.Tools = append(out.Tools, ts)
 	}

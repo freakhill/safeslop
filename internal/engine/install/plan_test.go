@@ -105,6 +105,21 @@ func TestPlanDetectsUpgrade(t *testing.T) {
 	}
 }
 
+func TestPlanNeverDowngrades(t *testing.T) {
+	// claude self-updates past the pin: installed 2.1.185 > pinned 2.1.176 → OK, never rolled back.
+	state := State{Runtimes: []Tool{{Name: "claude", Present: true, Version: "2.1.185"}}}
+	res, err := Plan(state, []Pin{pin("claude", "runtime", "2.1.176")})
+	if err != nil {
+		t.Fatalf("Plan errored: %v", err)
+	}
+	if res.Actions[0].Kind != ActionOK {
+		t.Fatalf("a newer install must be OK (never downgraded), got %s", res.Actions[0].Kind)
+	}
+	if res.Pending() != 0 {
+		t.Fatalf("a newer install must not be pending, got %d", res.Pending())
+	}
+}
+
 func TestPlanFailsClosedOnBadManifest(t *testing.T) {
 	bad := []Pin{{Name: "mise", Kind: "toolchain", Version: "latest", SHA256: "x", URL: "u"}}
 	if _, err := Plan(State{}, bad); err == nil {

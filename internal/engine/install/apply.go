@@ -2,6 +2,8 @@ package install
 
 import (
 	"archive/tar"
+	"archive/zip"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"fmt"
@@ -134,13 +136,23 @@ func applyOne(ctx context.Context, a Action, dirs Dirs, fetch Fetcher, emit func
 		return err
 	}
 	defer os.RemoveAll(work)
-	if err := extractTarGz(data, work); err != nil {
-		return fmt.Errorf("extract: %w", err)
-	}
 	switch a.Format {
 	case FormatBinaryTarball:
+		if err := extractTarGz(data, work); err != nil {
+			return fmt.Errorf("extract: %w", err)
+		}
 		return installBinary(a.Name, work, dirs.BinDir)
+	case FormatBinaryZip:
+		if err := extractZip(data, work); err != nil {
+			return fmt.Errorf("extract: %w", err)
+		}
+		return installBinary(a.Name, work, dirs.BinDir)
+	case FormatRawBinary:
+		return installRawBinary(a.Name, data, dirs.BinDir) // the artifact IS the binary — no extraction
 	case FormatAppTarball:
+		if err := extractTarGz(data, work); err != nil {
+			return fmt.Errorf("extract: %w", err)
+		}
 		return installApp(a.Name, work, dirs.AppDir, dirs.BinDir)
 	default:
 		return fmt.Errorf("unknown format %q", a.Format)
@@ -184,14 +196,32 @@ func installBinary(name, srcRoot, binDir string) error {
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		return err
 	}
-	// Stage beside the destination (same dir → same filesystem → the commit rename is atomic, so a
-	// reader mid-exec never sees a torn file), keep any prior binary at <name>.bak for rollback, then
-	// commit by rename; restore the backup on a commit failure.
 	dest := filepath.Join(binDir, name)
 	staged := dest + ".new"
 	if err := copyFile(src, staged, 0o755); err != nil {
 		return err
 	}
+	return commitStaged(staged, dest, name)
+}
+
+// installRawBinary places an artifact that IS the binary (no archive — e.g. claude's release) into
+// binDir as <name>, using the same atomic stage→backup→commit as installBinary.
+func installRawBinary(name string, data []byte, binDir string) error {
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		return err
+	}
+	dest := filepath.Join(binDir, name)
+	staged := dest + ".new"
+	if err := os.WriteFile(staged, data, 0o755); err != nil {
+		return err
+	}
+	return commitStaged(staged, dest, name)
+}
+
+// commitStaged atomically swaps a staged file into dest: it stages beside the destination (same dir →
+// same filesystem → the commit rename is atomic, so a reader mid-exec never sees a torn file), keeps any
+// prior file at <dest>.bak for rollback, then commits by rename; restores the backup on a commit failure.
+func commitStaged(staged, dest, name string) error {
 	backup := dest + ".bak"
 	_ = os.Remove(backup)
 	hadOld := false
@@ -254,6 +284,41 @@ func installApp(name, srcRoot, appDir, binDir string) error {
 	return os.Symlink(filepath.Join(dest, "Contents", "MacOS", name), link)
 }
 
+// Rollback restores the prior version of a tool that the last install kept at <dest>.bak (installApp /
+// installBinary leave that backup behind on every upgrade). It swaps the current — presumably bad —
+// version aside to <dest>.failed (kept, not destroyed, so the failure stays inspectable) and renames
+// the .bak back into the live path. It handles both an .app bundle (AppDir/<name>.app.bak) and a bare
+// binary (BinDir/<name>.bak), preferring whichever backup exists, and errors clearly when neither does.
+// For an .app the BinDir symlink already targets the unchanged live path, so it stays valid.
+func Rollback(name string, dirs Dirs) error {
+	app := filepath.Join(dirs.AppDir, name+".app")
+	bin := filepath.Join(dirs.BinDir, name)
+	switch {
+	case fileExists(app + ".bak"):
+		return restoreBackup(app)
+	case fileExists(bin + ".bak"):
+		return restoreBackup(bin)
+	default:
+		return fmt.Errorf("no prior version of %q to roll back to", name)
+	}
+}
+
+// restoreBackup sets the live path aside to live+".failed" (if present) and renames live+".bak" into
+// place. Same-directory renames → atomic on the same filesystem, matching the install commit path.
+func restoreBackup(live string) error {
+	if fileExists(live) {
+		failed := live + ".failed"
+		_ = os.RemoveAll(failed)
+		if err := os.Rename(live, failed); err != nil {
+			return fmt.Errorf("set aside current version: %w", err)
+		}
+	}
+	if err := os.Rename(live+".bak", live); err != nil {
+		return fmt.Errorf("restore prior version: %w", err)
+	}
+	return nil
+}
+
 func extractTarGz(data []byte, dest string) error {
 	gr, err := gzip.NewReader(bytesReader(data))
 	if err != nil {
@@ -299,6 +364,51 @@ func extractTarGz(data []byte, dest string) error {
 			_ = os.Symlink(h.Linkname, target)
 		}
 	}
+}
+
+// extractZip unpacks a .zip (e.g. bun's release) into dest, rejecting path traversal and preserving
+// the executable bit zip carries in its external attributes. Symlinks inside a zip are skipped (the
+// binary releases we pin don't use them; allowing arbitrary zip symlinks is an escape vector).
+func extractZip(data []byte, dest string) error {
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return err
+	}
+	for _, f := range zr.File {
+		target, err := safeJoin(dest, f.Name) // reject path traversal
+		if err != nil {
+			return err
+		}
+		info := f.FileInfo()
+		if info.IsDir() {
+			if err := os.MkdirAll(target, 0o755); err != nil {
+				return err
+			}
+			continue
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			continue // skip symlinks — not needed for the binary releases we pin
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return err
+		}
+		out, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, info.Mode().Perm()|0o200)
+		if err != nil {
+			rc.Close()
+			return err
+		}
+		_, cpErr := io.Copy(out, rc)
+		out.Close()
+		rc.Close()
+		if cpErr != nil {
+			return cpErr
+		}
+	}
+	return nil
 }
 
 // safeJoin joins name under root and rejects anything that escapes root (path traversal).

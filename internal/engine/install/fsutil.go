@@ -10,6 +10,12 @@ import (
 
 func bytesReader(b []byte) io.Reader { return bytes.NewReader(b) }
 
+// fileExists reports whether a path exists (file, dir, or .app bundle).
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
+}
+
 // filepathHasDotDotPrefix reports whether a cleaned relative path escapes its root.
 func filepathHasDotDotPrefix(rel string) bool {
 	return rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator))

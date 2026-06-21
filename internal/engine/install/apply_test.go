@@ -2,6 +2,7 @@ package install
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -14,6 +15,29 @@ import (
 
 	"aead.dev/minisign"
 )
+
+// zipBytes builds an in-memory .zip from name->content entries (mode 0755), mirroring tgz for the
+// FormatBinaryZip path (bun ships a zip).
+func zipBytes(t *testing.T, entries map[string]string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for name, content := range entries {
+		fh := &zip.FileHeader{Name: name, Method: zip.Deflate}
+		fh.SetMode(0o755)
+		w, err := zw.CreateHeader(fh)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write([]byte(content)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
 
 // tgz builds an in-memory .tar.gz from name->content entries (mode 0755).
 func tgz(t *testing.T, entries map[string]string) []byte {
@@ -91,6 +115,48 @@ func TestInstallBinaryUpgradeKeepsBackup(t *testing.T) {
 	bak, err := os.ReadFile(filepath.Join(dirs.BinDir, "mise.bak"))
 	if err != nil || string(bak) != "#!/bin/sh\necho v1\n" {
 		t.Fatalf(".bak must preserve the prior v1 for rollback, got %q err=%v", bak, err)
+	}
+}
+
+// TestApplyInstallsBinaryZip exercises the FormatBinaryZip route (bun): extract the zip, install the
+// inner binary executable into BinDir.
+func TestApplyInstallsBinaryZip(t *testing.T) {
+	art := zipBytes(t, map[string]string{"bun-darwin-aarch64/bun": "#!/bin/sh\necho bun\n"})
+	url := "https://x/bun.zip"
+	res := Result{Actions: []Action{{
+		Name: "bun", Kind: ActionInstall, Desired: "1.3.14",
+		Format: FormatBinaryZip, SHA256: sha(art), URL: url,
+	}}}
+	dirs := Dirs{BinDir: t.TempDir(), AppDir: t.TempDir(), TmpDir: t.TempDir()}
+	if err := Apply(context.Background(), res, dirs, fakeFetcher{url: art}, nil); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	got := filepath.Join(dirs.BinDir, "bun")
+	if fi, err := os.Stat(got); err != nil || fi.Mode()&0o111 == 0 {
+		t.Fatalf("bun not installed executable at %s (err=%v)", got, err)
+	}
+}
+
+// TestApplyInstallsRawBinary exercises the FormatRawBinary route (claude): the artifact IS the binary,
+// so it is verified and placed directly into BinDir with no extraction.
+func TestApplyInstallsRawBinary(t *testing.T) {
+	art := []byte("#!/bin/sh\necho claude\n")
+	url := "https://x/claude"
+	res := Result{Actions: []Action{{
+		Name: "claude", Kind: ActionInstall, Desired: "2.1.176",
+		Format: FormatRawBinary, SHA256: sha(art), URL: url,
+	}}}
+	dirs := Dirs{BinDir: t.TempDir(), AppDir: t.TempDir(), TmpDir: t.TempDir()}
+	if err := Apply(context.Background(), res, dirs, fakeFetcher{url: art}, nil); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	got := filepath.Join(dirs.BinDir, "claude")
+	b, err := os.ReadFile(got)
+	if err != nil || string(b) != string(art) {
+		t.Fatalf("raw binary content mismatch: %q err=%v", b, err)
+	}
+	if fi, _ := os.Stat(got); fi.Mode()&0o111 == 0 {
+		t.Fatal("raw binary must be installed executable")
 	}
 }
 
@@ -209,6 +275,63 @@ func TestInstallAppUpgradeKeepsBackup(t *testing.T) {
 	bak, err := os.ReadFile(filepath.Join(dirs.AppDir, "tart.app.bak", "Contents", "MacOS", "tart"))
 	if err != nil || string(bak) != "#!/bin/sh\necho v1\n" {
 		t.Fatalf(".bak must preserve the prior v1 for rollback, got %q err=%v", bak, err)
+	}
+}
+
+// TestRollbackRestoresPriorVersion upgrades a fake .app (which leaves the prior version at .bak), then
+// rolls back and asserts the live app holds the OLD content again and the bad version is kept at .failed.
+func TestRollbackRestoresPriorVersion(t *testing.T) {
+	dirs := Dirs{BinDir: t.TempDir(), AppDir: t.TempDir(), TmpDir: t.TempDir()}
+	mk := func(body string) []byte {
+		return tgz(t, map[string]string{
+			"tart.app/Contents/MacOS/tart": body,
+			"tart.app/Contents/Info.plist": "<plist/>",
+		})
+	}
+	install := func(art []byte) {
+		url := "https://x/tart.tgz"
+		res := Result{Actions: []Action{{Name: "tart", Kind: ActionInstall, Desired: "v", Format: FormatAppTarball, SHA256: sha(art), URL: url}}}
+		if err := Apply(context.Background(), res, dirs, fakeFetcher{url: art}, nil); err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+	}
+	install(mk("#!/bin/sh\necho v1\n"))
+	install(mk("#!/bin/sh\necho v2\n")) // upgrade -> .bak holds v1
+
+	if err := Rollback("tart", dirs); err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dirs.AppDir, "tart.app", "Contents", "MacOS", "tart"))
+	if err != nil || string(got) != "#!/bin/sh\necho v1\n" {
+		t.Fatalf("rollback must restore v1 to the live app, got %q err=%v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(dirs.AppDir, "tart.app.failed")); err != nil {
+		t.Fatalf("the rolled-back version must be kept at .failed, not destroyed: %v", err)
+	}
+}
+
+// TestRollbackBinaryAndErrorsWithoutBackup covers the bare-binary path and the no-backup error.
+func TestRollbackBinaryAndErrorsWithoutBackup(t *testing.T) {
+	dirs := Dirs{BinDir: t.TempDir(), AppDir: t.TempDir(), TmpDir: t.TempDir()}
+	if err := Rollback("mise", dirs); err == nil {
+		t.Fatal("Rollback must error when there is no .bak to restore")
+	}
+	binInstall := func(body string) {
+		art := tgz(t, map[string]string{"mise/bin/mise": body})
+		url := "https://x/mise.tgz"
+		res := Result{Actions: []Action{{Name: "mise", Kind: ActionInstall, Desired: "v", Format: FormatBinaryTarball, SHA256: sha(art), URL: url}}}
+		if err := Apply(context.Background(), res, dirs, fakeFetcher{url: art}, nil); err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+	}
+	binInstall("#!/bin/sh\necho v1\n")
+	binInstall("#!/bin/sh\necho v2\n") // upgrade -> mise.bak holds v1
+	if err := Rollback("mise", dirs); err != nil {
+		t.Fatalf("Rollback bin: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dirs.BinDir, "mise"))
+	if err != nil || string(got) != "#!/bin/sh\necho v1\n" {
+		t.Fatalf("rollback must restore the v1 binary, got %q err=%v", got, err)
 	}
 }
 

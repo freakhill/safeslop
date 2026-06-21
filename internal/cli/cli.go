@@ -734,6 +734,9 @@ func cmdInstall() *cobra.Command {
 			if len(res.Actions) == 0 {
 				fmt.Println("  (desired-state manifest is empty)")
 			}
+			if msg := install.Freshness(time.Now()).Message(); msg != "" {
+				fmt.Printf("\nnote: %s\n", msg) // advisory freshness floor — warn, never block
+			}
 			return nil
 		},
 	})
@@ -783,6 +786,27 @@ func cmdInstall() *cobra.Command {
 		ac.Flags().BoolVar(&dryRun, "dry-run", false, "show what would be installed without doing it")
 		return ac
 	}())
+	c.AddCommand(&cobra.Command{
+		Use:   "rollback <tool>",
+		Short: "Restore a tool's prior version, kept as a backup by the last install",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			dirs, err := install.DefaultDirs()
+			if err != nil {
+				return err
+			}
+			name := args[0]
+			if err := install.Rollback(name, dirs); err != nil {
+				return err // fail clearly when there is no backup to restore
+			}
+			if jsonOut {
+				emitJSON(map[string]any{"ok": true, "rolled_back": name})
+			} else {
+				fmt.Printf("rolled back %s to its prior version\n", name)
+			}
+			return nil
+		},
+	})
 	return c
 }
 
@@ -820,7 +844,10 @@ func renderInstallPlanJSON(version string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	b, _ := json.MarshalIndent(res, "", "  ")
+	b, _ := json.MarshalIndent(map[string]any{
+		"actions":   res.Actions,
+		"freshness": install.Freshness(time.Now()),
+	}, "", "  ")
 	return string(b), nil
 }
 
