@@ -40,6 +40,8 @@ safeslop: {
 		risky:  {agent: "shell", environment: "host"}                          // host tier -> Touch ID
 		box:    {agent: "shell", environment: "container", network: "deny"}   // egress-allowlisted (amber)
 		boxnet: {agent: "shell", environment: "container", network: "allow"}  // open egress (red)
+		vm:     {agent: "shell", environment: "vm",        network: "deny"}   // disposable Tart VM (adversary-grade), proxy egress
+		vmnet:  {agent: "shell", environment: "vm",        network: "allow"}  // disposable Tart VM, full network
 	}
 }
 CUE
