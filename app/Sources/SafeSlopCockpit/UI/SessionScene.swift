@@ -107,8 +107,8 @@ struct ProfileRef: Codable, Hashable, Identifiable {
     /// set to the policy dir via posix_spawn. /usr/bin/env finds safeslop on PATH; each arg is a
     /// literal, so a hostile profile name / path can't inject host commands (the trust gate + run
     /// happen as the user, before the sandbox). `safeslop run` itself does the gate + isolation + ctty.
-    var runExecutable: String { "/usr/bin/env" }
-    var runArgs: [String] { ["safeslop", "run", name] }
+    var runExecutable: String { EngineBinary.resolved.executable }
+    var runArgs: [String] { EngineBinary.resolved.prefixArgs + ["run", name] }
     var runCwd: String { configDir }
 }
 

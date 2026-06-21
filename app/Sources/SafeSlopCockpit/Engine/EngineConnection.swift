@@ -131,9 +131,10 @@ enum EngineConnection {
     @discardableResult
     static func ensureServing(timeout: Duration = .seconds(10)) async -> Bool {
         if await ping() != nil { return true }
+        let engine = EngineBinary.resolved
         let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        proc.arguments = ["safeslop", "serve"]
+        proc.executableURL = URL(fileURLWithPath: engine.executable)
+        proc.arguments = engine.prefixArgs + ["serve"]
         do { try proc.run() } catch { return false }
 
         let deadline = ContinuousClock.now.advanced(by: timeout)
