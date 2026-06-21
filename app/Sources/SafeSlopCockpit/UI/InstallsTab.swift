@@ -85,6 +85,13 @@ struct InstallsTab: View {
             if unknown {
                 Text("?").font(.callout.weight(.bold)).foregroundStyle(.secondary).help("detecting…")
             } else if t.present {
+                if !t.shadowedPaths.isEmpty {
+                    // The resolved binary shadows others of the same name later on PATH — picking the
+                    // wrong one can silently differ from what the user expects (ayo #6 / specs/0035).
+                    Label("shadows \(t.shadowedPaths.count)", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption2.weight(.semibold)).foregroundStyle(.orange)
+                        .help("Resolves to \(t.path)\nAlso on PATH (shadowed): \(t.shadowedPaths.joined(separator: ", "))")
+                }
                 Text(t.source).font(.caption2.weight(.semibold))
                     .padding(.horizontal, 6).padding(.vertical, 2)
                     .background(.green.opacity(0.15), in: Capsule()).foregroundStyle(.green)
