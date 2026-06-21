@@ -119,7 +119,7 @@ struct SessionHostView: View {
     @Environment(\.dismissWindow) private var dismissWindow
     @State private var phase: Phase
 
-    enum Phase: Equatable { case preparing, trust(changed: Bool), running, denied(String) }
+    enum Phase: Equatable { case preparing, trust(changed: Bool), hostConsent(Preflight), running, denied(String) }
 
     init(ref: ProfileRef) {
         self.ref = ref
@@ -136,6 +136,10 @@ struct SessionHostView: View {
                 TrustSheet(ref: ref, changed: changed,
                            onApprove: { Task { await approve(changed: changed) } },
                            onCancel: { dismissWindow(value: ref) })
+            case .hostConsent(let pf):
+                HostConsentView(ref: ref, preflight: pf,
+                                onLaunch: { phase = .running },
+                                onCancel: { dismissWindow(value: ref) })
             case .running:
                 LocalTerminal(executable: ref.runExecutable, args: ref.runArgs, currentDirectory: ref.runCwd,
                               onExit: { _ in dismissWindow(value: ref) })
@@ -174,9 +178,17 @@ struct SessionHostView: View {
         guard ref.runnable else {
             phase = .denied("refusing to launch: profile name or config path is not valid"); return
         }
-        if ref.environment == "host" { // launching with no isolation -> Touch ID
-            let ok = await BiometricGate.confirm(reason: "launch “\(ref.name)” on the host — it runs with no isolation, as you.")
-            if !ok { phase = .denied("authentication required to launch the host tier"); return }
+        if ref.environment == "host" {
+            // Host tier has no isolation: gate on a per-launch comprehension act (specs/0030), not a
+            // bare Touch ID. Fetch the engine-authored statements, then swap to the in-window consent
+            // phase; the view runs BiometricGate only once the user has matched ground truth.
+            do {
+                let pf = try await EngineConnection.preflightHostLaunch(profile: ref.name, configPath: ref.configDir)
+                phase = .hostConsent(Preflight(pf))
+            } catch {
+                phase = .denied("could not prepare the host-launch confirmation: \(String(describing: error))")
+            }
+            return
         }
         phase = .running
     }

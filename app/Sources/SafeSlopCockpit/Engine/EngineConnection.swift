@@ -63,6 +63,17 @@ enum EngineConnection {
         }
     }
 
+    /// Authors the per-launch host comprehension gate for `profile` (specs/0030): the engine returns the
+    /// fixed honesty headline, a live scope line, and the shuffled consent rows. Host-tier ONLY — the
+    /// engine errors for a more-isolated profile. Pure read; nothing is recorded, so each call re-draws.
+    static func preflightHostLaunch(profile: String, configPath: String = "") async throws -> Safeslop_Control_V1_PreflightHostLaunchResponse {
+        let transport = try makeTransport()
+        return try await withGRPCClient(transport: transport) { client in
+            let control = Safeslop_Control_V1_Control.Client(wrapping: client)
+            return try await control.preflightHostLaunch(.with { $0.profile = profile; $0.configPath = configPath })
+        }
+    }
+
     /// Records host-side approval of the safeslop.cue at configPath (the Trust RPC) so a subsequent
     /// OpenSession passes the engine's fail-closed trust gate (specs/0024 S1a). Returns the approved
     /// absolute path. configPath empty => the engine resolves it from its cwd (same as OpenSession).
