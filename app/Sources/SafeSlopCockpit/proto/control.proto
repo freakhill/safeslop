@@ -17,6 +17,7 @@ service Control {
   rpc InstallTool(InstallToolRequest) returns (stream InstallToolEvent);
   rpc ValidatePolicy(ValidatePolicyRequest) returns (ValidatePolicyResponse);
   rpc ListPresets(ListPresetsRequest) returns (ListPresetsResponse);
+  rpc PreflightHostLaunch(PreflightHostLaunchRequest) returns (PreflightHostLaunchResponse);
 }
 
 message PingRequest {}
@@ -155,3 +156,22 @@ message Preset {
   string cue = 3;
 }
 message ListPresetsResponse { repeated Preset presets = 1; }
+
+// PreflightHostLaunch authors the per-launch host comprehension gate (specs/0030). It is host-tier ONLY
+// — calling it for a more-isolated profile is an error — and it is a pure read: nothing is recorded, so
+// re-entering the gate re-draws fresh statements (consent is per-launch, never persisted). The engine
+// authors every sentence and sets every `expected`, so the affirmed text can't drift from what runs.
+message PreflightHostLaunchRequest {
+  string profile = 1;
+  string config_path = 2; // dir holding safeslop.cue; empty = server cwd
+}
+message ConsentStatement {
+  string text = 1;
+  bool expected = 2;       // ground truth: is this statement TRUE of this host run?
+  string tier_origin = 3;  // "host" for the true rows; a more-isolated tier for the false decoys
+}
+message PreflightHostLaunchResponse {
+  string headline_body = 1;                 // fixed honesty anchor — always true, never answerable
+  string scope_line = 2;                    // per-launch live-state line (varies run to run)
+  repeated ConsentStatement statements = 3; // pre-shuffled rows, guaranteed >=1 true + >=1 false decoy
+}
