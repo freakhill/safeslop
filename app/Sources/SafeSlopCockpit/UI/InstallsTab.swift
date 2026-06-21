@@ -11,6 +11,9 @@ struct InstallsTab: View {
     @State private var installing: Set<String> = []
     @State private var log: [String] = []
     @State private var activeTool: String?
+    /// The tool whose install consent gate is open (specs/0037). Clicking Install no longer installs
+    /// directly — it opens the proportionate consent sheet first.
+    @State private var pending: PendingInstall?
     /// Whether the initial two-phase load has completed. `.task` re-fires every time this tab re-appears
     /// (TabView disappears/reappears tab content); without this gate, each re-entry re-ran the catalog
     /// phase, which resets every row's source to "unknown" — flashing the whole list to gray "?" and
@@ -69,6 +72,16 @@ struct InstallsTab: View {
             await load(catalogOnly: false)
             didInitialLoad = true
         }
+        .sheet(item: $pending) { p in
+            InstallConsentSheet(
+                tool: p.tool,
+                onConfirm: {
+                    let name = p.tool.name
+                    pending = nil
+                    Task { await install(name) }
+                },
+                onCancel: { pending = nil })
+        }
     }
 
     @ViewBuilder
@@ -98,7 +111,7 @@ struct InstallsTab: View {
                     .help(t.path)
             } else if t.installable {
                 Button {
-                    Task { await install(t.name) }
+                    pending = PendingInstall(tool: t) // open the consent gate before installing
                 } label: {
                     if installing.contains(t.name) {
                         ProgressView().controlSize(.small)
@@ -116,6 +129,9 @@ struct InstallsTab: View {
         }
         .padding(.vertical, 2)
         .opacity(unknown ? 0.6 : 1)
+        // Hovering any row explains the extra precautions safeslop takes for THAT tool (verified pin vs
+        // brew vs unverified remote script vs already-present no-clobber). Skipped while still detecting.
+        .help(unknown ? "" : t.precautions)
     }
 
     private func load(catalogOnly: Bool) async {
@@ -132,6 +148,12 @@ struct InstallsTab: View {
         } catch {
             status = "detect failed: \(error)"
         }
+    }
+
+    /// Identifiable wrapper so the consent gate can drive a `.sheet(item:)`.
+    private struct PendingInstall: Identifiable {
+        let tool: Safeslop_Control_V1_ToolStatus
+        var id: String { tool.name }
     }
 
     private func install(_ name: String) async {
