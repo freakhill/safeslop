@@ -72,5 +72,19 @@ func DesiredState() []Pin {
 			SHA256:  "7c9ef7523abf1190a2fde2b81dd652260d1679ba471c09950e8a08fa772c06e2",
 			URL:     "https://github.com/pnpm/pnpm/releases/download/v11.8.0/pnpm-darwin-arm64.tar.gz",
 		},
+		{
+			// Claude Code ships a bare darwin-arm64 binary (no archive) at a versioned URL, with a
+			// per-version manifest.json carrying a sha256 — verified to match this pin on 2026-06-22. The
+			// pin replaces `curl -fsSL https://claude.ai/install.sh | bash` with verified Route A. The
+			// binary self-updates after install, so a slightly-old pin only affects the bootstrap. Named
+			// "claude" (the binary) so it matches both the Status probe and the "Claude Code" catalog
+			// entry's Detect name.
+			Name:    "claude",
+			Kind:    "runtime",
+			Format:  FormatRawBinary,
+			Version: "2.1.176",
+			SHA256:  "f3f1b0c098510bd5d472b15f5541bb261f5939aeb52e488760bc53fb54c1803d",
+			URL:     "https://downloads.claude.ai/claude-code-releases/2.1.176/darwin-arm64/claude",
+		},
 	}
 }

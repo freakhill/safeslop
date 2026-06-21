@@ -56,6 +56,7 @@ func Status(ctx context.Context, version string) State {
 			probe(ctx, "tart", "--version"),
 			probe(ctx, "bun", "--version"),
 			probe(ctx, "pnpm", "--version"),
+			probe(ctx, "claude", "--version"),
 		},
 	}
 	return st

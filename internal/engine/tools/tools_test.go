@@ -275,12 +275,12 @@ func TestInstallPreview(t *testing.T) {
 	if b := installPreview(Status{Tool: get("uv"), Present: false, Source: "missing"}, true); b.Verification != BrewManaged {
 		t.Fatalf("uv with brew should be brew-managed, got %+v", b)
 	}
-	// Unverified remote script (Claude Code — script-only, no brew/pin/installer): needs consent.
-	script := installPreview(Status{Tool: get("Claude Code"), Present: false, Source: "missing"}, true)
+	// Unverified remote script (Codex — npm, intentionally not pinned): needs consent, shows the command.
+	script := installPreview(Status{Tool: get("Codex"), Present: false, Source: "missing"}, true)
 	if script.Verification != UnverifiedRun || !script.NeedsConsent {
 		t.Fatalf("a script-only tool is an unverified remote script needing consent, got %+v", script)
 	}
-	if !strings.Contains(script.Command, "claude") {
+	if !strings.Contains(script.Command, "codex") {
 		t.Fatalf("unverified preview must show the literal command, got %q", script.Command)
 	}
 	// Present tool → no-clobber promise; a shadowed one notes the shadowing.
@@ -341,6 +341,33 @@ func TestCatalogInstallersAreFullyPinned(t *testing.T) {
 		if in.URL == "" || strings.Contains(in.URL, "latest") {
 			t.Fatalf("%s installer URL must be versioned, never latest: %q", c.Name, in.URL)
 		}
+	}
+}
+
+// TestClaudeUsesPinnedBinaryNotCurlSh covers the Detect-name pin match: "Claude Code" (Detect ["claude"])
+// resolves the "claude" pin and routes to verified Route A, never its `curl … | bash` script.
+func TestClaudeUsesPinnedBinaryNotCurlSh(t *testing.T) {
+	var c Tool
+	for _, x := range Catalog() {
+		if x.Name == "Claude Code" {
+			c = x
+		}
+	}
+	if c.Name != "Claude Code" {
+		t.Fatal("Claude Code must be in the catalog")
+	}
+	if !hasPinForTool(c) {
+		t.Fatal("Claude Code must resolve a pin via its Detect name")
+	}
+	missing := Status{Tool: c, Present: false, Source: "missing"}
+	for _, brewAvail := range []bool{true, false} {
+		if _, err := installArgv(missing, brewAvail); !errors.Is(err, errUsePin) {
+			t.Fatalf("Claude Code must route to the verified pin (brewAvail=%v), got %v", brewAvail, err)
+		}
+	}
+	pv := installPreview(missing, true)
+	if pv.Verification != VerifiedPin || strings.Contains(pv.Command, "curl") {
+		t.Fatalf("Claude Code should be a verified pin, not curl|sh: %+v", pv)
 	}
 }
 

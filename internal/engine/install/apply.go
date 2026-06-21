@@ -147,6 +147,8 @@ func applyOne(ctx context.Context, a Action, dirs Dirs, fetch Fetcher, emit func
 			return fmt.Errorf("extract: %w", err)
 		}
 		return installBinary(a.Name, work, dirs.BinDir)
+	case FormatRawBinary:
+		return installRawBinary(a.Name, data, dirs.BinDir) // the artifact IS the binary — no extraction
 	case FormatAppTarball:
 		if err := extractTarGz(data, work); err != nil {
 			return fmt.Errorf("extract: %w", err)
@@ -194,14 +196,32 @@ func installBinary(name, srcRoot, binDir string) error {
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		return err
 	}
-	// Stage beside the destination (same dir → same filesystem → the commit rename is atomic, so a
-	// reader mid-exec never sees a torn file), keep any prior binary at <name>.bak for rollback, then
-	// commit by rename; restore the backup on a commit failure.
 	dest := filepath.Join(binDir, name)
 	staged := dest + ".new"
 	if err := copyFile(src, staged, 0o755); err != nil {
 		return err
 	}
+	return commitStaged(staged, dest, name)
+}
+
+// installRawBinary places an artifact that IS the binary (no archive — e.g. claude's release) into
+// binDir as <name>, using the same atomic stage→backup→commit as installBinary.
+func installRawBinary(name string, data []byte, binDir string) error {
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		return err
+	}
+	dest := filepath.Join(binDir, name)
+	staged := dest + ".new"
+	if err := os.WriteFile(staged, data, 0o755); err != nil {
+		return err
+	}
+	return commitStaged(staged, dest, name)
+}
+
+// commitStaged atomically swaps a staged file into dest: it stages beside the destination (same dir →
+// same filesystem → the commit rename is atomic, so a reader mid-exec never sees a torn file), keeps any
+// prior file at <dest>.bak for rollback, then commits by rename; restores the backup on a commit failure.
+func commitStaged(staged, dest, name string) error {
 	backup := dest + ".bak"
 	_ = os.Remove(backup)
 	hadOld := false

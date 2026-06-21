@@ -137,6 +137,29 @@ func TestApplyInstallsBinaryZip(t *testing.T) {
 	}
 }
 
+// TestApplyInstallsRawBinary exercises the FormatRawBinary route (claude): the artifact IS the binary,
+// so it is verified and placed directly into BinDir with no extraction.
+func TestApplyInstallsRawBinary(t *testing.T) {
+	art := []byte("#!/bin/sh\necho claude\n")
+	url := "https://x/claude"
+	res := Result{Actions: []Action{{
+		Name: "claude", Kind: ActionInstall, Desired: "2.1.176",
+		Format: FormatRawBinary, SHA256: sha(art), URL: url,
+	}}}
+	dirs := Dirs{BinDir: t.TempDir(), AppDir: t.TempDir(), TmpDir: t.TempDir()}
+	if err := Apply(context.Background(), res, dirs, fakeFetcher{url: art}, nil); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	got := filepath.Join(dirs.BinDir, "claude")
+	b, err := os.ReadFile(got)
+	if err != nil || string(b) != string(art) {
+		t.Fatalf("raw binary content mismatch: %q err=%v", b, err)
+	}
+	if fi, _ := os.Stat(got); fi.Mode()&0o111 == 0 {
+		t.Fatal("raw binary must be installed executable")
+	}
+}
+
 func TestApplyFailsClosedOnSHAMismatch(t *testing.T) {
 	art := tgz(t, map[string]string{"mise/bin/mise": "x"})
 	url := "https://x/mise.tgz"

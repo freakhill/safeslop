@@ -55,6 +55,25 @@ func hasPin(name string) bool {
 	return ok
 }
 
+// pinForTool matches a pin by the catalog Name OR any Detect binary name, so a pin named for the binary
+// (e.g. "claude") routes a catalog entry whose display Name differs (e.g. "Claude Code").
+func pinForTool(t Tool) (install.Pin, bool) {
+	if p, ok := pinFor(t.Name); ok {
+		return p, true
+	}
+	for _, d := range t.Detect {
+		if p, ok := pinFor(d); ok {
+			return p, true
+		}
+	}
+	return install.Pin{}, false
+}
+
+func hasPinForTool(t Tool) bool {
+	_, ok := pinForTool(t)
+	return ok
+}
+
 // Category groups tools in the UI.
 const (
 	CatRuntime   = "Runtimes & package managers"
@@ -364,7 +383,7 @@ func installArgv(s Status, brewAvail bool) ([]string, error) {
 		return []string{"brew", "install", t.Brew}, nil
 	case t.Cask != "" && brewAvail:
 		return []string{"brew", "install", "--cask", t.Cask}, nil
-	case hasPin(t.Name):
+	case hasPinForTool(t):
 		return nil, errUsePin // verified embedded-pin install — not an argv (kills the curl|sh route)
 	case t.Installer != nil:
 		return nil, errUseInstaller // verified installer binary — fetched, verified, then executed
@@ -441,8 +460,8 @@ func installPreview(s Status, brewAvail bool) Preview {
 		p.Route, p.Verification, p.Command, p.Precautions = "brew", BrewManaged, "brew install "+t.Brew, brewPrecautions
 	case t.Cask != "" && brewAvail:
 		p.Route, p.Verification, p.Command, p.Precautions = "cask", BrewManaged, "brew install --cask "+t.Cask, brewPrecautions
-	case hasPin(t.Name):
-		pin, _ := pinFor(t.Name)
+	case hasPinForTool(t):
+		pin, _ := pinForTool(t)
 		p.Route, p.Verification = "verified-pin", VerifiedPin
 		p.SourceURL, p.SHA256, p.Version = pin.URL, pin.SHA256, pin.Version
 		p.Command = "verified install: " + pin.Name + " " + pin.Version + " (sha256-pinned binary)"
@@ -516,7 +535,7 @@ func InstallByName(name string, emit func(line string)) error {
 	}
 	argv, err := InstallArgv(s)
 	if errors.Is(err, errUsePin) {
-		return installPinned(name, emit) // verified Route A instead of curl|sh
+		return installPinned(s.Tool, emit) // verified Route A instead of curl|sh
 	}
 	if errors.Is(err, errUseInstaller) {
 		return installVerifiedInstaller(s.Tool, emit) // fetch+verify+run the pinned installer
@@ -548,8 +567,8 @@ func InstallByName(name string, emit func(line string)) error {
 // fail-closed verified installer (install.Apply: download → sha256 verify → install) instead of a raw
 // remote `curl … | sh`. The catalog already established the tool is missing, so this is always an
 // install; install.Plan validates the pin (fail-closed) and yields the single Action.
-func installPinned(name string, emit func(line string)) error {
-	pin, ok := pinFor(name)
+func installPinned(t Tool, emit func(line string)) error {
+	pin, ok := pinForTool(t)
 	if !ok {
 		return errNoRoute
 	}
