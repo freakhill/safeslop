@@ -1,6 +1,10 @@
 package tools
 
-import "testing"
+import (
+	"errors"
+	"strings"
+	"testing"
+)
 
 func TestCatalogIsPopulatedAndCategorized(t *testing.T) {
 	cat := Catalog()
@@ -170,6 +174,46 @@ func TestInstallableOnlyWhenMissing(t *testing.T) {
 	noRoute := Status{Tool: Tool{Name: "x"}, Present: false, Source: "missing"}
 	if noRoute.Installable() {
 		t.Fatal("missing tool with no route is not installable")
+	}
+}
+
+// TestUvUsesPinnedBinaryNotCurlSh locks in specs/0036 item ①: uv ships a checksum-pinned binary, so
+// a missing uv must route to the verified Route A (or brew), never to its raw `curl … | sh` script.
+func TestUvUsesPinnedBinaryNotCurlSh(t *testing.T) {
+	var uv Tool
+	for _, c := range Catalog() {
+		if c.Name == "uv" {
+			uv = c
+		}
+	}
+	if uv.Name != "uv" {
+		t.Fatal("uv must be in the catalog")
+	}
+	pin, ok := pinFor("uv")
+	if !ok || pin.Version == "" || pin.SHA256 == "" {
+		t.Fatalf("uv must have a fully-specified embedded pin, got %+v ok=%v", pin, ok)
+	}
+	missing := Status{Tool: uv, Present: false, Source: "missing"}
+
+	// With brew unavailable, the OLD behavior fell to the raw curl|sh script; now it routes to the pin.
+	if _, err := installArgv(missing, false); !errors.Is(err, errUsePin) {
+		t.Fatalf("uv without brew must route to the verified pin, got err=%v", err)
+	}
+	// uv must NEVER resolve to a /bin/sh -c curl argv, brew present or not.
+	for _, brewAvail := range []bool{true, false} {
+		argv, err := installArgv(missing, brewAvail)
+		if err == nil && len(argv) >= 3 && argv[0] == "/bin/sh" && strings.Contains(argv[2], "curl") {
+			t.Fatalf("uv must never resolve to a curl|sh argv (brewAvail=%v): %v", brewAvail, argv)
+		}
+	}
+	// With brew present, brew stays the preferred route.
+	if argv, err := installArgv(missing, true); err != nil || argv[0] != "brew" {
+		t.Fatalf("uv with brew should prefer brew, got argv=%v err=%v", argv, err)
+	}
+	// The route hint surfaced to the cockpit reflects the verified pin when brew is the resolver's choice
+	// or the pin — in all cases it must not advertise curl|sh.
+	if h := InstallRouteHint(missing); strings.Contains(h, "curl") {
+		t.Fatalf("the cockpit install hint for uv must not mention curl|sh, got %q", h)
 	}
 }
 

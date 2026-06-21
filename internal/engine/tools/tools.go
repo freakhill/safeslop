@@ -11,6 +11,7 @@
 package tools
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -19,6 +20,7 @@ import (
 	"sync"
 
 	"github.com/freakhill/safeslop/internal/engine/hostenv"
+	"github.com/freakhill/safeslop/internal/engine/install"
 )
 
 var (
@@ -26,7 +28,28 @@ var (
 	errNeedsBrew      = errors.New("this tool installs via Homebrew, which isn't on PATH (install brew first)")
 	errNoRoute        = errors.New("no install route for this tool")
 	errNoBrew         = errors.New("brew is not resolvable on the reconstructed PATH")
+	// errUsePin is an internal sentinel: the tool has an embedded checksum-pinned binary release, so it
+	// installs via the fail-closed verified Route A (install.Apply), not an argv. InstallByName catches
+	// it and runs installPinned; it is never surfaced to a caller as a failure.
+	errUsePin = errors.New("install via verified embedded pin")
 )
+
+// pinFor returns the embedded verified-install pin for a catalog tool, when one exists. A tool with a
+// pin installs through the checksum-verified Route A (sha256 → notarized-binary trust chain) instead of
+// piping a remote script into a shell (specs/0036 item ①). The pin's Name must match the catalog Name.
+func pinFor(name string) (install.Pin, bool) {
+	for _, p := range install.DesiredState() {
+		if p.Name == name {
+			return p, true
+		}
+	}
+	return install.Pin{}, false
+}
+
+func hasPin(name string) bool {
+	_, ok := pinFor(name)
+	return ok
+}
 
 // Category groups tools in the UI.
 const (
@@ -283,17 +306,28 @@ func DetectAll() []Status {
 }
 
 // InstallArgv returns the command that installs a MISSING tool, preferring brew formula, then cask,
-// then the tool's own script. It refuses for a present tool (no-clobber) or one with no route.
+// then — for a tool with an embedded checksum pin — the verified Route A (signalled by errUsePin, which
+// InstallByName handles), and only as a last resort the tool's own remote script. It refuses for a
+// present tool (no-clobber) or one with no route. The pin precedes the script so a pinned tool can
+// never fall back to `curl … | sh` (specs/0036 item ①).
 func InstallArgv(s Status) ([]string, error) {
+	return installArgv(s, brewOnPath())
+}
+
+// installArgv is the pure route resolver; brewAvail is injected so the ordering is testable without a
+// live brew on PATH.
+func installArgv(s Status, brewAvail bool) ([]string, error) {
 	if s.Present {
 		return nil, errAlreadyPresent
 	}
 	t := s.Tool
 	switch {
-	case t.Brew != "" && brewOnPath():
+	case t.Brew != "" && brewAvail:
 		return []string{"brew", "install", t.Brew}, nil
-	case t.Cask != "" && brewOnPath():
+	case t.Cask != "" && brewAvail:
 		return []string{"brew", "install", "--cask", t.Cask}, nil
+	case hasPin(t.Name):
+		return nil, errUsePin // verified embedded-pin install — not an argv (kills the curl|sh route)
 	case t.Script != "":
 		return []string{"/bin/sh", "-c", t.Script}, nil
 	case t.Cask != "" || t.Brew != "":
@@ -301,6 +335,22 @@ func InstallArgv(s Status) ([]string, error) {
 	default:
 		return nil, errNoRoute
 	}
+}
+
+// InstallRouteHint returns a human-readable description of how a missing tool would be installed — the
+// brew/cask/script argv joined, or the verified-pin route for a tool with an embedded checksum pin. ""
+// when not installable. Used by the cockpit Installs-tab preview (the control server's InstallHint).
+func InstallRouteHint(s Status) string {
+	if s.Present {
+		return ""
+	}
+	if argv, err := InstallArgv(s); err == nil {
+		return strings.Join(argv, " ")
+	}
+	if pin, ok := pinFor(s.Tool.Name); ok {
+		return "verified install: " + pin.Name + " " + pin.Version + " (sha256-pinned binary, no curl|sh)"
+	}
+	return ""
 }
 
 func brewOnPath() bool {
@@ -328,6 +378,9 @@ func InstallByName(name string, emit func(line string)) error {
 		return errNoRoute
 	}
 	argv, err := InstallArgv(s)
+	if errors.Is(err, errUsePin) {
+		return installPinned(name, emit) // verified Route A instead of curl|sh
+	}
 	if err != nil {
 		return err
 	}
@@ -349,6 +402,29 @@ func InstallByName(name string, emit func(line string)) error {
 	runErr := cmd.Run()
 	lw.flush()
 	return runErr
+}
+
+// installPinned installs a tool that ships an embedded checksum-pinned binary release through the
+// fail-closed verified installer (install.Apply: download → sha256 verify → install) instead of a raw
+// remote `curl … | sh`. The catalog already established the tool is missing, so this is always an
+// install; install.Plan validates the pin (fail-closed) and yields the single Action.
+func installPinned(name string, emit func(line string)) error {
+	pin, ok := pinFor(name)
+	if !ok {
+		return errNoRoute
+	}
+	dirs, err := install.DefaultDirs()
+	if err != nil {
+		return err
+	}
+	res, err := install.Plan(install.State{}, []install.Pin{pin}) // empty state → ActionInstall, pin validated
+	if err != nil {
+		return err
+	}
+	emit("$ safeslop verified-install " + pin.Name + " " + pin.Version + " (sha256-pinned, no curl|sh)")
+	return install.Apply(context.Background(), res, dirs, install.HTTPFetcher{}, func(e install.Event) {
+		emit("  [" + e.Tool + "] " + string(e.Kind) + " " + e.Msg)
+	})
 }
 
 // lineWriter turns arbitrary Write chunks into whole emitted lines. Stdout and Stderr both target it,

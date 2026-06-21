@@ -48,6 +48,7 @@ func Status(ctx context.Context, version string) State {
 		App:  detectApp(),
 		Toolchains: []Tool{
 			probe(ctx, "mise", "--version"),
+			probe(ctx, "uv", "--version"),
 			probe(ctx, "nix", "--version"),
 		},
 		Runtimes: []Tool{

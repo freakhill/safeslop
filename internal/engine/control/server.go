@@ -3,7 +3,6 @@ package control
 import (
 	"context"
 	"sort"
-	"strings"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -203,9 +202,7 @@ func (s *server) ListTools(_ context.Context, req *pb.ListToolsRequest) (*pb.Lis
 			ShadowedPaths: st.ShadowedPaths,
 		}
 		if ts.Installable {
-			if argv, err := tools.InstallArgv(st); err == nil {
-				ts.InstallHint = strings.Join(argv, " ")
-			}
+			ts.InstallHint = tools.InstallRouteHint(st) // brew/cask/script argv, or the verified-pin route
 		}
 		out.Tools = append(out.Tools, ts)
 	}

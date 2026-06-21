@@ -33,5 +33,18 @@ func DesiredState() []Pin {
 			SHA256:  "8554ab4f7fc12afe52f9b7e3093a935673cbac737a83973d2db7a0683c814529",
 			URL:     "https://github.com/cirruslabs/tart/releases/download/2.32.1/tart.tar.gz",
 		},
+		{
+			// uv ships a versioned darwin-arm64 binary tarball + a per-artifact .sha256 (verified to
+			// match this pin on 2026-06-21). Pinning the release here lets the cockpit install uv via the
+			// fail-closed Route A (sha256 → notarized-binary trust chain) instead of `curl … | sh`
+			// (specs/0036 item ①). No authoritative minisign pubkey is published (no .minisig asset), so
+			// sha256 is the floor — same precedent as mise/tart above.
+			Name:    "uv",
+			Kind:    "toolchain",
+			Format:  FormatBinaryTarball,
+			Version: "0.11.23",
+			SHA256:  "71ef9de85db820749b3b12b7585624ee279e9c5afcbc6f8236bc3d628c4305b0",
+			URL:     "https://github.com/astral-sh/uv/releases/download/0.11.23/uv-aarch64-apple-darwin.tar.gz",
+		},
 	}
 }
