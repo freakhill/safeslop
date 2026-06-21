@@ -37,6 +37,16 @@ message Profile {
   string risk_level = 10;   // "high" | "elevated" | "contained" — for color only
   repeated string risk_lines = 11; // break-glass consequence sentences
   repeated string tech_stack = 12; // underlying technologies (policy.TechStack) — Launch hover tooltip
+  repeated RiskAxis risk_axes = 13; // per-dimension restriction status — Launch shows the unrestricted ones loud
+}
+// RiskAxis is one capability dimension's restriction status (policy.RiskAxes). The GUI shows the
+// unrestricted ones (restricted=false) as loud amber/red chips — what's OPEN, as prominently as the
+// meta line shows what's bounded (ayo S2).
+message RiskAxis {
+  string name = 1;       // "network" | "files"
+  string value = 2;      // short status, e.g. "unrestricted", "open egress", "whole account"
+  bool restricted = 3;   // true = bounded; false = unrestricted/open (the loud case)
+  string severity = 4;   // "high" | "elevated" | "contained" — color only; value carries the meaning
 }
 message ListProfilesResponse { repeated Profile profiles = 1; }
 
