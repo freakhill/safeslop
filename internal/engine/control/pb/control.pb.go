@@ -1619,6 +1619,14 @@ type ToolStatus struct {
 	Installable   bool                   `protobuf:"varint,7,opt,name=installable,proto3" json:"installable,omitempty"`                         // true only when missing AND a route exists (no-clobber)
 	InstallHint   string                 `protobuf:"bytes,8,opt,name=install_hint,json=installHint,proto3" json:"install_hint,omitempty"`       // the command that would run, e.g. "brew install uv" (display only)
 	ShadowedPaths []string               `protobuf:"bytes,9,rep,name=shadowed_paths,json=shadowedPaths,proto3" json:"shadowed_paths,omitempty"` // other same-name executables later on PATH (shadowed by `path`)
+	// The install preview shared by the hover tooltip + consent gate (specs/0037). precautions is set for
+	// every tool; the rest are meaningful only when installable.
+	Precautions   string `protobuf:"bytes,10,opt,name=precautions,proto3" json:"precautions,omitempty"`                          // what safeslop does to keep this install safe (hover tooltip)
+	Verification  string `protobuf:"bytes,11,opt,name=verification,proto3" json:"verification,omitempty"`                        // verified-pin | brew | unverified-run
+	SourceUrl     string `protobuf:"bytes,12,opt,name=source_url,json=sourceUrl,proto3" json:"source_url,omitempty"`             // pin download URL (verified-pin only)
+	Sha256        string `protobuf:"bytes,13,opt,name=sha256,proto3" json:"sha256,omitempty"`                                    // pinned sha256 (verified-pin only)
+	PinnedVersion string `protobuf:"bytes,14,opt,name=pinned_version,json=pinnedVersion,proto3" json:"pinned_version,omitempty"` // pinned version (verified-pin only)
+	NeedsConsent  bool   `protobuf:"varint,15,opt,name=needs_consent,json=needsConsent,proto3" json:"needs_consent,omitempty"`   // unverified remote-script route → the gate demands typed confirmation
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1714,6 +1722,48 @@ func (x *ToolStatus) GetShadowedPaths() []string {
 		return x.ShadowedPaths
 	}
 	return nil
+}
+
+func (x *ToolStatus) GetPrecautions() string {
+	if x != nil {
+		return x.Precautions
+	}
+	return ""
+}
+
+func (x *ToolStatus) GetVerification() string {
+	if x != nil {
+		return x.Verification
+	}
+	return ""
+}
+
+func (x *ToolStatus) GetSourceUrl() string {
+	if x != nil {
+		return x.SourceUrl
+	}
+	return ""
+}
+
+func (x *ToolStatus) GetSha256() string {
+	if x != nil {
+		return x.Sha256
+	}
+	return ""
+}
+
+func (x *ToolStatus) GetPinnedVersion() string {
+	if x != nil {
+		return x.PinnedVersion
+	}
+	return ""
+}
+
+func (x *ToolStatus) GetNeedsConsent() bool {
+	if x != nil {
+		return x.NeedsConsent
+	}
+	return false
 }
 
 type ListToolsResponse struct {
@@ -2391,7 +2441,7 @@ const file_internal_engine_control_control_proto_rawDesc = "" +
 	"\x04DONE\x10\x02\x12\t\n" +
 	"\x05ERROR\x10\x03\"5\n" +
 	"\x10ListToolsRequest\x12!\n" +
-	"\fcatalog_only\x18\x01 \x01(\bR\vcatalogOnly\"\x82\x02\n" +
+	"\fcatalog_only\x18\x01 \x01(\bR\vcatalogOnly\"\xcb\x03\n" +
 	"\n" +
 	"ToolStatus\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1a\n" +
@@ -2402,7 +2452,15 @@ const file_internal_engine_control_control_proto_rawDesc = "" +
 	"\x04path\x18\x06 \x01(\tR\x04path\x12 \n" +
 	"\vinstallable\x18\a \x01(\bR\vinstallable\x12!\n" +
 	"\finstall_hint\x18\b \x01(\tR\vinstallHint\x12%\n" +
-	"\x0eshadowed_paths\x18\t \x03(\tR\rshadowedPaths\"J\n" +
+	"\x0eshadowed_paths\x18\t \x03(\tR\rshadowedPaths\x12 \n" +
+	"\vprecautions\x18\n" +
+	" \x01(\tR\vprecautions\x12\"\n" +
+	"\fverification\x18\v \x01(\tR\fverification\x12\x1d\n" +
+	"\n" +
+	"source_url\x18\f \x01(\tR\tsourceUrl\x12\x16\n" +
+	"\x06sha256\x18\r \x01(\tR\x06sha256\x12%\n" +
+	"\x0epinned_version\x18\x0e \x01(\tR\rpinnedVersion\x12#\n" +
+	"\rneeds_consent\x18\x0f \x01(\bR\fneedsConsent\"J\n" +
 	"\x11ListToolsResponse\x125\n" +
 	"\x05tools\x18\x01 \x03(\v2\x1f.safeslop.control.v1.ToolStatusR\x05tools\"(\n" +
 	"\x12InstallToolRequest\x12\x12\n" +

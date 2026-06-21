@@ -143,6 +143,14 @@ message ToolStatus {
   bool installable = 7;     // true only when missing AND a route exists (no-clobber)
   string install_hint = 8;  // the command that would run, e.g. "brew install uv" (display only)
   repeated string shadowed_paths = 9; // other same-name executables later on PATH (shadowed by `path`)
+  // The install preview shared by the hover tooltip + consent gate (specs/0037). precautions is set for
+  // every tool; the rest are meaningful only when installable.
+  string precautions = 10;     // what safeslop does to keep this install safe (hover tooltip)
+  string verification = 11;    // verified-pin | brew | unverified-run
+  string source_url = 12;      // pin download URL (verified-pin only)
+  string sha256 = 13;          // pinned sha256 (verified-pin only)
+  string pinned_version = 14;  // pinned version (verified-pin only)
+  bool needs_consent = 15;     // unverified remote-script route → the gate demands typed confirmation
 }
 message ListToolsResponse { repeated ToolStatus tools = 1; }
 
