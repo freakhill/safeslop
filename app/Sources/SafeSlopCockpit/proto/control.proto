@@ -16,6 +16,7 @@ service Control {
   rpc ListTools(ListToolsRequest) returns (ListToolsResponse);
   rpc InstallTool(InstallToolRequest) returns (stream InstallToolEvent);
   rpc ValidatePolicy(ValidatePolicyRequest) returns (ValidatePolicyResponse);
+  rpc ListPresets(ListPresetsRequest) returns (ListPresetsResponse);
 }
 
 message PingRequest {}
@@ -144,3 +145,13 @@ message ValidatePolicyResponse {
   string error = 2;             // empty when valid; cue/errors.Details otherwise
   repeated Profile profiles = 3;
 }
+
+// ListPresets returns the bundled premade policies (the "stdlib") the Create tab offers as starting
+// points (policy.Presets). Each is a complete, validated safeslop.cue.
+message ListPresetsRequest {}
+message Preset {
+  string name = 1;
+  string summary = 2; // one-line description (not "description" — SwiftProtobuf reserves that)
+  string cue = 3;
+}
+message ListPresetsResponse { repeated Preset presets = 1; }

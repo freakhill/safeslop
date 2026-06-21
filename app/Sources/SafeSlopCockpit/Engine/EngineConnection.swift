@@ -116,6 +116,16 @@ enum EngineConnection {
         }
     }
 
+    /// The bundled premade policies (the "stdlib") the Create tab offers as starting points.
+    static func listPresets() async throws -> [Safeslop_Control_V1_Preset] {
+        let transport = try makeTransport()
+        return try await withGRPCClient(transport: transport) { client in
+            let control = Safeslop_Control_V1_Control.Client(wrapping: client)
+            let resp = try await control.listPresets(.init())
+            return resp.presets
+        }
+    }
+
     /// Ensures `safeslop serve` is running: pings, and if unreachable spawns the binary and
     /// polls until the socket answers (or a timeout). `safeslop` is expected on PATH.
     @discardableResult

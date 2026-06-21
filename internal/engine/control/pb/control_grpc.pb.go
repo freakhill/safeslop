@@ -31,6 +31,7 @@ const (
 	Control_ListTools_FullMethodName      = "/safeslop.control.v1.Control/ListTools"
 	Control_InstallTool_FullMethodName    = "/safeslop.control.v1.Control/InstallTool"
 	Control_ValidatePolicy_FullMethodName = "/safeslop.control.v1.Control/ValidatePolicy"
+	Control_ListPresets_FullMethodName    = "/safeslop.control.v1.Control/ListPresets"
 )
 
 // ControlClient is the client API for Control service.
@@ -51,6 +52,7 @@ type ControlClient interface {
 	ListTools(ctx context.Context, in *ListToolsRequest, opts ...grpc.CallOption) (*ListToolsResponse, error)
 	InstallTool(ctx context.Context, in *InstallToolRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[InstallToolEvent], error)
 	ValidatePolicy(ctx context.Context, in *ValidatePolicyRequest, opts ...grpc.CallOption) (*ValidatePolicyResponse, error)
+	ListPresets(ctx context.Context, in *ListPresetsRequest, opts ...grpc.CallOption) (*ListPresetsResponse, error)
 }
 
 type controlClient struct {
@@ -211,6 +213,16 @@ func (c *controlClient) ValidatePolicy(ctx context.Context, in *ValidatePolicyRe
 	return out, nil
 }
 
+func (c *controlClient) ListPresets(ctx context.Context, in *ListPresetsRequest, opts ...grpc.CallOption) (*ListPresetsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListPresetsResponse)
+	err := c.cc.Invoke(ctx, Control_ListPresets_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ControlServer is the server API for Control service.
 // All implementations must embed UnimplementedControlServer
 // for forward compatibility.
@@ -229,6 +241,7 @@ type ControlServer interface {
 	ListTools(context.Context, *ListToolsRequest) (*ListToolsResponse, error)
 	InstallTool(*InstallToolRequest, grpc.ServerStreamingServer[InstallToolEvent]) error
 	ValidatePolicy(context.Context, *ValidatePolicyRequest) (*ValidatePolicyResponse, error)
+	ListPresets(context.Context, *ListPresetsRequest) (*ListPresetsResponse, error)
 	mustEmbedUnimplementedControlServer()
 }
 
@@ -274,6 +287,9 @@ func (UnimplementedControlServer) InstallTool(*InstallToolRequest, grpc.ServerSt
 }
 func (UnimplementedControlServer) ValidatePolicy(context.Context, *ValidatePolicyRequest) (*ValidatePolicyResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ValidatePolicy not implemented")
+}
+func (UnimplementedControlServer) ListPresets(context.Context, *ListPresetsRequest) (*ListPresetsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListPresets not implemented")
 }
 func (UnimplementedControlServer) mustEmbedUnimplementedControlServer() {}
 func (UnimplementedControlServer) testEmbeddedByValue()                 {}
@@ -480,6 +496,24 @@ func _Control_ValidatePolicy_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Control_ListPresets_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListPresetsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ControlServer).ListPresets(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Control_ListPresets_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ControlServer).ListPresets(ctx, req.(*ListPresetsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Control_ServiceDesc is the grpc.ServiceDesc for Control service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -518,6 +552,10 @@ var Control_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ValidatePolicy",
 			Handler:    _Control_ValidatePolicy_Handler,
+		},
+		{
+			MethodName: "ListPresets",
+			Handler:    _Control_ListPresets_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

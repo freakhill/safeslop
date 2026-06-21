@@ -12,6 +12,7 @@ struct CreateTab: View {
     @State private var validating = false
     @State private var scopeExpanded = true
     @State private var selectedProfile = ""
+    @State private var presets: [Safeslop_Control_V1_Preset] = []
 
     /// The merge target: the picked profile, or the only one. Empty when none/invalid.
     private var mergeTarget: String {
@@ -24,9 +25,26 @@ struct CreateTab: View {
 
     var body: some View {
         HSplitView {
-            // Left: the canonical CUE text.
+            // Left: the canonical CUE text + profile CRUD + preset loader.
             VStack(alignment: .leading, spacing: 6) {
-                Text("safeslop.cue").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                HStack {
+                    Text("safeslop.cue").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    Spacer()
+                    Menu("Profile") {
+                        Button("New profile", systemImage: "plus") { newProfile() }
+                        if !mergeTarget.isEmpty {
+                            Button("Delete \(mergeTarget)", systemImage: "trash", role: .destructive) {
+                                deleteProfile(mergeTarget)
+                            }
+                        }
+                    }.menuStyle(.borderlessButton).fixedSize()
+                    Menu("Presets") {
+                        if presets.isEmpty { Text("none") }
+                        ForEach(presets, id: \.name) { p in
+                            Button("\(p.name) — \(p.summary)") { cueText = p.cue }
+                        }
+                    }.menuStyle(.borderlessButton).fixedSize()
+                }
                 TextEditor(text: $cueText)
                     .font(.system(.body, design: .monospaced))
                     .frame(minWidth: 320, minHeight: 320)
@@ -90,6 +108,54 @@ struct CreateTab: View {
             if Task.isCancelled { return }
             await validate()
         }
+        .task { await loadPresets() } // once, on appear
+    }
+
+    private func loadPresets() async {
+        guard await EngineConnection.ensureServing() else { return }
+        presets = (try? await EngineConnection.listPresets()) ?? []
+    }
+
+    /// New profile: insert a deny-network sandbox template into the profiles block (unique name).
+    private func newProfile() {
+        let existing = Set(profiles.map(\.name))
+        var name = "newprofile"
+        var n = 1
+        while existing.contains(name) { n += 1; name = "newprofile\(n)" }
+        let block = "\n\t\t\(name): {agent: \"claude\", environment: \"sandbox\", network: \"deny\"}"
+        guard let r = cueText.range(of: "profiles:"),
+              let brace = cueText.range(of: "{", range: r.upperBound..<cueText.endIndex) else { return }
+        cueText.insert(contentsOf: block, at: brace.upperBound)
+        selectedProfile = name
+    }
+
+    /// Delete a profile: brace-match its block and remove it (plus its leading whitespace). A targeted
+    /// text edit — the rest of the canonical document is untouched.
+    private func deleteProfile(_ name: String) {
+        guard !name.isEmpty,
+              let nameR = cueText.range(of: name + ":"),
+              let braceStart = cueText.range(of: "{", range: nameR.upperBound..<cueText.endIndex) else { return }
+        var depth = 0
+        var idx = braceStart.lowerBound
+        var end: String.Index?
+        while idx < cueText.endIndex {
+            switch cueText[idx] {
+            case "{": depth += 1
+            case "}":
+                depth -= 1
+                if depth == 0 { end = cueText.index(after: idx) }
+            default: break
+            }
+            if end != nil { break }
+            idx = cueText.index(after: idx)
+        }
+        guard let endIdx = end else { return }
+        var start = nameR.lowerBound
+        while start > cueText.startIndex {
+            let p = cueText.index(before: start)
+            if cueText[p] == "\n" || cueText[p] == "\t" || cueText[p] == " " { start = p } else { break }
+        }
+        cueText.removeSubrange(start..<endIdx)
     }
 
     private var statusIcon: String {

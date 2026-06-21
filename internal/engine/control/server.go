@@ -230,6 +230,15 @@ func (s *server) ValidatePolicy(_ context.Context, req *pb.ValidatePolicyRequest
 	return resp, nil
 }
 
+// ListPresets returns the bundled premade policies (policy.Presets) for the Create tab's stdlib picker.
+func (s *server) ListPresets(_ context.Context, _ *pb.ListPresetsRequest) (*pb.ListPresetsResponse, error) {
+	out := &pb.ListPresetsResponse{}
+	for _, p := range policy.Presets() {
+		out.Presets = append(out.Presets, &pb.Preset{Name: p.Name, Summary: p.Description, Cue: p.CUE})
+	}
+	return out, nil
+}
+
 // installEventToPB maps a pb-free install.Event onto the wire enum.
 func installEventToPB(e install.Event) *pb.InstallApplyEvent {
 	k := pb.InstallApplyEvent_PROGRESS
