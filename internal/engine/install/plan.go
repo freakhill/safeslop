@@ -30,14 +30,31 @@ type Sig struct {
 // (SP7b-3) downloads URL, verifies SHA256, installs Version. The manifest is fail-closed: every
 // field is mandatory and Version is never "latest" (specs/0012 §5).
 type Pin struct {
-	Name    string `json:"name"`          // matches Tool.Name from Status (e.g. "mise", "tart")
-	Kind    string `json:"kind"`          // "toolchain" | "runtime" — informs apply's provisioner
-	Format  string `json:"format"`        // binary-tarball | app-tarball
-	Version string `json:"version"`       // exact pinned version, never "latest"
-	SHA256  string `json:"sha256"`        // sha256 of the darwin-arm64 artifact (provenance)
-	URL     string `json:"url"`           // download source for that artifact
-	Sig     *Sig   `json:"sig,omitempty"` // optional upstream signature
+	Name    string `json:"name"`    // matches Tool.Name from Status (e.g. "mise", "tart")
+	Kind    string `json:"kind"`    // "toolchain" | "runtime" — informs apply's provisioner
+	Format  string `json:"format"`  // binary-tarball | app-tarball
+	Version string `json:"version"` // exact pinned version, never "latest"
+	SHA256  string `json:"sha256"`  // sha256 of the darwin-arm64 artifact
+	URL     string `json:"url"`     // download source for that artifact
+	// Provenance records how SHA256 was obtained, so the cockpit can tell a vendor-published checksum
+	// apart from one safeslop computed from the download itself (trust-on-first-use). ProvenanceVendor =
+	// the pin matches a checksum the vendor publishes; ProvenanceTLS/"" = no vendor checksum exists, so
+	// the pin is the hash safeslop recorded over TLS (weaker provenance). It is a legibility label, NOT a
+	// security gate — the SHA verification is identical either way — so it is optional and defaults to the
+	// more cautious TLS reading when unset (fail-safe: an un-annotated pin never over-claims "vendor").
+	Provenance string `json:"provenance,omitempty"`
+	Sig        *Sig   `json:"sig,omitempty"` // optional upstream signature
 }
+
+// Provenance values for Pin.Provenance / VerifiedInstaller.Provenance.
+const (
+	ProvenanceVendor = "vendor" // the pinned SHA matches a checksum the vendor publishes for the release
+	ProvenanceTLS    = "tls"    // no vendor checksum exists; the pin is safeslop's own hash, recorded over TLS
+)
+
+// VendorChecksum reports whether the pin's SHA256 matches a vendor-published checksum (vs trust-on-
+// first-use). Unset provenance is treated as the weaker TOFU case, so the UI never over-claims.
+func (p Pin) VendorChecksum() bool { return p.Provenance == ProvenanceVendor }
 
 var sha256Re = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
@@ -69,6 +86,11 @@ func ValidateDesired(pins []Pin) error {
 		case FormatBinaryTarball, FormatBinaryZip, FormatRawBinary, FormatAppTarball:
 		default:
 			return fmt.Errorf("install: pin %q has invalid format %q", p.Name, p.Format)
+		}
+		// Provenance is optional (defaults to the cautious TLS reading), but a non-empty value must be a
+		// known label — a typo here would silently mislabel the cockpit's trust badge, so catch it at build.
+		if p.Provenance != "" && p.Provenance != ProvenanceVendor && p.Provenance != ProvenanceTLS {
+			return fmt.Errorf("install: pin %q has invalid provenance %q (want vendor|tls)", p.Name, p.Provenance)
 		}
 		if p.Sig != nil {
 			if p.Sig.Scheme != "minisign" {

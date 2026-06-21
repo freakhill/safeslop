@@ -2,19 +2,33 @@ import SwiftUI
 
 /// InstallConsentSheet is the proportionate consent gate shown before an install runs (specs/0037).
 /// It surfaces the preview the engine computed (tools.InstallPreview, carried on ToolStatus): the
-/// verification posture, the precautions safeslop takes, and the exact command. A verified-pin or brew
-/// install is a single click; an UNVERIFIED remote-script install (a curl|sh / npm tool with no checksum
-/// pin) requires the user to type the tool's name first — friction proportionate to the higher blast
-/// radius. The gate only previews; the actual install stays the existing InstallTool stream.
+/// verification posture (incl. whether the pin's checksum is vendor-published or a trust-on-first-use
+/// hash), the precautions safeslop takes, and the exact command. A verified-pin, brew, or confined
+/// verified-installer is a single click; the higher-blast-radius routes — an UNVERIFIED remote script
+/// (curl|sh / npm) OR an UNCONFINED admin installer (e.g. nix as root) — require the user to type the
+/// tool's name first, friction proportionate to the risk. The gate only previews; the actual install
+/// stays the existing InstallTool stream.
 struct InstallConsentSheet: View {
     let tool: Safeslop_Control_V1_ToolStatus
     let onConfirm: () -> Void
     let onCancel: () -> Void
     @State private var typed = ""
 
-    private var unverified: Bool { tool.needsConsent }
-    /// Verified/brew arm immediately; an unverified script arms only once the user retypes the tool name.
-    private var armed: Bool { !unverified || typed.trimmingCharacters(in: .whitespaces) == tool.name }
+    /// gated = the higher-blast-radius routes that demand a typed confirm: an unverified remote script OR
+    /// an unconfined admin installer (e.g. nix runs as root). Verified-pin/brew/confined installers are
+    /// one-click. (Mirrors the engine's Preview.NeedsConsent, which now covers both, specs/0037.)
+    private var gated: Bool { tool.needsConsent }
+    /// One-click routes arm immediately; a gated route arms only once the user retypes the tool name.
+    private var armed: Bool { !gated || typed.trimmingCharacters(in: .whitespaces) == tool.name }
+    /// The pin/installer checksum had no vendor-published source — it is safeslop's own trust-on-first-use
+    /// hash. Surfaced as a distinct, cautionary badge so "verified" never reads as vendor-cross-checked.
+    private var tofu: Bool { tool.provenance == "tls" }
+    /// Why this install is gated, phrased for the actual route (a remote script vs an unconfined installer).
+    private var gateReason: String {
+        tool.verification == "verified-installer"
+            ? "This installer runs UNCONFINED with administrator privileges."
+            : "This runs a remote script with your privileges."
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -38,9 +52,9 @@ struct InstallConsentSheet: View {
                 if tool.verification == "verified-pin" || tool.verification == "verified-installer" { provenance }
             }
 
-            if unverified {
+            if gated {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("This runs a remote script with your privileges. Type “\(tool.name)” to confirm you read the command.")
+                    Text("\(gateReason) Type “\(tool.name)” to confirm you read the precautions above.")
                         .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
                     TextField("type \(tool.name)", text: $typed)
                         .textFieldStyle(.roundedBorder).frame(maxWidth: 220)
@@ -50,11 +64,11 @@ struct InstallConsentSheet: View {
             HStack {
                 Button("Cancel", role: .cancel, action: onCancel)
                 Spacer()
-                Button(unverified ? "Run install" : "Install", action: onConfirm)
+                Button(gated ? "Run install" : "Install", action: onConfirm)
                     .buttonStyle(.borderedProminent)
-                    .tint(unverified ? .orange : .accentColor)
+                    .tint(gated ? .orange : .accentColor)
                     .disabled(!armed)
-                    .keyboardShortcut(armed && !unverified ? .defaultAction : nil)
+                    .keyboardShortcut(armed && !gated ? .defaultAction : nil)
             }
         }
         .padding(20)
@@ -63,8 +77,12 @@ struct InstallConsentSheet: View {
 
     @ViewBuilder private var badge: some View {
         switch tool.verification {
-        case "verified-pin": pill("sha256-verified pin", "checkmark.seal.fill", .green)
-        case "verified-installer": pill("sha256-verified installer", "checkmark.seal.fill", .teal)
+        case "verified-pin":
+            tofu ? pill("sha256-pinned · no vendor checksum", "exclamationmark.shield.fill", .yellow)
+                 : pill("sha256-verified pin", "checkmark.seal.fill", .green)
+        case "verified-installer":
+            tofu ? pill("sha256-pinned installer · no vendor checksum", "exclamationmark.shield.fill", .yellow)
+                 : pill("sha256-verified installer", "checkmark.seal.fill", .teal)
         case "brew": pill("installed via Homebrew", "mug.fill", .blue)
         case "unverified-run": pill("unverified remote script", "exclamationmark.triangle.fill", .orange)
         default: EmptyView()

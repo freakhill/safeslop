@@ -210,6 +210,7 @@ func (s *server) ListTools(_ context.Context, req *pb.ListToolsRequest) (*pb.Lis
 			ts.Sha256 = pv.SHA256
 			ts.PinnedVersion = pv.Version
 			ts.NeedsConsent = pv.NeedsConsent
+			ts.Provenance = pv.Provenance
 		}
 		out.Tools = append(out.Tools, ts)
 	}

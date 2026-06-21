@@ -7,8 +7,21 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/freakhill/safeslop/internal/engine/install"
 	"github.com/freakhill/safeslop/internal/engine/sandbox"
 )
+
+// catalogTool fetches a catalog entry by display name, failing the test if absent.
+func catalogTool(t *testing.T, name string) Tool {
+	t.Helper()
+	for _, c := range Catalog() {
+		if c.Name == name {
+			return c
+		}
+	}
+	t.Fatalf("catalog must contain %q", name)
+	return Tool{}
+}
 
 func TestCatalogIsPopulatedAndCategorized(t *testing.T) {
 	cat := Catalog()
@@ -405,6 +418,93 @@ func TestInstallerConfinement(t *testing.T) {
 	}
 	if !strings.Contains(string(prof), "id_ed25519") || !strings.Contains(string(prof), "deny file-read") {
 		t.Fatalf("a confined installer's profile must deny reading ssh private keys:\n%s", prof)
+	}
+}
+
+// TestPinnedToolsNeverFallToScript generalizes the claude-specific guard (specs/0036 coherency fix):
+// ANY catalog tool that resolves an embedded pin must route to the verified pin and never silently fall
+// back to its `curl … | sh` Script — the dead-fallback fragility (a pin Name that stops matching Detect
+// would drop the tool to the script route unnoticed). Run with brew unavailable so the pin route wins.
+func TestPinnedToolsNeverFallToScript(t *testing.T) {
+	any := false
+	for _, c := range Catalog() {
+		if !hasPinForTool(c) {
+			continue
+		}
+		any = true
+		missing := Status{Tool: c, Present: false, Source: "missing"}
+		if _, err := installArgv(missing, false); !errors.Is(err, errUsePin) {
+			t.Errorf("%s has a pin but did not route to it (brewAvail=false): %v", c.Name, err)
+		}
+		pv := installPreview(missing, false)
+		if pv.Verification != VerifiedPin {
+			t.Errorf("%s pin must preview as verified-pin, got %q", c.Name, pv.Verification)
+		}
+		if strings.Contains(pv.Command, "curl") || strings.Contains(pv.Command, "| sh") {
+			t.Errorf("%s pin must not resolve to its curl|sh script: %q", c.Name, pv.Command)
+		}
+	}
+	if !any {
+		t.Fatal("expected at least one pinned catalog tool to exercise this guard")
+	}
+}
+
+// TestVerifiedChecksumProvenanceSurfaced locks the legibility fix (specs/0036): a vendor-published
+// checksum and a trust-on-first-use hash must NOT share the same "verified" surface. uv (vendor) and
+// pnpm (TOFU) are both verified-pin one-click, but carry distinct provenance + disclosure.
+func TestVerifiedChecksumProvenanceSurfaced(t *testing.T) {
+	uv := installPreview(Status{Tool: catalogTool(t, "uv"), Present: false, Source: "missing"}, false)
+	if uv.Provenance != install.ProvenanceVendor {
+		t.Fatalf("uv pin must be vendor-checksum provenance, got %q", uv.Provenance)
+	}
+	if !strings.Contains(uv.Precautions, "vendor publishes") {
+		t.Fatalf("vendor-checksum precautions must say so: %q", uv.Precautions)
+	}
+	pnpm := installPreview(Status{Tool: catalogTool(t, "pnpm"), Present: false, Source: "missing"}, false)
+	if pnpm.Provenance != install.ProvenanceTLS {
+		t.Fatalf("pnpm pin must be TOFU provenance, got %q", pnpm.Provenance)
+	}
+	if !strings.Contains(pnpm.Precautions, "trust-on-first-use") {
+		t.Fatalf("TOFU precautions must disclose it: %q", pnpm.Precautions)
+	}
+	if uv.Verification != VerifiedPin || pnpm.Verification != VerifiedPin {
+		t.Fatal("both uv and pnpm must still be verified-pin (the distinction is provenance, not route)")
+	}
+}
+
+// TestUnconfinedInstallerDemandsConsent locks the friction-tracks-risk fix (specs/0037): an unconfined
+// admin installer (nix, runs as root) is gated on a typed confirm just like an unverified script, while
+// a confined installer (rustup) stays one-click.
+func TestUnconfinedInstallerDemandsConsent(t *testing.T) {
+	nix := installPreview(Status{Tool: catalogTool(t, "nix"), Present: false, Source: "missing"}, true)
+	if nix.Verification != VerifiedInstallerRoute {
+		t.Fatalf("nix must be a verified installer, got %q", nix.Verification)
+	}
+	if !nix.NeedsConsent {
+		t.Fatal("an unconfined admin installer (nix) must demand typed confirmation")
+	}
+	if !strings.Contains(nix.Precautions, "UNCONFINED") {
+		t.Fatalf("nix precautions must flag UNCONFINED: %q", nix.Precautions)
+	}
+	rust := installPreview(Status{Tool: catalogTool(t, "Rust"), Present: false, Source: "missing"}, true)
+	if rust.NeedsConsent {
+		t.Fatal("a confined installer (rustup) must stay one-click, not gated")
+	}
+}
+
+// TestPostInstallDisclosed locks the bootstrap-vs-steady-state fix (specs/0036): tools whose verification
+// covers only the first artifact disclose what happens afterward, so the badge isn't read as a guarantee.
+func TestPostInstallDisclosed(t *testing.T) {
+	cases := map[string]string{
+		"Claude Code": "keeps itself up to date",
+		"Rust":        "signed manifests",
+		"nix":         "verified by the installer",
+	}
+	for name, want := range cases {
+		p := InstallPreview(Status{Tool: catalogTool(t, name), Present: false, Source: "missing"})
+		if !strings.Contains(p.Precautions, want) {
+			t.Errorf("%s precautions must disclose post-install behavior (%q): %q", name, want, p.Precautions)
+		}
 	}
 }
 

@@ -1622,11 +1622,12 @@ type ToolStatus struct {
 	// The install preview shared by the hover tooltip + consent gate (specs/0037). precautions is set for
 	// every tool; the rest are meaningful only when installable.
 	Precautions   string `protobuf:"bytes,10,opt,name=precautions,proto3" json:"precautions,omitempty"`                          // what safeslop does to keep this install safe (hover tooltip)
-	Verification  string `protobuf:"bytes,11,opt,name=verification,proto3" json:"verification,omitempty"`                        // verified-pin | brew | unverified-run
-	SourceUrl     string `protobuf:"bytes,12,opt,name=source_url,json=sourceUrl,proto3" json:"source_url,omitempty"`             // pin download URL (verified-pin only)
-	Sha256        string `protobuf:"bytes,13,opt,name=sha256,proto3" json:"sha256,omitempty"`                                    // pinned sha256 (verified-pin only)
-	PinnedVersion string `protobuf:"bytes,14,opt,name=pinned_version,json=pinnedVersion,proto3" json:"pinned_version,omitempty"` // pinned version (verified-pin only)
-	NeedsConsent  bool   `protobuf:"varint,15,opt,name=needs_consent,json=needsConsent,proto3" json:"needs_consent,omitempty"`   // unverified remote-script route → the gate demands typed confirmation
+	Verification  string `protobuf:"bytes,11,opt,name=verification,proto3" json:"verification,omitempty"`                        // verified-pin | verified-installer | brew | unverified-run
+	SourceUrl     string `protobuf:"bytes,12,opt,name=source_url,json=sourceUrl,proto3" json:"source_url,omitempty"`             // pin download URL (verified-pin/installer only)
+	Sha256        string `protobuf:"bytes,13,opt,name=sha256,proto3" json:"sha256,omitempty"`                                    // pinned sha256 (verified-pin/installer only)
+	PinnedVersion string `protobuf:"bytes,14,opt,name=pinned_version,json=pinnedVersion,proto3" json:"pinned_version,omitempty"` // pinned version (verified-pin/installer only)
+	NeedsConsent  bool   `protobuf:"varint,15,opt,name=needs_consent,json=needsConsent,proto3" json:"needs_consent,omitempty"`   // typed confirmation demanded — unverified script OR unconfined admin installer
+	Provenance    string `protobuf:"bytes,16,opt,name=provenance,proto3" json:"provenance,omitempty"`                            // verified-pin/installer only: "vendor" (vendor-published checksum) | "tls" (trust-on-first-use)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1764,6 +1765,13 @@ func (x *ToolStatus) GetNeedsConsent() bool {
 		return x.NeedsConsent
 	}
 	return false
+}
+
+func (x *ToolStatus) GetProvenance() string {
+	if x != nil {
+		return x.Provenance
+	}
+	return ""
 }
 
 type ListToolsResponse struct {
@@ -2441,7 +2449,7 @@ const file_internal_engine_control_control_proto_rawDesc = "" +
 	"\x04DONE\x10\x02\x12\t\n" +
 	"\x05ERROR\x10\x03\"5\n" +
 	"\x10ListToolsRequest\x12!\n" +
-	"\fcatalog_only\x18\x01 \x01(\bR\vcatalogOnly\"\xcb\x03\n" +
+	"\fcatalog_only\x18\x01 \x01(\bR\vcatalogOnly\"\xeb\x03\n" +
 	"\n" +
 	"ToolStatus\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1a\n" +
@@ -2460,7 +2468,10 @@ const file_internal_engine_control_control_proto_rawDesc = "" +
 	"source_url\x18\f \x01(\tR\tsourceUrl\x12\x16\n" +
 	"\x06sha256\x18\r \x01(\tR\x06sha256\x12%\n" +
 	"\x0epinned_version\x18\x0e \x01(\tR\rpinnedVersion\x12#\n" +
-	"\rneeds_consent\x18\x0f \x01(\bR\fneedsConsent\"J\n" +
+	"\rneeds_consent\x18\x0f \x01(\bR\fneedsConsent\x12\x1e\n" +
+	"\n" +
+	"provenance\x18\x10 \x01(\tR\n" +
+	"provenance\"J\n" +
 	"\x11ListToolsResponse\x125\n" +
 	"\x05tools\x18\x01 \x03(\v2\x1f.safeslop.control.v1.ToolStatusR\x05tools\"(\n" +
 	"\x12InstallToolRequest\x12\x12\n" +
