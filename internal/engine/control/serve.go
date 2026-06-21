@@ -33,6 +33,7 @@ func Serve(version string,
 	trustFn func(configPath string) (string, error),
 	listFn func(configPath string) ([]*pb.Profile, error),
 	preflightFn func(profile, configPath string) (*pb.PreflightHostLaunchResponse, error),
+	untrustFn func(configPath string) (string, error),
 ) error {
 	path, err := socketPath()
 	if err != nil {
@@ -50,7 +51,7 @@ func Serve(version string,
 		return err
 	}
 	gs := grpc.NewServer()
-	pb.RegisterControlServer(gs, NewControlServer(version, launchFn, resolveFn, trustFn, listFn, preflightFn))
+	pb.RegisterControlServer(gs, NewControlServer(version, launchFn, resolveFn, trustFn, listFn, preflightFn, untrustFn))
 	return gs.Serve(peerAuthListener{ln})
 }
 
@@ -64,6 +65,7 @@ func NewControlServer(version string,
 	trustFn func(configPath string) (string, error),
 	listFn func(configPath string) ([]*pb.Profile, error),
 	preflightFn func(profile, configPath string) (*pb.PreflightHostLaunchResponse, error),
+	untrustFn func(configPath string) (string, error),
 ) pb.ControlServer {
 	return &server{
 		version:        version,
@@ -73,6 +75,7 @@ func NewControlServer(version string,
 		trustFn:        trustFn,
 		listFn:         listFn,
 		preflightFn:    preflightFn,
+		untrustFn:      untrustFn,
 		installApplyFn: defaultInstallApply(version),
 	}
 }

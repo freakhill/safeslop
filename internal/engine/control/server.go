@@ -26,6 +26,7 @@ type server struct {
 	trustFn        func(configPath string) (string, error)
 	listFn         func(configPath string) ([]*pb.Profile, error)
 	preflightFn    func(profile, configPath string) (*pb.PreflightHostLaunchResponse, error)
+	untrustFn      func(configPath string) (string, error)
 	installApplyFn func(emit func(*pb.InstallApplyEvent)) error
 }
 
@@ -145,6 +146,21 @@ func (s *server) Trust(_ context.Context, req *pb.TrustRequest) (*pb.TrustRespon
 		return nil, err
 	}
 	return &pb.TrustResponse{TrustedPath: abs}, nil
+}
+
+// Untrust removes the host-side approval of the safeslop.cue at req.ConfigPath (trust.Store.Revoke), so
+// the next ListProfiles reports it untrusted and a subsequent launch re-gates through the trust sheet —
+// the symmetric reverse of Trust (ayo Actionable #3). Revoke removes privilege, so it needs no biometric
+// (specs/0030 risk-proportional rule). The peer is uid/process-tree-checked at Accept.
+func (s *server) Untrust(_ context.Context, req *pb.UntrustRequest) (*pb.UntrustResponse, error) {
+	if s.untrustFn == nil {
+		return nil, status.Errorf(codes.Unimplemented, "untrust not wired")
+	}
+	abs, err := s.untrustFn(req.ConfigPath)
+	if err != nil {
+		return nil, err
+	}
+	return &pb.UntrustResponse{UntrustedPath: abs}, nil
 }
 
 func (s *server) InstallPlan(_ context.Context, _ *pb.InstallPlanRequest) (*pb.InstallPlanResponse, error) {

@@ -353,6 +353,29 @@ func cockpitTrust(configPath string) (string, error) {
 	return filepath.Abs(path)
 }
 
+// cockpitUntrust removes the host approval of the safeslop.cue at configPath (the Launch row's Revoke).
+// It revokes under the SAME canonical path key enforceTrust approves under, so the status flips cleanly
+// back to untrusted. Returns the absolute path whose approval was removed.
+func cockpitUntrust(configPath string) (string, error) {
+	path, err := findConfig(configPath)
+	if err != nil {
+		return "", err
+	}
+	abs := canonicalPolicyPath(path)
+	storePath, err := trust.DefaultPath()
+	if err != nil {
+		return "", err
+	}
+	store, err := trust.Load(storePath)
+	if err != nil {
+		return "", err
+	}
+	if err := store.Revoke(abs); err != nil {
+		return "", err
+	}
+	return abs, nil
+}
+
 // cockpitListProfiles returns the safeslop.cue profiles for the GUI launcher, each tagged with its
 // honest isolation tier from policy.EnvTier — one source of truth for the cockpit's tier indicator
 // (specs/research/2026-06-20-cockpit-safe-by-design.md). Listing is inspection (ungated, like
@@ -532,6 +555,7 @@ func cmdServe() *cobra.Command {
 				cockpitTrust,
 				cockpitListProfiles,
 				cockpitPreflightHostLaunch,
+				cockpitUntrust,
 			)
 		},
 	}

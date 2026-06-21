@@ -164,6 +164,21 @@ func TestCockpitBackendSmoke(t *testing.T) {
 	if _, err := cl.PreflightHostLaunch(ctx, &pb.PreflightHostLaunchRequest{Profile: "s", ConfigPath: cuePath}); err == nil {
 		t.Errorf("PreflightHostLaunch(s): want error for non-host profile, got nil")
 	}
+
+	// Symmetric revoke (ayo #3): Untrust removes the host approval, so a re-list shows the profiles
+	// untrusted and the next launch would re-gate through the trust sheet.
+	if _, err := cl.Untrust(ctx, &pb.UntrustRequest{ConfigPath: cuePath}); err != nil {
+		t.Fatalf("Untrust: %v", err)
+	}
+	relisted, err := cl.ListProfiles(ctx, &pb.ListProfilesRequest{ConfigPath: cuePath})
+	if err != nil {
+		t.Fatalf("ListProfiles after Untrust: %v", err)
+	}
+	for _, p := range relisted.Profiles {
+		if p.TrustStatus == "trusted" {
+			t.Errorf("after Untrust, profile %q still reports trusted", p.Name)
+		}
+	}
 }
 
 // startCockpitBackend serves the real Control implementation over an in-memory bufconn and returns a
@@ -175,7 +190,7 @@ func startCockpitBackend(t *testing.T) (pb.ControlClient, func()) {
 	gs := grpc.NewServer()
 	pb.RegisterControlServer(gs, control.NewControlServer("vSMOKE",
 		nil, // launchFn: the Launch RPC has real side effects and is out of scope for the smoke.
-		resolveSession, cockpitTrust, cockpitListProfiles, cockpitPreflightHostLaunch,
+		resolveSession, cockpitTrust, cockpitListProfiles, cockpitPreflightHostLaunch, cockpitUntrust,
 	))
 	go func() { _ = gs.Serve(lis) }()
 
