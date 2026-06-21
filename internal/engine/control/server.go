@@ -237,6 +237,7 @@ func (s *server) ValidatePolicy(_ context.Context, req *pb.ValidatePolicyRequest
 			Tier: tier, TierNote: note,
 			RiskHeadline: risk.Headline, RiskLevel: risk.Level, RiskLines: risk.Lines,
 			TechStack: policy.TechStack(prof),
+			RiskAxes:  RiskAxesPB(prof),
 		})
 	}
 	return resp, nil
@@ -249,6 +250,17 @@ func (s *server) ListPresets(_ context.Context, _ *pb.ListPresetsRequest) (*pb.L
 		out.Presets = append(out.Presets, &pb.Preset{Name: p.Name, Summary: p.Description, Cue: p.CUE})
 	}
 	return out, nil
+}
+
+// RiskAxesPB maps a profile's policy-level RiskAxes onto the wire type, so cockpitListProfiles and
+// ValidatePolicy emit the same per-axis restriction status (single source of truth: policy.RiskAxes).
+func RiskAxesPB(p policy.Profile) []*pb.RiskAxis {
+	axes := policy.RiskAxes(p)
+	out := make([]*pb.RiskAxis, 0, len(axes))
+	for _, a := range axes {
+		out = append(out, &pb.RiskAxis{Name: a.Name, Value: a.Value, Restricted: a.Restricted, Severity: a.Severity})
+	}
+	return out
 }
 
 // installEventToPB maps a pb-free install.Event onto the wire enum.

@@ -58,6 +58,30 @@ func TestCockpitBackendSmoke(t *testing.T) {
 		}
 	}
 
+	// risk_axes: the engine flags each profile's UNRESTRICTED dimensions so the Launch row can show
+	// what's open as loudly as what's bounded (ayo S2 / specs/0032). host = all axes unrestricted;
+	// sandbox+deny = all bounded.
+	byName := map[string]*pb.Profile{}
+	for _, p := range lp.Profiles {
+		byName[p.Name] = p
+	}
+	if h := byName["h"]; h == nil || len(h.RiskAxes) == 0 {
+		t.Errorf("host profile has no risk_axes (the Launch row can't flag what's unrestricted)")
+	} else {
+		for _, ax := range h.RiskAxes {
+			if ax.Restricted {
+				t.Errorf("host axis %q=%q marked restricted; host bounds nothing", ax.Name, ax.Value)
+			}
+		}
+	}
+	if s := byName["s"]; s != nil {
+		for _, ax := range s.RiskAxes {
+			if !ax.Restricted {
+				t.Errorf("sandbox+deny axis %q=%q marked unrestricted; it is bounded", ax.Name, ax.Value)
+			}
+		}
+	}
+
 	// Create tab — ValidatePolicy rejects broken CUE...
 	bad, err := cl.ValidatePolicy(ctx, &pb.ValidatePolicyRequest{CueText: "package safeslop\nsafeslop: {{{ not valid"})
 	if err != nil {

@@ -400,6 +400,7 @@ func cockpitListProfiles(configPath string) ([]*pb.Profile, error) {
 			RiskLevel:    risk.Level,
 			RiskLines:    risk.Lines,
 			TechStack:    policy.TechStack(prof),
+			RiskAxes:     control.RiskAxesPB(prof),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
