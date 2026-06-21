@@ -6,18 +6,29 @@ import SwiftUI
 /// separate WindowGroups opened from the Launch tab.
 struct RootTabs: View {
     @State private var engine = EngineModel()
+    @State private var tab = RootTabs.initialTab
 
     var body: some View {
-        TabView {
+        TabView(selection: $tab) {
             LaunchTab()
                 .tabItem { Label("Launch", systemImage: "play.circle") }
+                .tag("launch")
             InstallsTab()
                 .tabItem { Label("Installs", systemImage: "shippingbox") }
+                .tag("installs")
             CreateTab()
                 .tabItem { Label("Create", systemImage: "plus.square.on.square") }
+                .tag("create")
         }
         .environment(engine)
         .frame(minWidth: 460, minHeight: 480)
         .task { await engine.refresh() }
+    }
+
+    /// The tab shown at launch — Launch by default. The screenshot harness sets COCKPIT_TAB so it can
+    /// capture Installs/Create without a click (the GUI self-test instrumentation).
+    static var initialTab: String {
+        let t = ProcessInfo.processInfo.environment["COCKPIT_TAB"]?.lowercased() ?? "launch"
+        return ["launch", "installs", "create"].contains(t) ? t : "launch"
     }
 }

@@ -13,8 +13,10 @@ set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"      # repo root (this script lives in app/)
 TESTREPO="${COCKPIT_TEST_DIR:-/tmp/safeslop-cockpit-test}"
-OUT="${COCKPIT_SHOT:-/tmp/safeslop-cockpit.png}"
+TAB="${1:-launch}"                                           # which tab to open: launch | installs | create
+OUT="${COCKPIT_SHOT:-/tmp/safeslop-cockpit-$TAB.png}"
 SETTLE="${COCKPIT_SETTLE:-6}"                                 # seconds to let SwiftUI render + connect
+export COCKPIT_TAB="$TAB"                                     # RootTabs reads this to deep-link the initial tab
 
 echo "==> building safeslop + cockpit"
 make -C "$REPO" build >/dev/null
