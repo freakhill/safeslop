@@ -254,6 +254,41 @@ func installApp(name, srcRoot, appDir, binDir string) error {
 	return os.Symlink(filepath.Join(dest, "Contents", "MacOS", name), link)
 }
 
+// Rollback restores the prior version of a tool that the last install kept at <dest>.bak (installApp /
+// installBinary leave that backup behind on every upgrade). It swaps the current — presumably bad —
+// version aside to <dest>.failed (kept, not destroyed, so the failure stays inspectable) and renames
+// the .bak back into the live path. It handles both an .app bundle (AppDir/<name>.app.bak) and a bare
+// binary (BinDir/<name>.bak), preferring whichever backup exists, and errors clearly when neither does.
+// For an .app the BinDir symlink already targets the unchanged live path, so it stays valid.
+func Rollback(name string, dirs Dirs) error {
+	app := filepath.Join(dirs.AppDir, name+".app")
+	bin := filepath.Join(dirs.BinDir, name)
+	switch {
+	case fileExists(app + ".bak"):
+		return restoreBackup(app)
+	case fileExists(bin + ".bak"):
+		return restoreBackup(bin)
+	default:
+		return fmt.Errorf("no prior version of %q to roll back to", name)
+	}
+}
+
+// restoreBackup sets the live path aside to live+".failed" (if present) and renames live+".bak" into
+// place. Same-directory renames → atomic on the same filesystem, matching the install commit path.
+func restoreBackup(live string) error {
+	if fileExists(live) {
+		failed := live + ".failed"
+		_ = os.RemoveAll(failed)
+		if err := os.Rename(live, failed); err != nil {
+			return fmt.Errorf("set aside current version: %w", err)
+		}
+	}
+	if err := os.Rename(live+".bak", live); err != nil {
+		return fmt.Errorf("restore prior version: %w", err)
+	}
+	return nil
+}
+
 func extractTarGz(data []byte, dest string) error {
 	gr, err := gzip.NewReader(bytesReader(data))
 	if err != nil {

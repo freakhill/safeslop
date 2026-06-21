@@ -783,6 +783,27 @@ func cmdInstall() *cobra.Command {
 		ac.Flags().BoolVar(&dryRun, "dry-run", false, "show what would be installed without doing it")
 		return ac
 	}())
+	c.AddCommand(&cobra.Command{
+		Use:   "rollback <tool>",
+		Short: "Restore a tool's prior version, kept as a backup by the last install",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			dirs, err := install.DefaultDirs()
+			if err != nil {
+				return err
+			}
+			name := args[0]
+			if err := install.Rollback(name, dirs); err != nil {
+				return err // fail clearly when there is no backup to restore
+			}
+			if jsonOut {
+				emitJSON(map[string]any{"ok": true, "rolled_back": name})
+			} else {
+				fmt.Printf("rolled back %s to its prior version\n", name)
+			}
+			return nil
+		},
+	})
 	return c
 }
 

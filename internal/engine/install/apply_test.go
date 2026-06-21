@@ -212,6 +212,63 @@ func TestInstallAppUpgradeKeepsBackup(t *testing.T) {
 	}
 }
 
+// TestRollbackRestoresPriorVersion upgrades a fake .app (which leaves the prior version at .bak), then
+// rolls back and asserts the live app holds the OLD content again and the bad version is kept at .failed.
+func TestRollbackRestoresPriorVersion(t *testing.T) {
+	dirs := Dirs{BinDir: t.TempDir(), AppDir: t.TempDir(), TmpDir: t.TempDir()}
+	mk := func(body string) []byte {
+		return tgz(t, map[string]string{
+			"tart.app/Contents/MacOS/tart": body,
+			"tart.app/Contents/Info.plist": "<plist/>",
+		})
+	}
+	install := func(art []byte) {
+		url := "https://x/tart.tgz"
+		res := Result{Actions: []Action{{Name: "tart", Kind: ActionInstall, Desired: "v", Format: FormatAppTarball, SHA256: sha(art), URL: url}}}
+		if err := Apply(context.Background(), res, dirs, fakeFetcher{url: art}, nil); err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+	}
+	install(mk("#!/bin/sh\necho v1\n"))
+	install(mk("#!/bin/sh\necho v2\n")) // upgrade -> .bak holds v1
+
+	if err := Rollback("tart", dirs); err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dirs.AppDir, "tart.app", "Contents", "MacOS", "tart"))
+	if err != nil || string(got) != "#!/bin/sh\necho v1\n" {
+		t.Fatalf("rollback must restore v1 to the live app, got %q err=%v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(dirs.AppDir, "tart.app.failed")); err != nil {
+		t.Fatalf("the rolled-back version must be kept at .failed, not destroyed: %v", err)
+	}
+}
+
+// TestRollbackBinaryAndErrorsWithoutBackup covers the bare-binary path and the no-backup error.
+func TestRollbackBinaryAndErrorsWithoutBackup(t *testing.T) {
+	dirs := Dirs{BinDir: t.TempDir(), AppDir: t.TempDir(), TmpDir: t.TempDir()}
+	if err := Rollback("mise", dirs); err == nil {
+		t.Fatal("Rollback must error when there is no .bak to restore")
+	}
+	binInstall := func(body string) {
+		art := tgz(t, map[string]string{"mise/bin/mise": body})
+		url := "https://x/mise.tgz"
+		res := Result{Actions: []Action{{Name: "mise", Kind: ActionInstall, Desired: "v", Format: FormatBinaryTarball, SHA256: sha(art), URL: url}}}
+		if err := Apply(context.Background(), res, dirs, fakeFetcher{url: art}, nil); err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+	}
+	binInstall("#!/bin/sh\necho v1\n")
+	binInstall("#!/bin/sh\necho v2\n") // upgrade -> mise.bak holds v1
+	if err := Rollback("mise", dirs); err != nil {
+		t.Fatalf("Rollback bin: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dirs.BinDir, "mise"))
+	if err != nil || string(got) != "#!/bin/sh\necho v1\n" {
+		t.Fatalf("rollback must restore the v1 binary, got %q err=%v", got, err)
+	}
+}
+
 func TestApplySkipsOKActions(t *testing.T) {
 	res := Result{Actions: []Action{{Name: "mise", Kind: ActionOK, Format: FormatBinaryTarball}}}
 	dirs := Dirs{BinDir: t.TempDir(), AppDir: t.TempDir(), TmpDir: t.TempDir()}
