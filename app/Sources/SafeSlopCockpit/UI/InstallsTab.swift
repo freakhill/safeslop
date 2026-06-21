@@ -11,6 +11,11 @@ struct InstallsTab: View {
     @State private var installing: Set<String> = []
     @State private var log: [String] = []
     @State private var activeTool: String?
+    /// Whether the initial two-phase load has completed. `.task` re-fires every time this tab re-appears
+    /// (TabView disappears/reappears tab content); without this gate, each re-entry re-ran the catalog
+    /// phase, which resets every row's source to "unknown" — flashing the whole list to gray "?" and
+    /// back (the giant flicker). Re-detect remains the explicit manual refresh.
+    @State private var didInitialLoad = false
 
     /// catalog order preserved, grouped into (category, tools) sections.
     private var sections: [(String, [Safeslop_Control_V1_ToolStatus])] {
@@ -55,10 +60,14 @@ struct InstallsTab: View {
             }
         }
         .padding()
-        // instant first paint (every tool with a "?"), then the real brew-backed detection.
+        // instant first paint (every tool with a "?"), then the real brew-backed detection — ONCE.
+        // Re-entering the tab must not re-flash the populated rows back to "?" (the giant flicker); the
+        // catalog phase only runs while nothing is shown yet, and the whole sequence runs a single time.
         .task {
-            await load(catalogOnly: true)
+            guard !didInitialLoad else { return }
+            if tools.isEmpty { await load(catalogOnly: true) }
             await load(catalogOnly: false)
+            didInitialLoad = true
         }
     }
 
