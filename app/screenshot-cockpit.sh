@@ -17,6 +17,9 @@ TAB="${1:-launch}"                                           # which tab to open
 OUT="${COCKPIT_SHOT:-/tmp/safeslop-cockpit-$TAB.png}"
 SETTLE="${COCKPIT_SETTLE:-6}"                                 # seconds to let SwiftUI render + connect
 export COCKPIT_TAB="$TAB"                                     # RootTabs reads this to deep-link the initial tab
+# The host-consent gate isn't a tab — it's a session-window phase. COCKPIT_PREVIEW makes the app root
+# render it standalone so this harness can shoot it like any tab (specs/0030).
+if [ "$TAB" = "host-consent" ]; then export COCKPIT_PREVIEW="host-consent"; fi
 
 echo "==> building safeslop + cockpit"
 make -C "$REPO" build >/dev/null

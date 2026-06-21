@@ -83,3 +83,32 @@ struct HostConsentView: View {
         if ok { onLaunch() }
     }
 }
+
+/// HostConsentPreview renders HostConsentView with a hardcoded sample payload for the screenshot harness
+/// only (COCKPIT_PREVIEW=host-consent) — the live launch flow never reaches it. It exists so
+/// `make cockpit-shot host-consent` can capture the gate's layout headlessly, the same self-test
+/// affordance COCKPIT_TAB gives the three main tabs (specs/0030).
+struct HostConsentPreview: View {
+    /// True when the screenshot harness asked for the host-consent layout (never in normal use).
+    static var isActive: Bool {
+        ProcessInfo.processInfo.environment["COCKPIT_PREVIEW"]?.lowercased() == "host-consent"
+    }
+
+    private static let sampleRef = ProfileRef(name: "risky", agent: "claude", environment: "host",
+                                              network: "allow", tier: "none", riskLevel: "high")
+    private static let sample = Preflight(
+        headlineBody: "This agent runs on your Mac as you — no isolation. It can read and write every "
+            + "file your account can, use your logged-in credentials, and reach any network your Mac can "
+            + "reach. Nothing about profile \"risky\" is sandboxed.",
+        scopeLine: "This run: your home folder + 2 other mounted volumes, 1 safeslop-injected credential, full host network.",
+        statements: [
+            ConsentStatement(text: "Network access is limited to an approved allow-list.", expected: false, tierOrigin: "container"),
+            ConsentStatement(text: "This agent can read and write every file your account can.", expected: true, tierOrigin: "host"),
+            ConsentStatement(text: "Files outside the project are invisible to this agent.", expected: false, tierOrigin: "vm"),
+        ])
+
+    var body: some View {
+        HostConsentView(ref: Self.sampleRef, preflight: Self.sample, onLaunch: {}, onCancel: {})
+            .frame(width: 520, height: 460)
+    }
+}

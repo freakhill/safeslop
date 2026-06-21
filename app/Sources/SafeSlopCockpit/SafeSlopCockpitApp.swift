@@ -10,7 +10,13 @@ struct SafeSlopCockpitApp: App {
 
     var body: some Scene {
         WindowGroup("SafeSlop", id: "launcher") {
-            RootTabs()
+            // COCKPIT_PREVIEW renders a single phase standalone for the screenshot harness (specs/0030);
+            // the normal app always shows the three-tab cockpit.
+            if HostConsentPreview.isActive {
+                HostConsentPreview()
+            } else {
+                RootTabs()
+            }
         }
         .defaultSize(width: 480, height: 520)
 
