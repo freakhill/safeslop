@@ -17,7 +17,13 @@ CONTAINER_SRC := library/layer/container
 CONTAINER_DST := internal/engine/container/assets
 SYNCED        := allowlist.domains Dockerfile.agent Dockerfile.agent.tools
 
-.PHONY: build test vet fmt fmtcheck check check-assets sync-container-assets dist sign clean proto cockpit cockpit-fresh cockpit-app cockpit-icon
+# The control-plane schema lives in two hand-synced copies: the Go-side source
+# protoc reads, and the Swift bundle the cockpit compiles. They must stay
+# identical — a one-sided edit drifts silently and breaks the cockpit build.
+PROTO_GO    := internal/engine/control/control.proto
+PROTO_SWIFT := app/Sources/SafeSlopCockpit/proto/control.proto
+
+.PHONY: build test vet fmt fmtcheck check check-assets proto-sync proto-sync-check sync-container-assets dist sign clean proto cockpit cockpit-fresh cockpit-app cockpit-icon
 
 ## Click-test the SwiftUI cockpit with zero setup: build + seed a test repo + serve + run the app
 ## (engine torn down on quit). You only deal with the GUI. `cockpit-fresh` also resets the trust store.
@@ -78,8 +84,19 @@ check-assets:
 	@diff -q $(CONTAINER_SRC)/agent-tools.env.example $(CONTAINER_DST)/agent-tools.env >/dev/null || { \
 	  echo "drift: agent-tools.env (run 'make sync-container-assets')"; exit 1; }
 
+## Copy the canonical Go-side control.proto over the Swift bundle copy (Go is the
+## source protoc + the committed *.pb.go derive from). Run after editing the schema.
+proto-sync:
+	@cp $(PROTO_GO) $(PROTO_SWIFT)
+	@echo "synced $(PROTO_GO) -> $(PROTO_SWIFT)"
+
+## Gate on the two control.proto copies drifting apart — mirrors check-assets.
+proto-sync-check:
+	@diff -q $(PROTO_GO) $(PROTO_SWIFT) >/dev/null || { \
+	  echo "drift: $(PROTO_SWIFT) != $(PROTO_GO) (run 'make proto-sync')"; exit 1; }
+
 ## The full local gate, mirrored by .github/workflows/go.yml.
-check: check-assets vet fmtcheck test
+check: check-assets proto-sync-check vet fmtcheck test
 
 ## Cross-compile the two macOS arches into dist/ (signing-ready static binaries).
 dist:
