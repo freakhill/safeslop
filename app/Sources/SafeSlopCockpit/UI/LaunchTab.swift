@@ -41,10 +41,20 @@ struct LaunchTab: View {
             if !missing { openWindow(id: "session", value: ref) }
         } label: {
             HStack {
-                // colored ecusson: danger level is the chip background; the glyph stays white.
-                RiskBadge(symbol: ref.tierSymbol, color: ref.riskColor).help(ref.tierNote)
+                // Ecusson: color is the chip background; the border WEIGHT (rank) is the non-color danger
+                // channel so the chip reads in grayscale / for the colorblind (ayo S2). Glyph = tier.
+                RiskBadge(symbol: ref.tierSymbol, color: ref.riskColor, rank: ref.dangerRank).help(ref.tierNote)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(ref.name).font(.headline)
+                    HStack(spacing: 6) {
+                        Text(ref.name).font(.headline)
+                        // symbol+word+color triad (macOS TCC / Little Snitch): the WORD carries danger,
+                        // not the color alone.
+                        Text(ref.dangerWord)
+                            .font(.caption2.weight(.bold))
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(ref.riskColor.opacity(0.18), in: Capsule())
+                            .foregroundStyle(ref.riskColor)
+                    }
                     Text("\(ref.agent) · \(ref.tierLabel) · net:\(ref.netLabel)")
                         .font(.caption).foregroundStyle(.secondary)
                     if !ref.riskHeadline.isEmpty {

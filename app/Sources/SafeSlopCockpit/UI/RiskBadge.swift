@@ -7,12 +7,19 @@ import SwiftUI
 struct RiskBadge: View {
     let symbol: String
     let color: Color
+    /// Danger rank (0 contained / 1 elevated / 2 high) → border weight: the non-color, grayscale-
+    /// survivable danger channel that makes the chip's color redundant rather than sole (ayo S2).
+    var rank: Int = 0
     var size: CGFloat = 30
+
+    private var borderWidth: CGFloat { CGFloat(rank) * 1.5 } // 0 / 1.5 / 3.0 pt
 
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: size * 0.24, style: .continuous)
                 .fill(color.gradient)
+            RoundedRectangle(cornerRadius: size * 0.24, style: .continuous)
+                .strokeBorder(.white.opacity(0.9), lineWidth: borderWidth)
             Image(systemName: symbol)
                 .font(.system(size: size * 0.5, weight: .semibold))
                 .foregroundStyle(.white)
