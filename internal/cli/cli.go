@@ -282,7 +282,11 @@ func cmdRun() *cobra.Command {
 				return err
 			}
 			code, err := runProfile(name, prof, argv, ws)
-			if err != nil && code == 0 {
+			if err != nil {
+				// Surface the failure reason. runProfile returns code=1 on setup
+				// errors (e.g. a deny-network VM with no SAFESLOP_VM_PROXY_URL), so
+				// the old `&& code == 0` guard silently dropped them — a launch that
+				// failed with no diagnostic. cobra prints returned errors as "Error: …".
 				return err
 			}
 			os.Exit(code)
