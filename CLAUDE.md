@@ -59,6 +59,12 @@ make check          # go vet + gofmt + go test ./...  (CI: .github/workflows/go.
 make build          # static CGO_ENABLED=0 binary -> ./safeslop
 ```
 
+`make test-integration` runs the `integration`-tagged tests (today: the
+`install→uninstall→install` idempotency proof on a real tart VM, specs/0041).
+It is NOT part of `make check` — it boots a VM and does real network installs,
+needs `tart` on the host (self-skips otherwise), and is wired as a manual/cron
+Woodpecker pipeline (`.woodpecker/integration.yml`), never on push/PR.
+
 CI runs all four fish gates plus the Go workflow. The **active CI is Forgejo
 Woodpecker** (`.woodpecker/*.yml`) while GitHub is paused (see *Development
 happens on Forgejo* below); the `.github/workflows/` mirror is kept for the
