@@ -35,8 +35,11 @@ type Pin struct {
 	Kind    string `json:"kind"`    // "toolchain" | "runtime" — informs apply's provisioner
 	Format  string `json:"format"`  // binary-tarball | app-tarball
 	Version string `json:"version"` // exact pinned version, never "latest"
-	SHA256  string `json:"sha256"`  // sha256 of the darwin-arm64 artifact
-	URL     string `json:"url"`     // download source for that artifact
+	SHA256  string `json:"sha256"`  // sha256 of the artifact (one of SHA256/SHA512 is required)
+	// SHA512 is an alternative/additional digest for upstreams that publish only a sha512 sidecar (e.g.
+	// alpine-lima's VM image). A pin needs at least one of SHA256/SHA512; Apply verifies every digest set.
+	SHA512 string `json:"sha512,omitempty"`
+	URL    string `json:"url"` // download source for that artifact
 	// Provenance records how SHA256 was obtained, so the cockpit can tell a vendor-published checksum
 	// apart from one safeslop computed from the download itself (trust-on-first-use). ProvenanceVendor =
 	// the pin matches a checksum the vendor publishes; ProvenanceTLS/"" = no vendor checksum exists, so
@@ -62,6 +65,7 @@ const (
 func (p Pin) VendorChecksum() bool { return p.Provenance == ProvenanceVendor }
 
 var sha256Re = regexp.MustCompile(`^[0-9a-f]{64}$`)
+var sha512Re = regexp.MustCompile(`^[0-9a-f]{128}$`)
 
 // ValidateDesired enforces the fail-closed contract: every pin is fully specified and exact. An
 // invalid manifest is an error, never a silent skip (specs/0012 §5: "fails closed").
@@ -81,8 +85,16 @@ func ValidateDesired(pins []Pin) error {
 		if p.Version == "" || p.Version == "latest" {
 			return fmt.Errorf("install: pin %q must declare an exact version, got %q", p.Name, p.Version)
 		}
-		if !sha256Re.MatchString(p.SHA256) {
-			return fmt.Errorf("install: pin %q must declare a 64-hex sha256", p.Name)
+		// A pin needs at least one digest; any digest present must be the right width (case-insensitive
+		// hex is accepted at verify time, but the manifest is authored lowercase).
+		if p.SHA256 == "" && p.SHA512 == "" {
+			return fmt.Errorf("install: pin %q must declare a sha256 or sha512", p.Name)
+		}
+		if p.SHA256 != "" && !sha256Re.MatchString(p.SHA256) {
+			return fmt.Errorf("install: pin %q has a malformed sha256 (want 64-hex)", p.Name)
+		}
+		if p.SHA512 != "" && !sha512Re.MatchString(p.SHA512) {
+			return fmt.Errorf("install: pin %q has a malformed sha512 (want 128-hex)", p.Name)
 		}
 		if p.URL == "" {
 			return fmt.Errorf("install: pin %q must declare a source url", p.Name)
@@ -125,6 +137,7 @@ type Action struct {
 	Current string     `json:"current,omitempty"` // probed version ("" if absent)
 	Desired string     `json:"desired"`           // pinned version
 	SHA256  string     `json:"sha256"`            // carried through for apply
+	SHA512  string     `json:"sha512,omitempty"`  // carried through for apply (alt/extra digest)
 	URL     string     `json:"url"`
 	Format  string     `json:"format"`
 	Sig     *Sig       `json:"sig,omitempty"`
@@ -168,7 +181,7 @@ func Plan(state State, desired []Pin) (Result, error) {
 	}
 	var res Result
 	for _, p := range desired {
-		a := Action{Name: p.Name, Desired: p.Version, SHA256: p.SHA256, URL: p.URL, Format: p.Format, Sig: p.Sig, Provenance: p.Provenance, SelfUpdating: p.SelfUpdating}
+		a := Action{Name: p.Name, Desired: p.Version, SHA256: p.SHA256, SHA512: p.SHA512, URL: p.URL, Format: p.Format, Sig: p.Sig, Provenance: p.Provenance, SelfUpdating: p.SelfUpdating}
 		tool, found := index[p.Name]
 		cur := extractVersion(tool.Version)
 		switch {

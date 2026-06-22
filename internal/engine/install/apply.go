@@ -161,8 +161,20 @@ func applyOne(ctx context.Context, a Action, dirs Dirs, fetch Fetcher, emit func
 		return nil, fmt.Errorf("download read: %w", err)
 	}
 	emit(Event{Kind: EventProgress, Tool: a.Name, Msg: "verifying"})
-	if err := VerifySHA256(data, a.SHA256); err != nil {
-		return nil, err
+	// Verify every digest the pin declares (at least one is guaranteed by ValidateDesired). A tool that
+	// publishes only a sha512 sidecar (alpine-lima's VM image) is verified by that; both run when both set.
+	if a.SHA256 == "" && a.SHA512 == "" {
+		return nil, fmt.Errorf("install %s: no digest to verify against", a.Name)
+	}
+	if a.SHA256 != "" {
+		if err := VerifySHA256(data, a.SHA256); err != nil {
+			return nil, err
+		}
+	}
+	if a.SHA512 != "" {
+		if err := VerifySHA512(data, a.SHA512); err != nil {
+			return nil, err
+		}
 	}
 	if a.Sig != nil {
 		if err := verifySigChain(ctx, a, fetch); err != nil {

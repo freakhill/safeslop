@@ -2,6 +2,7 @@ package install
 
 import (
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -16,6 +17,17 @@ func VerifySHA256(data []byte, want string) error {
 	got := hex.EncodeToString(sum[:])
 	if !strings.EqualFold(got, want) {
 		return fmt.Errorf("sha256 mismatch: got %s want %s", got, want)
+	}
+	return nil
+}
+
+// VerifySHA512 fails closed unless sha512(data) hex-equals want (case-insensitive). Some upstreams (e.g.
+// alpine-lima's VM image) publish only a sha512 sidecar; a Pin may carry SHA512 instead of/along SHA256.
+func VerifySHA512(data []byte, want string) error {
+	sum := sha512.Sum512(data)
+	got := hex.EncodeToString(sum[:])
+	if !strings.EqualFold(got, want) {
+		return fmt.Errorf("sha512 mismatch: got %s want %s", got, want)
 	}
 	return nil
 }
