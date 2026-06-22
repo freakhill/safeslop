@@ -785,6 +785,7 @@ func recordVerifiedInstall(t Tool) error {
 		Version:          in.Version,
 		Provenance:       in.Provenance,
 		Uninstall:        in.Uninstall,
+		UninstallVerify:  in.UninstallVerify,
 		InstallerVersion: in.Version,
 	})
 }
