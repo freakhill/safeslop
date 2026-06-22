@@ -21,7 +21,16 @@ type Engine interface {
 	Argv(args ...string) []string
 	// Command builds the full invocation of a container subcommand, environment included.
 	Command(ctx context.Context, args ...string) *exec.Cmd
+	// InternalNetwork is the name of an externally pre-created `--internal` network the compose must use
+	// for the agent's no-egress network, or "" to declare `internal: true` inline. It is "" for host
+	// docker (rootful docker honors internal:true) and a fixed name for lima (rootless nerdctl does NOT —
+	// the agent would otherwise reach the internet directly, bypassing squid; validated 2026-06-22).
+	InternalNetwork() string
 }
+
+// internalNetworkName is the engine-managed `--internal` network the lima backend pre-creates so the
+// agent container has no default route (its only egress is the squid proxy).
+const internalNetworkName = "safeslop-internal"
 
 // HostDockerEngine runs `docker <args>` on the host — today's behaviour, used by SystemBackend against an
 // ambient OrbStack/Docker Desktop. safeslop neither installs nor manages that daemon.
@@ -30,6 +39,9 @@ type HostDockerEngine struct{}
 func (HostDockerEngine) Name() string { return "docker" }
 
 func (HostDockerEngine) Argv(args ...string) []string { return append([]string{"docker"}, args...) }
+
+// InternalNetwork is "" — rootful docker honors compose's inline `internal: true`.
+func (HostDockerEngine) InternalNetwork() string { return "" }
 
 func (e HostDockerEngine) Command(ctx context.Context, args ...string) *exec.Cmd {
 	argv := e.Argv(args...)
@@ -48,6 +60,10 @@ type LimaNerdctlEngine struct {
 }
 
 func (LimaNerdctlEngine) Name() string { return "nerdctl" }
+
+// InternalNetwork is the pre-created `--internal` network name — rootless nerdctl does not honor
+// compose's inline internal:true, so the agent must join a real --internal network to have no egress.
+func (LimaNerdctlEngine) InternalNetwork() string { return internalNetworkName }
 
 // Argv is `env LIMA_HOME=… limactl shell <inst> env XDG…=… PATH=… nerdctl <args>` — the outer env points
 // limactl at the owned lima home; the inner env sets the rootless guest environment. Shared by Command

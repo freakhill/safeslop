@@ -69,7 +69,7 @@ func TestEnsureCreatesThenBringsUp(t *testing.T) {
 	r := &recRunner{listSays: ""} // empty → instance absent → create path
 	b := &LimaBackend{dirs: dirs, run: r.run}
 
-	eng, err := b.Ensure(context.Background(), nil)
+	eng, err := b.Ensure(context.Background(), "", nil)
 	if err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestEnsureStartsExistingInstance(t *testing.T) {
 	r := &recRunner{listSays: instanceName} // present → start-existing path, no --name create
 	b := &LimaBackend{dirs: dirs, run: r.run}
 
-	if _, err := b.Ensure(context.Background(), nil); err != nil {
+	if _, err := b.Ensure(context.Background(), "", nil); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
 	if r.saw("--name=" + instanceName) {
@@ -115,7 +115,7 @@ func TestEnsureFailsWhenImageNotInstalled(t *testing.T) {
 	_ = os.Remove(filepath.Join(dirs.CacheDir, imageBlobName)) // pinned image not installed
 	r := &recRunner{}
 	b := &LimaBackend{dirs: dirs, run: r.run}
-	if _, err := b.Ensure(context.Background(), nil); err == nil {
+	if _, err := b.Ensure(context.Background(), "", nil); err == nil {
 		t.Fatal("Ensure must fail closed when the pinned VM image blob is absent")
 	}
 }

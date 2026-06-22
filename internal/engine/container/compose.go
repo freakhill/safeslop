@@ -21,6 +21,11 @@ type composeParams struct {
 	NpmConfig  bool // true when a staged .npmrc exists
 	Kubeconfig bool // true when a staged kubeconfig exists (KUBECONFIG -> bind-mount path)
 	OpenEgress bool // true in network:allow -> agent also joins the egress bridge (real route + DNS)
+	// InternalNet, when set, is the name of an externally pre-created `--internal` network the compose
+	// references instead of declaring `internal: true` inline. The lima/rootless-nerdctl backend MUST set
+	// it (compose's inline internal:true does not isolate egress there); the host docker backend leaves it
+	// empty (rootful docker honors internal:true). See compose.yml.tmpl.
+	InternalNet string
 }
 
 func renderCompose(p composeParams) (string, error) {

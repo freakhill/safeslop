@@ -536,6 +536,12 @@ func cmdDown() *cobra.Command {
 			if vm.Available() {
 				_ = vm.DestroyAll(context.Background())
 			}
+			// Also reap the safeslop-managed lima container VM if one was provisioned (idempotent: a no-op
+			// when limactl is absent or no instance exists). Keeps `down` a complete teardown for the
+			// opt-in lima backend.
+			if dirs, derr := install.DefaultDirs(); derr == nil {
+				_ = runtimepkg.NewLimaBackend(dirs).Teardown(context.Background())
+			}
 			return nil
 		},
 	}

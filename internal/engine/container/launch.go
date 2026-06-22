@@ -9,7 +9,15 @@ import (
 
 	"github.com/freakhill/safeslop/internal/engine/container/runtime"
 	"github.com/freakhill/safeslop/internal/engine/exec"
+	"github.com/freakhill/safeslop/internal/engine/install"
 )
+
+// preferLimaBackend reports whether the user opted into the safeslop-managed lima container runtime
+// (SAFESLOP_CONTAINER_BACKEND=lima). Unset → use the ambient host docker when present (today's
+// behaviour); lima is also chosen as a fallback by runtime.Select when no host docker exists.
+func preferLimaBackend() bool {
+	return os.Getenv("SAFESLOP_CONTAINER_BACKEND") == "lima"
+}
 
 // materializeRun writes the per-run runtime dir (squid.conf, allowlist.domains, compose.yml,
 // entrypoint.sh, and a .safeslop-stage marker for the reconcile sweep) and returns the compose
@@ -51,14 +59,6 @@ func materializeRun(p composeParams, open bool) (string, error) {
 // secretEnv is written to secrets.env and sourced by the entrypoint; SP7c-2 cockpit sessions pass
 // nil (inherited-host-env parity with SP7c-1; full staging is a separate deferred unit).
 func provision(ctx context.Context, agentArgv []string, workspace, network string, secretEnv []string, stageDir string) (argv []string, composeFile string, eng runtime.Engine, err error) {
-	// The engine the tier runs container ops through. Today: the ambient host docker (unchanged
-	// behaviour). The backend SELECTION (lima when a profile opts into safeslop-managed containers,
-	// via runtime.Select + Backend.Ensure → Engine) lands here next (specs/0044 Phase 4.1); when it
-	// does, Available()/the nix guard move under the docker branch.
-	eng = runtime.HostDockerEngine{}
-	if !Available() {
-		return nil, "", nil, fmt.Errorf("container environment requires docker + docker compose v2 (run: safeslop doctor)")
-	}
 	if len(agentArgv) == 0 {
 		return nil, "", nil, exec.ErrNoArgv
 	}
@@ -72,6 +72,35 @@ func provision(ctx context.Context, agentArgv []string, workspace, network strin
 	if real, err := filepath.EvalSymlinks(workspace); err == nil {
 		workspace = real
 	}
+
+	// Select + bring up the container engine. Default: the ambient host docker (unchanged behaviour).
+	// SAFESLOP_CONTAINER_BACKEND=lima opts into the safeslop-managed, pinned, rootless lima VM; lima is
+	// also the fallback when no host docker is present. The lima VM mounts the workspace (writable) so the
+	// agent's edits land on the host repo (specs/0044 Phase 4.1). Backend.Ensure fails closed if its
+	// engine is unavailable (no docker / no limactl).
+	dirs, err := install.DefaultDirs()
+	if err != nil {
+		return nil, "", nil, err
+	}
+	// Lima is OPT-IN, never an automatic fallback: without the opt-in we use the ambient host docker
+	// (and surface the unchanged "needs docker" error if it is absent), so enabling the managed VM is
+	// always a deliberate choice, never a surprise boot.
+	var backend runtime.Backend = &runtime.SystemBackend{}
+	if preferLimaBackend() {
+		backend = runtime.NewLimaBackend(dirs)
+	}
+	eng, err = backend.Ensure(ctx, workspace, func(s string) { fmt.Fprintln(os.Stderr, "safeslop: "+s) })
+	if err != nil {
+		return nil, "", nil, err
+	}
+	// Egress isolation: the agent's no-egress network. Host docker honours compose's inline internal:true;
+	// lima/rootless-nerdctl does NOT, so the engine names a `--internal` network we pre-create here (before
+	// compose up) and the compose references it as external (validated 2026-06-22).
+	internalNet := eng.InternalNetwork()
+	if internalNet != "" {
+		_ = runEngine(ctx, eng, "network", "create", "--internal", internalNet) // idempotent; ignore "exists"
+	}
+
 	if _, err := writeSecretsEnv(stageDir, secretEnv); err != nil {
 		return nil, "", nil, err
 	}
@@ -79,14 +108,15 @@ func provision(ctx context.Context, agentArgv []string, workspace, network strin
 	_, kubeErr := os.Stat(filepath.Join(stageDir, "kubeconfig"))
 	_, sshErr := os.Stat(filepath.Join(stageDir, ".ssh", "id"))
 	p := composeParams{
-		RuntimeDir: stageDir,
-		Workspace:  workspace,
-		StageDir:   stageDir,
-		Term:       os.Getenv("TERM"),
-		NpmConfig:  npmErr == nil,
-		Kubeconfig: kubeErr == nil,
-		SshKey:     sshErr == nil,
-		OpenEgress: network == "allow",
+		RuntimeDir:  stageDir,
+		Workspace:   workspace,
+		StageDir:    stageDir,
+		Term:        os.Getenv("TERM"),
+		NpmConfig:   npmErr == nil,
+		Kubeconfig:  kubeErr == nil,
+		SshKey:      sshErr == nil,
+		OpenEgress:  network == "allow",
+		InternalNet: internalNet,
 	}
 	composeFile, err = materializeRun(p, network == "allow")
 	if err != nil {
