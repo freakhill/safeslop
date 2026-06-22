@@ -1,9 +1,17 @@
 # 0041 — `safeslop uninstall`: implementation plan
 
-**Status:** implementation plan. **Date:** 2026-06-22. Implements the seven actionables of the
-research-derived design note **specs/0040-uninstall-clean-and-reinstall.md**. Sibling of the install
-arc (specs/0036–0039), the consent + blast-radius gate (specs/0037), and the symmetric trust↔revoke
-arc (specs/0033).
+**Status:** implemented (PRs #9–#13, forgejo, 2026-06-22). **Date:** 2026-06-22. Implements the seven
+actionables of the research-derived design note **specs/0040-uninstall-clean-and-reinstall.md**.
+Sibling of the install arc (specs/0036–0039), the consent + blast-radius gate (specs/0037), and the
+symmetric trust↔revoke arc (specs/0033).
+
+**Landed:** Phase 0 foundations (#9: receipt store, `Pin.SelfUpdating`, `VerifyCodesign`), Phase 1
+install-time recording (#10), Phase 2 the uninstall engine (#11), Phase 3 the `safeslop uninstall` CLI
+(#12), Phase 4 the tart-VM idempotency test (#13). Deviations from the plan, all deliberate: negative-
+provenance "untouched" is derived live from `install.Status` at plan time rather than written at install
+time (fresher than a stale copy); the Path B idempotency leg of the CI test is deferred until a CLI verb
+to install a verified-installer exists (driving it would create/destroy a real `/nix` volume). Phase 5
+is this doc + the README section.
 
 A fresh agent should be able to execute these tasks top-to-bottom without further context. Each task
 names exact files/symbols and carries its own verification. **Refactor and behaviour tasks are kept
@@ -54,7 +62,7 @@ separate.** Run `make check` (= `check-assets proto-sync-check vet fmtcheck test
 
 ## Phase 0 — Foundations (no behaviour change to install/uninstall yet)
 
-- [ ] **0.1 Add `SelfUpdating` to `install.Pin`** *(actionable 7)*
+- [x] **0.1 Add `SelfUpdating` to `install.Pin`** *(actionable 7)*
   FILE:     `internal/engine/install/plan.go`
   CHANGE:   Add field `SelfUpdating bool \`json:"self_updating,omitempty"\`` to the `Pin` struct
             (after `Sig`). Add a one-line comment: tools that overwrite their own binary after
@@ -63,7 +71,7 @@ separate.** Run `make check` (= `check-assets proto-sync-check vet fmtcheck test
   VERIFY:   `go build ./... && go vet ./internal/engine/install/`
   EXPECTED: builds clean; `grep -n 'SelfUpdating' internal/engine/install/plan.go` shows the field.
 
-- [ ] **0.2 Mark `claude` self-updating in the manifest** *(actionable 7)*
+- [x] **0.2 Mark `claude` self-updating in the manifest** *(actionable 7)*
   FILE:     `internal/engine/install/desired.go`
   CHANGE:   In the `claude` Pin (the `FormatRawBinary` entry, ~line 91), add `SelfUpdating: true,`.
             The existing comment already says "The binary self-updates after install" — leave it.
@@ -72,7 +80,7 @@ separate.** Run `make check` (= `check-assets proto-sync-check vet fmtcheck test
   VERIFY:   `go test ./internal/engine/install/ -run TestDesiredStateIsFailClosed`
   EXPECTED: PASS — manifest still fully pinned and fail-closed with the new flag set.
 
-- [ ] **0.3 Create the receipt store package** *(actionable 1 — the core)*
+- [x] **0.3 Create the receipt store package** *(actionable 1 — the core)*
   FILE:     `internal/engine/receipt/receipt.go` (new)
   CHANGE:   New package `receipt`, mirroring `trust.go`'s store shape exactly. Define:
             - `const storeVersion = 1`
@@ -91,7 +99,7 @@ separate.** Run `make check` (= `check-assets proto-sync-check vet fmtcheck test
   VERIFY:   `go build ./internal/engine/receipt/`
   EXPECTED: compiles.
 
-- [ ] **0.4 Receipt store round-trip + crash-safety test**
+- [x] **0.4 Receipt store round-trip + crash-safety test**
   FILE:     `internal/engine/receipt/receipt_test.go` (new)
   CHANGE:   Table tests using `t.TempDir()` for the store path: (a) `Load` of a missing file returns
             an empty, usable store; (b) `Record` then `Load` round-trips an Entry with `Files`,
@@ -102,7 +110,7 @@ separate.** Run `make check` (= `check-assets proto-sync-check vet fmtcheck test
   VERIFY:   `go test ./internal/engine/receipt/`
   EXPECTED: PASS.
 
-- [ ] **0.5 Add a `codesign --verify` exec helper** *(actionable 4 dependency)*
+- [x] **0.5 Add a `codesign --verify` exec helper** *(actionable 4 dependency)*
   FILE:     `internal/engine/install/codesign.go` (new)
   CHANGE:   `func VerifyCodesign(ctx context.Context, path string) error` shelling out to
             `/usr/bin/codesign --verify --strict <path>` via `exec.CommandContext`; non-zero exit →
@@ -118,7 +126,7 @@ separate.** Run `make check` (= `check-assets proto-sync-check vet fmtcheck test
 
 ## Phase 1 — Write receipts at install time (behaviour: install now records)
 
-- [ ] **1.1 Make `applyOne` report what it placed** *(refactor only — no behaviour change)*
+- [x] **1.1 Make `applyOne` report what it placed** *(refactor only — no behaviour change)*
   FILE:     `internal/engine/install/apply.go`
   CHANGE:   Change `applyOne` (the per-action installer) to return the placed artifact paths and the
             primary binary's sha256: e.g. `(placed []receipt.File, err error)` where each `File`
@@ -131,7 +139,7 @@ separate.** Run `make check` (= `check-assets proto-sync-check vet fmtcheck test
   VERIFY:   `go test ./internal/engine/install/`
   EXPECTED: PASS — existing apply tests unchanged in behaviour.
 
-- [ ] **1.2 `install.Apply` records a Path A receipt entry per applied action** *(actionable 1)*
+- [x] **1.2 `install.Apply` records a Path A receipt entry per applied action** *(actionable 1)*
   FILE:     `internal/engine/install/apply.go`
   CHANGE:   `Apply` (`apply.go:95`) gains a receipt store. Open `receipt.DefaultPath()` + `receipt.Load`
             once at the top (a load failure is fatal — fail-closed, since a missing-but-unwritable
@@ -145,7 +153,7 @@ separate.** Run `make check` (= `check-assets proto-sync-check vet fmtcheck test
   VERIFY:   `go test ./internal/engine/install/`
   EXPECTED: PASS (add the assertion in 1.3).
 
-- [ ] **1.3 Test: a Path A install writes a verifiable receipt**
+- [x] **1.3 Test: a Path A install writes a verifiable receipt**
   FILE:     `internal/engine/install/apply_receipt_test.go` (new)
   CHANGE:   Drive `Apply` with a fake `Fetcher` returning a tiny known artifact for one synthetic Pin,
             `Dirs` under `t.TempDir()`, and `HOME` pointed at a temp dir (so `receipt.DefaultPath`
@@ -156,7 +164,7 @@ separate.** Run `make check` (= `check-assets proto-sync-check vet fmtcheck test
   VERIFY:   `go test ./internal/engine/install/ -run Receipt`
   EXPECTED: PASS.
 
-- [ ] **1.4 Add the designated uninstaller to `VerifiedInstaller`** *(actionable 4 — data)*
+- [x] **1.4 Add the designated uninstaller to `VerifiedInstaller`** *(actionable 4 — data)*
   FILE:     `internal/engine/tools/tools.go`
   CHANGE:   Add fields to `VerifiedInstaller` (`tools.go:115`): `Uninstall []string` (the argv of the
             tool's designated uninstaller for the installed state) and an optional
@@ -169,7 +177,7 @@ separate.** Run `make check` (= `check-assets proto-sync-check vet fmtcheck test
   VERIFY:   `go test ./internal/engine/tools/`
   EXPECTED: PASS.
 
-- [ ] **1.5 Path B install records a receipt entry + negative provenance** *(actionable 1, 5)*
+- [x] **1.5 Path B install records a receipt entry + negative provenance** *(actionable 1, 5)*
   FILE:     `internal/engine/tools/tools.go`
   CHANGE:   In `installVerifiedInstaller` (`tools.go:700`), on the installer exiting 0, open the
             receipt store and `Record(receipt.Entry{Tool: t.Name, Path: "B", Version: t.Installer.Version, Provenance: t.Installer.Provenance, Uninstall: t.Installer.Uninstall, InstallerVersion: t.Installer.Version})`.
@@ -180,7 +188,7 @@ separate.** Run `make check` (= `check-assets proto-sync-check vet fmtcheck test
   VERIFY:   `go test ./internal/engine/tools/`
   EXPECTED: PASS (assertion added in 1.6).
 
-- [ ] **1.6 Test: a Path B install records the delegate uninstaller**
+- [x] **1.6 Test: a Path B install records the delegate uninstaller**
   FILE:     `internal/engine/tools/tools_uninstall_test.go` (new)
   CHANGE:   Without actually running an installer, unit-test the record path: factor the
             receipt-recording in 1.5 into a small `recordVerifiedInstall(store, t Tool) error` and test
@@ -194,7 +202,7 @@ separate.** Run `make check` (= `check-assets proto-sync-check vet fmtcheck test
 
 ## Phase 2 — The uninstall engine (new package, pure logic + macOS effects)
 
-- [ ] **2.1 `uninstall.Plan` — receipt-driven, with untouched enumeration** *(actionable 2, 5)*
+- [x] **2.1 `uninstall.Plan` — receipt-driven, with untouched enumeration** *(actionable 2, 5)*
   FILE:     `internal/engine/uninstall/plan.go` (new)
   CHANGE:   New package `uninstall`. Define:
             - `type Kind int` → `RemovePathA`, `DelegatePathB`.
@@ -210,7 +218,7 @@ separate.** Run `make check` (= `check-assets proto-sync-check vet fmtcheck test
   VERIFY:   `go build ./internal/engine/uninstall/`
   EXPECTED: compiles.
 
-- [ ] **2.2 Test: plan classifies A vs B and lists untouched**
+- [x] **2.2 Test: plan classifies A vs B and lists untouched**
   FILE:     `internal/engine/uninstall/plan_test.go` (new)
   CHANGE:   Seed a temp receipt store with one Path A entry (uv) and one Path B entry (nix); build a
             fake `install.State` that also reports docker present. Assert: `Items` has uv
@@ -220,7 +228,7 @@ separate.** Run `make check` (= `check-assets proto-sync-check vet fmtcheck test
   VERIFY:   `go test ./internal/engine/uninstall/ -run Plan`
   EXPECTED: PASS.
 
-- [ ] **2.3 Trash dir helper + move/rollback/prune** *(actionable 3 — the recoverable tier)*
+- [x] **2.3 Trash dir helper + move/rollback/prune** *(actionable 3 — the recoverable tier)*
   FILE:     `internal/engine/uninstall/trash.go` (new)
   CHANGE:   - `func TrashDir() (string, error)` → `~/.local/share/safeslop/trash` (same `$HOME` volume
               as `~/.local/bin`, so `os.Rename` is atomic — comment this constraint).
@@ -234,7 +242,7 @@ separate.** Run `make check` (= `check-assets proto-sync-check vet fmtcheck test
   VERIFY:   `go test ./internal/engine/uninstall/ -run Trash` (test added in 2.4)
   EXPECTED: compiles; test green in 2.4.
 
-- [ ] **2.4 Test: trash move + rollback round-trip, no-clobber**
+- [x] **2.4 Test: trash move + rollback round-trip, no-clobber**
   FILE:     `internal/engine/uninstall/trash_test.go` (new)
   CHANGE:   Under `t.Setenv("HOME", t.TempDir())`: create a fake binary, `moveToTrash` it, assert the
             original path is gone and a trash copy + manifest exist; `Rollback` restores it byte-for-
@@ -243,7 +251,7 @@ separate.** Run `make check` (= `check-assets proto-sync-check vet fmtcheck test
   VERIFY:   `go test ./internal/engine/uninstall/ -run Trash`
   EXPECTED: PASS.
 
-- [ ] **2.5 Path A apply: verify-then-delete, ENOENT-tolerant, symlink-safe, atomic batch** *(actionable 3)*
+- [x] **2.5 Path A apply: verify-then-delete, ENOENT-tolerant, symlink-safe, atomic batch** *(actionable 3)*
   FILE:     `internal/engine/uninstall/apply_a.go` (new)
   CHANGE:   `func applyPathA(item Item, dirs install.Dirs, stamp string) (Result, error)`:
             1. **Pre-flight, no mutation:** for every `File` with a non-empty `SHA256`, recompute the
@@ -262,7 +270,7 @@ separate.** Run `make check` (= `check-assets proto-sync-check vet fmtcheck test
   VERIFY:   `go build ./internal/engine/uninstall/`
   EXPECTED: compiles; tested in 2.6.
 
-- [ ] **2.6 Test: Path A apply honours hash-mismatch abort, ENOENT, external-symlink skip**
+- [x] **2.6 Test: Path A apply honours hash-mismatch abort, ENOENT, external-symlink skip**
   FILE:     `internal/engine/uninstall/apply_a_test.go` (new)
   CHANGE:   Cases: (a) clean removal of a hash-matching file → trashed, gone from BinDir; (b)
             hash-mismatch on a non-self-updating tool → error, file NOT trashed (atomic abort, nothing
@@ -272,7 +280,7 @@ separate.** Run `make check` (= `check-assets proto-sync-check vet fmtcheck test
   VERIFY:   `go test ./internal/engine/uninstall/ -run PathA`
   EXPECTED: PASS.
 
-- [ ] **2.7 Running-instance detection (warn-only)** *(actionable 3 — MEDIUM)*
+- [x] **2.7 Running-instance detection (warn-only)** *(actionable 3 — MEDIUM)*
   FILE:     `internal/engine/uninstall/running.go` (new)
   CHANGE:   `func runningInstances(binPath string) ([]int, error)` using `pgrep -f <binPath>` (or
             `lsof <binPath>`); returns pids. `applyPathA` calls it and adds a warning to the `Result`
@@ -281,7 +289,7 @@ separate.** Run `make check` (= `check-assets proto-sync-check vet fmtcheck test
   VERIFY:   `go build ./internal/engine/uninstall/`
   EXPECTED: compiles; `grep -n 'func runningInstances' internal/engine/uninstall/running.go` matches.
 
-- [ ] **2.8 Path B apply: re-verify, delegate, fail-closed, post-verify teardown** *(actionable 4)*
+- [x] **2.8 Path B apply: re-verify, delegate, fail-closed, post-verify teardown** *(actionable 4)*
   FILE:     `internal/engine/uninstall/apply_b.go` (new)
   CHANGE:   `func applyPathB(ctx, item Item) (Result, error)`:
             1. Resolve the delegate binary (`item.Delegate[0]`). If it is an on-disk path
@@ -300,7 +308,7 @@ separate.** Run `make check` (= `check-assets proto-sync-check vet fmtcheck test
   VERIFY:   `go build ./internal/engine/uninstall/`
   EXPECTED: compiles; tested in 2.9.
 
-- [ ] **2.9 Test: Path B fail-closed on non-zero exit + teardown verification (stubbed)**
+- [x] **2.9 Test: Path B fail-closed on non-zero exit + teardown verification (stubbed)**
   FILE:     `internal/engine/uninstall/apply_b_test.go` (new)
   CHANGE:   Inject the delegate runner + probe runner as function fields (or an interface) so the test
             substitutes fakes — do NOT run real nix/rustup. Cases: (a) delegate exits 0 and probes
@@ -315,7 +323,7 @@ separate.** Run `make check` (= `check-assets proto-sync-check vet fmtcheck test
 
 ## Phase 3 — CLI surface (the symmetric, gated mirror of `install`)
 
-- [ ] **3.1 `cmdUninstall` skeleton + `plan` subcommand (+`--json`)** *(actionable 2, 5)*
+- [x] **3.1 `cmdUninstall` skeleton + `plan` subcommand (+`--json`)** *(actionable 2, 5)*
   FILE:     `internal/cli/cli.go`
   CHANGE:   Add `func cmdUninstall() *cobra.Command` mirroring `cmdInstall()` (`cli.go:684`). Register
             it in `newRoot()` (`cli.go:65`): `root.AddCommand(..., cmdInstall(), cmdUninstall())`.
@@ -328,7 +336,7 @@ separate.** Run `make check` (= `check-assets proto-sync-check vet fmtcheck test
   EXPECTED: help prints; `safeslop uninstall plan --json` on a machine with no receipt prints an empty
             plan (`{"items":[],...}`) and exits 0.
 
-- [ ] **3.2 `uninstall apply` with typed-confirmation gate, `--dry-run`, `--yes`** *(actionable 2)*
+- [x] **3.2 `uninstall apply` with typed-confirmation gate, `--dry-run`, `--yes`** *(actionable 2)*
   FILE:     `internal/cli/cli.go`
   CHANGE:   `uninstall apply [tool...]`: build the plan, print the itemized blast radius INCLUDING the
             reversibility asymmetry copy ("Path A → restorable from trash for 7 days; Path B (APFS
@@ -344,7 +352,7 @@ separate.** Run `make check` (= `check-assets proto-sync-check vet fmtcheck test
             a machine with at least one receipt — or assert the prompt+abort path)*
   EXPECTED: prints the plan, reads the declined input, aborts without removing anything, non-zero exit.
 
-- [ ] **3.3 `--purge` second tier behind a second typed confirmation** *(actionable 2)*
+- [x] **3.3 `--purge` second tier behind a second typed confirmation** *(actionable 2)*
   FILE:     `internal/cli/cli.go`
   CHANGE:   Add `--purge` to `uninstall apply`. Semantics (conservative — honour "never remove what
             you didn't install"): purge does NOT recursively `rm` arbitrary user dirs. It (a) for
@@ -357,7 +365,7 @@ separate.** Run `make check` (= `check-assets proto-sync-check vet fmtcheck test
   VERIFY:   `go test ./internal/cli/ -run Uninstall`
   EXPECTED: PASS (test added in 3.5).
 
-- [ ] **3.4 `uninstall rollback` + `uninstall prune` subcommands** *(actionable 3)*
+- [x] **3.4 `uninstall rollback` + `uninstall prune` subcommands** *(actionable 3)*
   FILE:     `internal/cli/cli.go`
   CHANGE:   `uninstall rollback [stamp]` → `uninstall.Rollback` (newest if no stamp); prints what was
             restored. `uninstall prune [--older-than 168h]` → `uninstall.Prune` (default 7d TTL);
@@ -365,7 +373,7 @@ separate.** Run `make check` (= `check-assets proto-sync-check vet fmtcheck test
   VERIFY:   `go build ./... && ./safeslop uninstall rollback --help && ./safeslop uninstall prune --help`
   EXPECTED: both help texts print; exit 0.
 
-- [ ] **3.5 CLI tests: plan JSON shape, gate declines, untouched present**
+- [x] **3.5 CLI tests: plan JSON shape, gate declines, untouched present**
   FILE:     `internal/cli/cli_uninstall_test.go` (new)
   CHANGE:   Mirror `cli_install_plan_test.go`: (a) `renderUninstallPlanJSON` with `HOME` at a temp dir
             seeded with a 2-entry receipt → valid JSON with an `items` key of length 2 and an
@@ -379,7 +387,7 @@ separate.** Run `make check` (= `check-assets proto-sync-check vet fmtcheck test
 
 ## Phase 4 — Idempotent reinstall as a CI test *(actionable 6)*
 
-- [ ] **4.1 `install→uninstall→install` integration test, gated** 
+- [x] **4.1 `install→uninstall→install` integration test, gated** 
   FILE:     `internal/engine/vm/idempotency_integration_test.go` (new; first line `//go:build integration`)
   CHANGE:   Guard with `if !Available() { t.Skip("tart unavailable") }` AND the `integration` build tag
             (so `go test ./...` in normal CI never runs it). The test: `EnsureBase` → `CloneAndBoot` a
@@ -392,7 +400,7 @@ separate.** Run `make check` (= `check-assets proto-sync-check vet fmtcheck test
   VERIFY:   `go vet -tags integration ./internal/engine/vm/` (vet only — the test body needs real tart)
   EXPECTED: vets clean under the integration tag; is skipped/excluded by the default `go test ./...`.
 
-- [ ] **4.2 Opt-in CI wiring + Makefile target** 
+- [x] **4.2 Opt-in CI wiring + Makefile target** 
   FILE:     `Makefile`, `.woodpecker/go.yml`
   CHANGE:   Add a Makefile target `test-integration: ; go test -tags integration ./...` (NOT part of
             `check`). In `.woodpecker/go.yml`, add a SEPARATE, clearly-labelled step that runs
@@ -407,7 +415,7 @@ separate.** Run `make check` (= `check-assets proto-sync-check vet fmtcheck test
 
 ## Phase 5 — Close-out (docs, gates, record)
 
-- [ ] **5.1 README + `--help` sync for the new command**
+- [x] **5.1 README + `--help` sync for the new command**
   FILE:     `README.md` (and whatever `slop-sync-help` checks for the Go binary, if applicable)
   CHANGE:   Document `safeslop uninstall plan|apply|rollback|prune`, the A/B reversibility asymmetry,
             `--purge`/`--dry-run`/`--yes`, and the explicit non-features (no Docker, no `--force`).
@@ -415,13 +423,13 @@ separate.** Run `make check` (= `check-assets proto-sync-check vet fmtcheck test
             then just `go build ./... && ./safeslop uninstall --help`)*
   EXPECTED: drift gate passes (or help renders cleanly).
 
-- [ ] **5.2 Full gate green + pinning**
+- [x] **5.2 Full gate green + pinning**
   FILE:     (repo-wide)
   CHANGE:   No code change — run the done-checklist.
   VERIFY:   `make check && make build && fish scripts/slop-pinning.fish`
   EXPECTED: all green; no `latest` introduced (the receipt/uninstall code pins nothing new).
 
-- [ ] **5.3 Record the spec status + memory**
+- [x] **5.3 Record the spec status + memory**
   FILE:     `specs/0041-uninstall-implementation.md` (this file)
   CHANGE:   Flip Status to "implemented" with the merge commit once landed. Save the load-bearing
             decisions (receipt = removal authority; A/B asymmetry; non-features) to project memory so
