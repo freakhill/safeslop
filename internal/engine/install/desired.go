@@ -58,6 +58,8 @@ func DesiredState() []Pin {
 			// 2026-06-21. Pinning it routes the cockpit install through verified Route A instead of
 			// `curl -fsSL https://bun.sh/install | bash` (specs/0036 Task 5). The zip holds
 			// bun-darwin-aarch64/bun; installBinary's findFile resolves it. No minisig published.
+			// TODO(0041): verify bun/pnpm self-update churn; if they overwrite their own binary like
+			// claude, set SelfUpdating: true so uninstall doesn't read the expected drift as tampering.
 			Name:       "bun",
 			Kind:       "runtime",
 			Format:     FormatBinaryZip,
@@ -88,13 +90,14 @@ func DesiredState() []Pin {
 			// binary self-updates after install, so a slightly-old pin only affects the bootstrap. Named
 			// "claude" (the binary) so it matches both the Status probe and the "Claude Code" catalog
 			// entry's Detect name.
-			Name:       "claude",
-			Kind:       "runtime",
-			Format:     FormatRawBinary,
-			Version:    "2.1.176",
-			SHA256:     "f3f1b0c098510bd5d472b15f5541bb261f5939aeb52e488760bc53fb54c1803d",
-			URL:        "https://downloads.claude.ai/claude-code-releases/2.1.176/darwin-arm64/claude",
-			Provenance: ProvenanceVendor, // matches the per-version manifest.json sha on downloads.claude.ai
+			Name:         "claude",
+			Kind:         "runtime",
+			Format:       FormatRawBinary,
+			Version:      "2.1.176",
+			SHA256:       "f3f1b0c098510bd5d472b15f5541bb261f5939aeb52e488760bc53fb54c1803d",
+			URL:          "https://downloads.claude.ai/claude-code-releases/2.1.176/darwin-arm64/claude",
+			Provenance:   ProvenanceVendor, // matches the per-version manifest.json sha on downloads.claude.ai
+			SelfUpdating: true,             // claude overwrites its own binary post-install; on-disk hash drifts by design (specs/0041)
 		},
 	}
 }
