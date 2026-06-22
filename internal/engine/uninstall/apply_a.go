@@ -118,7 +118,9 @@ func (e *Engine) symlinkEscapes(p string) bool {
 		target = filepath.Join(filepath.Dir(p), target)
 	}
 	target = filepath.Clean(target)
-	for _, prefix := range []string{e.Dirs.BinDir, e.Dirs.AppDir} {
+	// BinDir/AppDir/LibDir are all safeslop-owned prefixes: a symlink into any of them is our own (e.g.
+	// BinDir/limactl -> LibDir/limactl/bin/limactl for a FormatToolTree install), safe to remove.
+	for _, prefix := range []string{e.Dirs.BinDir, e.Dirs.AppDir, e.Dirs.LibDir} {
 		if prefix != "" && (target == prefix || strings.HasPrefix(target, prefix+string(os.PathSeparator))) {
 			return false
 		}

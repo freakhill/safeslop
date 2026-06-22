@@ -9,6 +9,31 @@ consent gate (specs/0037).
 A fresh agent should execute these top-to-bottom. Each task carries its own verification. **Refactor and
 behaviour are separate tasks.** Run `make check` after each phase.
 
+## Live validation & architecture correction (2026-06-22)
+
+The engine slices were validated on a REAL lima 2.1.3 vz boot of the pinned alpine-lima `.iso` on
+darwin/arm64 (macOS 26.5.1). The boot **superseded three assumptions** in the original plan below — the
+"docker-compatible socket, compose path unchanged" design (next section) does **not** survive contact
+with the minimal Alpine guest, and jojo chose **Path 2** (keep the minimal verified image, change the
+engine + tier):
+
+- **No Docker-API socket.** The Alpine guest is musl + OpenRC: glibc `dockerd` static binaries don't
+  exec, and both docker's and nerdctl's rootless *setuptools* require systemd. So the engine is
+  **rootless containerd/nerdctl** (nerdctl-full is musl-static and brings up rootless via
+  `containerd-rootless.sh`, no systemd). nerdctl speaks the containerd API, not the Docker API.
+- **Therefore the container tier must move docker→nerdctl** (NOT "unchanged"): `Ensure` returns an
+  `Engine` (in-guest `nerdctl` for lima, host `docker` for SystemBackend), and the tier will run the
+  engine instead of a hardcoded `docker`. This contradicts the "compose unchanged" line below — that
+  line is **obsolete**.
+- **limactl is a tool tree, not a bare binary** (resolves its guest agent + templates relative to its
+  path) → new `install.FormatToolTree` (see the install fix commit).
+
+**Done + live-validated:** Phases 0,1,2,3,5; the `vmOpts.vz.rosetta`/`mountPoint`/`LIMA_HOME` schema
+corrections; `LimaBackend.Ensure` (boots the VM + rootless engine + runs a digest-pinned container —
+integration test PASSES); `FormatToolTree`. **Remaining:** Phase 4 (wire the Engine into
+`container.provision` + the first-run consent gate + the VM-disk receipt) and the container-tier
+docker→nerdctl rewrite incl. the per-run workspace mount (the bulk of the remaining work).
+
 ## What this delivers and what it does NOT change
 
 safeslop's `internal/engine/container` package today **assumes** a docker daemon + `docker compose` are
