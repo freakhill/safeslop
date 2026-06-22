@@ -36,14 +36,29 @@ func scpArgv(ip, src, dst string) []string {
 	return a
 }
 
-// remoteAgentCmd returns the zsh -lc argument that sources the staged secrets (if present) then
-// execs the agent. Each agent arg is single-quote escaped so values with spaces survive the
-// remote shell. proxyURL != "" prepends HTTP(S)_PROXY exports (advisory egress for network=deny).
-func remoteAgentCmd(agentArgv []string, proxyURL string) string {
+// remoteAgentCmd returns the zsh -lc argument that exports any staged path-creds, sources the
+// staged secrets (if present), then execs the agent. Each agent arg is single-quote escaped so
+// values with spaces survive the remote shell. proxyURL != "" prepends HTTP(S)_PROXY exports
+// (advisory egress for network=deny). hasSSHKey/hasKubeconfig mirror the container compose env
+// (compose.yml.tmpl): the same GIT_SSH_COMMAND / KUBECONFIG, but pointed at the scp'd stage under
+// the guest's ~/.safeslop-runtime instead of the bind-mount path.
+func remoteAgentCmd(agentArgv []string, proxyURL string, hasSSHKey, hasKubeconfig bool) string {
 	var b strings.Builder
 	if proxyURL != "" {
 		p := shellQuote(proxyURL)
 		b.WriteString("export HTTP_PROXY=" + p + " HTTPS_PROXY=" + p + " http_proxy=" + p + " https_proxy=" + p + "; ")
+	}
+	if hasSSHKey {
+		// scp -r does not reliably preserve the host's 0600 on the private key; ssh refuses an
+		// over-permissive key ("UNPROTECTED PRIVATE KEY FILE"). Re-tighten before use. The ssh
+		// option string mirrors compose.yml.tmpl exactly (pinned known_hosts, no agent); ssh
+		// expands the ~ in -i / UserKnownHostsFile itself, so the guest $HOME need not be known.
+		b.WriteString("chmod 700 ~/.safeslop-runtime/.ssh 2>/dev/null; chmod 600 ~/.safeslop-runtime/.ssh/id 2>/dev/null; ")
+		b.WriteString("export GIT_SSH_COMMAND='ssh -i ~/.safeslop-runtime/.ssh/id -o IdentitiesOnly=yes -o IdentityAgent=none -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.safeslop-runtime/.ssh/known_hosts'; ")
+	}
+	if hasKubeconfig {
+		// kubectl does not expand ~, so the shell must — zsh expands the tilde in this assignment.
+		b.WriteString("export KUBECONFIG=~/.safeslop-runtime/kubeconfig; ")
 	}
 	b.WriteString("set -a; [ -f ~/.safeslop-runtime/secrets.env ] && . ~/.safeslop-runtime/secrets.env; set +a; exec")
 	for _, a := range agentArgv {

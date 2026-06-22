@@ -1004,18 +1004,10 @@ func runProfile(name string, prof policy.Profile, argv []string, ws string) (int
 	stageDir := filepath.Join(ws, ".safeslop", "runtime", name)
 	defer os.RemoveAll(stageDir) // wipe staged secrets/.npmrc regardless of outcome
 
-	// kube/ssh creds need a file at a boundary-stable path; vm's scp'd stage path
-	// (unknown guest $HOME, single-quoted secrets.env) isn't wired yet. Fail fast,
-	// before minting any token / registering any deploy key (specs/0010, specs/0011).
-	if prof.Environment == "vm" && prof.Credentials != nil {
-		if prof.Credentials.Kube != nil {
-			return 1, fmt.Errorf("kube credentials are not yet supported with environment:%q — use environment:\"container\" (specs/0010)", prof.Environment)
-		}
-		if prof.Credentials.Ssh != nil {
-			return 1, fmt.Errorf("ssh credentials are not yet supported with environment:%q — use environment:\"container\" (specs/0011)", prof.Environment)
-		}
-	}
-
+	// kube/ssh creds are staged as files in stageDir and delivered into the VM guest at
+	// ~/.safeslop-runtime (scp'd whole), with GIT_SSH_COMMAND/KUBECONFIG exported guest-side by
+	// remoteAgentCmd — the guest $HOME is resolved via ~ rather than assumed (specs/0010, 0011,
+	// 0039). The container path remains the reference implementation.
 	secretEnv, pathEnv, err := stageProfile(ctx, prof, stageDir)
 	if err != nil {
 		return 1, err
