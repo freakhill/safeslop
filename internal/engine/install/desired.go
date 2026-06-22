@@ -40,6 +40,21 @@ func DesiredState() []Pin {
 			Provenance: ProvenanceVendor, // matches tart's published checksums file
 		},
 		{
+			// limactl is the container-isolation-tier VM manager (the docker engine provider; specs/0043/0044),
+			// the sibling of tart in the base toolchain. The tarball roots bin/limactl, which installBinary's
+			// findFile resolves. Fetched from lima's signed upstream GitHub release (NOT a Homebrew bottle —
+			// bottles lack SLSA/cosign build provenance); sha256 verified against lima's published SHA256SUMS on
+			// 2026-06-22. The large container-only artifacts (the in-guest engine bundle, the VM OS image) are
+			// installed on demand by LimaBackend.Pins() behind the first-start consent gate, NOT pinned here.
+			Name:       "limactl",
+			Kind:       "runtime",
+			Format:     FormatBinaryTarball,
+			Version:    "2.1.3",
+			SHA256:     "52bcf0780fcb28128ac9f6924d4410a6bc7c92fa80c9a858d89ae34ec3ce4f35",
+			URL:        "https://github.com/lima-vm/lima/releases/download/v2.1.3/lima-2.1.3-Darwin-arm64.tar.gz",
+			Provenance: ProvenanceVendor, // matches lima's published SHA256SUMS (GPG-signed)
+		},
+		{
 			// uv ships a versioned darwin-arm64 binary tarball + a per-artifact .sha256 (verified to
 			// match this pin on 2026-06-21). Pinning the release here lets the cockpit install uv via the
 			// fail-closed Route A (sha256 → notarized-binary trust chain) instead of `curl … | sh`
