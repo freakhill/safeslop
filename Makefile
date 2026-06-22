@@ -23,7 +23,7 @@ SYNCED        := allowlist.domains Dockerfile.agent Dockerfile.agent.tools
 PROTO_GO    := internal/engine/control/control.proto
 PROTO_SWIFT := app/Sources/SafeSlopCockpit/proto/control.proto
 
-.PHONY: build test vet fmt fmtcheck check check-assets proto-sync proto-sync-check sync-container-assets dist sign clean proto cockpit cockpit-fresh cockpit-app cockpit-icon
+.PHONY: build test vet fmt fmtcheck check check-assets proto-sync proto-sync-check sync-container-assets dist sign clean proto cockpit cockpit-fresh cockpit-app cockpit-icon test-integration
 
 ## Click-test the SwiftUI cockpit with zero setup: build + seed a test repo + serve + run the app
 ## (engine torn down on quit). You only deal with the GUI. `cockpit-fresh` also resets the trust store.
@@ -97,6 +97,13 @@ proto-sync-check:
 
 ## The full local gate, mirrored by .github/workflows/go.yml.
 check: check-assets proto-sync-check vet fmtcheck test
+
+## Opt-in integration tests behind the `integration` build tag — currently the install->uninstall->install
+## idempotency proof on a real tart VM (specs/0041 task 6). NOT part of `check`: it boots a VM and does
+## real network installs. Needs tart on a darwin/arm64 host; self-skips when tart is absent. Wired as a
+## manual/cron Woodpecker pipeline (.woodpecker/integration.yml), never on every push.
+test-integration:
+	go test -tags integration -timeout 35m ./...
 
 ## Cross-compile the two macOS arches into dist/ (signing-ready static binaries).
 dist:

@@ -1,0 +1,17 @@
+# Opt-in integration pipeline: the install->uninstall->install idempotency proof on a REAL tart VM
+# (specs/0041 task 6). Deliberately NOT triggered on push/PR — it boots a macOS guest and does real
+# network installs, so it runs only on a manual trigger from the Woodpecker UI or on a schedule. This
+# keeps the fast `go.yml` gate (make check + make build) untouched while still asserting idempotency in
+# CI rather than as a claimed property.
+#
+# Local backend on the darwin/arm64 agent, so the step runs on the host — the host must have tart (plus
+# the Go toolchain + make). If tart is missing the test self-skips, so the pipeline stays green.
+when:
+  - event: manual
+  - event: cron
+labels:
+  platform: darwin/arm64
+steps:
+  - name: idempotency
+    commands:
+      - make test-integration   # go test -tags integration (boots a tart VM; self-skips without tart)
