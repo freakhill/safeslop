@@ -39,6 +39,7 @@ type Entry struct {
 	SelfUpdating     bool     `json:"self_updating,omitempty"`
 	Files            []File   `json:"files,omitempty"`             // Path A: artifacts safeslop placed
 	Uninstall        []string `json:"uninstall,omitempty"`         // Path B: designated delegate uninstaller argv
+	UninstallVerify  []string `json:"uninstall_verify,omitempty"`  // Path B: post-teardown probe argv (residue check)
 	InstallerVersion string   `json:"installer_version,omitempty"` // Path B: version of the installer that ran
 }
 
