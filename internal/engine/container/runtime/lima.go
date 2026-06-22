@@ -35,13 +35,25 @@ func (b *LimaBackend) StateDir() string {
 	return filepath.Join(home, ".config", "safeslop", "lima")
 }
 
-// enginePins are the in-guest engine artifacts, staged from LOCAL pinned copies at provision so the VM
-// does ZERO internet fetch for the engine (specs/0043 graft #1). Verified against the upstream signed
-// releases on 2026-06-22. The VM OS image is a third pin still pending the lima-image-contract decision
-// (alpine-lima ships .iso+sha512; lima v2.1.3's default-image format must be confirmed before pinning —
-// specs/0044 §Phase 1 refinement) — added here once resolved, NOT in install.DesiredState().
+// enginePins are the on-demand container-runtime artifacts: the pinned VM OS image plus the in-guest
+// engine bundle, all staged from LOCAL pinned copies at provision so the VM does ZERO internet fetch for
+// the engine (specs/0043 graft #1). Verified against the upstream signed releases on 2026-06-22. These
+// are installed at first container start behind the consent gate — NOT in install.DesiredState().
 func enginePins() []install.Pin {
 	return []install.Pin{
+		{
+			// alpine-lima: a tiny, purpose-built lima guest image, github-hosted + checksummed. It ships an
+			// .iso with only a sha512 sidecar (no sha256), so this pin uses SHA512. The .iso boot path under
+			// lima v2.1.3 is exercised by the Phase 6 integration test (deferred). Chosen over an Ubuntu cloud
+			// image for minimal surface; the engine is staged separately (below), not baked by the distro.
+			Name:       "lima-guest-image",
+			Kind:       "runtime",
+			Format:     install.FormatBlob,
+			Version:    "0.2.49", // alpine-lima release (Alpine 3.23.0 guest)
+			SHA512:     "7ef845a28cd8d77da8317a2d748456f0861d86d23dc2c51739927f16c634fec21ec90d58edd71202bdd708f81629bcffc4c9c682689bcc34f37668803757d463",
+			URL:        "https://github.com/lima-vm/alpine-lima/releases/download/v0.2.49/alpine-lima-std-3.23.0-aarch64.iso",
+			Provenance: install.ProvenanceVendor, // matches alpine-lima's published .sha512sum
+		},
 		{
 			Name:       "nerdctl-full",
 			Kind:       "runtime",
