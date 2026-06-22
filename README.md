@@ -161,11 +161,30 @@ safeslop run <profile> [--dry-run]  # launch under the profile's tier (trust-gat
 safeslop doctor                     # what boundaries/tools are available here
 safeslop down                       # tear down container/VM sessions
 safeslop install                    # inventory + install the pinned toolchain (status/plan/apply)
+safeslop uninstall [tool...]        # remove what safeslop installed (plan/apply/rollback/prune)
 safeslop serve                      # gRPC control plane (drives the GUI app)
 ```
 
 Add `--json` to any command for machine-readable output (a future GUI drives the
 engine entirely through it).
+
+`uninstall` is the receipt-driven, consent-gated mirror of `install`: it removes
+**only** what safeslop's install receipt (`~/.config/safeslop/receipts.json`)
+records placing — never reconstructed from the manifest, and never a tool it did
+not install. Two disciplines with asymmetric reversibility:
+
+- **Path A** (pinned binaries it placed — uv, bun, mise, …): hash-verified before
+  removal, then moved to `~/.local/share/safeslop/trash/` — `uninstall rollback`
+  restores the latest removal; `uninstall prune` clears trash past its TTL.
+- **Path B** (verified installers — nix, rustup): delegated to the tool's own
+  uninstaller, fail-closed on its exit, with the teardown re-verified. These are
+  **irreversible** (a destroyed `/nix` volume is gone), and the plan says so.
+
+`uninstall apply` requires a typed confirmation (`--yes` skips only the prompt,
+for automation — it never widens what is removed); `--purge` is a second tier
+behind its own confirmation. Tools safeslop did not install (Docker, brew/cask,
+hand-installed) are listed as **untouched** and never removed — there is no
+`--force` to override that.
 
 ---
 
