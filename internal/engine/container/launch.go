@@ -1,10 +1,12 @@
 package container
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/freakhill/safeslop/internal/engine/container/runtime"
@@ -14,9 +16,26 @@ import (
 
 // preferLimaBackend reports whether the user opted into the safeslop-managed lima container runtime
 // (SAFESLOP_CONTAINER_BACKEND=lima). Unset → use the ambient host docker when present (today's
-// behaviour); lima is also chosen as a fallback by runtime.Select when no host docker exists.
+// behaviour); lima is never an automatic fallback, so it is never a surprise VM boot.
 func preferLimaBackend() bool {
 	return os.Getenv("SAFESLOP_CONTAINER_BACKEND") == "lima"
+}
+
+// confirmLimaBlastRadius is the first-run consent gate (specs/0044 Phase 4.2): before safeslop first
+// boots the managed lima VM it itemises the blast radius and requires a typed confirmation. Fails closed
+// when stdin is not a terminal (booting a VM unattended without consent is exactly what this prevents);
+// the embedded cockpit uses its own preflight RPC instead of this TTY path.
+func confirmLimaBlastRadius(lb *runtime.LimaBackend) error {
+	fmt.Fprintln(os.Stderr, lb.BlastRadius())
+	if fi, _ := os.Stdin.Stat(); fi == nil || fi.Mode()&os.ModeCharDevice == 0 {
+		return fmt.Errorf("the lima container VM needs first-run consent; run `safeslop run` interactively once to approve it")
+	}
+	fmt.Fprint(os.Stderr, "\nType 'boot the vm' to proceed (anything else aborts): ")
+	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	if strings.TrimSpace(line) != "boot the vm" {
+		return fmt.Errorf("aborted: lima VM consent not given")
+	}
+	return lb.RecordConsent()
 }
 
 // materializeRun writes the per-run runtime dir (squid.conf, allowlist.domains, compose.yml,
@@ -87,7 +106,13 @@ func provision(ctx context.Context, agentArgv []string, workspace, network strin
 	// always a deliberate choice, never a surprise boot.
 	var backend runtime.Backend = &runtime.SystemBackend{}
 	if preferLimaBackend() {
-		backend = runtime.NewLimaBackend(dirs)
+		lb := runtime.NewLimaBackend(dirs)
+		if lb.NeedsConsent() { // first-run blast-radius gate (Phase 4.2)
+			if cerr := confirmLimaBlastRadius(lb); cerr != nil {
+				return nil, "", nil, cerr
+			}
+		}
+		backend = lb
 	}
 	eng, err = backend.Ensure(ctx, workspace, func(s string) { fmt.Fprintln(os.Stderr, "safeslop: "+s) })
 	if err != nil {

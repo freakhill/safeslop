@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/freakhill/safeslop/internal/engine/install"
+	"github.com/freakhill/safeslop/internal/engine/receipt"
 )
 
 // copyFile is the cross-device fallback for stageEngine's hard-link (the CacheDir blobs and LIMA_HOME may
@@ -88,7 +89,7 @@ func enginePins() []install.Pin {
 			Name:       imageBlobName,
 			Kind:       "runtime",
 			Format:     install.FormatBlob,
-			Version:    "0.2.49", // alpine-lima release (Alpine 3.23.0 guest)
+			Version:    imageVersion,
 			SHA512:     imageSHA512,
 			URL:        "https://github.com/lima-vm/alpine-lima/releases/download/v0.2.49/alpine-lima-std-3.23.0-aarch64.iso",
 			Provenance: install.ProvenanceVendor, // matches alpine-lima's published .sha512sum
@@ -124,8 +125,70 @@ const (
 	imageBlobName  = "lima-guest-image"
 	engineBlobName = "nerdctl-full"
 	cosignBlobName = "cosign"
+	imageVersion   = "0.2.49" // alpine-lima release (Alpine 3.23.0 guest)
 	imageSHA512    = "7ef845a28cd8d77da8317a2d748456f0861d86d23dc2c51739927f16c634fec21ec90d58edd71202bdd708f81629bcffc4c9c682689bcc34f37668803757d463"
+	// receiptTool is the install-receipt key for the managed lima VM state (specs/0044 Phase 4.3).
+	receiptTool = "lima-runtime"
 )
+
+// --- First-run consent gate (specs/0044 Phase 4.2) ---------------------------------------------------
+//
+// Booting the VM is a real blast radius (a Linux guest + a writable repo mount), so the FIRST time the
+// lima backend is used safeslop itemises exactly what it entails and requires the user to confirm. The
+// prompt itself lives in the launch path (a TTY typed-confirmation, or the cockpit's preflight RPC);
+// these methods are the engine-side state. Consent is recorded once (a marker under StateDir).
+
+func (b *LimaBackend) consentMarkerPath() string { return filepath.Join(b.StateDir(), "consented") }
+
+// NeedsConsent reports whether the first-run blast-radius gate must still run (no prior consent recorded).
+func (b *LimaBackend) NeedsConsent() bool {
+	_, err := os.Stat(b.consentMarkerPath())
+	return err != nil
+}
+
+// RecordConsent persists that the user approved the lima VM's blast radius, so later runs skip the gate.
+func (b *LimaBackend) RecordConsent() error {
+	if err := os.MkdirAll(b.StateDir(), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(b.consentMarkerPath(), []byte("ok\n"), 0o600)
+}
+
+// BlastRadius is the itemised first-run consent text — exactly what booting the managed lima VM entails.
+func (b *LimaBackend) BlastRadius() string {
+	return fmt.Sprintf(`the safeslop container backend will boot a pinned, rootless Linux VM:
+  - image: alpine-lima %s (sha512 %s…), verified against the pinned digest
+  - a lightweight vz Linux guest (Apple Virtualization.framework)
+  - VM disk + state under %s (safeslop-owned; reclaimed by `+"`safeslop down`"+` and uninstall)
+  - the container engine runs ROOTLESS inside the guest; its socket never leaves the VM
+  - your repo is mounted writable; your $HOME is NOT mounted; networking is user-mode NAT only`,
+		imageVersion, imageSHA512[:12], filepath.Join(b.StateDir(), "home", instanceName))
+}
+
+// recordReceipt records the managed lima VM state as a Path A install receipt so `safeslop uninstall`
+// accounts for and removes it. StateDir is a sha-less directory File (a live VM disk mutates every boot
+// and cannot be hash-verified — the same branch uninstall uses for an .app bundle); the immutable pinned
+// blobs in CacheDir keep their own hashed receipts from install.Apply (specs/0044 Phase 4.3).
+func (b *LimaBackend) recordReceipt() error {
+	rcPath := b.dirs.ReceiptPath
+	if rcPath == "" {
+		p, err := receipt.DefaultPath()
+		if err != nil {
+			return err
+		}
+		rcPath = p
+	}
+	store, err := receipt.Load(rcPath)
+	if err != nil {
+		return err
+	}
+	return store.Record(receipt.Entry{
+		Tool:    receiptTool,
+		Path:    "A",
+		Version: imageVersion,
+		Files:   []receipt.File{{Path: b.StateDir()}}, // owned lima state dir: VM disk, engine-stage, markers
+	})
+}
 
 // Pins are installed ON DEMAND (gated at first container start), never folded into the base
 // install.DesiredState() that `install apply` runs for every user. limactl itself is the small,
@@ -253,6 +316,11 @@ func (b *LimaBackend) create(ctx context.Context, limactl, home, workspace strin
 	}
 	// Record the workspace this instance was created for, so Ensure can reuse vs recreate (best-effort).
 	_ = os.WriteFile(filepath.Join(b.StateDir(), "workspace"), []byte(workspace), 0o600)
+	// Receipt the VM state so uninstall accounts for it. A placed-but-unreceipted VM would be the same
+	// "unremovable" hazard install.Apply guards against, so a record failure is surfaced, not swallowed.
+	if err := b.recordReceipt(); err != nil {
+		return fmt.Errorf("lima backend: record VM receipt: %w", err)
+	}
 	return nil
 }
 

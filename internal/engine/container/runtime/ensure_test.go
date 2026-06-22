@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/freakhill/safeslop/internal/engine/install"
+	"github.com/freakhill/safeslop/internal/engine/receipt"
 )
 
 func TestLimaNerdctlEngineArgv(t *testing.T) {
@@ -61,7 +62,7 @@ func ensureFixture(t *testing.T) install.Dirs {
 			t.Fatal(err)
 		}
 	}
-	return install.Dirs{BinDir: bin, CacheDir: cache, TmpDir: t.TempDir()}
+	return install.Dirs{BinDir: bin, CacheDir: cache, TmpDir: t.TempDir(), ReceiptPath: filepath.Join(t.TempDir(), "receipts.json")}
 }
 
 func TestEnsureCreatesThenBringsUp(t *testing.T) {
@@ -91,6 +92,36 @@ func TestEnsureCreatesThenBringsUp(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(stage, f)); err != nil {
 			t.Errorf("engine stage missing %s: %v", f, err)
 		}
+	}
+	// The VM must be receipted (Phase 4.3) so uninstall can reap it: a Path A entry with StateDir as a
+	// sha-less directory File.
+	store, err := receipt.Load(dirs.ReceiptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, ok := store.Get(receiptTool)
+	if !ok || e.Path != "A" {
+		t.Fatalf("lima VM must be receipted as Path A, got %+v", e)
+	}
+	if len(e.Files) != 1 || e.Files[0].Path != b.StateDir() || e.Files[0].SHA256 != "" {
+		t.Fatalf("VM receipt must be the StateDir as a sha-less dir, got %+v", e.Files)
+	}
+}
+
+func TestLimaConsentGate(t *testing.T) {
+	dirs := ensureFixture(t)
+	b := &LimaBackend{dirs: dirs, run: (&recRunner{}).run}
+	if !b.NeedsConsent() {
+		t.Fatal("a fresh backend must require first-run consent")
+	}
+	if br := b.BlastRadius(); !strings.Contains(br, "$HOME is NOT mounted") || !strings.Contains(br, "rootless") {
+		t.Fatalf("blast radius must itemise the key facts, got:\n%s", br)
+	}
+	if err := b.RecordConsent(); err != nil {
+		t.Fatal(err)
+	}
+	if b.NeedsConsent() {
+		t.Fatal("consent must not be required again after RecordConsent")
 	}
 }
 
