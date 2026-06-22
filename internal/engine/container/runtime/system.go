@@ -15,14 +15,14 @@ type SystemBackend struct{}
 
 func (*SystemBackend) Name() string { return "system" }
 
-func (*SystemBackend) Ensure(ctx context.Context, emit func(string)) (string, error) {
+func (*SystemBackend) Ensure(ctx context.Context, emit func(string)) (Engine, error) {
 	if !systemDockerAvailable() {
-		return "", fmt.Errorf("no docker engine on PATH; install OrbStack/Docker Desktop, or use the lima backend")
+		return nil, fmt.Errorf("no docker engine on PATH; install OrbStack/Docker Desktop, or use the lima backend")
 	}
 	if emit != nil {
 		emit("using the docker engine already on your PATH (unmanaged by safeslop)")
 	}
-	return "", nil // empty DOCKER_HOST = ambient docker context
+	return HostDockerEngine{}, nil // the ambient docker context
 }
 
 func (*SystemBackend) Teardown(context.Context) error { return nil }

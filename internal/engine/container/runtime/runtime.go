@@ -14,14 +14,16 @@ import (
 	"github.com/freakhill/safeslop/internal/engine/install"
 )
 
-// Backend provides a docker-compatible engine for the container tier.
+// Backend provides a container engine for the container tier. SystemBackend hands back a HostDockerEngine
+// (the ambient docker the user already runs); LimaBackend boots a pinned, rootless, hardened vz Linux VM
+// and hands back a LimaNerdctlEngine that runs nerdctl inside it. The engine in the VM is rootless and the
+// socket lives inside the guest — the host's /var/run/docker.sock is never used or exposed (specs/0043).
 type Backend interface {
 	// Name identifies the backend ("system" | "lima").
 	Name() string
-	// Ensure idempotently brings the engine up and returns a DOCKER_HOST value the compose path can use.
-	// An empty string means "use the ambient docker context" (SystemBackend). It MUST NEVER return the
-	// host's /var/run/docker.sock — a lima socket is scoped per session and lives in the VM/StateDir.
-	Ensure(ctx context.Context, emit func(string)) (dockerHost string, err error)
+	// Ensure idempotently brings the engine up and returns an Engine the container tier runs commands
+	// through (host docker vs in-guest rootless nerdctl).
+	Ensure(ctx context.Context, emit func(string)) (Engine, error)
 	// Teardown stops the engine/VM this backend started (no-op for SystemBackend).
 	Teardown(ctx context.Context) error
 	// Pins are the Path A artifacts this backend needs installed before Ensure (nil for SystemBackend).

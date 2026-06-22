@@ -43,9 +43,15 @@ type limaImage struct {
 	Digest   string `yaml:"digest,omitempty"`
 }
 type limaMount struct {
-	Location string `yaml:"location"`
-	Writable bool   `yaml:"writable"`
+	Location   string `yaml:"location"`
+	MountPoint string `yaml:"mountPoint,omitempty"` // guest path; lima otherwise mounts at the identity path
+	Writable   bool   `yaml:"writable"`
 }
+
+// engineStageMountPoint is where the read-only engine staging dir appears in the guest — the path the
+// provision script reads the pinned bundle from. Validated live 2026-06-22.
+const engineStageMountPoint = "/safeslop-engine"
+
 type limaNetwork struct {
 	Lima string `yaml:"lima,omitempty"`
 }
@@ -114,7 +120,7 @@ func renderLimaYAML(in LimaConfigInput) ([]byte, error) {
 		VMOpts:     limaVMOpts{VZ: limaVZ{Rosetta: limaRosetta{Enabled: true, BinFmt: true}}},
 		Images:     []limaImage{{Location: in.ImageLocation, Arch: in.ImageArch, Digest: in.ImageDigest}},
 		MountType:  "virtiofs",
-		Mounts:     []limaMount{{Location: in.EngineStage, Writable: false}}, // read-only engine staging
+		Mounts:     []limaMount{{Location: in.EngineStage, MountPoint: engineStageMountPoint, Writable: false}}, // read-only engine staging at /safeslop-engine
 		Networks:   []limaNetwork{},
 		SSH:        limaSSH{ForwardAgent: false},
 		Containerd: limaContainerd{System: false, User: false}, // lima manages none; safeslop runs rootless itself
