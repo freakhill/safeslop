@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/freakhill/safeslop/internal/engine/container/runtime"
 	"github.com/freakhill/safeslop/internal/engine/exec"
 )
 
@@ -49,25 +50,30 @@ func materializeRun(p composeParams, open bool) (string, error) {
 // file path (for teardown). Shared by Launch (safeslop run) and PrepareSession (the embedded cockpit).
 // secretEnv is written to secrets.env and sourced by the entrypoint; SP7c-2 cockpit sessions pass
 // nil (inherited-host-env parity with SP7c-1; full staging is a separate deferred unit).
-func provision(ctx context.Context, agentArgv []string, workspace, network string, secretEnv []string, stageDir string) (argv []string, composeFile string, err error) {
+func provision(ctx context.Context, agentArgv []string, workspace, network string, secretEnv []string, stageDir string) (argv []string, composeFile string, eng runtime.Engine, err error) {
+	// The engine the tier runs container ops through. Today: the ambient host docker (unchanged
+	// behaviour). The backend SELECTION (lima when a profile opts into safeslop-managed containers,
+	// via runtime.Select + Backend.Ensure → Engine) lands here next (specs/0044 Phase 4.1); when it
+	// does, Available()/the nix guard move under the docker branch.
+	eng = runtime.HostDockerEngine{}
 	if !Available() {
-		return nil, "", fmt.Errorf("container environment requires docker + docker compose v2 (run: safeslop doctor)")
+		return nil, "", nil, fmt.Errorf("container environment requires docker + docker compose v2 (run: safeslop doctor)")
 	}
 	if len(agentArgv) == 0 {
-		return nil, "", exec.ErrNoArgv
+		return nil, "", nil, exec.ErrNoArgv
 	}
 	if agentArgv[0] == "nix" {
-		return nil, "", fmt.Errorf("toolchain:nix is not supported in environment:container yet (read-only container vs writable /nix store); use environment:vm or host, or toolchain:mise")
+		return nil, "", nil, fmt.Errorf("toolchain:nix is not supported in environment:container yet (read-only container vs writable /nix store); use environment:vm or host, or toolchain:mise")
 	}
 	if err := os.MkdirAll(stageDir, 0o700); err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 	_ = withRepoLock(workspace, func() error { return Reconcile(ctx, workspace, time.Hour) })
 	if real, err := filepath.EvalSymlinks(workspace); err == nil {
 		workspace = real
 	}
 	if _, err := writeSecretsEnv(stageDir, secretEnv); err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 	_, npmErr := os.Stat(filepath.Join(stageDir, ".npmrc"))
 	_, kubeErr := os.Stat(filepath.Join(stageDir, "kubeconfig"))
@@ -84,12 +90,12 @@ func provision(ctx context.Context, agentArgv []string, workspace, network strin
 	}
 	composeFile, err = materializeRun(p, network == "allow")
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
-	if err := Up(ctx, stageDir, composeFile); err != nil {
-		return nil, "", err
+	if err := Up(ctx, eng, stageDir, composeFile); err != nil {
+		return nil, "", nil, err
 	}
-	return composeRunArgv(composeFile, agentArgv), composeFile, nil
+	return composeRunArgv(eng, composeFile, agentArgv), composeFile, eng, nil
 }
 
 // Launch runs spec.Argv in the agent container. secretEnv (the resolved profile secrets) is
@@ -98,7 +104,7 @@ func provision(ctx context.Context, agentArgv []string, workspace, network strin
 // holds .npmrc when pnpm creds were staged); it is bind-mounted ro at /safeslop/runtime and wiped
 // on exit by the caller. The agent runs interactively through a PTY (design §6.2).
 func Launch(ctx context.Context, spec exec.LaunchSpec, workspace, network string, secretEnv []string, stageDir string) (int, error) {
-	argv, _, err := provision(ctx, spec.Argv, workspace, network, secretEnv, stageDir)
+	argv, _, _, err := provision(ctx, spec.Argv, workspace, network, secretEnv, stageDir)
 	if err != nil {
 		return 1, err
 	}
@@ -110,12 +116,12 @@ func Launch(ctx context.Context, spec exec.LaunchSpec, workspace, network string
 // down (compose down + stageDir wipe) when the session closes. Cockpit sessions pass secretEnv
 // nil (inherited-host-env parity with SP7c-1). cleanup is always non-nil and safe to call once.
 func PrepareSession(ctx context.Context, agentArgv []string, workspace, network string, secretEnv []string, stageDir string) (argv []string, cleanup func(), err error) {
-	argv, composeFile, err := provision(ctx, agentArgv, workspace, network, secretEnv, stageDir)
+	argv, composeFile, eng, err := provision(ctx, agentArgv, workspace, network, secretEnv, stageDir)
 	if err != nil {
 		return nil, func() {}, err
 	}
 	return argv, func() {
-		_ = Teardown(context.Background(), composeFile)
+		_ = Teardown(context.Background(), eng, composeFile)
 		_ = os.RemoveAll(stageDir)
 	}, nil
 }

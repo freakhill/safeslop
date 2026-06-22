@@ -276,7 +276,7 @@ fi`, uid, uid)
 // (it is launched detached, so it races the first command). Bounded; a context cancel aborts immediately.
 func (b *LimaBackend) waitEngineReady(ctx context.Context, eng LimaNerdctlEngine) error {
 	for i := 0; i < 20; i++ {
-		if _, code, err := b.run(ctx, eng.argv("info")); err == nil && code == 0 {
+		if _, code, err := b.run(ctx, eng.Argv("info")); err == nil && code == 0 {
 			return nil
 		}
 		select {

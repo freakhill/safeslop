@@ -12,7 +12,7 @@ import (
 
 func TestLimaNerdctlEngineArgv(t *testing.T) {
 	e := LimaNerdctlEngine{Limactl: "/b/limactl", Instance: "safeslop", UID: 501, LimaHome: "/h/lima"}
-	got := strings.Join(e.argv("run", "--rm", "img"), " ")
+	got := strings.Join(e.Argv("run", "--rm", "img"), " ")
 	want := "env LIMA_HOME=/h/lima /b/limactl shell safeslop env XDG_RUNTIME_DIR=/run/user/501 " +
 		"PATH=/usr/local/bin:/usr/bin:/bin:/sbin:/usr/sbin nerdctl run --rm img"
 	if got != want {

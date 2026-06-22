@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/freakhill/safeslop/internal/engine/container/runtime"
 )
 
 func TestComposeIsNetworkEnforcedAndLeakFree(t *testing.T) {
@@ -47,7 +49,7 @@ func TestWriteSecretsEnvEscapesAndIs0600(t *testing.T) {
 }
 
 func TestComposeRunArgvHasNoDashE(t *testing.T) {
-	got := composeRunArgv("/rt/compose.yml", []string{"fish"})
+	got := composeRunArgv(runtime.HostDockerEngine{}, "/rt/compose.yml", []string{"fish"})
 	for _, a := range got {
 		if a == "-e" {
 			t.Fatal("composeRunArgv must not use -e (secrets leak to ps/inspect)")
@@ -56,6 +58,18 @@ func TestComposeRunArgvHasNoDashE(t *testing.T) {
 	want := []string{"docker", "compose", "-f", "/rt/compose.yml", "run", "--rm", "agent", "fish"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("got %v want %v", got, want)
+	}
+}
+
+// TestComposeRunArgvLimaWrapsInGuest pins that the lima engine routes the same compose run through
+// `limactl shell <inst> … nerdctl …` — the tier code is unchanged, only the engine differs.
+func TestComposeRunArgvLimaWrapsInGuest(t *testing.T) {
+	eng := runtime.LimaNerdctlEngine{Limactl: "/b/limactl", Instance: "safeslop", UID: 501, LimaHome: "/h"}
+	got := strings.Join(composeRunArgv(eng, "/rt/compose.yml", []string{"fish"}), " ")
+	for _, want := range []string{"limactl shell safeslop", "nerdctl compose -f /rt/compose.yml run --rm agent fish"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("lima compose argv missing %q: %s", want, got)
+		}
 	}
 }
 

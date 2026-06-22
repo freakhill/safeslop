@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/freakhill/safeslop/internal/engine/container/runtime"
 )
 
 const (
@@ -43,8 +45,8 @@ func Available() bool {
 	return exec.CommandContext(context.Background(), "docker", "compose", "version").Run() == nil
 }
 
-func imageExists(ctx context.Context, tag string) bool {
-	return exec.CommandContext(ctx, "docker", "image", "inspect", tag).Run() == nil
+func imageExists(ctx context.Context, eng runtime.Engine, tag string) bool {
+	return eng.Command(ctx, "image", "inspect", tag).Run() == nil
 }
 
 func ensureDockerfiles(dir string) error {
@@ -60,26 +62,27 @@ func ensureDockerfiles(dir string) error {
 	return nil
 }
 
-func runDocker(ctx context.Context, args ...string) error {
-	c := exec.CommandContext(ctx, "docker", args...)
+// runEngine runs a container subcommand through the selected engine, streaming to the host stdio
+// (docker on the host, or nerdctl inside the lima guest). Replaces the former hardcoded `docker`.
+func runEngine(ctx context.Context, eng runtime.Engine, args ...string) error {
+	c := eng.Command(ctx, args...)
 	c.Stdout, c.Stderr = os.Stdout, os.Stderr
 	return c.Run()
 }
 
-// buildImages builds the base then the tools image (idempotent via docker image inspect),
-// from dir as build context. The tools Dockerfile's FROM local/agent-sandbox:latest is
-// satisfied by the base build.
-func buildImages(ctx context.Context, dir string) error {
+// buildImages builds the base then the tools image (idempotent via image inspect), from dir as build
+// context. The tools Dockerfile's FROM local/agent-sandbox:latest is satisfied by the base build.
+func buildImages(ctx context.Context, eng runtime.Engine, dir string) error {
 	if err := ensureDockerfiles(dir); err != nil {
 		return err
 	}
-	if !imageExists(ctx, baseTag) {
-		if err := runDocker(ctx, "build", "-f", filepath.Join(dir, "Dockerfile.agent"), "-t", baseTag, dir); err != nil {
+	if !imageExists(ctx, eng, baseTag) {
+		if err := runEngine(ctx, eng, "build", "-f", filepath.Join(dir, "Dockerfile.agent"), "-t", baseTag, dir); err != nil {
 			return fmt.Errorf("build base image: %w", err)
 		}
 	}
-	if !imageExists(ctx, toolsTag) {
-		if err := runDocker(ctx, "build", "-f", filepath.Join(dir, "Dockerfile.agent.tools"), "-t", toolsTag,
+	if !imageExists(ctx, eng, toolsTag) {
+		if err := runEngine(ctx, eng, "build", "-f", filepath.Join(dir, "Dockerfile.agent.tools"), "-t", toolsTag,
 			"--build-arg", "ENABLE_CLAUDE_CODE=true", "--build-arg", "ENABLE_OPENCODE=true", dir); err != nil {
 			return fmt.Errorf("build tools image: %w", err)
 		}
@@ -88,19 +91,19 @@ func buildImages(ctx context.Context, dir string) error {
 }
 
 // Up ensures images are built and the squid proxy is running for the given compose file.
-func Up(ctx context.Context, dir, composeFile string) error {
-	if err := buildImages(ctx, dir); err != nil {
+func Up(ctx context.Context, eng runtime.Engine, dir, composeFile string) error {
+	if err := buildImages(ctx, eng, dir); err != nil {
 		return err
 	}
-	return runDocker(ctx, "compose", "-f", composeFile, "up", "-d", "proxy")
+	return runEngine(ctx, eng, "compose", "-f", composeFile, "up", "-d", "proxy")
 }
 
 // Down stops squid + networks. A "" composeFile is a no-op.
-func Down(ctx context.Context, composeFile string) error {
+func Down(ctx context.Context, eng runtime.Engine, composeFile string) error {
 	if composeFile == "" {
 		return nil
 	}
-	return runDocker(ctx, "compose", "-f", composeFile, "down")
+	return runEngine(ctx, eng, "compose", "-f", composeFile, "down")
 }
 
 // Teardown fully reaps a cockpit session's stack: it force-removes every container carrying the
@@ -109,17 +112,17 @@ func Down(ctx context.Context, composeFile string) error {
 // compose project name defaults to the compose file's parent dir basename; safeslop gives each
 // cockpit session a unique cockpit-* stage dir, so this only ever reaps that session's own
 // containers. A "" composeFile is a no-op.
-func Teardown(ctx context.Context, composeFile string) error {
+func Teardown(ctx context.Context, eng runtime.Engine, composeFile string) error {
 	if composeFile == "" {
 		return nil
 	}
 	project := filepath.Base(filepath.Dir(composeFile))
-	out, err := exec.CommandContext(ctx, "docker", "ps", "-aq",
+	out, err := eng.Command(ctx, "ps", "-aq",
 		"--filter", "label=com.docker.compose.project="+project).Output()
 	if err == nil {
 		for _, id := range strings.Fields(string(out)) {
-			_ = exec.CommandContext(ctx, "docker", "rm", "-f", id).Run()
+			_ = eng.Command(ctx, "rm", "-f", id).Run()
 		}
 	}
-	return Down(ctx, composeFile)
+	return Down(ctx, eng, composeFile)
 }
