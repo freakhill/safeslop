@@ -127,6 +127,11 @@ type Action struct {
 	URL     string     `json:"url"`
 	Format  string     `json:"format"`
 	Sig     *Sig       `json:"sig,omitempty"`
+	// Provenance and SelfUpdating are carried from the Pin so Apply can record them in the install
+	// receipt (uninstall reads them: provenance for legibility, self_updating to tolerate expected
+	// on-disk hash drift). Not part of the trust decision — purely receipt metadata.
+	Provenance   string `json:"provenance,omitempty"`
+	SelfUpdating bool   `json:"self_updating,omitempty"`
 }
 
 // Result is the ordered plan: one Action per pinned tool, in manifest order.
@@ -162,7 +167,7 @@ func Plan(state State, desired []Pin) (Result, error) {
 	}
 	var res Result
 	for _, p := range desired {
-		a := Action{Name: p.Name, Desired: p.Version, SHA256: p.SHA256, URL: p.URL, Format: p.Format, Sig: p.Sig}
+		a := Action{Name: p.Name, Desired: p.Version, SHA256: p.SHA256, URL: p.URL, Format: p.Format, Sig: p.Sig, Provenance: p.Provenance, SelfUpdating: p.SelfUpdating}
 		tool, found := index[p.Name]
 		cur := extractVersion(tool.Version)
 		switch {

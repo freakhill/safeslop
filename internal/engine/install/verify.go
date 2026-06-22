@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"strings"
 
 	"aead.dev/minisign"
@@ -17,6 +18,22 @@ func VerifySHA256(data []byte, want string) error {
 		return fmt.Errorf("sha256 mismatch: got %s want %s", got, want)
 	}
 	return nil
+}
+
+// sha256Hex is the lowercase hex sha256 of b — the form recorded in install receipts (receipt.File.SHA256).
+func sha256Hex(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+// sha256File hashes the file at path. Apply records this for each placed artifact so uninstall can
+// verify the on-disk bytes still match what safeslop wrote before unlinking (specs/0041).
+func sha256File(path string) (string, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return sha256Hex(b), nil
 }
 
 // VerifyMinisign verifies the upstream signature chain, fail-closed:
