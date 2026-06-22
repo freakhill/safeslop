@@ -1,6 +1,7 @@
 # 0044 — Container runtime (lima): implementation plan
 
-**Status:** implementation plan. **Date:** 2026-06-22. Implements the FLO verdict
+**Status:** implemented (opt-in lima backend, live-validated) — see the "Live validation & architecture
+correction" section. **Date:** 2026-06-22. Implements the FLO verdict
 specs/0043-container-runtime-decision.md (winner **B**: a dedicated, pinned lima/colima vz VM manager,
 engine pre-staged into the pinned image, behind a thin `container.Backend` seam). Built on the research
 note specs/0042, the install arc (specs/0036–0039), the uninstall arc (specs/0040–0041), and the
@@ -28,11 +29,22 @@ engine + tier):
 - **limactl is a tool tree, not a bare binary** (resolves its guest agent + templates relative to its
   path) → new `install.FormatToolTree` (see the install fix commit).
 
-**Done + live-validated:** Phases 0,1,2,3,5; the `vmOpts.vz.rosetta`/`mountPoint`/`LIMA_HOME` schema
-corrections; `LimaBackend.Ensure` (boots the VM + rootless engine + runs a digest-pinned container —
-integration test PASSES); `FormatToolTree`. **Remaining:** Phase 4 (wire the Engine into
-`container.provision` + the first-run consent gate + the VM-disk receipt) and the container-tier
-docker→nerdctl rewrite incl. the per-run workspace mount (the bulk of the remaining work).
+**Status: implemented (opt-in), live-validated.** Phases 0,1,2,3,5; the `vmOpts.vz.rosetta`/`mountPoint`/
+`LIMA_HOME` schema corrections; `FormatToolTree` (limactl needs its tree); the container tier routed
+through a `runtime.Engine` seam; Phase 4 fully — `container.provision` selects the backend
+(`SAFESLOP_CONTAINER_BACKEND=lima` opt-in, never an automatic boot), `Ensure(workspace)` mounts the repo
+writable at its identity path, the **egress fix** (rootless nerdctl ignores compose `internal: true`, so
+a pre-created `--internal` network is used — the integration test asserts the agent cannot egress
+directly), the first-run **consent gate** (4.2, typed confirmation itemising the blast radius), and the
+**VM-disk receipt** (4.3, `lima-runtime` Path A = StateDir as a sha-less dir). The integration test
+(boot → workspace write-back → egress block → teardown) PASSES on real lima.
+
+**Notes / refinements left:** the container-tier compose still runs `docker compose run` for the *agent*
+via the engine argv (validated TTY passthrough) but the full in-guest build of the agent image under
+nerdctl is exercised only by the live path, not yet by an automated build test; and `safeslop uninstall`
+of `lima-runtime` trashes StateDir without first stopping a running VM, so run `safeslop down` before
+uninstall while the VM is up (the down path reaps it). The embedded cockpit uses its own preflight RPC
+rather than the TTY consent prompt. The tart-Linux north star remains a later, separate backend impl.
 
 ## What this delivers and what it does NOT change
 
