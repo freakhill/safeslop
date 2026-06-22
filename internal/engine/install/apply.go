@@ -53,19 +53,22 @@ func DefaultDirs() (Dirs, error) {
 		AppDir:   filepath.Join(home, "Applications"),
 		TmpDir:   os.TempDir(),
 		CacheDir: filepath.Join(home, ".cache", "safeslop"),
+		LibDir:   filepath.Join(home, ".local", "lib", "safeslop"),
 	}, nil
 }
 
 // Dirs are the install targets. BinDir gets executables (~/.local/bin); AppDir gets .app bundles
 // (~/Applications); TmpDir is scratch for download/extract; CacheDir (~/.cache/safeslop) gets FormatBlob
-// artifacts (VM images, engine tarballs) — non-executable, never on PATH. ReceiptPath is where Apply
-// records what it placed; "" means the real ~/.config/safeslop/receipts.json (receipt.DefaultPath) —
-// tests set CacheDir/ReceiptPath to temp paths to isolate.
+// artifacts (VM images, engine tarballs) — non-executable, never on PATH; LibDir (~/.local/lib/safeslop)
+// gets FormatToolTree trees (a tool + the resources it resolves relative to its binary, e.g. lima),
+// symlinked into BinDir. ReceiptPath is where Apply records what it placed; "" means the real
+// ~/.config/safeslop/receipts.json (receipt.DefaultPath) — tests set these to temp paths to isolate.
 type Dirs struct {
 	BinDir      string
 	AppDir      string
 	TmpDir      string
 	CacheDir    string
+	LibDir      string
 	ReceiptPath string
 }
 
@@ -202,6 +205,11 @@ func applyOne(ctx context.Context, a Action, dirs Dirs, fetch Fetcher, emit func
 		return installRawBinary(a.Name, data, dirs.BinDir) // the artifact IS the binary — no extraction
 	case FormatBlob:
 		return installBlob(a.Name, data, dirs.CacheDir) // verified non-executable artifact -> CacheDir
+	case FormatToolTree:
+		if err := extractTarGz(data, work); err != nil {
+			return nil, fmt.Errorf("extract: %w", err)
+		}
+		return installToolTree(a.Name, work, dirs.LibDir, dirs.BinDir)
 	case FormatAppTarball:
 		if err := extractTarGz(data, work); err != nil {
 			return nil, fmt.Errorf("extract: %w", err)
@@ -325,6 +333,65 @@ func commitStaged(staged, dest, name string) error {
 		return fmt.Errorf("commit %q: %w", name, err)
 	}
 	return nil
+}
+
+// installToolTree installs a tool that ships its own tree (bin/ plus the resources it resolves RELATIVE
+// to its binary — e.g. lima's limactl finds share/lima/<guestagent> + the templates via ../share, so the
+// bare binary alone is non-functional; verified live 2026-06-22). The whole extracted tree is committed
+// to libDir/<name> and bin/<name> is symlinked into binDir. Returns the tree dir (sha-less, like an .app
+// bundle) + the BinDir symlink for the receipt; uninstall removes both. Same atomic stage→backup→commit
+// shape as installApp.
+func installToolTree(name, srcRoot, libDir, binDir string) ([]receipt.File, error) {
+	if libDir == "" {
+		return nil, fmt.Errorf("install: FormatToolTree %q needs a LibDir", name)
+	}
+	if _, err := os.Stat(filepath.Join(srcRoot, "bin", name)); err != nil {
+		// Tarball nests the tree under a top dir: locate the binary and treat its grandparent as the root.
+		found, ferr := findFile(srcRoot, name)
+		if ferr != nil {
+			return nil, fmt.Errorf("tool binary %q not found in archive: %w", name, err)
+		}
+		srcRoot = filepath.Dir(filepath.Dir(found))
+	}
+	if err := os.MkdirAll(libDir, 0o755); err != nil {
+		return nil, err
+	}
+	dest := filepath.Join(libDir, name)
+	staged := dest + ".new"
+	_ = os.RemoveAll(staged)
+	if err := os.Rename(srcRoot, staged); err != nil {
+		if cerr := copyTree(srcRoot, staged); cerr != nil { // cross-device fallback
+			return nil, cerr
+		}
+	}
+	backup := dest + ".bak"
+	_ = os.RemoveAll(backup)
+	hadOld := false
+	if _, err := os.Stat(dest); err == nil {
+		if err := os.Rename(dest, backup); err != nil {
+			return nil, fmt.Errorf("back up existing %s tree: %w", name, err)
+		}
+		hadOld = true
+	}
+	if err := os.Rename(staged, dest); err != nil {
+		if hadOld {
+			_ = os.Rename(backup, dest) // roll back to the prior version
+		}
+		_ = os.RemoveAll(staged)
+		return nil, fmt.Errorf("commit %s tree: %w", name, err)
+	}
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		return nil, err
+	}
+	link := filepath.Join(binDir, name)
+	_ = os.Remove(link)
+	if err := os.Symlink(filepath.Join(dest, "bin", name), link); err != nil {
+		return nil, err
+	}
+	return []receipt.File{
+		{Path: dest},                // tool tree dir (sha-less, like an .app bundle)
+		{Path: link, Symlink: true}, // BinDir/<name> -> <tree>/bin/<name>
+	}, nil
 }
 
 // installApp moves <name>.app into appDir and symlinks its inner binary into binDir. It returns both
@@ -451,11 +518,20 @@ func extractTarGz(data []byte, dest string) error {
 			}
 			f.Close()
 		case tar.TypeSymlink:
-			// app bundles carry internal symlinks; only allow ones that stay inside dest.
-			if _, err := safeJoin(filepath.Dir(target), h.Linkname); err != nil {
+			// App bundles and tool trees carry intra-tree symlinks (e.g. lima's
+			// share/doc/lima/templates -> ../../lima/templates). Allow them, but only if the resolved
+			// target stays inside the extraction root — never let an archive plant a symlink escaping dest.
+			resolved := filepath.Join(filepath.Dir(target), h.Linkname)
+			if rel, rerr := filepath.Rel(dest, resolved); rerr != nil || filepathHasDotDotPrefix(rel) {
+				return fmt.Errorf("unsafe symlink in archive: %q -> %q", h.Name, h.Linkname)
+			}
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 				return err
 			}
-			_ = os.Symlink(h.Linkname, target)
+			_ = os.Remove(target) // idempotent re-extract
+			if err := os.Symlink(h.Linkname, target); err != nil {
+				return err
+			}
 		}
 	}
 }

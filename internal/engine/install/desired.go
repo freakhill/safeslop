@@ -40,15 +40,19 @@ func DesiredState() []Pin {
 			Provenance: ProvenanceVendor, // matches tart's published checksums file
 		},
 		{
-			// limactl is the container-isolation-tier VM manager (the docker engine provider; specs/0043/0044),
-			// the sibling of tart in the base toolchain. The tarball roots bin/limactl, which installBinary's
-			// findFile resolves. Fetched from lima's signed upstream GitHub release (NOT a Homebrew bottle —
-			// bottles lack SLSA/cosign build provenance); sha256 verified against lima's published SHA256SUMS on
-			// 2026-06-22. The large container-only artifacts (the in-guest engine bundle, the VM OS image) are
-			// installed on demand by LimaBackend.Pins() behind the first-start consent gate, NOT pinned here.
+			// limactl is the container-isolation-tier VM manager (the engine provider; specs/0043/0044), the
+			// sibling of tart in the base toolchain. It is a FormatToolTree, NOT a bare binary: limactl
+			// resolves its guest agent (share/lima/lima-guestagent.Linux-aarch64.gz) and the instance
+			// templates RELATIVE to its own path, so the binary alone cannot boot a VM (verified live
+			// 2026-06-22 — the bare binary fatals "template default.yaml not found"). The whole tarball tree
+			// (bin/ share/ libexec/) is installed to LibDir/limactl and bin/limactl symlinked into BinDir.
+			// Fetched from lima's signed upstream GitHub release (NOT a Homebrew bottle — bottles lack
+			// SLSA/cosign build provenance); sha256 verified against lima's published SHA256SUMS on 2026-06-22.
+			// The large container-only artifacts (the in-guest engine bundle, the VM OS image) are installed on
+			// demand by LimaBackend.Pins() behind the first-start consent gate, NOT pinned here.
 			Name:       "limactl",
 			Kind:       "runtime",
-			Format:     FormatBinaryTarball,
+			Format:     FormatToolTree,
 			Version:    "2.1.3",
 			SHA256:     "52bcf0780fcb28128ac9f6924d4410a6bc7c92fa80c9a858d89ae34ec3ce4f35",
 			URL:        "https://github.com/lima-vm/lima/releases/download/v2.1.3/lima-2.1.3-Darwin-arm64.tar.gz",
