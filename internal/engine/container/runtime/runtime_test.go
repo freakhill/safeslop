@@ -20,7 +20,7 @@ func TestSelectFallsToLimaWithoutDocker(t *testing.T) {
 
 func TestSystemBackendErrsWithoutDocker(t *testing.T) {
 	t.Setenv("PATH", "")
-	_, err := (&SystemBackend{}).Ensure(context.Background(), nil)
+	_, err := (&SystemBackend{}).Ensure(context.Background(), "", nil)
 	if err == nil {
 		t.Fatal("SystemBackend.Ensure must error when no docker is on PATH")
 	}
@@ -62,7 +62,7 @@ func TestLimaStateDirUnderSafeslop(t *testing.T) {
 
 func TestLimaEnsureFailsLoudWithoutLimactl(t *testing.T) {
 	// BinDir with no limactl → Ensure must error, never silently claim a runtime.
-	_, err := NewLimaBackend(install.Dirs{BinDir: t.TempDir()}).Ensure(context.Background(), nil)
+	_, err := NewLimaBackend(install.Dirs{BinDir: t.TempDir()}).Ensure(context.Background(), "", nil)
 	if err == nil {
 		t.Fatal("lima Ensure must error when limactl is absent")
 	}

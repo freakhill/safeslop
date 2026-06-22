@@ -34,6 +34,13 @@ services:
     networks: [internal{{if .OpenEgress}}, egress{{end}}]
 networks:
   internal:
-    internal: true
-  egress:
+{{if .InternalNet}}    # Pre-created out of band with the engine's `network create --internal` so the agent gets
+    # NO default route. Required for the lima/rootless-nerdctl backend: compose's own inline no-egress
+    # form is NOT honored there (the bridge keeps its gateway and RootlessKit/slirp NATs it out, so the
+    # agent would reach the internet directly, bypassing squid — validated 2026-06-22). Rootful docker
+    # does honor the inline form, so the host backend keeps it below.
+    external: true
+    name: {{.InternalNet}}
+{{else}}    internal: true
+{{end}}  egress:
     driver: bridge

@@ -22,8 +22,10 @@ type Backend interface {
 	// Name identifies the backend ("system" | "lima").
 	Name() string
 	// Ensure idempotently brings the engine up and returns an Engine the container tier runs commands
-	// through (host docker vs in-guest rootless nerdctl).
-	Ensure(ctx context.Context, emit func(string)) (Engine, error)
+	// through (host docker vs in-guest rootless nerdctl). workspace is the repo the agent will edit: the
+	// lima backend mounts it writable in the guest at its identity path (host path == guest path, so the
+	// compose bind mounts resolve unchanged); SystemBackend ignores it (host docker sees host paths).
+	Ensure(ctx context.Context, workspace string, emit func(string)) (Engine, error)
 	// Teardown stops the engine/VM this backend started (no-op for SystemBackend).
 	Teardown(ctx context.Context) error
 	// Pins are the Path A artifacts this backend needs installed before Ensure (nil for SystemBackend).

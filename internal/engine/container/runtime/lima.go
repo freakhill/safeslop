@@ -137,7 +137,7 @@ func (b *LimaBackend) Pins() []install.Pin { return enginePins() }
 // CacheDir blobs, and `limactl start`s the instance; on every call it (re)starts a stopped instance and
 // brings rootless containerd up (idempotent), then waits for the engine to answer. The full flow was
 // validated live on 2026-06-22 (see specs/0044). It fails loud rather than pretending a runtime exists.
-func (b *LimaBackend) Ensure(ctx context.Context, emit func(string)) (Engine, error) {
+func (b *LimaBackend) Ensure(ctx context.Context, workspace string, emit func(string)) (Engine, error) {
 	if emit == nil {
 		emit = func(string) {}
 	}
@@ -152,18 +152,34 @@ func (b *LimaBackend) Ensure(ctx context.Context, emit func(string)) (Engine, er
 	if err := os.MkdirAll(home, 0o755); err != nil {
 		return nil, fmt.Errorf("lima backend: create LIMA_HOME: %w", err)
 	}
+	if workspace != "" {
+		if real, err := filepath.EvalSymlinks(workspace); err == nil {
+			workspace = real // mount the real path; the guest sees it at the same (identity) location
+		}
+	}
 	uid := os.Getuid()
 	eng := LimaNerdctlEngine{Limactl: limactl, Instance: instanceName, UID: uid, LimaHome: home}
 
-	if b.instanceExists(ctx, limactl, home) {
+	switch {
+	case !b.instanceExists(ctx, limactl, home):
+		emit("provisioning the pinned safeslop lima VM (first run)")
+		if err := b.create(ctx, limactl, home, workspace, emit); err != nil {
+			return nil, err
+		}
+	case b.mountedWorkspace() != workspace:
+		// The VM is mounted for a different repo. A lima mount is fixed at instance creation, so switch
+		// workspaces by recreating (the engine bundle re-stages from the local mount; no network for it).
+		emit("re-provisioning the lima VM for this workspace")
+		if err := b.Teardown(ctx); err != nil {
+			return nil, err
+		}
+		if err := b.create(ctx, limactl, home, workspace, emit); err != nil {
+			return nil, err
+		}
+	default:
 		emit("starting the existing safeslop lima VM")
 		if out, code, err := b.runLimactl(ctx, limactl, home, "start", instanceName); err != nil || code != 0 {
 			return nil, limaErr("start existing instance failed", out, code, err)
-		}
-	} else {
-		emit("provisioning the pinned safeslop lima VM (first run)")
-		if err := b.create(ctx, limactl, home, emit); err != nil {
-			return nil, err
 		}
 	}
 
@@ -177,9 +193,20 @@ func (b *LimaBackend) Ensure(ctx context.Context, emit func(string)) (Engine, er
 	return eng, nil
 }
 
+// mountedWorkspace returns the workspace the current instance was created for (StateDir/workspace marker),
+// or "" if none. Lets Ensure reuse the VM for the same repo and recreate it for a different one.
+func (b *LimaBackend) mountedWorkspace() string {
+	m, err := os.ReadFile(filepath.Join(b.StateDir(), "workspace"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(m))
+}
+
 // create renders the owned, hardened YAML (gated by assertLimaInvariants inside renderLimaYAML), stages
 // the engine bundle from the installed CacheDir blobs, writes the config, and starts a fresh instance.
-func (b *LimaBackend) create(ctx context.Context, limactl, home string, emit func(string)) error {
+// workspace (when non-empty) is mounted writable at its identity path so the agent can edit the repo.
+func (b *LimaBackend) create(ctx context.Context, limactl, home, workspace string, emit func(string)) error {
 	stage, err := b.stageEngine()
 	if err != nil {
 		return fmt.Errorf("lima backend: stage engine bundle: %w", err)
@@ -198,6 +225,7 @@ func (b *LimaBackend) create(ctx context.Context, limactl, home string, emit fun
 		ImageArch:     "aarch64",
 		EngineStage:   stage,
 		User:          user,
+		Workspace:     workspace,
 	})
 	if err != nil {
 		return err // invariant gate failure — never start a non-conforming VM
@@ -223,6 +251,8 @@ func (b *LimaBackend) create(ctx context.Context, limactl, home string, emit fun
 	if err != nil || code != 0 {
 		return limaErr("limactl start failed", out, code, err)
 	}
+	// Record the workspace this instance was created for, so Ensure can reuse vs recreate (best-effort).
+	_ = os.WriteFile(filepath.Join(b.StateDir(), "workspace"), []byte(workspace), 0o600)
 	return nil
 }
 
@@ -334,5 +364,6 @@ func (b *LimaBackend) Teardown(ctx context.Context) error {
 	if out, code, err := b.runLimactl(ctx, limactl, home, "delete", "-f", instanceName); err != nil || code != 0 {
 		return limaErr("delete instance failed", out, code, err)
 	}
+	_ = os.Remove(filepath.Join(b.StateDir(), "workspace")) // clear the reuse marker
 	return nil
 }

@@ -61,6 +61,34 @@ func TestComposeRunArgvHasNoDashE(t *testing.T) {
 	}
 }
 
+// TestComposeNetworksByBackend pins the egress-isolation fix: the host backend declares the internal
+// network inline (`internal: true`, which rootful docker honors), while the lima backend references a
+// pre-created external `--internal` network (rootless nerdctl does NOT honor inline internal:true, so the
+// agent would otherwise reach the internet directly — validated 2026-06-22).
+func TestComposeNetworksByBackend(t *testing.T) {
+	host, err := renderCompose(composeParams{RuntimeDir: "/rt", Workspace: "/ws", StageDir: "/st"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(host, "internal: true") {
+		t.Error("host backend must declare internal: true inline")
+	}
+	if strings.Contains(host, "external: true") {
+		t.Error("host backend must NOT use an external network")
+	}
+
+	lima, err := renderCompose(composeParams{RuntimeDir: "/rt", Workspace: "/ws", StageDir: "/st", InternalNet: "safeslop-internal"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(lima, "external: true") || !strings.Contains(lima, "name: safeslop-internal") {
+		t.Errorf("lima backend must reference the external --internal network, got:\n%s", lima)
+	}
+	if strings.Contains(lima, "internal: true") {
+		t.Error("lima backend must NOT use compose's inline internal:true (it leaks egress under rootless nerdctl)")
+	}
+}
+
 // TestComposeRunArgvLimaWrapsInGuest pins that the lima engine routes the same compose run through
 // `limactl shell <inst> … nerdctl …` — the tier code is unchanged, only the engine differs.
 func TestComposeRunArgvLimaWrapsInGuest(t *testing.T) {
