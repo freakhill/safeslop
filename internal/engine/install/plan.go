@@ -44,6 +44,10 @@ type Pin struct {
 	// more cautious TLS reading when unset (fail-safe: an un-annotated pin never over-claims "vendor").
 	Provenance string `json:"provenance,omitempty"`
 	Sig        *Sig   `json:"sig,omitempty"` // optional upstream signature
+	// SelfUpdating marks a tool that overwrites its own binary after install (e.g. claude), so its
+	// on-disk hash diverges from this pin by design. The install receipt carries this flag so uninstall
+	// does not treat the expected drift as tampering (specs/0041). Optional; defaults false.
+	SelfUpdating bool `json:"self_updating,omitempty"`
 }
 
 // Provenance values for Pin.Provenance / VerifiedInstaller.Provenance.
