@@ -13,6 +13,7 @@ const (
 	FormatBinaryZip     = "binary-zip"     // .zip containing the <name> binary (e.g. bun); install to BinDir
 	FormatRawBinary     = "raw-binary"     // the artifact IS the <name> binary, no archive (e.g. claude); install to BinDir
 	FormatAppTarball    = "app-tarball"    // tar.gz containing <name>.app; install to AppDir + symlink
+	FormatBlob          = "blob"           // a verified, NON-executable artifact (VM image, engine tarball); placed in CacheDir as <name>, mode 0644, never on PATH (specs/0044)
 )
 
 // Sig is an optional upstream signature over the artifact's checksum file. When present, Apply
@@ -87,7 +88,7 @@ func ValidateDesired(pins []Pin) error {
 			return fmt.Errorf("install: pin %q must declare a source url", p.Name)
 		}
 		switch p.Format {
-		case FormatBinaryTarball, FormatBinaryZip, FormatRawBinary, FormatAppTarball:
+		case FormatBinaryTarball, FormatBinaryZip, FormatRawBinary, FormatAppTarball, FormatBlob:
 		default:
 			return fmt.Errorf("install: pin %q has invalid format %q", p.Name, p.Format)
 		}

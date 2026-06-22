@@ -49,20 +49,23 @@ func DefaultDirs() (Dirs, error) {
 		return Dirs{}, err
 	}
 	return Dirs{
-		BinDir: filepath.Join(home, ".local", "bin"),
-		AppDir: filepath.Join(home, "Applications"),
-		TmpDir: os.TempDir(),
+		BinDir:   filepath.Join(home, ".local", "bin"),
+		AppDir:   filepath.Join(home, "Applications"),
+		TmpDir:   os.TempDir(),
+		CacheDir: filepath.Join(home, ".cache", "safeslop"),
 	}, nil
 }
 
 // Dirs are the install targets. BinDir gets executables (~/.local/bin); AppDir gets .app bundles
-// (~/Applications); TmpDir is scratch for download/extract. ReceiptPath is where Apply records what it
-// placed; "" means the real ~/.config/safeslop/receipts.json (receipt.DefaultPath) — tests set it to a
-// temp file to isolate the store.
+// (~/Applications); TmpDir is scratch for download/extract; CacheDir (~/.cache/safeslop) gets FormatBlob
+// artifacts (VM images, engine tarballs) — non-executable, never on PATH. ReceiptPath is where Apply
+// records what it placed; "" means the real ~/.config/safeslop/receipts.json (receipt.DefaultPath) —
+// tests set CacheDir/ReceiptPath to temp paths to isolate.
 type Dirs struct {
 	BinDir      string
 	AppDir      string
 	TmpDir      string
+	CacheDir    string
 	ReceiptPath string
 }
 
@@ -185,6 +188,8 @@ func applyOne(ctx context.Context, a Action, dirs Dirs, fetch Fetcher, emit func
 		return installBinary(a.Name, work, dirs.BinDir)
 	case FormatRawBinary:
 		return installRawBinary(a.Name, data, dirs.BinDir) // the artifact IS the binary — no extraction
+	case FormatBlob:
+		return installBlob(a.Name, data, dirs.CacheDir) // verified non-executable artifact -> CacheDir
 	case FormatAppTarball:
 		if err := extractTarGz(data, work); err != nil {
 			return nil, fmt.Errorf("extract: %w", err)
@@ -258,6 +263,27 @@ func installRawBinary(name string, data []byte, binDir string) ([]receipt.File, 
 	dest := filepath.Join(binDir, name)
 	staged := dest + ".new"
 	if err := os.WriteFile(staged, data, 0o755); err != nil {
+		return nil, err
+	}
+	if err := commitStaged(staged, dest, name); err != nil {
+		return nil, err
+	}
+	return []receipt.File{{Path: dest, SHA256: sha256Hex(data)}}, nil
+}
+
+// installBlob places a verified, NON-executable artifact (a VM image, an engine tarball) at
+// cacheDir/<name>, mode 0o644 — never chmod-+x, never on PATH (specs/0044). Same atomic
+// stage→backup→commit as the binary path. Returns the placed artifact for the receipt.
+func installBlob(name string, data []byte, cacheDir string) ([]receipt.File, error) {
+	if cacheDir == "" {
+		return nil, fmt.Errorf("install: FormatBlob %q needs a CacheDir", name)
+	}
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		return nil, err
+	}
+	dest := filepath.Join(cacheDir, name)
+	staged := dest + ".new"
+	if err := os.WriteFile(staged, data, 0o644); err != nil {
 		return nil, err
 	}
 	if err := commitStaged(staged, dest, name); err != nil {
