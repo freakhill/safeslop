@@ -3,8 +3,12 @@ package install
 // DesiredState is the embedded, pinned + checksummed install manifest for darwin-arm64 — the only
 // platform SafeSlop targets (specs/0012). It is the desired-state half of `install plan`; apply
 // (SP7b-3) consumes URL + SHA256. Bump entries as data edits; TestDesiredStateIsFailClosed +
-// ValidateDesired guarantee every entry stays fully pinned. Tools probed by Status but absent here
-// (docker, nix) are not yet installer-managed — their multi-component installers are a later slice.
+// ValidateDesired guarantee every entry stays fully pinned. Two tools probed by Status are absent
+// here by design: nix is installer-managed via the *verified-installer* route instead (a pinned
+// nix-installer binary in internal/engine/tools, since a single pinned binary can't express its
+// multi-component system install); docker is genuinely unmanaged — on darwin the CLI is brew-only
+// and the daemon is Docker Desktop / OrbStack (GUI casks), with no single-artifact verified
+// installer to pin, so it stays a deliberate later slice.
 //
 // Checksums are read from each release's official checksum file (mise SHASUMS256.txt,
 // tart_<ver>_checksums.txt). Bump version+sha256+url together when pinning a newer release.
