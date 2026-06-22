@@ -19,6 +19,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/freakhill/safeslop/internal/engine/container"
+	runtimepkg "github.com/freakhill/safeslop/internal/engine/container/runtime"
 	"github.com/freakhill/safeslop/internal/engine/control"
 	"github.com/freakhill/safeslop/internal/engine/control/pb"
 	"github.com/freakhill/safeslop/internal/engine/creds"
@@ -526,7 +527,9 @@ func cmdDown() *cobra.Command {
 					return err
 				}
 				defer os.RemoveAll(dir)
-				if err := container.Down(context.Background(), composeFile); err != nil {
+				// `safeslop down` targets the ambient host docker (the lima VM is torn down per-run by its
+				// own backend Teardown); the engine seam defaults to the host docker engine here.
+				if err := container.Down(context.Background(), runtimepkg.HostDockerEngine{}, composeFile); err != nil {
 					return err
 				}
 			}

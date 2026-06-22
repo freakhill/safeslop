@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"text/template"
+
+	"github.com/freakhill/safeslop/internal/engine/container/runtime"
 )
 
 // composeParams fills compose.yml.tmpl. RuntimeDir holds the rendered squid.conf +
@@ -62,11 +64,12 @@ func writeSecretsEnv(stageDir string, secretEnv []string) (string, error) {
 	return path, nil
 }
 
-// composeRunArgv builds `docker compose -f <file> run --rm agent <argv...>`. There is NO -e:
-// secrets ride secrets.env (sourced by the entrypoint), non-secret env lives in the compose file.
-func composeRunArgv(composeFile string, argv []string) []string {
-	out := []string{"docker", "compose", "-f", composeFile, "run", "--rm", "agent"}
-	return append(out, argv...)
+// composeRunArgv builds the engine's `compose -f <file> run --rm agent <argv...>` invocation (docker on
+// the host, or `limactl shell <inst> … nerdctl …` for lima). There is NO -e: secrets ride secrets.env
+// (sourced by the entrypoint), non-secret env lives in the compose file. The result is driven through a
+// PTY (RunInPTY) — the interactive terminal passes through limactl shell (validated 2026-06-22).
+func composeRunArgv(eng runtime.Engine, composeFile string, argv []string) []string {
+	return eng.Argv(append([]string{"compose", "-f", composeFile, "run", "--rm", "agent"}, argv...)...)
 }
 
 // writeEntrypoint copies the embedded entrypoint.sh into dir (mode 0755).
