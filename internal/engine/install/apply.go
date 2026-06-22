@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+
+	"github.com/freakhill/safeslop/internal/engine/receipt"
 )
 
 // Fetcher fetches an artifact URL. The CLI/server use HTTPFetcher; tests use a fake.
@@ -54,11 +56,14 @@ func DefaultDirs() (Dirs, error) {
 }
 
 // Dirs are the install targets. BinDir gets executables (~/.local/bin); AppDir gets .app bundles
-// (~/Applications); TmpDir is scratch for download/extract.
+// (~/Applications); TmpDir is scratch for download/extract. ReceiptPath is where Apply records what it
+// placed; "" means the real ~/.config/safeslop/receipts.json (receipt.DefaultPath) — tests set it to a
+// temp file to isolate the store.
 type Dirs struct {
-	BinDir string
-	AppDir string
-	TmpDir string
+	BinDir      string
+	AppDir      string
+	TmpDir      string
+	ReceiptPath string
 }
 
 // EventKind classifies an Apply progress event.
@@ -96,66 +101,97 @@ func Apply(ctx context.Context, res Result, dirs Dirs, fetch Fetcher, emit func(
 	if emit == nil {
 		emit = func(Event) {}
 	}
+	// The receipt is the removal authority for `safeslop uninstall` (specs/0040/0041): each successful
+	// action is recorded here, so uninstall removes exactly what was placed rather than reconstructing
+	// from the manifest. Open the store up front; a load failure is FATAL — installing files we cannot
+	// record would leave them unremovable, the opposite of the honesty guarantee. dirs.ReceiptPath lets
+	// tests redirect the store; empty means the real ~/.config/safeslop/receipts.json.
+	rcPath := dirs.ReceiptPath
+	if rcPath == "" {
+		p, err := receipt.DefaultPath()
+		if err != nil {
+			return fmt.Errorf("install: locate receipt store: %w", err)
+		}
+		rcPath = p
+	}
+	store, err := receipt.Load(rcPath)
+	if err != nil {
+		return fmt.Errorf("install: load receipt store: %w", err)
+	}
 	for _, a := range res.Actions {
 		if a.Kind == ActionOK {
 			continue
 		}
 		emit(Event{Kind: EventStart, Tool: a.Name, Msg: string(a.Kind) + " " + a.Desired})
-		if err := applyOne(ctx, a, dirs, fetch, emit); err != nil {
+		placed, err := applyOne(ctx, a, dirs, fetch, emit)
+		if err != nil {
 			emit(Event{Kind: EventError, Tool: a.Name, Msg: err.Error()})
 			return fmt.Errorf("install %s: %w", a.Name, err)
+		}
+		// Record AFTER the files are committed. A record failure here is a real inconsistency (placed but
+		// untracked → not cleanly uninstallable), so it is fatal too — surface it rather than swallow it.
+		if err := store.Record(receipt.Entry{
+			Tool:         a.Name,
+			Path:         "A",
+			Version:      a.Desired,
+			Provenance:   a.Provenance,
+			SelfUpdating: a.SelfUpdating,
+			Files:        placed,
+		}); err != nil {
+			emit(Event{Kind: EventError, Tool: a.Name, Msg: "record receipt: " + err.Error()})
+			return fmt.Errorf("install %s: record receipt: %w", a.Name, err)
 		}
 		emit(Event{Kind: EventDone, Tool: a.Name, Msg: a.Desired})
 	}
 	return nil
 }
 
-func applyOne(ctx context.Context, a Action, dirs Dirs, fetch Fetcher, emit func(Event)) error {
+func applyOne(ctx context.Context, a Action, dirs Dirs, fetch Fetcher, emit func(Event)) ([]receipt.File, error) {
 	emit(Event{Kind: EventProgress, Tool: a.Name, Msg: "downloading"})
 	rc, err := fetch.Fetch(ctx, a.URL)
 	if err != nil {
-		return fmt.Errorf("download: %w", err)
+		return nil, fmt.Errorf("download: %w", err)
 	}
 	data, err := io.ReadAll(rc)
 	rc.Close()
 	if err != nil {
-		return fmt.Errorf("download read: %w", err)
+		return nil, fmt.Errorf("download read: %w", err)
 	}
 	emit(Event{Kind: EventProgress, Tool: a.Name, Msg: "verifying"})
 	if err := VerifySHA256(data, a.SHA256); err != nil {
-		return err
+		return nil, err
 	}
 	if a.Sig != nil {
 		if err := verifySigChain(ctx, a, fetch); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	emit(Event{Kind: EventProgress, Tool: a.Name, Msg: "installing"})
 	work, err := os.MkdirTemp(dirs.TmpDir, "safeslop-install-")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer os.RemoveAll(work)
 	switch a.Format {
 	case FormatBinaryTarball:
 		if err := extractTarGz(data, work); err != nil {
-			return fmt.Errorf("extract: %w", err)
+			return nil, fmt.Errorf("extract: %w", err)
 		}
 		return installBinary(a.Name, work, dirs.BinDir)
 	case FormatBinaryZip:
 		if err := extractZip(data, work); err != nil {
-			return fmt.Errorf("extract: %w", err)
+			return nil, fmt.Errorf("extract: %w", err)
 		}
 		return installBinary(a.Name, work, dirs.BinDir)
 	case FormatRawBinary:
 		return installRawBinary(a.Name, data, dirs.BinDir) // the artifact IS the binary — no extraction
 	case FormatAppTarball:
 		if err := extractTarGz(data, work); err != nil {
-			return fmt.Errorf("extract: %w", err)
+			return nil, fmt.Errorf("extract: %w", err)
 		}
 		return installApp(a.Name, work, dirs.AppDir, dirs.BinDir)
 	default:
-		return fmt.Errorf("unknown format %q", a.Format)
+		return nil, fmt.Errorf("unknown format %q", a.Format)
 	}
 }
 
@@ -183,39 +219,51 @@ func verifySigChain(ctx context.Context, a Action, fetch Fetcher) error {
 	return VerifyMinisign(a.Sig.PubKey, sums, sig, a.SHA256, a.Sig.Artifact)
 }
 
-// installBinary copies <name>/bin/<name> (or the first file named <name>) into binDir, 0755.
-func installBinary(name, srcRoot, binDir string) error {
+// installBinary copies <name>/bin/<name> (or the first file named <name>) into binDir, 0755, and
+// returns the placed artifact (path + its sha256) for the install receipt.
+func installBinary(name, srcRoot, binDir string) ([]receipt.File, error) {
 	src := filepath.Join(srcRoot, name, "bin", name)
 	if _, err := os.Stat(src); err != nil {
 		found, ferr := findFile(srcRoot, name)
 		if ferr != nil {
-			return fmt.Errorf("binary %q not found in archive: %w", name, err)
+			return nil, fmt.Errorf("binary %q not found in archive: %w", name, err)
 		}
 		src = found
 	}
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
-		return err
+		return nil, err
 	}
 	dest := filepath.Join(binDir, name)
 	staged := dest + ".new"
 	if err := copyFile(src, staged, 0o755); err != nil {
-		return err
+		return nil, err
 	}
-	return commitStaged(staged, dest, name)
+	if err := commitStaged(staged, dest, name); err != nil {
+		return nil, err
+	}
+	sum, err := sha256File(dest)
+	if err != nil {
+		return nil, fmt.Errorf("hash placed %q: %w", name, err)
+	}
+	return []receipt.File{{Path: dest, SHA256: sum}}, nil
 }
 
 // installRawBinary places an artifact that IS the binary (no archive — e.g. claude's release) into
-// binDir as <name>, using the same atomic stage→backup→commit as installBinary.
-func installRawBinary(name string, data []byte, binDir string) error {
+// binDir as <name>, using the same atomic stage→backup→commit as installBinary, and returns the placed
+// artifact for the receipt (sha computed from the verified bytes).
+func installRawBinary(name string, data []byte, binDir string) ([]receipt.File, error) {
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
-		return err
+		return nil, err
 	}
 	dest := filepath.Join(binDir, name)
 	staged := dest + ".new"
 	if err := os.WriteFile(staged, data, 0o755); err != nil {
-		return err
+		return nil, err
 	}
-	return commitStaged(staged, dest, name)
+	if err := commitStaged(staged, dest, name); err != nil {
+		return nil, err
+	}
+	return []receipt.File{{Path: dest, SHA256: sha256Hex(data)}}, nil
 }
 
 // commitStaged atomically swaps a staged file into dest: it stages beside the destination (same dir →
@@ -241,21 +289,23 @@ func commitStaged(staged, dest, name string) error {
 	return nil
 }
 
-// installApp moves <name>.app into appDir and symlinks its inner binary into binDir.
-func installApp(name, srcRoot, appDir, binDir string) error {
+// installApp moves <name>.app into appDir and symlinks its inner binary into binDir. It returns both
+// placed artifacts for the receipt: the .app bundle directory (no sha — it is a tree, not a file) and
+// the BinDir symlink.
+func installApp(name, srcRoot, appDir, binDir string) ([]receipt.File, error) {
 	app := filepath.Join(srcRoot, name+".app")
 	if _, err := os.Stat(app); err != nil {
-		return fmt.Errorf("%s.app not found in archive: %w", name, err)
+		return nil, fmt.Errorf("%s.app not found in archive: %w", name, err)
 	}
 	if err := os.MkdirAll(appDir, 0o755); err != nil {
-		return err
+		return nil, err
 	}
 	dest := filepath.Join(appDir, name+".app")
 	staged := dest + ".new"
 	_ = os.RemoveAll(staged)
 	if err := os.Rename(app, staged); err != nil {
 		if cerr := copyTree(app, staged); cerr != nil { // cross-device fallback
-			return cerr
+			return nil, cerr
 		}
 	}
 	// Keep the prior version for rollback instead of deleting it up front: a failed commit must never
@@ -265,7 +315,7 @@ func installApp(name, srcRoot, appDir, binDir string) error {
 	hadOld := false
 	if _, err := os.Stat(dest); err == nil {
 		if err := os.Rename(dest, backup); err != nil {
-			return fmt.Errorf("back up existing %s.app: %w", name, err)
+			return nil, fmt.Errorf("back up existing %s.app: %w", name, err)
 		}
 		hadOld = true
 	}
@@ -274,14 +324,20 @@ func installApp(name, srcRoot, appDir, binDir string) error {
 			_ = os.Rename(backup, dest) // roll back to the prior version
 		}
 		_ = os.RemoveAll(staged)
-		return fmt.Errorf("commit %s.app: %w", name, err)
+		return nil, fmt.Errorf("commit %s.app: %w", name, err)
 	}
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
-		return err
+		return nil, err
 	}
 	link := filepath.Join(binDir, name)
 	_ = os.Remove(link)
-	return os.Symlink(filepath.Join(dest, "Contents", "MacOS", name), link)
+	if err := os.Symlink(filepath.Join(dest, "Contents", "MacOS", name), link); err != nil {
+		return nil, err
+	}
+	return []receipt.File{
+		{Path: dest},                // <name>.app bundle directory
+		{Path: link, Symlink: true}, // BinDir/<name> -> Contents/MacOS/<name>
+	}, nil
 }
 
 // Rollback restores the prior version of a tool that the last install kept at <dest>.bak (installApp /

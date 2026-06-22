@@ -23,6 +23,7 @@ import (
 	"github.com/freakhill/safeslop/internal/engine/buildinfo"
 	"github.com/freakhill/safeslop/internal/engine/hostenv"
 	"github.com/freakhill/safeslop/internal/engine/install"
+	"github.com/freakhill/safeslop/internal/engine/receipt"
 	"github.com/freakhill/safeslop/internal/engine/sandbox"
 )
 
@@ -127,6 +128,17 @@ type VerifiedInstaller struct {
 	// safeslop's own TOFU hash). Surfaced as the cockpit's trust badge; defaults to the cautious TLS
 	// reading when unset, so an un-annotated installer never over-claims "vendor".
 	Provenance string
+	// Uninstall is the argv of the tool's OWN designated uninstaller for the installed state — safeslop
+	// never hand-rolls teardown of /nix, a daemon, or synthetic.conf (specs/0040/0041 Path B). It is
+	// recorded in the install receipt and run (after re-verifying it, fail-closed on its exit) by
+	// `safeslop uninstall`. Per-tool the correct uninstaller differs: a self-managing tool exposes its
+	// own (rustup self uninstall); a receipt-driven installer drops a matching uninstaller binary
+	// (Determinate leaves /nix/nix-installer).
+	Uninstall []string
+	// UninstallVerify is an optional post-teardown probe argv. Uninstall does not trust the delegate's
+	// exit code alone (nix-installer has shipped "successful" uninstalls leaving stale state); it runs
+	// this and treats matching output as "residue remains" (specs/0040). Empty = no extra probe.
+	UninstallVerify []string
 }
 
 // vendorChecksum reports whether the installer's pinned SHA matches a vendor-published checksum.
@@ -195,6 +207,11 @@ func Catalog() []Tool {
 				Args:       []string{"install", "--no-confirm"},
 				Confine:    false,                 // creates /nix + a daemon via sudo — cannot run under a user sandbox
 				Provenance: install.ProvenanceTLS, // Determinate publishes no checksum sidecar — TOFU hash
+				// Determinate drops /nix/nix-installer (the matching build) for exactly this — the only safe
+				// way to reverse the daemon + APFS volume + synthetic.conf it created. Post-verify by greping
+				// `diskutil apfs list` for a surviving Nix volume (specs/0041 §"Contradiction resolved").
+				Uninstall:       []string{"/nix/nix-installer", "uninstall", "--no-confirm"},
+				UninstallVerify: []string{"/usr/sbin/diskutil", "apfs", "list"},
 			},
 			Script: "curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install",
 			Note:   "Nix package manager (Determinate installer)",
@@ -216,6 +233,9 @@ func Catalog() []Tool {
 				Args:       []string{"-y"},
 				Confine:    true,                     // user-space install (~/.rustup, ~/.cargo) — sandbox it with secret-deny
 				Provenance: install.ProvenanceVendor, // matches rustup's published .sha256
+				// rustup is self-managing: its live `rustup self uninstall` is the authoritative teardown
+				// (a cached old rustup-init could corrupt newer state). No APFS/daemon probe needed.
+				Uninstall: []string{"rustup", "self", "uninstall", "-y"},
 			},
 			Script: "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y",
 			Note:   "Rust toolchain — cargo/rustc via rustup",
@@ -729,7 +749,44 @@ func installVerifiedInstaller(t Tool, emit func(line string)) error {
 	cmd.Stderr = lw
 	runErr := cmd.Run()
 	lw.flush()
-	return runErr
+	if runErr != nil {
+		return runErr
+	}
+	// The installer placed system state safeslop doesn't directly track (a daemon, an APFS volume,
+	// ~/.rustup). Record a Path B receipt so `safeslop uninstall` can delegate teardown to the tool's own
+	// uninstaller rather than reconstructing it (specs/0040/0041). A record failure is fatal: an
+	// un-recorded Path B install is one uninstall cannot cleanly reverse.
+	if err := recordVerifiedInstall(t); err != nil {
+		emit("  WARNING: installed but failed to record uninstall receipt: " + err.Error())
+		return err
+	}
+	return nil
+}
+
+// recordVerifiedInstall writes the Path B install receipt for a verified-installer tool: the delegate
+// uninstaller argv to run at uninstall time, plus the installer version and provenance. Factored out so
+// it is unit-testable without running a real installer.
+func recordVerifiedInstall(t Tool) error {
+	in := t.Installer
+	if in == nil {
+		return errNoRoute
+	}
+	rcPath, err := receipt.DefaultPath()
+	if err != nil {
+		return fmt.Errorf("locate receipt store: %w", err)
+	}
+	store, err := receipt.Load(rcPath)
+	if err != nil {
+		return fmt.Errorf("load receipt store: %w", err)
+	}
+	return store.Record(receipt.Entry{
+		Tool:             t.Name,
+		Path:             "B",
+		Version:          in.Version,
+		Provenance:       in.Provenance,
+		Uninstall:        in.Uninstall,
+		InstallerVersion: in.Version,
+	})
 }
 
 // installerRunArgv builds the command to run a verified installer at binPath, wrapping it under
