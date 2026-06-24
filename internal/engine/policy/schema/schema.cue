@@ -108,6 +108,11 @@ package safeslop
 	ttl?:   string | *"1h"
 	url?:   string
 	token:  #SecretRef
+	// Multi-repo: one deploy key per entry, staged with SSH aliases + insteadOf (specs/0047 P2).
+	// `url` is required in this mode (no single origin to infer the instance from). `ssh-port` is
+	// the instance's git SSH port (Forgejo instances commonly differ from the https URL), default 22.
+	repos?:      [...#RepoCred]
+	"ssh-port"?: int | *22
 }
 
 // Credential providers a profile uses (SP2: pnpm; SP/0009: aws/gcp; SP/0010: kube; SP/0011: ssh;

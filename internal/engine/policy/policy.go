@@ -93,10 +93,12 @@ type SshCreds struct {
 // instance base (e.g. "https://codeberg.org"); when empty the host is inferred from the cwd
 // origin remote (specs/0047).
 type ForgejoCreds struct {
-	Write bool   `json:"write,omitempty"`
-	Ttl   string `json:"ttl,omitempty"`
-	URL   string `json:"url,omitempty"`
-	Token string `json:"token"`
+	Write   bool       `json:"write,omitempty"`
+	Ttl     string     `json:"ttl,omitempty"`
+	URL     string     `json:"url,omitempty"`
+	Token   string     `json:"token"`
+	Repos   []RepoCred `json:"repos,omitempty"`    // multi-repo: one deploy key per entry (specs/0047 P2)
+	SSHPort int        `json:"ssh-port,omitempty"` // instance git SSH port for multi-repo (default 22)
 }
 
 // Credentials groups the credential providers a profile uses (SP2; aws/gcp SP/0009; kube SP/0010;

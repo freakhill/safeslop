@@ -149,3 +149,145 @@ func TestRevokeForgejoCallsDelete(t *testing.T) {
 func TestRevokeForgejoNoInfoIsSilent(t *testing.T) {
 	RevokeForgejo(context.Background(), t.TempDir())
 }
+
+func TestHostFromURL(t *testing.T) {
+	cases := map[string]string{
+		"https://codeberg.org":                "codeberg.org",
+		"https://forgejojo.lucyjojo.me:3000/": "forgejojo.lucyjojo.me",
+		"https://git.example.com/":            "git.example.com",
+	}
+	for in, want := range cases {
+		if got := hostFromURL(in); got != want {
+			t.Fatalf("hostFromURL(%q) = %q want %q", in, got, want)
+		}
+	}
+}
+
+func TestStageForgejoMultiRepo(t *testing.T) {
+	type req struct{ path, body string }
+	var reqs []req
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		reqs = append(reqs, req{r.URL.Path, string(b)})
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "api") {
+			_, _ = w.Write([]byte(`{"id":555}`))
+		}
+	}))
+	defer srv.Close()
+
+	binDir := t.TempDir()
+	stage := t.TempDir()
+	fakeStub(t, binDir, "ssh-keygen", `eval "p=\${$#}"; echo PRIV > "$p"; echo "ssh-ed25519 AAAAPUB safeslop" > "$p.pub"`)
+	fakeStub(t, binDir, "ssh-keyscan", `eval "h=\${$#}"; echo "$h ssh-ed25519 AAAAHOSTKEY"`)
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+	t.Setenv("FORGEJO_TOKEN", "secret-tok")
+
+	host := hostFromURL(srv.URL)
+	creds := &policy.Credentials{Forgejo: &policy.ForgejoCreds{
+		URL: srv.URL, Token: "env:FORGEJO_TOKEN", SSHPort: 2222,
+		Repos: []policy.RepoCred{{Repo: "jojo/web"}, {Repo: "jojo/api", Write: true}},
+	}}
+	env, err := StageForgejo(context.Background(), creds, stage)
+	if err != nil {
+		t.Fatalf("StageForgejo multi: %v", err)
+	}
+
+	for _, slug := range []string{"jojo-web", "jojo-api"} {
+		kp := filepath.Join(stage, ".ssh", "id_"+slug)
+		if fi, _ := os.Stat(kp); fi == nil || fi.Mode().Perm() != 0o600 {
+			t.Fatalf("key %s not staged 0600", slug)
+		}
+		if _, err := os.Stat(kp + ".pub"); !os.IsNotExist(err) {
+			t.Fatalf(".pub for %s must be removed", slug)
+		}
+	}
+
+	cfg, _ := os.ReadFile(filepath.Join(stage, ".ssh", "config"))
+	for _, want := range []string{
+		"Host " + host + "-jojo-web",
+		"Host " + host + "-jojo-api",
+		"HostName " + host,
+		"Port 2222",
+	} {
+		if !strings.Contains(string(cfg), want) {
+			t.Fatalf("ssh config missing %q:\n%s", want, cfg)
+		}
+	}
+
+	joined := strings.Join(env, "\n")
+	if !strings.Contains(joined, "GIT_SSH_COMMAND=ssh -F "+filepath.Join(stage, ".ssh", "config")) ||
+		!strings.Contains(joined, "GIT_CONFIG_GLOBAL="+filepath.Join(stage, ".gitconfig")) {
+		t.Fatalf("env = %v", env)
+	}
+
+	// insteadOf covers both the scp-like and the ssh://host:port spellings.
+	gc, _ := os.ReadFile(filepath.Join(stage, ".gitconfig"))
+	for _, want := range []string{
+		"insteadOf = git@" + host + ":jojo/web.git",
+		"insteadOf = ssh://git@" + host + ":2222/jojo/web.git",
+	} {
+		if !strings.Contains(string(gc), want) {
+			t.Fatalf("gitconfig missing %q:\n%s", want, gc)
+		}
+	}
+
+	// revoke-info: one 4-field line per key, token ref (never value).
+	ri, _ := os.ReadFile(filepath.Join(stage, ".ssh", "revoke-info"))
+	if !strings.Contains(string(ri), "jojo/web 555 env:FORGEJO_TOKEN") || !strings.Contains(string(ri), "jojo/api 555 env:FORGEJO_TOKEN") {
+		t.Fatalf("revoke-info = %q", ri)
+	}
+	if strings.Contains(string(ri), "secret-tok") {
+		t.Fatal("token VALUE must never be on disk")
+	}
+
+	// API hit each repo; repo2 read-write.
+	var web, api string
+	for _, r := range reqs {
+		if strings.Contains(r.path, "/jojo/web/keys") {
+			web = r.body
+		}
+		if strings.Contains(r.path, "/jojo/api/keys") {
+			api = r.body
+		}
+	}
+	if !strings.Contains(web, `"read_only":true`) {
+		t.Fatalf("web should be ro: %q", web)
+	}
+	if !strings.Contains(api, `"read_only":false`) {
+		t.Fatalf("api should be rw: %q", api)
+	}
+}
+
+func TestRevokeForgejoMultiRevokesAll(t *testing.T) {
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			paths = append(paths, r.URL.Path)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	t.Setenv("FORGEJO_TOKEN", "secret-tok")
+
+	stage := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(stage, ".ssh"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	info := srv.URL + " jojo/web 555 env:FORGEJO_TOKEN\n" + srv.URL + " jojo/api 556 env:FORGEJO_TOKEN\n"
+	if err := os.WriteFile(filepath.Join(stage, ".ssh", "revoke-info"), []byte(info), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	RevokeForgejo(context.Background(), stage)
+	for _, want := range []string{"/api/v1/repos/jojo/web/keys/555", "/api/v1/repos/jojo/api/keys/556"} {
+		found := false
+		for _, p := range paths {
+			if p == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("revoke missing %q (got %v)", want, paths)
+		}
+	}
+}

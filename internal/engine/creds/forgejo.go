@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,6 +37,15 @@ func forgejoAPIBase(fc *policy.ForgejoCreds, host string) string {
 		return strings.TrimRight(fc.URL, "/")
 	}
 	return "https://" + host
+}
+
+// hostFromURL returns the hostname (no port) of an instance base URL.
+func hostFromURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return u.Hostname()
 }
 
 // ---- parsers ----
@@ -152,6 +162,11 @@ func StageForgejo(ctx context.Context, creds *policy.Credentials, stageDir strin
 	}
 	fc := creds.Forgejo
 
+	// Multi-repo: one deploy key per named repo, staged with SSH aliases + insteadOf (specs/0047 P2).
+	if len(fc.Repos) > 0 {
+		return stageForgejoMulti(ctx, fc, stageDir)
+	}
+
 	rOut, err := runSSHCmd(ctx, []string{"git", "remote", "get-url", "origin"}, "run safeslop from a repo with a Forgejo origin")
 	if err != nil {
 		return nil, err
@@ -226,18 +241,21 @@ func RevokeForgejo(ctx context.Context, stageDir string) {
 	if err != nil {
 		return
 	}
-	f := strings.Fields(strings.TrimSpace(string(b)))
-	if len(f) != 4 {
-		return
+	// One "<base> <owner>/<repo> <id> <token-ref>" line per staged key (1 single-repo, N multi).
+	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+		f := strings.Fields(line)
+		if len(f) != 4 {
+			continue
+		}
+		base, ownerRepo, id, tokenRef := f[0], f[1], f[2], f[3]
+		or := strings.SplitN(ownerRepo, "/", 2)
+		if len(or) != 2 {
+			continue
+		}
+		token, err := secrets.Resolve(ctx, tokenRef)
+		if err != nil {
+			continue
+		}
+		_, _, _ = forgejoDo(ctx, http.MethodDelete, forgejoKeyURL(base, or[0], or[1], id), token, nil)
 	}
-	base, ownerRepo, id, tokenRef := f[0], f[1], f[2], f[3]
-	or := strings.SplitN(ownerRepo, "/", 2)
-	if len(or) != 2 {
-		return
-	}
-	token, err := secrets.Resolve(ctx, tokenRef)
-	if err != nil {
-		return
-	}
-	_, _, _ = forgejoDo(ctx, http.MethodDelete, forgejoKeyURL(base, or[0], or[1], id), token, nil)
 }
