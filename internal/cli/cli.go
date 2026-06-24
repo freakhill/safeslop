@@ -654,7 +654,8 @@ func resolveSession(profile, configPath string) (control.SessionSpec, error) {
 		env := childEnv(secretEnv, pathEnv)
 		return control.SessionSpec{Argv: wrapped, Dir: ws, Env: env, OnClose: chainClose(wrapCleanup, wipe)}, nil
 	case "container":
-		cargv, cleanup, err := container.PrepareSession(context.Background(), argv, ws, prof.Network, secretEnv, stageDir)
+		egress := append(append([]string{}, policy.AgentEgress(prof.Agent)...), prof.Egress...)
+		cargv, cleanup, err := container.PrepareSession(context.Background(), argv, ws, prof.Network, egress, secretEnv, stageDir)
 		if err != nil {
 			_ = os.RemoveAll(stageDir)
 			return control.SessionSpec{}, err
@@ -1046,7 +1047,9 @@ func runProfile(name string, prof policy.Profile, argv []string, ws string) (int
 	case "container":
 		// secrets go in secrets.env (sourced by the entrypoint); .npmrc and kubeconfig
 		// are staged in stageDir and reached via the /safeslop/runtime bind mount.
-		return container.Launch(ctx, engexec.LaunchSpec{Argv: argv}, ws, prof.Network, secretEnv, stageDir)
+		// egress = the agent's built-in providers + the profile's egress: list (specs/0046).
+		egress := append(append([]string{}, policy.AgentEgress(prof.Agent)...), prof.Egress...)
+		return container.Launch(ctx, engexec.LaunchSpec{Argv: argv}, ws, prof.Network, egress, secretEnv, stageDir)
 	case "vm":
 		// secrets ride secrets.env scp'd into the VM and sourced over ssh; the VM is destroyed on exit.
 		tk := ""

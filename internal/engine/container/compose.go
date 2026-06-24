@@ -26,6 +26,10 @@ type composeParams struct {
 	// it (compose's inline internal:true does not isolate egress there); the host docker backend leaves it
 	// empty (rootful docker honors internal:true). See compose.yml.tmpl.
 	InternalNet string
+	// Egress is the extra allowlist domains (the agent's built-in providers + the profile's `egress:`,
+	// already unioned by the caller) appended to the base allowlist asset when the per-run
+	// allowlist.domains is materialized. Empty => base allowlist only (specs/0046).
+	Egress []string
 }
 
 func renderCompose(p composeParams) (string, error) {
