@@ -42,3 +42,15 @@ func TestAgentArgvShellFallsBackWhenNoShellEnv(t *testing.T) {
 		t.Errorf("empty $SHELL host fallback: argv=%v, want [/bin/sh]", argv)
 	}
 }
+
+// TestAgentArgvPi locks specs/0045: agent: "pi" launches the `pi` binary interactively
+// (resolved off PATH for host/sandbox), the same shape as claude/opencode.
+func TestAgentArgvPi(t *testing.T) {
+	argv, err := agentArgv(policy.Profile{Agent: "pi"})
+	if err != nil {
+		t.Fatalf("agentArgv(pi): %v", err)
+	}
+	if len(argv) != 1 || argv[0] != "pi" {
+		t.Errorf("pi argv = %v, want [pi]", argv)
+	}
+}

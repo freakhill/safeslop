@@ -131,6 +131,8 @@ func agentLabel(a string) string {
 		return "Codex"
 	case "opencode":
 		return "opencode"
+	case "pi":
+		return "Pi"
 	case "", "shell":
 		return "shell"
 	default:
