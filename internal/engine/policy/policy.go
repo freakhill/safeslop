@@ -71,11 +71,20 @@ type KubeCluster struct {
 	Gke *GkeCluster `json:"gke,omitempty"`
 }
 
+// RepoCred names one repository in a multi-repo credential, with its own access (specs/0047 P2).
+type RepoCred struct {
+	Repo  string `json:"repo"`            // "owner/name"
+	Write bool   `json:"write,omitempty"` // rw deploy key for this repo (default ro)
+}
+
 // SshCreds stages a per-run repo-scoped ephemeral SSH deploy key (read-only unless Write).
 // The host mints it; only the private key crosses the boundary (specs/0001 §7.1, specs/0011).
+// When Repos is non-empty, one key is minted per repo and staged with per-repo SSH aliases +
+// git insteadOf rewrites (specs/0047 P2); otherwise the single repo is inferred from origin.
 type SshCreds struct {
-	Write bool   `json:"write,omitempty"`
-	Ttl   string `json:"ttl,omitempty"`
+	Write bool       `json:"write,omitempty"`
+	Ttl   string     `json:"ttl,omitempty"`
+	Repos []RepoCred `json:"repos,omitempty"`
 }
 
 // ForgejoCreds is the Forgejo/Gitea sibling of SshCreds: a per-run repo-scoped ephemeral deploy

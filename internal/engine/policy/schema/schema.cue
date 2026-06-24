@@ -84,9 +84,19 @@ package safeslop
 // SSH/Git auth into the boundary as a per-run, repo-scoped ephemeral deploy key — the
 // 1Password agent socket is never passed in (specs/0001 §7.1, specs/0011). The host mints
 // the key (read-only by default); write:true is lint-gated on network:deny.
+// One repository in a multi-repo credential, with its own access level (specs/0047 P2).
+#RepoCred: {
+	repo:   string // "owner/name"
+	write?: bool | *false
+}
+
 #SshCreds: {
 	write?: bool | *false
 	ttl?:   string | *"1h"
+	// Multi-repo: one ephemeral deploy key per entry, staged with distinct SSH host aliases +
+	// git insteadOf rewrites so git picks the right key per repo (specs/0047 P2). Omit to infer
+	// the single repo from the cwd origin (the `write`/`ttl` above apply to that inferred key).
+	repos?: [...#RepoCred]
 }
 
 // Forgejo/Gitea ephemeral deploy key — the non-GitHub-forge sibling of #SshCreds (specs/0047). The

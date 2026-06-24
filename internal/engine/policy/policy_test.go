@@ -76,6 +76,13 @@ func TestLoadDecodesSecretsAndCredentials(t *testing.T) {
 	if gh.Host != "npm.pkg.github.com" || gh.Token != "env:GH_NPM_TOKEN" || gh.Scope != "@myorg" {
 		t.Errorf("pnpm[1] = %+v", gh)
 	}
+	// Multi-repo ssh credential decodes through the embedded schema (specs/0047 P2).
+	if work.Credentials.Ssh == nil || len(work.Credentials.Ssh.Repos) != 2 {
+		t.Fatalf("expected 2 ssh repos, got %+v", work.Credentials.Ssh)
+	}
+	if r := work.Credentials.Ssh.Repos; r[0].Repo != "acme/web" || r[1].Repo != "acme/api" || r[0].Write || !r[1].Write {
+		t.Errorf("ssh repos = %+v", r)
+	}
 }
 
 func TestLoadRejectsBadSecretRef(t *testing.T) {
