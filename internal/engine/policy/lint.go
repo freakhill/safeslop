@@ -46,6 +46,14 @@ func Lint(cfg *Config) []Warning {
 					"set network:deny with a forge-only egress allowlist, or use a read-only key (specs/0011)",
 			})
 		}
+		if len(p.Egress) > 0 && (p.Network == "allow" || p.Environment != "container") {
+			out = append(out, Warning{
+				Profile: n,
+				Code:    "egress-ignored",
+				Message: "sets egress domains but they are ignored — the egress allowlist is honored only on " +
+					"environment:container with network:deny (network:allow bypasses it; host/sandbox use Seatbelt; vm uses a proxy)",
+			})
+		}
 	}
 	return out
 }

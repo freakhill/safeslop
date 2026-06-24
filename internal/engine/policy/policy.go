@@ -109,6 +109,9 @@ type Profile struct {
 	Workspace   string     `json:"workspace,omitempty"`
 	Files       *FileScope `json:"files,omitempty"`
 	Network     string     `json:"network"`
+	// Egress lists extra allowlist domains for environment:container with network:deny,
+	// unioned with the base allowlist + the agent's built-in providers (specs/0046).
+	Egress []string `json:"egress,omitempty"`
 	// Secrets maps an env var name to a secret ref (op://... or env:NAME),
 	// resolved at launch and injected into the agent's environment.
 	Secrets map[string]string `json:"secrets,omitempty"`

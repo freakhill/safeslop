@@ -79,3 +79,40 @@ func TestLintSshWriteOpenEgress(t *testing.T) {
 		t.Fatal("read-only+allow must NOT be flagged")
 	}
 }
+
+func lintCodes(cfg *Config) map[string]bool {
+	m := map[string]bool{}
+	for _, w := range Lint(cfg) {
+		m[w.Code] = true
+	}
+	return m
+}
+
+// TestLintEgressIgnored: an `egress:` list is honored only on environment:container with
+// network:deny; anywhere else it is silently ignored, so lint warns (specs/0046).
+func TestLintEgressIgnored(t *testing.T) {
+	ok := &Config{Profiles: map[string]Profile{
+		"p": {Agent: "pi", Environment: "container", Network: "deny", Egress: []string{".x.com"}},
+	}}
+	if lintCodes(ok)["egress-ignored"] {
+		t.Error("container+deny with egress must NOT warn — it is honored there")
+	}
+	allow := &Config{Profiles: map[string]Profile{
+		"p": {Agent: "pi", Environment: "container", Network: "allow", Egress: []string{".x.com"}},
+	}}
+	if !lintCodes(allow)["egress-ignored"] {
+		t.Error("container+allow with egress must warn (allowlist bypassed)")
+	}
+	sb := &Config{Profiles: map[string]Profile{
+		"p": {Agent: "pi", Environment: "sandbox", Network: "deny", Egress: []string{".x.com"}},
+	}}
+	if !lintCodes(sb)["egress-ignored"] {
+		t.Error("non-container env with egress must warn (Seatbelt has no domain allowlist)")
+	}
+	none := &Config{Profiles: map[string]Profile{
+		"p": {Agent: "pi", Environment: "sandbox", Network: "deny"},
+	}}
+	if lintCodes(none)["egress-ignored"] {
+		t.Error("a profile without egress must not warn")
+	}
+}

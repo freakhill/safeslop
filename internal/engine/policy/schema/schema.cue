@@ -128,6 +128,11 @@ package safeslop
 	// container/vm support + auto-deny of secret-bearing children are tracked in specs/0029.
 	files?: #FileScope
 	network: #Network | *"deny"
+	// Extra egress domains for environment:container with network:deny — unioned with the
+	// base allowlist + the agent's built-in providers (specs/0046). A leading dot
+	// (".example.com") is a subdomain suffix match; a bare host is exact. Ignored on
+	// network:allow and on host/sandbox/vm.
+	egress?: [...string]
 	// Env var name -> secret ref; injected into the agent's environment at launch.
 	secrets?: {[string]: #SecretRef}
 	// Credentials staged before launch and wiped on exit.
