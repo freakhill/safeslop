@@ -89,13 +89,26 @@ package safeslop
 	ttl?:   string | *"1h"
 }
 
-// Credential providers a profile uses (SP2: pnpm; SP/0009: aws/gcp; SP/0010: kube; SP/0011: ssh).
+// Forgejo/Gitea ephemeral deploy key — the non-GitHub-forge sibling of #SshCreds (specs/0047). The
+// instance has no `gh`-style ambient auth, so `token` is an explicit secret ref. `url` is the
+// instance base (e.g. "https://codeberg.org"); when omitted the host is inferred from the cwd
+// origin remote. The SSH host key is pinned per run via ssh-keyscan at stage time.
+#ForgejoCreds: {
+	write?: bool | *false
+	ttl?:   string | *"1h"
+	url?:   string
+	token:  #SecretRef
+}
+
+// Credential providers a profile uses (SP2: pnpm; SP/0009: aws/gcp; SP/0010: kube; SP/0011: ssh;
+// specs/0047: forgejo).
 #Credentials: {
-	pnpm?: [...#PnpmRegistry]
-	aws?:  #AwsSso
-	gcp?:  #GcpAdc
-	kube?: #KubeCluster
-	ssh?:  #SshCreds
+	pnpm?:    [...#PnpmRegistry]
+	aws?:     #AwsSso
+	gcp?:     #GcpAdc
+	kube?:    #KubeCluster
+	ssh?:     #SshCreds
+	forgejo?: #ForgejoCreds
 }
 
 // A pinned toolchain layered onto any environment (SP5), orthogonal to `environment`.
