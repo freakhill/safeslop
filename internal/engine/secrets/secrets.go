@@ -12,6 +12,7 @@ import (
 	"os"
 	osexec "os/exec"
 	"strings"
+	"time"
 )
 
 // OpAvailable reports whether the 1Password CLI is on PATH.
@@ -20,11 +21,16 @@ func OpAvailable() bool {
 	return err == nil
 }
 
-// OpSignedIn reports whether `op` has an active session (best-effort).
+// OpSignedIn reports whether `op` has an active session (best-effort). The probe is bounded:
+// a signed-out or network-gated `op whoami` can block indefinitely (it may try to reach the
+// 1Password app/daemon), so `safeslop doctor` must never hang on it — a slow/hung op degrades
+// to "not signed in".
 func OpSignedIn(ctx context.Context) bool {
 	if !OpAvailable() {
 		return false
 	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
 	return osexec.CommandContext(ctx, "op", "whoami").Run() == nil
 }
 
