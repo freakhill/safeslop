@@ -120,6 +120,10 @@ safeslop: {
 			// Real per-URL allowlisting is the container tier's job.
 			network: "deny"
 
+			// Extra egress domains for environment:container + network:deny, unioned with
+			// the base allowlist + the agent's built-in providers (".x.com" = subdomain match).
+			egress: [".internal.example.com"]
+
 			// Directory the boundary confines file access to.
 			// Omitted => the directory you ran safeslop from.
 			workspace: "."
