@@ -84,18 +84,46 @@ package safeslop
 // SSH/Git auth into the boundary as a per-run, repo-scoped ephemeral deploy key — the
 // 1Password agent socket is never passed in (specs/0001 §7.1, specs/0011). The host mints
 // the key (read-only by default); write:true is lint-gated on network:deny.
+// One repository in a multi-repo credential, with its own access level (specs/0047 P2).
+#RepoCred: {
+	repo:   string // "owner/name"
+	write?: bool | *false
+}
+
 #SshCreds: {
 	write?: bool | *false
 	ttl?:   string | *"1h"
+	// Multi-repo: one ephemeral deploy key per entry, staged with distinct SSH host aliases +
+	// git insteadOf rewrites so git picks the right key per repo (specs/0047 P2). Omit to infer
+	// the single repo from the cwd origin (the `write`/`ttl` above apply to that inferred key).
+	repos?: [...#RepoCred]
 }
 
-// Credential providers a profile uses (SP2: pnpm; SP/0009: aws/gcp; SP/0010: kube; SP/0011: ssh).
+// Forgejo/Gitea ephemeral deploy key — the non-GitHub-forge sibling of #SshCreds (specs/0047). The
+// instance has no `gh`-style ambient auth, so `token` is an explicit secret ref. `url` is the
+// instance base (e.g. "https://codeberg.org"); when omitted the host is inferred from the cwd
+// origin remote. The SSH host key is pinned per run via ssh-keyscan at stage time.
+#ForgejoCreds: {
+	write?: bool | *false
+	ttl?:   string | *"1h"
+	url?:   string
+	token:  #SecretRef
+	// Multi-repo: one deploy key per entry, staged with SSH aliases + insteadOf (specs/0047 P2).
+	// `url` is required in this mode (no single origin to infer the instance from). `ssh-port` is
+	// the instance's git SSH port (Forgejo instances commonly differ from the https URL), default 22.
+	repos?:      [...#RepoCred]
+	"ssh-port"?: int | *22
+}
+
+// Credential providers a profile uses (SP2: pnpm; SP/0009: aws/gcp; SP/0010: kube; SP/0011: ssh;
+// specs/0047: forgejo).
 #Credentials: {
-	pnpm?: [...#PnpmRegistry]
-	aws?:  #AwsSso
-	gcp?:  #GcpAdc
-	kube?: #KubeCluster
-	ssh?:  #SshCreds
+	pnpm?:    [...#PnpmRegistry]
+	aws?:     #AwsSso
+	gcp?:     #GcpAdc
+	kube?:    #KubeCluster
+	ssh?:     #SshCreds
+	forgejo?: #ForgejoCreds
 }
 
 // A pinned toolchain layered onto any environment (SP5), orthogonal to `environment`.

@@ -999,9 +999,19 @@ func stageProfile(ctx context.Context, prof policy.Profile, stageDir string) (se
 	if err != nil {
 		return nil, nil, err
 	}
+	// ssh (GitHub) and forgejo both deliver a single GIT_SSH_COMMAND into the same stage; one forge
+	// per profile until specs/0047 P2 unifies them via per-repo SSH aliases + insteadOf rewrites.
+	if prof.Credentials != nil && prof.Credentials.Ssh != nil && prof.Credentials.Forgejo != nil {
+		return nil, nil, fmt.Errorf("credentials: set either ssh (GitHub) or forgejo, not both (multi-forge lands in specs/0047 P2)")
+	}
+	forgejoEnv, err := creds.StageForgejo(ctx, prof.Credentials, stageDir)
+	if err != nil {
+		return nil, nil, err
+	}
 	pathEnv = append(pathEnv, npmrcEnv...)
 	pathEnv = append(pathEnv, kubeEnv...)
 	pathEnv = append(pathEnv, sshEnv...)
+	pathEnv = append(pathEnv, forgejoEnv...)
 	return secretEnv, pathEnv, nil
 }
 
@@ -1026,6 +1036,9 @@ func runProfile(name string, prof policy.Profile, argv []string, ws string) (int
 	// LIFO orders it first).
 	if prof.Credentials != nil && prof.Credentials.Ssh != nil {
 		defer creds.RevokeSSH(context.Background(), stageDir)
+	}
+	if prof.Credentials != nil && prof.Credentials.Forgejo != nil {
+		defer creds.RevokeForgejo(context.Background(), stageDir)
 	}
 
 	// Detect (and warn about) any change the agent makes to git's executable surface —

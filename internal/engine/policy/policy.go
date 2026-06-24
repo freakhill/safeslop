@@ -71,20 +71,45 @@ type KubeCluster struct {
 	Gke *GkeCluster `json:"gke,omitempty"`
 }
 
-// SshCreds stages a per-run repo-scoped ephemeral SSH deploy key (read-only unless Write).
-// The host mints it; only the private key crosses the boundary (specs/0001 §7.1, specs/0011).
-type SshCreds struct {
-	Write bool   `json:"write,omitempty"`
-	Ttl   string `json:"ttl,omitempty"`
+// RepoCred names one repository in a multi-repo credential, with its own access (specs/0047 P2).
+type RepoCred struct {
+	Repo  string `json:"repo"`            // "owner/name"
+	Write bool   `json:"write,omitempty"` // rw deploy key for this repo (default ro)
 }
 
-// Credentials groups the credential providers a profile uses (SP2; aws/gcp SP/0009; kube SP/0010; ssh SP/0011).
+// SshCreds stages a per-run repo-scoped ephemeral SSH deploy key (read-only unless Write).
+// The host mints it; only the private key crosses the boundary (specs/0001 §7.1, specs/0011).
+// When Repos is non-empty, one key is minted per repo and staged with per-repo SSH aliases +
+// git insteadOf rewrites (specs/0047 P2); otherwise the single repo is inferred from origin.
+type SshCreds struct {
+	Write bool       `json:"write,omitempty"`
+	Ttl   string     `json:"ttl,omitempty"`
+	Repos []RepoCred `json:"repos,omitempty"`
+}
+
+// ForgejoCreds is the Forgejo/Gitea sibling of SshCreds: a per-run repo-scoped ephemeral deploy
+// key on a non-GitHub forge (Codeberg, self-hosted, etc.). Forgejo has no `gh`-style ambient
+// auth, so Token is an explicit secret ref (op://... or env:NAME) for the API call. URL is the
+// instance base (e.g. "https://codeberg.org"); when empty the host is inferred from the cwd
+// origin remote (specs/0047).
+type ForgejoCreds struct {
+	Write   bool       `json:"write,omitempty"`
+	Ttl     string     `json:"ttl,omitempty"`
+	URL     string     `json:"url,omitempty"`
+	Token   string     `json:"token"`
+	Repos   []RepoCred `json:"repos,omitempty"`    // multi-repo: one deploy key per entry (specs/0047 P2)
+	SSHPort int        `json:"ssh-port,omitempty"` // instance git SSH port for multi-repo (default 22)
+}
+
+// Credentials groups the credential providers a profile uses (SP2; aws/gcp SP/0009; kube SP/0010;
+// ssh SP/0011; forgejo specs/0047).
 type Credentials struct {
-	Pnpm []PnpmRegistry `json:"pnpm,omitempty"`
-	Aws  *AwsSso        `json:"aws,omitempty"`
-	Gcp  *GcpAdc        `json:"gcp,omitempty"`
-	Kube *KubeCluster   `json:"kube,omitempty"`
-	Ssh  *SshCreds      `json:"ssh,omitempty"`
+	Pnpm    []PnpmRegistry `json:"pnpm,omitempty"`
+	Aws     *AwsSso        `json:"aws,omitempty"`
+	Gcp     *GcpAdc        `json:"gcp,omitempty"`
+	Kube    *KubeCluster   `json:"kube,omitempty"`
+	Ssh     *SshCreds      `json:"ssh,omitempty"`
+	Forgejo *ForgejoCreds  `json:"forgejo,omitempty"`
 }
 
 // Toolchain layers a pinned tool environment onto any environment (SP5). When Run is set,

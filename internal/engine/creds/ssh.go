@@ -98,6 +98,10 @@ func StageSSH(ctx context.Context, creds *policy.Credentials, stageDir string) (
 	if creds == nil || creds.Ssh == nil {
 		return nil, nil
 	}
+	// Multi-repo: one deploy key per named repo, staged with SSH aliases + insteadOf (specs/0047 P2).
+	if len(creds.Ssh.Repos) > 0 {
+		return stageGitHubMulti(ctx, creds.Ssh, stageDir)
+	}
 	rOut, err := runSSHCmd(ctx, []string{"git", "remote", "get-url", "origin"}, "run safeslop from a repo with a github.com origin")
 	if err != nil {
 		return nil, err
@@ -150,13 +154,16 @@ func RevokeSSH(ctx context.Context, stageDir string) {
 	if err != nil {
 		return
 	}
-	f := strings.Fields(strings.TrimSpace(string(b)))
-	if len(f) != 2 {
-		return
+	// One "owner/repo id" line per staged key (a single line in the single-repo case, N in multi).
+	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+		f := strings.Fields(line)
+		if len(f) != 2 {
+			continue
+		}
+		or := strings.SplitN(f[0], "/", 2)
+		if len(or) != 2 {
+			continue
+		}
+		_, _ = runSSHCmd(ctx, ghRevokeArgv(or[0], or[1], f[1]), "best-effort revoke")
 	}
-	or := strings.SplitN(f[0], "/", 2)
-	if len(or) != 2 {
-		return
-	}
-	_, _ = runSSHCmd(ctx, ghRevokeArgv(or[0], or[1], f[1]), "best-effort revoke")
 }
