@@ -14,10 +14,17 @@ launchable agent in the **Go engine**, alongside `claude`/`opencode`/`shell`.
 - `make check` green; `fish scripts/slop-pinning.fish` clean (pi pinned, no `latest`).
 
 ## Scope / off-limits
-- **Go engine ONLY.** Do NOT touch the fish/Python stack: `scripts/slop-agents.fish`,
-  `scripts/_py/slop_orchestrator.py`, `library/layer/policy/**` (presets/fixtures/
-  schema), or `library/layer/container/**`. opencode already lives in both stacks; pi
-  intentionally does not (per sign-off 2026-06-24).
+- **Go engine ONLY** for launcher logic. Do NOT touch the fish/Python launchers:
+  `scripts/slop-agents.fish`, `scripts/_py/slop_orchestrator.py`, or
+  `library/layer/policy/**` (presets/fixtures/schema). opencode already lives in both
+  stacks; pi intentionally does not (per sign-off 2026-06-24).
+- **Container assets are shared canonical source — correction to the original off-limits.**
+  `library/layer/container/{Dockerfile.agent.tools,allowlist.domains,agent-tools.env.example}`
+  is the single source of truth that `make sync-container-assets` copies into the Go embed
+  dir (`internal/engine/container/assets/`); the `check-assets` gate fails the build if they
+  diverge. The container tier therefore edits BOTH copies (not fish-launcher logic). The
+  fish-stack `library/layer/container/docker-compose.yml` build-arg passthrough is left
+  untouched, so enabling pi stays Go-engine-only.
 - **No per-agent allowlist mechanism.** The Go engine's egress allowlist is a single
   global file; pi's providers are added there (widens egress for all container agents —
   accepted tradeoff). A per-agent allowlist is a separate future feature, not this spec.
