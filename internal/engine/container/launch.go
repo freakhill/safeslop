@@ -60,7 +60,7 @@ func materializeRun(p composeParams, open bool) (string, error) {
 	}
 	files := map[string][]byte{
 		"squid.conf":        []byte(squid),
-		"allowlist.domains": allow,
+		"allowlist.domains": composeAllowlist(allow, p.Egress),
 		"compose.yml":       []byte(yml),
 		".safeslop-stage":   nil,
 	}
@@ -72,12 +72,36 @@ func materializeRun(p composeParams, open bool) (string, error) {
 	return filepath.Join(dir, "compose.yml"), nil
 }
 
+// composeAllowlist appends extra domains (the agent's built-in providers + the profile's
+// egress, already unioned by the caller) to the base allowlist asset, de-duplicating while
+// preserving order (base first, then first-seen extras). Empty/whitespace entries are
+// dropped. This is the per-run effective container egress allowlist (specs/0046).
+func composeAllowlist(base []byte, extra []string) []byte {
+	var lines []string
+	seen := map[string]bool{}
+	add := func(s string) {
+		s = strings.TrimSpace(s)
+		if s == "" || seen[s] {
+			return
+		}
+		seen[s] = true
+		lines = append(lines, s)
+	}
+	for _, l := range strings.Split(string(base), "\n") {
+		add(l)
+	}
+	for _, e := range extra {
+		add(e)
+	}
+	return []byte(strings.Join(lines, "\n") + "\n")
+}
+
 // provision materializes the per-run runtime dir and starts the compose stack, returning the
 // interactive argv that runs the agent (`docker compose run --rm agent <argv>`) plus the compose
 // file path (for teardown). Shared by Launch (safeslop run) and PrepareSession (the embedded cockpit).
 // secretEnv is written to secrets.env and sourced by the entrypoint; SP7c-2 cockpit sessions pass
 // nil (inherited-host-env parity with SP7c-1; full staging is a separate deferred unit).
-func provision(ctx context.Context, agentArgv []string, workspace, network string, secretEnv []string, stageDir string) (argv []string, composeFile string, eng runtime.Engine, err error) {
+func provision(ctx context.Context, agentArgv []string, workspace, network string, egress []string, secretEnv []string, stageDir string) (argv []string, composeFile string, eng runtime.Engine, err error) {
 	if len(agentArgv) == 0 {
 		return nil, "", nil, exec.ErrNoArgv
 	}
@@ -142,6 +166,7 @@ func provision(ctx context.Context, agentArgv []string, workspace, network strin
 		SshKey:      sshErr == nil,
 		OpenEgress:  network == "allow",
 		InternalNet: internalNet,
+		Egress:      egress,
 	}
 	composeFile, err = materializeRun(p, network == "allow")
 	if err != nil {
@@ -158,8 +183,8 @@ func provision(ctx context.Context, agentArgv []string, workspace, network strin
 // of host `ps` and `docker inspect`. stageDir is the host .safeslop/runtime/<profile> dir (already
 // holds .npmrc when pnpm creds were staged); it is bind-mounted ro at /safeslop/runtime and wiped
 // on exit by the caller. The agent runs interactively through a PTY (design §6.2).
-func Launch(ctx context.Context, spec exec.LaunchSpec, workspace, network string, secretEnv []string, stageDir string) (int, error) {
-	argv, _, _, err := provision(ctx, spec.Argv, workspace, network, secretEnv, stageDir)
+func Launch(ctx context.Context, spec exec.LaunchSpec, workspace, network string, egress []string, secretEnv []string, stageDir string) (int, error) {
+	argv, _, _, err := provision(ctx, spec.Argv, workspace, network, egress, secretEnv, stageDir)
 	if err != nil {
 		return 1, err
 	}
@@ -170,8 +195,8 @@ func Launch(ctx context.Context, spec exec.LaunchSpec, workspace, network string
 // returns the interactive argv to run on the engine's PTY plus a cleanup that tears the stack
 // down (compose down + stageDir wipe) when the session closes. Cockpit sessions pass secretEnv
 // nil (inherited-host-env parity with SP7c-1). cleanup is always non-nil and safe to call once.
-func PrepareSession(ctx context.Context, agentArgv []string, workspace, network string, secretEnv []string, stageDir string) (argv []string, cleanup func(), err error) {
-	argv, composeFile, eng, err := provision(ctx, agentArgv, workspace, network, secretEnv, stageDir)
+func PrepareSession(ctx context.Context, agentArgv []string, workspace, network string, egress []string, secretEnv []string, stageDir string) (argv []string, cleanup func(), err error) {
+	argv, composeFile, eng, err := provision(ctx, agentArgv, workspace, network, egress, secretEnv, stageDir)
 	if err != nil {
 		return nil, func() {}, err
 	}
