@@ -518,3 +518,18 @@ func TestInstallArgvRefusesPresentAndPicksRoute(t *testing.T) {
 		t.Fatalf("script route: argv=%v err=%v", argv, err)
 	}
 }
+
+// TestCatalogIncludesPi locks specs/0045: the Pi coding agent is a registered, detectable agent
+// (an npm script-only tool, like Codex — installed with --ignore-scripts for supply-chain hygiene).
+func TestCatalogIncludesPi(t *testing.T) {
+	pi := catalogTool(t, "Pi")
+	if pi.Category != CatAgents {
+		t.Errorf("Pi must be in the agents category, got %q", pi.Category)
+	}
+	if len(pi.Detect) != 1 || pi.Detect[0] != "pi" {
+		t.Errorf("Pi must detect the `pi` binary, got %v", pi.Detect)
+	}
+	if !strings.Contains(pi.Script, "@earendil-works/pi-coding-agent") || !strings.Contains(pi.Script, "ignore-scripts") {
+		t.Errorf("Pi install script must be the pinned-package npm install with --ignore-scripts, got %q", pi.Script)
+	}
+}

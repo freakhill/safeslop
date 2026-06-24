@@ -83,7 +83,8 @@ func buildImages(ctx context.Context, eng runtime.Engine, dir string) error {
 	}
 	if !imageExists(ctx, eng, toolsTag) {
 		if err := runEngine(ctx, eng, "build", "-f", filepath.Join(dir, "Dockerfile.agent.tools"), "-t", toolsTag,
-			"--build-arg", "ENABLE_CLAUDE_CODE=true", "--build-arg", "ENABLE_OPENCODE=true", dir); err != nil {
+			"--build-arg", "ENABLE_CLAUDE_CODE=true", "--build-arg", "ENABLE_OPENCODE=true",
+			"--build-arg", "ENABLE_PI=true", dir); err != nil {
 			return fmt.Errorf("build tools image: %w", err)
 		}
 	}

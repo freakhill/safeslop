@@ -122,3 +122,15 @@ func TestTechStackListsUnderlyingTech(t *testing.T) {
 		t.Error("sandbox tech stack must mention Seatbelt")
 	}
 }
+
+// TestAgentLabelAndTechStackPi locks specs/0045: the pi agent has a human label and surfaces
+// in the tech-stack summary.
+func TestAgentLabelAndTechStackPi(t *testing.T) {
+	if got := agentLabel("pi"); got != "Pi" {
+		t.Errorf("agentLabel(pi) = %q, want Pi", got)
+	}
+	s := strings.Join(TechStack(Profile{Agent: "pi", Environment: "sandbox"}), "\n")
+	if !strings.Contains(s, "Agent: Pi") {
+		t.Errorf("tech stack must label the pi agent:\n%s", s)
+	}
+}

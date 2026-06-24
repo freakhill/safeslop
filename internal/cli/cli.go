@@ -137,7 +137,7 @@ func cmdList() *cobra.Command {
 // doctorReport probes the external tools and isolation boundaries safeslop can use.
 // Extracted so it is testable and reusable (e.g. a future GUI / installer).
 func doctorReport() map[string]any {
-	tools := []string{"git", "gh", "docker", "op", "claude", "opencode", "tart", "mise", "nix", "aws", "gcloud", "gke-gcloud-auth-plugin"}
+	tools := []string{"git", "gh", "docker", "op", "claude", "opencode", "pi", "tart", "mise", "nix", "aws", "gcloud", "gke-gcloud-auth-plugin"}
 	report := map[string]any{}
 	for _, t := range tools {
 		p, err := osexec.LookPath(t)
@@ -1173,6 +1173,8 @@ func agentArgv(p policy.Profile) ([]string, error) {
 		return []string{"claude"}, nil
 	case "opencode":
 		return []string{"opencode"}, nil
+	case "pi":
+		return []string{"pi"}, nil
 	case "shell":
 		// The host's $SHELL is an absolute host path (e.g. /bin/zsh, /opt/homebrew/bin/fish).
 		// That path is correct for host/sandbox (the agent runs on the host) but does NOT exist

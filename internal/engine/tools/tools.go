@@ -292,6 +292,9 @@ func Catalog() []Tool {
 			Script: "npm install -g @openai/codex", Note: "the OpenAI Codex agent (needs npm)"},
 		{Name: "opencode", Category: CatAgents, Detect: []string{"opencode"}, Brew: "sst/tap/opencode",
 			Note: "the opencode agent"},
+		{Name: "Pi", Category: CatAgents, Detect: []string{"pi"},
+			Script: "npm install -g --ignore-scripts @earendil-works/pi-coding-agent",
+			Note:   "the Pi coding agent (pi.dev, BYOK)"},
 	}
 }
 

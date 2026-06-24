@@ -9,7 +9,7 @@ the list of successful runs on `main` — the topmost entry is the last commit
 that passed CI.
 
 **safeslop** is a single, signed Go binary that launches coding agents (Claude
-Code, a shell, OpenCode) under macOS isolation, driven by a per-repo
+Code, a shell, OpenCode, Pi) under macOS isolation, driven by a per-repo
 `safeslop.cue` policy. One file declares *which* agent runs, in *which* isolation
 environment, with *which* ephemeral credentials — and safeslop provisions it,
 launches the agent, and tears everything down on exit.
@@ -110,7 +110,7 @@ safeslop: {
 	version: 1
 	profiles: {
 		example: {
-			// What to launch: "claude" | "shell" | "opencode".
+			// What to launch: "claude" | "shell" | "opencode" | "pi".
 			agent: "claude"
 
 			// Where it runs: "sandbox" (default) | "container" | "vm" | "host".
