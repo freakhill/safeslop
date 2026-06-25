@@ -81,7 +81,7 @@ safeslop: {
 	version: 1
 	profiles: {
 		work: {
-			agent:       "claude"          // "claude" | "shell" | "opencode" | "pi"
+			agent:       "claude"          // "claude" | "shell" | "pi"
 			environment: "container"       // "sandbox" | "container" | "vm" | "host"
 			network:     "deny"            // "deny" | "allow"
 			workspace:   "."
