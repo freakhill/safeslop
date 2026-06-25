@@ -124,10 +124,10 @@ Remove:
 Grep gate:
 
 ```sh
-git grep -nEi 'SafeSlopCockpit|Package\.swift|xcodebuild|swiftc|control\.proto|grpc|proto-sync|sign-notarize' -- . ':!specs/0049-*'
+git grep -nEi 'SafeSlopCockpit|Package\.swift|xcodebuild|swiftc|control\.proto|grpc|proto-sync|sign-notarize' -- . ':!specs/**'
 ```
 
-Expected: no matches outside this spec.
+Expected: no matches in live code/docs. Historical specs are archival design records and are excluded from the live-surface denylist.
 
 ### PR3 — Add versioned Go ↔ Emacs JSON contract
 
@@ -301,13 +301,13 @@ Final denylist:
 
 ```sh
 git grep -nEi '\b(opencode|open-code|vscode|vs code|visual studio code|SafeSlopCockpit|cockpit|Package\.swift|xcodebuild|swiftc|control\.proto|grpc|proto-sync|sign-notarize)\b' -- . \
-  ':!specs/0049-*' \
+  ':!specs/**' \
   ':!internal/cli/agentseed_test.go' \
   ':!internal/cli/cli_agentargv_test.go' \
   ':!ci/pivot-denylist.sh'
 ```
 
-Expected: no output outside allowed negative tests, this spec, and the denylist script itself.
+Expected: no output outside allowed negative tests and the denylist script itself. Historical specs are archival design records and are excluded from the live-surface denylist.
 
 ## Emacs architecture
 

@@ -1,7 +1,7 @@
 // Package hostenv reconstructs the user's real shell environment for a process that was started
 // with a stripped one — notably a Finder/launchd-launched .app, which inherits PATH≈/usr/bin:/bin
 // and usually no $SHELL. Without this the engine can't find brew, git, mise/asdf shims, or the
-// agents, so tool detection (internal/engine/tools) and agent launch both break outside a terminal.
+// agents, so binary resolution and agent launch both break outside a terminal.
 //
 // It captures rather than parses: it runs the user's login+interactive shell once and reads the
 // environment that shell builds (dotfiles have conditional logic and version-manager `eval`s that

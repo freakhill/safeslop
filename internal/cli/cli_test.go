@@ -6,8 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/spf13/cobra"
-
 	"github.com/freakhill/safeslop/internal/engine/policy"
 )
 
@@ -73,13 +71,18 @@ func TestDoctorDoesNotReportOpenCode(t *testing.T) {
 	}
 }
 
-func TestServeAndLaunchRegistered(t *testing.T) {
-	have := map[string]bool{}
-	for _, c := range []*cobra.Command{cmdServe(), cmdLaunch()} {
-		have[c.Name()] = true
+func TestServeRemovedFromRoot(t *testing.T) {
+	root := newRoot()
+	for _, c := range root.Commands() {
+		if c.Name() == "serve" {
+			t.Fatal("safeslop serve must stay removed with the old UI control plane")
+		}
 	}
-	if !have["serve"] || !have["launch"] {
-		t.Fatalf("serve/launch commands missing: %v", have)
+}
+
+func TestLaunchRegistered(t *testing.T) {
+	if cmdLaunch().Name() != "launch" {
+		t.Fatal("launch command missing")
 	}
 }
 

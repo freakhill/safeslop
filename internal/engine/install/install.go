@@ -1,12 +1,11 @@
-// Package install inventories whether safeslop itself (binary, app, toolchains, runtimes) is
-// installed and current — the read-only half of the installer (specs/0012 §5). No side effects.
+// Package install inventories whether safeslop itself, toolchains, and runtimes are
+// installed and current. No side effects.
 package install
 
 import (
 	"context"
 	"os"
 	osexec "os/exec"
-	"path/filepath"
 	"strings"
 )
 
@@ -25,16 +24,9 @@ type Self struct {
 	OnPath  bool   `json:"on_path"`        // a `safeslop` resolves on PATH
 }
 
-// App is the SafeSlop.app presence (signing verification is a later slice).
-type App struct {
-	Present bool   `json:"present"`
-	Path    string `json:"path,omitempty"`
-}
-
 // State is the full install inventory.
 type State struct {
 	Self       Self   `json:"self"`
-	App        App    `json:"app"`
 	Toolchains []Tool `json:"toolchains"`
 	Runtimes   []Tool `json:"runtimes"`
 }
@@ -45,7 +37,6 @@ func Status(ctx context.Context, version string) State {
 	_, lookErr := osexec.LookPath("safeslop")
 	st := State{
 		Self: Self{Version: version, Path: exe, OnPath: lookErr == nil},
-		App:  detectApp(),
 		Toolchains: []Tool{
 			probe(ctx, "mise", "--version"),
 			probe(ctx, "uv", "--version"),
@@ -73,18 +64,4 @@ func probe(ctx context.Context, name string, versionArgs ...string) Tool {
 		t.Version = strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0])
 	}
 	return t
-}
-
-// detectApp looks for SafeSlop.app in the standard install locations.
-func detectApp() App {
-	candidates := []string{"/Applications/SafeSlop.app"}
-	if home, err := os.UserHomeDir(); err == nil {
-		candidates = append(candidates, filepath.Join(home, "Applications", "SafeSlop.app"))
-	}
-	for _, p := range candidates {
-		if _, err := os.Stat(p); err == nil {
-			return App{Present: true, Path: p}
-		}
-	}
-	return App{Present: false}
 }

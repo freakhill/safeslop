@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/freakhill/safeslop/internal/engine/container/runtime"
@@ -105,25 +104,4 @@ func Down(ctx context.Context, eng runtime.Engine, composeFile string) error {
 		return nil
 	}
 	return runEngine(ctx, eng, "compose", "-f", composeFile, "down")
-}
-
-// Teardown fully reaps a cockpit session's stack: it force-removes every container carrying the
-// compose project label — including the one-off `docker compose run` agent container, which
-// `compose down` deliberately leaves behind — then runs Down to drop the proxy + networks. The
-// compose project name defaults to the compose file's parent dir basename; safeslop gives each
-// cockpit session a unique cockpit-* stage dir, so this only ever reaps that session's own
-// containers. A "" composeFile is a no-op.
-func Teardown(ctx context.Context, eng runtime.Engine, composeFile string) error {
-	if composeFile == "" {
-		return nil
-	}
-	project := filepath.Base(filepath.Dir(composeFile))
-	out, err := eng.Command(ctx, "ps", "-aq",
-		"--filter", "label=com.docker.compose.project="+project).Output()
-	if err == nil {
-		for _, id := range strings.Fields(string(out)) {
-			_ = eng.Command(ctx, "rm", "-f", id).Run()
-		}
-	}
-	return Down(ctx, eng, composeFile)
 }

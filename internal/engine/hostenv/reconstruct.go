@@ -17,7 +17,7 @@ import (
 )
 
 // captureTimeout bounds the shell run: a misconfigured profile that blocks on ssh-add/gpg/nvm must
-// never freeze the cockpit — we fall back to the deterministic floor instead.
+// never hang command startup — we fall back to the deterministic floor instead.
 const captureTimeout = 3 * time.Second
 
 // Env is a reconstructed host environment: a name→value map plus its provenance. It is RICH (a login

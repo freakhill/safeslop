@@ -23,8 +23,7 @@ func preferLimaBackend() bool {
 
 // confirmLimaBlastRadius is the first-run consent gate (specs/0044 Phase 4.2): before safeslop first
 // boots the managed lima VM it itemises the blast radius and requires a typed confirmation. Fails closed
-// when stdin is not a terminal (booting a VM unattended without consent is exactly what this prevents);
-// the embedded cockpit uses its own preflight RPC instead of this TTY path.
+// when stdin is not a terminal (booting a VM unattended without consent is exactly what this prevents).
 func confirmLimaBlastRadius(lb *runtime.LimaBackend) error {
 	fmt.Fprintln(os.Stderr, lb.BlastRadius())
 	if fi, _ := os.Stdin.Stat(); fi == nil || fi.Mode()&os.ModeCharDevice == 0 {
@@ -98,9 +97,8 @@ func composeAllowlist(base []byte, extra []string) []byte {
 
 // provision materializes the per-run runtime dir and starts the compose stack, returning the
 // interactive argv that runs the agent (`docker compose run --rm agent <argv>`) plus the compose
-// file path (for teardown). Shared by Launch (safeslop run) and PrepareSession (the embedded cockpit).
-// secretEnv is written to secrets.env and sourced by the entrypoint; SP7c-2 cockpit sessions pass
-// nil (inherited-host-env parity with SP7c-1; full staging is a separate deferred unit).
+// file path (for teardown).
+// secretEnv is written to secrets.env and sourced by the entrypoint.
 func provision(ctx context.Context, agentArgv []string, workspace, network string, egress []string, secretEnv []string, stageDir string) (argv []string, composeFile string, eng runtime.Engine, err error) {
 	if len(agentArgv) == 0 {
 		return nil, "", nil, exec.ErrNoArgv
@@ -196,21 +194,6 @@ func Launch(ctx context.Context, spec exec.LaunchSpec, workspace, network string
 		return 1, err
 	}
 	return exec.RunInPTY(ctx, exec.LaunchSpec{Argv: argv})
-}
-
-// PrepareSession provisions the agent container for an embedded-cockpit session (SP7c-2): it
-// returns the interactive argv to run on the engine's PTY plus a cleanup that tears the stack
-// down (compose down + stageDir wipe) when the session closes. Cockpit sessions pass secretEnv
-// nil (inherited-host-env parity with SP7c-1). cleanup is always non-nil and safe to call once.
-func PrepareSession(ctx context.Context, agentArgv []string, workspace, network string, egress []string, secretEnv []string, stageDir string) (argv []string, cleanup func(), err error) {
-	argv, composeFile, eng, err := provision(ctx, agentArgv, workspace, network, egress, secretEnv, stageDir)
-	if err != nil {
-		return nil, func() {}, err
-	}
-	return argv, func() {
-		_ = Teardown(context.Background(), eng, composeFile)
-		_ = os.RemoveAll(stageDir)
-	}, nil
 }
 
 // ComposeForDown writes a throwaway runtime dir + compose file so `safeslop down` can target

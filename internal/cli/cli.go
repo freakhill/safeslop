@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math/rand"
 	"os"
 	osexec "os/exec"
 	"path/filepath"
@@ -20,8 +19,6 @@ import (
 
 	"github.com/freakhill/safeslop/internal/engine/container"
 	runtimepkg "github.com/freakhill/safeslop/internal/engine/container/runtime"
-	"github.com/freakhill/safeslop/internal/engine/control"
-	"github.com/freakhill/safeslop/internal/engine/control/pb"
 	"github.com/freakhill/safeslop/internal/engine/creds"
 	engexec "github.com/freakhill/safeslop/internal/engine/exec"
 	"github.com/freakhill/safeslop/internal/engine/gitguard"
@@ -63,7 +60,7 @@ func newRoot() *cobra.Command {
 		SilenceErrors: true,
 	}
 	root.PersistentFlags().BoolVar(&jsonOut, "json", false, "emit machine-readable JSON output")
-	root.AddCommand(cmdValidate(), cmdList(), cmdDoctor(), cmdRun(), cmdTrust(), cmdDown(), cmdServe(), cmdLaunch(), cmdInstall(), cmdUninstall())
+	root.AddCommand(cmdValidate(), cmdList(), cmdDoctor(), cmdRun(), cmdTrust(), cmdDown(), cmdLaunch(), cmdInstall(), cmdUninstall())
 	return root
 }
 
@@ -343,149 +340,6 @@ func enforceTrust(policyPath string, allowTrust bool) error {
 	}
 }
 
-// cockpitTrust records host-side approval of the safeslop.cue at configPath — the engine side of
-// the GUI's Trust RPC, so a subsequent OpenSession passes the fail-closed trust gate (specs/0024
-// S1a). Returns the approved absolute path. The peer is already uid/process-tree-checked at the
-// socket accept (control/peerauth.go), so a sandboxed agent can't reach this.
-func cockpitTrust(configPath string) (string, error) {
-	path, err := findConfig(configPath)
-	if err != nil {
-		return "", err
-	}
-	if err := enforceTrust(path, true); err != nil {
-		return "", err
-	}
-	return filepath.Abs(path)
-}
-
-// cockpitUntrust removes the host approval of the safeslop.cue at configPath (the Launch row's Revoke).
-// It revokes under the SAME canonical path key enforceTrust approves under, so the status flips cleanly
-// back to untrusted. Returns the absolute path whose approval was removed.
-func cockpitUntrust(configPath string) (string, error) {
-	path, err := findConfig(configPath)
-	if err != nil {
-		return "", err
-	}
-	abs := canonicalPolicyPath(path)
-	storePath, err := trust.DefaultPath()
-	if err != nil {
-		return "", err
-	}
-	store, err := trust.Load(storePath)
-	if err != nil {
-		return "", err
-	}
-	if err := store.Revoke(abs); err != nil {
-		return "", err
-	}
-	return abs, nil
-}
-
-// cockpitListProfiles returns the safeslop.cue profiles for the GUI launcher, each tagged with its
-// honest isolation tier from policy.EnvTier — one source of truth for the cockpit's tier indicator
-// (specs/research/2026-06-20-cockpit-safe-by-design.md). Listing is inspection (ungated, like
-// `list`/`validate`); the socket peer check (control/peerauth.go) still applies.
-func cockpitListProfiles(configPath string) ([]*pb.Profile, error) {
-	path, err := findConfig(configPath)
-	if err != nil {
-		return nil, err
-	}
-	cfg, err := policy.Load(path)
-	if err != nil {
-		return nil, err
-	}
-	// Per-policy trust state, surfaced so the launcher can badge it BEFORE launch (anti-ambush:
-	// the user sees "untrusted/changed" up front, not as a surprise prompt on click). Trust is
-	// per-file, so every profile in this safeslop.cue shares the status.
-	canon := canonicalPolicyPath(path) // symlink-free, so it matches what `safeslop run` keys on
-	trustStatus := trust.Untrusted.String()
-	if data, rerr := os.ReadFile(canon); rerr == nil {
-		if sp, perr := trust.DefaultPath(); perr == nil {
-			if store, lerr := trust.Load(sp); lerr == nil {
-				trustStatus = store.Check(canon, data).String()
-			}
-		}
-	}
-	configDir := filepath.Dir(canon)
-	out := make([]*pb.Profile, 0, len(cfg.Profiles))
-	for name, prof := range cfg.Profiles {
-		env := prof.Environment
-		if env == "" {
-			env = "sandbox" // schema default
-		}
-		tier, note := policy.EnvTier(env)
-		risk := policy.RiskSummary(prof)
-		out = append(out, &pb.Profile{
-			Name:         name,
-			Agent:        prof.Agent,
-			Environment:  env,
-			Network:      prof.Network,
-			Tier:         tier,
-			TierNote:     note,
-			TrustStatus:  trustStatus,
-			ConfigDir:    configDir,
-			RiskHeadline: risk.Headline,
-			RiskLevel:    risk.Level,
-			RiskLines:    risk.Lines,
-			TechStack:    policy.TechStack(prof),
-			RiskAxes:     control.RiskAxesPB(prof),
-		})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out, nil
-}
-
-// cockpitPreflightHostLaunch authors the host-launch comprehension gate for the cockpit (specs/0030).
-// It resolves the profile, refuses anything but the host tier (a more-isolated profile has nothing to
-// comprehend here — its isolation is real), and returns the engine-authored headline + live scope line
-// + shuffled consent rows. Pure read: no trust mutation, nothing persisted, fresh draw every call.
-func cockpitPreflightHostLaunch(profile, configPath string) (*pb.PreflightHostLaunchResponse, error) {
-	path, err := findConfig(configPath)
-	if err != nil {
-		return nil, err
-	}
-	cfg, err := policy.Load(path)
-	if err != nil {
-		return nil, err
-	}
-	name, prof, err := selectProfile(cfg, profile)
-	if err != nil {
-		return nil, err
-	}
-	if prof.Environment != "host" {
-		return nil, fmt.Errorf("profile %q is environment %q, not host — the host comprehension gate is host-tier only", name, prof.Environment)
-	}
-	stmts := policy.HostConsentStatements(3, rand.New(rand.NewSource(time.Now().UnixNano())))
-	out := &pb.PreflightHostLaunchResponse{
-		HeadlineBody: policy.HostHeadlineBody(name),
-		ScopeLine:    policy.HostScopeLine(prof, mountedVolumes()),
-	}
-	for _, st := range stmts {
-		out.Statements = append(out.Statements, &pb.ConsentStatement{
-			Text: st.Text, Expected: st.Expected, TierOrigin: st.TierOrigin,
-		})
-	}
-	return out, nil
-}
-
-// mountedVolumes lists the non-boot volumes under /Volumes — a best-effort live-state snapshot for the
-// host scope line. The boot volume self-links as /Volumes/Macintosh HD; failures degrade to an empty
-// list rather than blocking the launch gate.
-func mountedVolumes() []string {
-	entries, err := os.ReadDir("/Volumes")
-	if err != nil {
-		return nil
-	}
-	out := make([]string, 0, len(entries))
-	for _, e := range entries {
-		if e.Name() == "Macintosh HD" {
-			continue
-		}
-		out = append(out, "/Volumes/"+e.Name())
-	}
-	return out
-}
-
 func cmdTrust() *cobra.Command {
 	return &cobra.Command{
 		Use:   "trust [safeslop.cue]",
@@ -547,154 +401,6 @@ func cmdDown() *cobra.Command {
 	}
 }
 
-func cmdServe() *cobra.Command {
-	return &cobra.Command{
-		Use:   "serve",
-		Short: "Run the gRPC control plane on ~/.safeslop/s.sock (drives the GUI app)",
-		Args:  cobra.NoArgs,
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return control.Serve(Version,
-				func(profile, configPath string, emit func(*pb.LaunchEvent)) error {
-					emit(&pb.LaunchEvent{Kind: pb.LaunchEvent_SPAWNED, Message: profile})
-					code, err := launchProfile(profile, configPath)
-					if err != nil {
-						emit(&pb.LaunchEvent{Kind: pb.LaunchEvent_ERROR, Message: err.Error()})
-						return nil
-					}
-					emit(&pb.LaunchEvent{Kind: pb.LaunchEvent_EXITED, ExitCode: int32(code)})
-					return nil
-				},
-				resolveSession,
-				cockpitTrust,
-				cockpitListProfiles,
-				cockpitPreflightHostLaunch,
-				cockpitUntrust,
-			)
-		},
-	}
-}
-
-// resolveSession turns a profile name into a control.SessionSpec: the (optionally toolchain-
-// wrapped) agent argv, the workspace, the profile's resolved secrets + staged credentials, and
-// the per-environment cleanup as OnClose. Credential parity with `safeslop run` (SP7c-3), minus ssh
-// deploy keys, which are deferred in the cockpit (they key off the workspace git origin).
-func resolveSession(profile, configPath string) (control.SessionSpec, error) {
-	path, err := findConfig(configPath)
-	if err != nil {
-		return control.SessionSpec{}, err
-	}
-	// Fail-closed policy trust gate, identical to the CLI `run` path (specs/0022). The cockpit's
-	// in-process OpenSession data plane was the one launch chokepoint not gated, so a same-uid
-	// in-sandbox peer could rewrite safeslop.cue and OpenSession its way to environment:"host"
-	// (specs/0024 S1a). The GUI surfaces approval via `safeslop trust` (a wizard screen is a
-	// follow-on); allowTrust stays false here (the engine never auto-approves on the agent's behalf).
-	if err := enforceTrust(path, false); err != nil {
-		return control.SessionSpec{}, err
-	}
-	cfg, err := policy.Load(path)
-	if err != nil {
-		return control.SessionSpec{}, err
-	}
-	_, prof, err := selectProfile(cfg, profile)
-	if err != nil {
-		return control.SessionSpec{}, err
-	}
-	argv, err := agentArgv(prof)
-	if err != nil {
-		return control.SessionSpec{}, err
-	}
-	if prof.Toolchain != nil && toolchain.Wraps(prof.Toolchain.Kind) {
-		argv = toolchain.Wrap(prof.Toolchain.Kind, prof.Toolchain.Run, argv)
-	}
-	ws := prof.Workspace
-	if ws == "" {
-		ws, _ = os.Getwd()
-	}
-
-	// Credential gates the cockpit can't satisfy yet (reject before staging anything):
-	// ssh mints a per-window deploy key scoped to the *workspace* git origin, but safeslop serve's
-	// cwd isn't the workspace — deferred to `safeslop run`. vm can't reach kube (mirrors runProfile).
-	if prof.Credentials != nil {
-		if prof.Credentials.Ssh != nil {
-			return control.SessionSpec{}, fmt.Errorf("ssh credentials aren't supported in cockpit sessions yet (the deploy key is scoped to the workspace git origin); use `safeslop run`")
-		}
-		if prof.Environment == "vm" && prof.Credentials.Kube != nil {
-			return control.SessionSpec{}, fmt.Errorf("kube credentials are not supported with environment:%q; use environment:\"container\" (specs/0010)", prof.Environment)
-		}
-	}
-
-	if err := seedAgentDefaults(prof, ws); err != nil {
-		return control.SessionSpec{}, err
-	}
-
-	// Per-session stage dir (unique → N concurrent sessions don't collide; also the vm clone name).
-	base := filepath.Join(ws, ".safeslop", "runtime")
-	if err := os.MkdirAll(base, 0o700); err != nil {
-		return control.SessionSpec{}, err
-	}
-	stageDir, err := os.MkdirTemp(base, "cockpit-*")
-	if err != nil {
-		return control.SessionSpec{}, err
-	}
-	secretEnv, pathEnv, err := stageProfile(context.Background(), prof, stageDir)
-	if err != nil {
-		_ = os.RemoveAll(stageDir)
-		return control.SessionSpec{}, err
-	}
-	wipe := func() { _ = os.RemoveAll(stageDir) }
-
-	switch prof.Environment {
-	case "host":
-		argv = resolveHostBinary(argv) // Finder launch: resolve "claude" off the reconstructed PATH
-		env := childEnv(secretEnv, pathEnv)
-		return control.SessionSpec{Argv: argv, Dir: ws, Env: env, OnClose: wipe}, nil
-	case "sandbox", "": // sandbox is the default
-		argv = resolveHostBinary(argv)
-		wrapped, wrapCleanup, err := sandbox.WrapArgv(argv, ws, prof.Network, sandboxScope(prof.Files))
-		if err != nil {
-			_ = os.RemoveAll(stageDir)
-			return control.SessionSpec{}, err
-		}
-		env := childEnv(secretEnv, pathEnv)
-		return control.SessionSpec{Argv: wrapped, Dir: ws, Env: env, OnClose: chainClose(wrapCleanup, wipe)}, nil
-	case "container":
-		egress := append(append([]string{}, policy.AgentEgress(prof.Agent)...), prof.Egress...)
-		cargv, cleanup, err := container.PrepareSession(context.Background(), argv, ws, prof.Network, egress, secretEnv, stageDir)
-		if err != nil {
-			_ = os.RemoveAll(stageDir)
-			return control.SessionSpec{}, err
-		}
-		return control.SessionSpec{Argv: cargv, Dir: ws, OnClose: cleanup}, nil // cleanup wipes stageDir
-	case "vm":
-		tk := ""
-		if prof.Toolchain != nil {
-			tk = prof.Toolchain.Kind
-		}
-		// stageDir basename is the per-session VM clone name (concurrency isolation).
-		vargv, cleanup, err := vm.PrepareSession(context.Background(), argv, prof.Network, secretEnv, stageDir, filepath.Base(stageDir), tk)
-		if err != nil {
-			_ = os.RemoveAll(stageDir)
-			return control.SessionSpec{}, err
-		}
-		return control.SessionSpec{Argv: vargv, Dir: ws, OnClose: cleanup}, nil // cleanup wipes stageDir
-	default:
-		_ = os.RemoveAll(stageDir)
-		return control.SessionSpec{}, fmt.Errorf("unknown environment %q", prof.Environment)
-	}
-}
-
-// chainClose returns a cleanup that runs fns in order, skipping nils — used to compose a
-// session's OnClose (e.g. a sandbox temp-profile removal followed by the stage-dir wipe).
-func chainClose(fns ...func()) func() {
-	return func() {
-		for _, f := range fns {
-			if f != nil {
-				f()
-			}
-		}
-	}
-}
-
 func cmdInstall() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "install",
@@ -702,7 +408,7 @@ func cmdInstall() *cobra.Command {
 	}
 	c.AddCommand(&cobra.Command{
 		Use:   "status",
-		Short: "Report whether safeslop, its app, toolchains, and runtimes are installed",
+		Short: "Report whether safeslop, toolchains, and runtimes are installed",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if jsonOut {
@@ -714,11 +420,6 @@ func cmdInstall() *cobra.Command {
 			if st.Self.Path != "" {
 				fmt.Printf("  binary: %s\n", st.Self.Path)
 			}
-			app := "not installed"
-			if st.App.Present {
-				app = st.App.Path
-			}
-			fmt.Printf("  app:    %s\n", app)
 			printTools("toolchains", st.Toolchains)
 			printTools("runtimes", st.Runtimes)
 			return nil
@@ -903,8 +604,7 @@ func cmdLaunch() *cobra.Command {
 
 // launchProfile opens the user's preferred terminal (from ~/.config/safeslop/config.cue) running
 // `safeslop run <profile>`, so the real ctty handoff happens inside that window. Returns once the
-// terminal is spawned. configPath is reserved for the gRPC delegation (v1 resolves safeslop.cue
-// from the workspace).
+// terminal is spawned.
 // profileNameRe constrains launchable profile names: the name is embedded in the spawned
 // terminal's window title and SAFESLOP_SESSION, so it must not carry shell/title metacharacters.
 var profileNameRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
@@ -1137,7 +837,7 @@ func arg0(args []string) string {
 // walking up from the current directory.
 func findConfig(explicit string) (string, error) {
 	if explicit != "" {
-		// A directory => the safeslop.cue inside it (the cockpit passes a config dir).
+		// A directory => the safeslop.cue inside it (callers may pass a config dir).
 		if fi, err := os.Stat(explicit); err == nil && fi.IsDir() {
 			return filepath.Join(explicit, "safeslop.cue"), nil
 		}

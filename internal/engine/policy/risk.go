@@ -45,9 +45,9 @@ func RiskSummary(p Profile) Risk {
 	return Risk{Headline: headline(env, p.Network), Lines: lines, Level: level(env, p.Network)}
 }
 
-// RiskAxis is one capability dimension with its restriction status, so the cockpit can show what is
+// RiskAxis is one capability dimension with its restriction status, so frontends can show what is
 // UNRESTRICTED as loudly as what is restricted (ayo S2 — hiding an absence is a dark pattern). Computed
-// engine-side alongside RiskSummary so the GUI never re-derives "is this open" (single source of truth).
+// alongside RiskSummary so callers never re-derive "is this open" (single source of truth).
 type RiskAxis struct {
 	Name       string // "network" | "files"
 	Value      string // short status: "unrestricted" | "open egress" | "whole account" | "workspace-only" | ...

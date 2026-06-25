@@ -1,6 +1,6 @@
 # Release notes
 
-`safeslop` is distributed as a Go binary plus the optional SwiftUI cockpit app.
+`safeslop` is distributed as a Go binary.
 
 ## Current release focus
 
@@ -11,12 +11,10 @@
 - Receipt-driven install/uninstall flows.
 - Go-only CI gate through `make check` and `make build`.
 
-## Build and sign
+## Build
 
 ```bash
 make dist
-make sign
 ```
 
-`make sign` runs `app/packaging/sign-notarize.sh` and requires the Apple
-Developer signing/notary environment described in that helper.
+Signing/notarization packaging was removed with the Swift UI surface in specs/0049 PR2.

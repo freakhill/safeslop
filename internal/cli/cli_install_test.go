@@ -18,7 +18,10 @@ func TestInstallStatusJSONShape(t *testing.T) {
 	if self["version"] != "v9.9.9" {
 		t.Fatalf("self.version = %v, want v9.9.9", self["version"])
 	}
-	for _, k := range []string{"app", "toolchains", "runtimes"} {
+	if _, ok := m["app"]; ok {
+		t.Fatalf("status JSON must not report removed Swift UI app: %v", m)
+	}
+	for _, k := range []string{"toolchains", "runtimes"} {
 		if _, ok := m[k]; !ok {
 			t.Fatalf("status JSON missing %q: %v", k, m)
 		}

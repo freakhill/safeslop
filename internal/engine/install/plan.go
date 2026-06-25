@@ -41,8 +41,8 @@ type Pin struct {
 	// alpine-lima's VM image). A pin needs at least one of SHA256/SHA512; Apply verifies every digest set.
 	SHA512 string `json:"sha512,omitempty"`
 	URL    string `json:"url"` // download source for that artifact
-	// Provenance records how SHA256 was obtained, so the cockpit can tell a vendor-published checksum
-	// apart from one safeslop computed from the download itself (trust-on-first-use). ProvenanceVendor =
+	// Provenance records how SHA256 was obtained, so safeslop can distinguish a vendor-published checksum
+	// from one computed from the download itself (trust-on-first-use). ProvenanceVendor =
 	// the pin matches a checksum the vendor publishes; ProvenanceTLS/"" = no vendor checksum exists, so
 	// the pin is the hash safeslop recorded over TLS (weaker provenance). It is a legibility label, NOT a
 	// security gate — the SHA verification is identical either way — so it is optional and defaults to the
@@ -106,7 +106,7 @@ func ValidateDesired(pins []Pin) error {
 			return fmt.Errorf("install: pin %q has invalid format %q", p.Name, p.Format)
 		}
 		// Provenance is optional (defaults to the cautious TLS reading), but a non-empty value must be a
-		// known label — a typo here would silently mislabel the cockpit's trust badge, so catch it at build.
+		// known label, so catch typos at build.
 		if p.Provenance != "" && p.Provenance != ProvenanceVendor && p.Provenance != ProvenanceTLS {
 			return fmt.Errorf("install: pin %q has invalid provenance %q (want vendor|tls)", p.Name, p.Provenance)
 		}

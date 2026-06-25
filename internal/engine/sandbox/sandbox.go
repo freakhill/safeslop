@@ -109,7 +109,7 @@ func Profile(workspace, network string, scope Scope) string {
 	// as `file-ioctl`, which is NOT implied by file-read* on /dev — so without this
 	// rule a sandboxed zsh prints "can't set tty pgrp: operation not permitted",
 	// becomes a background process group, and its commands suspend on SIGTTIN/SIGTTOU
-	// (the cockpit "shell opens but runs nothing" bug). Scoped to the BSD pty slaves
+	// (the "shell opens but runs nothing" bug). Scoped to the BSD pty slaves
 	// (/dev/ttysNNN). Seatbelt can't filter by ioctl request code, so the residual
 	// TIOCSTI surface stays within this tier's honest threat model (mistake-guard:
 	// guards agent mistakes + accidental exfil, not a malicious-code escape).

@@ -11,8 +11,7 @@ import (
 
 // provision boots a disposable session VM, provisions its toolchain, scp's the staged dir in,
 // and returns the `ssh -t` argv that runs the agent remotely (sourcing secrets.env over ssh).
-// Shared by Launch (safeslop run) and PrepareSession (the embedded cockpit). On any failure after the
-// VM boots, provision destroys it so no VM leaks; on success the caller owns teardown (Destroy +
+// On any failure after the VM boots, provision destroys it so no VM leaks; on success the caller owns teardown (Destroy +
 // stage wipe). network "deny" requires SAFESLOP_VM_PROXY_URL; "allow" is full VM network.
 func provision(ctx context.Context, agentArgv []string, network string, secretEnv []string, stageDir, profile, toolchainKind string) (argv []string, err error) {
 	if !Available() {
@@ -75,21 +74,6 @@ func Launch(ctx context.Context, agentArgv []string, network string, secretEnv [
 	}
 	defer func() { _ = Destroy(context.Background(), profile) }() // disposable: always tear down
 	return exec.RunInTerminal(ctx, exec.LaunchSpec{Argv: argv})
-}
-
-// PrepareSession provisions a disposable VM for an embedded-cockpit session (SP7c-2): it returns
-// the `ssh -t` argv to run on the engine's PTY plus a cleanup that destroys the VM and wipes the
-// stage when the session closes. Cockpit sessions pass secretEnv nil (inherited-host-env parity
-// with SP7c-1). cleanup is always non-nil and safe to call once.
-func PrepareSession(ctx context.Context, agentArgv []string, network string, secretEnv []string, stageDir, profile, toolchainKind string) (argv []string, cleanup func(), err error) {
-	argv, err = provision(ctx, agentArgv, network, secretEnv, stageDir, profile, toolchainKind)
-	if err != nil {
-		return nil, func() {}, err
-	}
-	return argv, func() {
-		_ = Destroy(context.Background(), profile)
-		_ = os.RemoveAll(stageDir)
-	}, nil
 }
 
 func runScp(ctx context.Context, ip, src, dst string) error {

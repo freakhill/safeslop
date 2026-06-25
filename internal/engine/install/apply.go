@@ -15,7 +15,7 @@ import (
 	"github.com/freakhill/safeslop/internal/engine/receipt"
 )
 
-// Fetcher fetches an artifact URL. The CLI/server use HTTPFetcher; tests use a fake.
+// Fetcher fetches an artifact URL. The CLI uses HTTPFetcher; tests use a fake.
 type Fetcher interface {
 	Fetch(ctx context.Context, url string) (io.ReadCloser, error)
 }
@@ -82,8 +82,7 @@ const (
 	EventError    EventKind = "error"    // action failed (fail-closed abort)
 )
 
-// Event is a pb-free progress record so the engine never imports the gRPC types; the CLI prints
-// these and the control server translates them to pb.InstallApplyEvent.
+// Event is a progress record emitted by install apply; the CLI prints these for users.
 type Event struct {
 	Kind EventKind `json:"kind"`
 	Tool string    `json:"tool"`
@@ -91,9 +90,8 @@ type Event struct {
 }
 
 // The trust chain (specs/0012 §10.2 — the honest "no naive Homebrew" rationale):
-// the pinned sha256es ship COMPILED INTO THE NOTARIZED safeslop binary, so an artifact that
-// matches its embedded sha inherits Apple's code-signing root of trust — tampering with the pin
-// set breaks the binary's own signature. A GitHub-release download against an advisory README hash
+// the pinned sha256es ship compiled into the safeslop binary, so tampering with the pin set
+// requires changing the binary the user chose to run. A GitHub-release download against an advisory README hash
 // (what brew-style delegation would amount to) is a WEAKER root of trust, not stronger. Where
 // upstream also publishes a verifiable signature, Apply verifies it too (Pin.Sig), because a
 // faithfully-checksummed artifact from a compromised maintainer is still malicious
