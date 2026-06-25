@@ -9,18 +9,20 @@ import (
 	"github.com/freakhill/safeslop/internal/engine/policy"
 )
 
-// The JSON fixtures are the Go-era replacement for `slop-agents seed`: profile launch seeds the
-// same non-clobbering Claude/OpenCode project defaults without depending on fish, Python, or cue.
+// The JSON fixture is the Go-era replacement for `slop-agents seed`: profile launch seeds the
+// same non-clobbering Claude Code project defaults without depending on fish, Python, or cue.
 //
-//go:embed agentfixtures/claude-code.settings.json agentfixtures/opencode.json
+//go:embed agentfixtures/claude-code.settings.json
 var agentFixtureFS embed.FS
 
 func seedAgentDefaults(prof policy.Profile, ws string) error {
 	switch prof.Agent {
 	case "claude":
 		return seedFixture(filepath.Join(ws, ".claude", "settings.json"), "agentfixtures/claude-code.settings.json")
-	case "opencode":
-		return seedFixture(filepath.Join(ws, "opencode.json"), "agentfixtures/opencode.json")
+	case "pi", "shell", "":
+		return nil
+	case "opencode", "vscode":
+		return fmt.Errorf("unsupported agent %q", prof.Agent)
 	default:
 		return nil
 	}

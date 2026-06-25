@@ -7,9 +7,8 @@ library/layer/container/agent-tools.env
 # macOS metadata
 .DS_Store
 
-# Claude Code / OpenCode per-machine settings
+# Claude Code per-machine settings
 .claude/
-opencode.json
 
 # Python bytecode caches from developer tools
 **/__pycache__/

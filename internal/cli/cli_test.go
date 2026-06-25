@@ -67,6 +67,12 @@ func TestDoctorReportsGh(t *testing.T) {
 	}
 }
 
+func TestDoctorDoesNotReportOpenCode(t *testing.T) {
+	if _, ok := doctorReport()["opencode"]; ok {
+		t.Fatalf("doctor must not report dropped opencode tool")
+	}
+}
+
 func TestServeAndLaunchRegistered(t *testing.T) {
 	have := map[string]bool{}
 	for _, c := range []*cobra.Command{cmdServe(), cmdLaunch()} {

@@ -137,7 +137,7 @@ func cmdList() *cobra.Command {
 // doctorReport probes the external tools and isolation boundaries safeslop can use.
 // Extracted so it is testable and reusable (e.g. a future GUI / installer).
 func doctorReport() map[string]any {
-	tools := []string{"git", "gh", "docker", "op", "claude", "opencode", "pi", "tart", "mise", "nix", "aws", "gcloud", "gke-gcloud-auth-plugin"}
+	tools := []string{"git", "gh", "docker", "op", "claude", "pi", "tart", "mise", "nix", "aws", "gcloud", "gke-gcloud-auth-plugin"}
 	report := map[string]any{}
 	for _, t := range tools {
 		p, err := osexec.LookPath(t)
@@ -1194,8 +1194,6 @@ func agentArgv(p policy.Profile) ([]string, error) {
 	switch p.Agent {
 	case "claude":
 		return []string{"claude"}, nil
-	case "opencode":
-		return []string{"opencode"}, nil
 	case "pi":
 		return []string{"pi"}, nil
 	case "shell":
@@ -1224,7 +1222,7 @@ func agentArgv(p policy.Profile) ([]string, error) {
 
 // resolveHostBinary makes argv[0] an absolute path via the reconstructed host PATH, for the host and
 // sandbox tiers where the agent runs in the host process namespace. Under a Finder/launchd launch the
-// process PATH is stripped, so a bare "claude"/"opencode" would fail to exec; resolving it against the
+// process PATH is stripped, so a bare "claude" would fail to exec; resolving it against the
 // host_discovery_env recovers the real location. Container/VM tiers resolve inside the guest and must
 // NOT be passed through here. Uses the same rich-env-for-discovery path as detection (the sandbox
 // firewall is childEnv, not this).

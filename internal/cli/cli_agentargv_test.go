@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/freakhill/safeslop/internal/engine/policy"
@@ -43,14 +44,43 @@ func TestAgentArgvShellFallsBackWhenNoShellEnv(t *testing.T) {
 	}
 }
 
-// TestAgentArgvPi locks specs/0045: agent: "pi" launches the `pi` binary interactively
-// (resolved off PATH for host/sandbox), the same shape as claude/opencode.
-func TestAgentArgvPi(t *testing.T) {
+func TestAgentArgvAcceptsPi(t *testing.T) {
 	argv, err := agentArgv(policy.Profile{Agent: "pi"})
 	if err != nil {
 		t.Fatalf("agentArgv(pi): %v", err)
 	}
 	if len(argv) != 1 || argv[0] != "pi" {
 		t.Errorf("pi argv = %v, want [pi]", argv)
+	}
+}
+
+func TestAgentArgvAcceptsClaudeCode(t *testing.T) {
+	argv, err := agentArgv(policy.Profile{Agent: "claude"})
+	if err != nil {
+		t.Fatalf("agentArgv(claude): %v", err)
+	}
+	if len(argv) != 1 || argv[0] != "claude" {
+		t.Errorf("claude argv = %v, want [claude]", argv)
+	}
+}
+
+func TestAgentArgvRejectsOpenCode(t *testing.T) {
+	_, err := agentArgv(policy.Profile{Agent: "opencode"})
+	if err == nil || !strings.Contains(err.Error(), "unknown agent") {
+		t.Fatalf("agentArgv(opencode) error = %v, want unknown agent", err)
+	}
+}
+
+func TestAgentArgvRejectsVSCode(t *testing.T) {
+	_, err := agentArgv(policy.Profile{Agent: "vscode"})
+	if err == nil || !strings.Contains(err.Error(), "unknown agent") {
+		t.Fatalf("agentArgv(vscode) error = %v, want unknown agent", err)
+	}
+}
+
+func TestAgentArgvRejectsUnknownAgent(t *testing.T) {
+	_, err := agentArgv(policy.Profile{Agent: "cursor"})
+	if err == nil || !strings.Contains(err.Error(), "unknown agent") {
+		t.Fatalf("agentArgv(cursor) error = %v, want unknown agent", err)
 	}
 }
