@@ -183,9 +183,11 @@ will also build and install it into `~/.local/bin`.
 `make check` performs:
 
 - container asset drift check
+- specs/0049 pivot denylist check
 - `go vet ./...`
 - `gofmt` verification for `cmd` and `internal`
 - `go test ./...`
+- Emacs package smoke/contract tests via `make test-emacs`
 
 Useful targeted tests:
 
@@ -193,7 +195,13 @@ Useful targeted tests:
 go test ./internal/engine/creds/ -v
 go test ./internal/engine/policy/ -run 'Pinned|Latest' -v
 go test ./internal/cli/ -v
+go test ./internal/jsoncontract -v
+make test-emacs EMACS=/absolute/path/to/emacs
 ```
+
+The checked Emacs package consumes the Go golden JSON fixtures directly from
+`internal/jsoncontract/testdata/*.golden.json`; there is no copied fixture set.
+CI scaffolding for a pinned Emacs 32.1 source build lives under `ci/emacs32/`.
 
 Active development happens on the Forgejo remote. Use branches and Forgejo PRs;
 GitHub is a release mirror.

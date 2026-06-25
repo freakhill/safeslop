@@ -15,6 +15,7 @@
 ;;; Code:
 
 (require 'subr-x)
+(require 'safeslop-contract)
 
 (defgroup safeslop nil
   "Run safeslop from Emacs."
@@ -156,73 +157,58 @@ Return non-nil if the socket is up after this call."
         (when (safeslop-daemon-start)
           (safeslop-daemon-wait)))))
 
-(defun safeslop--run-buffer (name args)
-  "Run safeslop with ARGS into buffer NAME using exact argv, never a shell."
+(defun safeslop--call-json (args)
+  "Run safeslop with ARGS and parse stdout as a contract envelope.
+ARGS is passed to `call-process' as an argv list; no shell is used."
   (safeslop--ensure-daemon)
+  (with-temp-buffer
+    (let ((status (apply #'call-process safeslop-program nil t nil args))
+          (stdout nil))
+      (setq stdout (buffer-string))
+      (let ((envelope (safeslop-contract-parse-string stdout)))
+        (unless (equal status 0)
+          (setq safeslop-last-error
+                (or (safeslop-contract-first-error-code envelope)
+                    (format "safeslop exited with status %s" status))))
+        envelope))))
+
+(defun safeslop--show-envelope-buffer (name args envelope)
+  "Render ENVELOPE for safeslop ARGS into buffer NAME and return ENVELOPE."
   (let ((buf (get-buffer-create name)))
     (with-current-buffer buf
       (let ((inhibit-read-only t))
         (erase-buffer)
         (insert (format "$ %s %s\n\n" safeslop-program (string-join args " ")))
+        (insert (format "ok: %s\n" (if (safeslop-contract-ok-p envelope) "true" "false")))
+        (dolist (warning (safeslop-contract-warnings envelope))
+          (insert (format "warning[%s]: %s\n"
+                          (alist-get 'code warning)
+                          (alist-get 'message warning))))
+        (dolist (err (safeslop-contract-errors envelope))
+          (insert (format "error[%s]: %s\n"
+                          (alist-get 'code err)
+                          (alist-get 'message err))))
         (safeslop-output-mode)))
-    (let ((status (apply #'call-process safeslop-program nil buf t args)))
-      (unless (equal status 0)
-        (setq safeslop-last-error
-              (format "safeslop exited with status %s: %s" status (string-join args " "))))
-      (pop-to-buffer buf)
-      status)))
+    (pop-to-buffer buf))
+  envelope)
 
 ;;;###autoload
 (defun safeslop-doctor ()
-  "Run `safeslop doctor'."
+  "Run `safeslop doctor --json' and parse the contract envelope."
   (interactive)
-  (safeslop--run-buffer "*safeslop doctor*" '("doctor")))
+  (let* ((args '("doctor" "--json"))
+         (envelope (safeslop--call-json args)))
+    (safeslop--show-envelope-buffer "*safeslop doctor*" args envelope)))
 
 ;;;###autoload
 (defun safeslop-policy-check-file (file)
-  "Validate safeslop policy FILE."
+  "Validate safeslop policy FILE and parse the contract envelope."
   (interactive (list (read-file-name "Policy file: " nil nil t "safeslop.cue")))
-  (safeslop--run-buffer "*safeslop validate*" (list "validate" (expand-file-name file))))
+  (let* ((args (list "validate" (expand-file-name file) "--json"))
+         (envelope (safeslop--call-json args)))
+    (safeslop--show-envelope-buffer "*safeslop validate*" args envelope)))
 
-;;;###autoload
-(defun safeslop-session-new (&optional agent workspace)
-  "Create a placeholder safeslop session for AGENT in WORKSPACE.
-Session APIs land in specs/0049 PR5; this command currently records the
-requested intent and avoids invoking non-existent CLI surfaces."
-  (interactive
-   (list (completing-read "Agent: " '("claude" "pi") nil t nil nil "claude")
-         (read-directory-name "Workspace: " nil nil t)))
-  (message "safeslop sessions are not implemented yet (agent=%s workspace=%s)" agent workspace))
-
-;;;###autoload
-(defun safeslop-session-attach ()
-  "Attach to a safeslop session placeholder."
-  (interactive)
-  (message "safeslop session attach is not implemented yet"))
-
-;;;###autoload
-(defun safeslop-session-list ()
-  "List safeslop sessions placeholder."
-  (interactive)
-  (message "safeslop session list is not implemented yet"))
-
-;;;###autoload
-(defun safeslop-session-status ()
-  "Show safeslop session status placeholder."
-  (interactive)
-  (message "safeslop session status is not implemented yet"))
-
-;;;###autoload
-(defun safeslop-session-stop ()
-  "Stop a safeslop session placeholder."
-  (interactive)
-  (message "safeslop session stop is not implemented yet"))
-
-;;;###autoload
-(defun safeslop-session-restart ()
-  "Restart a safeslop session placeholder."
-  (interactive)
-  (message "safeslop session restart is not implemented yet"))
+(require 'safeslop-session)
 
 ;;;###autoload
 (defun safeslop-switch-to-session-buffer ()
