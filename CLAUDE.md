@@ -17,7 +17,6 @@ Per-repo guidance for Claude Code and other coding agents working in `safeslop`.
 - Engine packages: `internal/engine/*`
 - CLI command tree: `internal/cli`
 - Embedded policy schema: `internal/engine/policy/schema/schema.cue`
-- SwiftUI cockpit app: `app/`
 - Container/VM assets: `library/layer/container` plus embedded copies under
   `internal/engine/container/assets`
 
@@ -33,7 +32,7 @@ make check
 make build
 ```
 
-`make check` runs asset/proto sync checks, `go vet`, `gofmt` verification, and
+`make check` runs asset sync checks, `go vet`, `gofmt` verification, and
 `go test ./...`. It is the local mirror of the Go CI gate.
 
 For targeted changes, also run focused tests, for example:
@@ -72,7 +71,6 @@ Do not use `--repo` for this repo's Forgejo PR creation flow.
 - `internal/engine/vm/` — disposable VM launch and remote command assembly.
 - `internal/engine/sandbox/` — macOS Seatbelt profile generation and launch.
 - `internal/engine/install/` and `internal/engine/uninstall/` — receipt-driven tool install lifecycle.
-- `internal/engine/control/` — gRPC control plane for the cockpit.
 
 ## Safety notes
 

@@ -7,18 +7,6 @@ import (
 	"testing"
 )
 
-func TestPrepareSessionRejectsWhenUnavailable(t *testing.T) {
-	t.Setenv("PATH", "")
-	_, cleanup, err := PrepareSession(context.Background(), []string{"zsh"}, "allow", nil, t.TempDir(), "p", "")
-	if err == nil {
-		t.Fatal("expected error when tart unavailable")
-	}
-	if cleanup == nil {
-		t.Fatal("cleanup must never be nil")
-	}
-	cleanup() // must be safe to call on the error path
-}
-
 func TestLaunchRejectsWhenUnavailable(t *testing.T) {
 	t.Setenv("PATH", "")
 	_, err := Launch(context.Background(), []string{"zsh"}, "allow", nil, t.TempDir(), "p", "")

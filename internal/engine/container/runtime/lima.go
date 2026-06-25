@@ -135,8 +135,8 @@ const (
 //
 // Booting the VM is a real blast radius (a Linux guest + a writable repo mount), so the FIRST time the
 // lima backend is used safeslop itemises exactly what it entails and requires the user to confirm. The
-// prompt itself lives in the launch path (a TTY typed-confirmation, or the cockpit's preflight RPC);
-// these methods are the engine-side state. Consent is recorded once (a marker under StateDir).
+// prompt itself lives in the launch path as a TTY typed-confirmation; these methods are the
+// engine-side state. Consent is recorded once (a marker under StateDir).
 
 func (b *LimaBackend) consentMarkerPath() string { return filepath.Join(b.StateDir(), "consented") }
 

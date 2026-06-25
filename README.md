@@ -64,7 +64,6 @@ safeslop doctor                     report available tools and isolation tiers
 safeslop down                       tear down container/VM sessions
 safeslop install                    inventory and install pinned toolchains/runtimes
 safeslop uninstall                  receipt-driven removal of installed tools
-safeslop serve                      gRPC control plane for the cockpit app
 safeslop launch <profile>           open a terminal running a profile
 ```
 
@@ -174,7 +173,6 @@ make build
 `make check` performs:
 
 - container asset drift check
-- control proto drift check
 - `go vet ./...`
 - `gofmt` verification for `cmd` and `internal`
 - `go test ./...`
@@ -190,7 +188,7 @@ go test ./internal/cli/ -v
 Active development happens on the Forgejo remote. Use branches and Forgejo PRs;
 GitHub is a release mirror.
 
-## Release signing
+## Release builds
 
 Build local binaries with:
 
@@ -198,12 +196,3 @@ Build local binaries with:
 make build
 make dist
 ```
-
-Maintainer signing/notarization is driven by:
-
-```bash
-make sign
-```
-
-The signing helper lives at `app/packaging/sign-notarize.sh` and requires Apple
-Developer credentials in the environment.

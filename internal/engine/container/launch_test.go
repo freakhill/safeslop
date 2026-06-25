@@ -19,18 +19,6 @@ func TestLaunchRejectsWhenUnavailable(t *testing.T) {
 	}
 }
 
-func TestPrepareSessionRejectsWhenUnavailable(t *testing.T) {
-	t.Setenv("PATH", "")
-	_, cleanup, err := PrepareSession(context.Background(), []string{"fish"}, t.TempDir(), "deny", nil, nil, t.TempDir())
-	if err == nil {
-		t.Fatal("expected error when docker unavailable")
-	}
-	if cleanup == nil {
-		t.Fatal("cleanup must never be nil")
-	}
-	cleanup() // must be safe to call on the error path
-}
-
 // TestComposeAllowlistUnionsAndDedupes locks specs/0046: the per-run allowlist is base ∪ extra,
 // order-preserving, de-duplicated, with empty/whitespace entries dropped; nil extra == base.
 func TestComposeAllowlistUnionsAndDedupes(t *testing.T) {

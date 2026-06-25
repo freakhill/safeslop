@@ -112,7 +112,7 @@ func TestLaunchAllowsWorkspaceWriteOnDarwin(t *testing.T) {
 	}
 }
 
-// TestLaunchAllowsTtyJobControlOnDarwin is the regression guard for the cockpit
+// TestLaunchAllowsTtyJobControlOnDarwin is the regression guard for the
 // "sandboxed shell opens but runs nothing" bug. An interactive shell on a PTY must
 // be able to ioctl its controlling terminal — tcsetpgrp (TIOCSPGRP) to claim the
 // foreground, and window-size ioctls. Seatbelt gates these as `file-ioctl`, which

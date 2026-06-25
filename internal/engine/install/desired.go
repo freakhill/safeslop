@@ -5,7 +5,7 @@ package install
 // (SP7b-3) consumes URL + SHA256. Bump entries as data edits; TestDesiredStateIsFailClosed +
 // ValidateDesired guarantee every entry stays fully pinned. Two tools probed by Status are absent
 // here by design: nix is installer-managed via the *verified-installer* route instead (a pinned
-// nix-installer binary in internal/engine/tools, since a single pinned binary can't express its
+// nix-installer binary, since a single pinned binary can't express its
 // multi-component system install); docker is genuinely unmanaged — on darwin the CLI is brew-only
 // and the daemon is Docker Desktop / OrbStack (GUI casks), with no single-artifact verified
 // installer to pin, so it stays a deliberate later slice.
@@ -60,8 +60,8 @@ func DesiredState() []Pin {
 		},
 		{
 			// uv ships a versioned darwin-arm64 binary tarball + a per-artifact .sha256 (verified to
-			// match this pin on 2026-06-21). Pinning the release here lets the cockpit install uv via the
-			// fail-closed Route A (sha256 → notarized-binary trust chain) instead of `curl … | sh`
+			// match this pin on 2026-06-21). Pinning the release here lets safeslop install uv via the
+			// fail-closed Route A (sha256 verification) instead of `curl … | sh`
 			// (specs/0036 item ①). No authoritative minisign pubkey is published (no .minisig asset), so
 			// sha256 is the floor — same precedent as mise/tart above.
 			Name:       "uv",
@@ -74,7 +74,7 @@ func DesiredState() []Pin {
 		},
 		{
 			// bun ships a darwin-arm64 .zip; sha256 verified to match bun's published SHASUMS256.txt on
-			// 2026-06-21. Pinning it routes the cockpit install through verified Route A instead of
+			// 2026-06-21. Pinning it routes safeslop installs through verified Route A instead of
 			// `curl -fsSL https://bun.sh/install | bash` (specs/0036 Task 5). The zip holds
 			// bun-darwin-aarch64/bun; installBinary's findFile resolves it. No minisig published.
 			// TODO(0041): verify bun/pnpm self-update churn; if they overwrite their own binary like
