@@ -10,7 +10,7 @@ CONTAINER_SRC := library/layer/container
 CONTAINER_DST := internal/engine/container/assets
 SYNCED        := allowlist.domains Dockerfile.agent Dockerfile.agent.tools
 
-.PHONY: build test vet fmt fmtcheck check check-assets sync-container-assets dist clean test-integration
+.PHONY: build test vet fmt fmtcheck check check-assets check-pivot-denylist sync-container-assets dist clean test-integration
 
 ## Build the local binary (static — no cgo, immune to the WARP/uv install path).
 build:
@@ -44,7 +44,10 @@ check-assets:
 	  echo "drift: agent-tools.env (run 'make sync-container-assets')"; exit 1; }
 
 ## The full local gate, mirrored by .github/workflows/go.yml.
-check: check-assets vet fmtcheck test
+check-pivot-denylist:
+	ci/pivot-denylist.sh
+
+check: check-assets check-pivot-denylist vet fmtcheck test
 
 ## Opt-in integration tests behind the `integration` build tag — currently the install->uninstall->install
 ## idempotency proof on a real tart VM (specs/0041 task 6). NOT part of `check`: it boots a VM and does

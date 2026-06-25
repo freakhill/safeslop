@@ -65,9 +65,16 @@ func TestDoctorReportsGh(t *testing.T) {
 	}
 }
 
-func TestDoctorDoesNotReportOpenCode(t *testing.T) {
-	if _, ok := doctorReport()["opencode"]; ok {
-		t.Fatalf("doctor must not report dropped opencode tool")
+// The pivot narrows the supported coding agents to Claude Code and Pi; doctor must
+// probe those and must not regrow probes for the dropped agent CLIs. The dropped
+// names are kept out of source here (the denylist guards their reappearance); the
+// agentseed/agentargv negative tests prove rejection.
+func TestDoctorProbesSupportedAgentsOnly(t *testing.T) {
+	report := doctorReport()
+	for _, want := range []string{"claude", "pi"} {
+		if _, ok := report[want]; !ok {
+			t.Fatalf("doctor must probe supported agent %q: %v keys", want, report)
+		}
 	}
 }
 

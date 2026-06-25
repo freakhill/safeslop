@@ -35,8 +35,8 @@ func TestAgentEgressPiHasProvidersOthersNil(t *testing.T) {
 			t.Errorf("banned provider %q must never appear: %v", banned, pi)
 		}
 	}
-	// claude/opencode/shell rely on the shared base — no per-agent extras.
-	for _, a := range []string{"claude", "opencode", "shell", ""} {
+	// claude/shell rely on the shared base — no per-agent extras.
+	for _, a := range []string{"claude", "shell", ""} {
 		if AgentEgress(a) != nil {
 			t.Errorf("AgentEgress(%q) must be nil (relies on shared base), got %v", a, AgentEgress(a))
 		}

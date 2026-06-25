@@ -8,7 +8,7 @@ package schema
 
 #AdapterName: "docker-compose" | "squid" | "envoy" | "coredns" |
 	"sandbox-exec" | "lulu" | "pf" |
-	"claude-code-settings" | "opencode-settings" | "ag2-executor" |
+	"claude-code-settings" | "ag2-executor" |
 	"tart" | "orbstack"
 
 #NetworkPolicy: "strict-egress" | "proxy-only" | "off"
@@ -82,7 +82,6 @@ package schema
 		...
 	}
 	"claude-code-settings"?: {...}
-	"opencode-settings"?:    {...}
 	"ag2-executor"?: {
 		executor?: "docker" | "local"
 		...
@@ -125,7 +124,7 @@ package schema
 // scripts/_py/slop_orchestrator.py (next phase).
 
 // Agent names mirror the preset filenames under library/layer/policy/presets/.
-#Agent: "claude" | "opencode" | "ag2" | "openclaw" | "zeroclaw" |
+#Agent: "claude" | "ag2" | "openclaw" | "zeroclaw" |
 	"crewai" | "pydantic-ai" | "nous-hermes-local" | "nous-hermes-remote"
 
 // Where the agent runs.

@@ -1,7 +1,6 @@
 FROM local/agent-sandbox:latest
 
 ARG ENABLE_CLAUDE_CODE=false
-ARG ENABLE_OPENCODE=false
 ARG ENABLE_PI=false
 ARG ENABLE_CREWAI=true
 ARG ENABLE_PYDANTICAI=true
@@ -9,8 +8,6 @@ ARG ENABLE_AG2=true
 
 ARG CLAUDE_CODE_NPM_PACKAGE=@anthropic-ai/claude-code
 ARG CLAUDE_CODE_VERSION=2.1.121
-ARG OPENCODE_NPM_PACKAGE=opencode-ai
-ARG OPENCODE_VERSION=1.14.28
 ARG PI_NPM_PACKAGE=@earendil-works/pi-coding-agent
 ARG PI_VERSION=0.80.2
 
@@ -33,10 +30,6 @@ RUN python3 -m pip install --no-cache-dir --break-system-packages --upgrade pip 
 # Optional npm-based CLIs. These are disabled/enabled via build args.
 RUN if [ "$ENABLE_CLAUDE_CODE" = "true" ]; then \
       npm install -g "${CLAUDE_CODE_NPM_PACKAGE}@${CLAUDE_CODE_VERSION}"; \
-    fi
-
-RUN if [ "$ENABLE_OPENCODE" = "true" ]; then \
-      npm install -g "${OPENCODE_NPM_PACKAGE}@${OPENCODE_VERSION}"; \
     fi
 
 # --ignore-scripts: skip Pi's npm lifecycle scripts (supply-chain hygiene; matches
