@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "ok": false,
+  "data": {},
+  "warnings": [],
+  "errors": [
+    {
+      "code": "INVALID_ARGUMENT",
+      "message": "missing required --workspace argument",
+      "details": {
+        "argument": "workspace"
+      },
+      "retryable": false
+    }
+  ]
+}

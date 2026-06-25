@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "ok": false,
+  "data": {},
+  "warnings": [],
+  "errors": [
+    {
+      "code": "PTY_UNAVAILABLE",
+      "message": "interactive PTY is unavailable; use status JSONL fallback",
+      "details": {
+        "fallback": "status-jsonl"
+      },
+      "retryable": true
+    }
+  ]
+}
