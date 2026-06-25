@@ -1,8 +1,7 @@
 // Package sandbox launches commands under the macOS sandbox-exec (Seatbelt)
 // boundary — the first-class local boundary of the design (specs/0001 §6.2).
 //
-// The generated .sb profile is ported faithfully from the proven
-// scripts/slop-macos-sandbox.fish generator: it builds on Apple's system.sb,
+// The generated .sb profile builds on Apple's system.sb,
 // allows the system reads a shell/binary needs, confines file writes to the
 // workspace plus temp dirs, and applies a coarse network policy (deny/allow —
 // sandbox-exec cannot do a URL allowlist; that is the container's job).

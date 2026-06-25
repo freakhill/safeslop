@@ -82,8 +82,10 @@ type RepoCred struct {
 // When Repos is non-empty, one key is minted per repo and staged with per-repo SSH aliases +
 // git insteadOf rewrites (specs/0047 P2); otherwise the single repo is inferred from origin.
 type SshCreds struct {
+	Mode  string     `json:"mode,omitempty"` // "deploy-key" (default) or "pat" (stage an existing fine-grained token)
 	Write bool       `json:"write,omitempty"`
 	Ttl   string     `json:"ttl,omitempty"`
+	Pat   string     `json:"pat,omitempty"` // secret ref for mode:"pat"; token value is staged 0600, never embedded in config
 	Repos []RepoCred `json:"repos,omitempty"`
 }
 
@@ -93,12 +95,14 @@ type SshCreds struct {
 // instance base (e.g. "https://codeberg.org"); when empty the host is inferred from the cwd
 // origin remote (specs/0047).
 type ForgejoCreds struct {
+	Mode    string     `json:"mode,omitempty"` // "deploy-key" (default) or "pat" (stage an existing fine-grained token)
 	Write   bool       `json:"write,omitempty"`
 	Ttl     string     `json:"ttl,omitempty"`
 	URL     string     `json:"url,omitempty"`
-	Token   string     `json:"token"`
-	Repos   []RepoCred `json:"repos,omitempty"`    // multi-repo: one deploy key per entry (specs/0047 P2)
-	SSHPort int        `json:"ssh-port,omitempty"` // instance git SSH port for multi-repo (default 22)
+	Token   string     `json:"token,omitempty"`    // API token ref for deploy-key registration/revocation
+	Pat     string     `json:"pat,omitempty"`      // secret ref for mode:"pat"; token value is staged 0600, never embedded in config
+	Repos   []RepoCred `json:"repos,omitempty"`    // multi-repo: one deploy key/PAT scope per entry (specs/0047 P2/P2.3)
+	SSHPort int        `json:"ssh-port,omitempty"` // instance git SSH port for multi-repo rewrites (default 22)
 }
 
 // Credentials groups the credential providers a profile uses (SP2; aws/gcp SP/0009; kube SP/0010;

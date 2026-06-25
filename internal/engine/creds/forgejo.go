@@ -161,6 +161,9 @@ func StageForgejo(ctx context.Context, creds *policy.Credentials, stageDir strin
 		return nil, nil
 	}
 	fc := creds.Forgejo
+	if fc.Mode == "pat" {
+		return stageForgejoPAT(ctx, fc, stageDir)
+	}
 
 	// Multi-repo: one deploy key per named repo, staged with SSH aliases + insteadOf (specs/0047 P2).
 	if len(fc.Repos) > 0 {
@@ -175,62 +178,16 @@ func StageForgejo(ctx context.Context, creds *policy.Credentials, stageDir strin
 	if err != nil {
 		return nil, err
 	}
-	token, err := secrets.Resolve(ctx, fc.Token)
-	if err != nil {
-		return nil, fmt.Errorf("forgejo token: %w", err)
-	}
 	base := forgejoAPIBase(fc, host)
 
-	sshDir := filepath.Join(stageDir, ".ssh")
-	if err := os.MkdirAll(sshDir, 0o700); err != nil {
-		return nil, err
-	}
-	keyPath := filepath.Join(sshDir, "id")
-	khPath := filepath.Join(sshDir, "known_hosts")
-
-	title := "safeslop-" + owner + "-" + repo
-	if _, err := runSSHCmd(ctx, keygenArgv(keyPath, title), "is ssh-keygen on PATH?"); err != nil {
-		return nil, err
-	}
-	pub, err := os.ReadFile(keyPath + ".pub")
-	if err != nil {
-		return nil, fmt.Errorf("read generated public key: %w", err)
-	}
-
-	body := forgejoKeyBody(title, strings.TrimSpace(string(pub)), fc.Write)
-	respBody, code, err := forgejoDo(ctx, http.MethodPost, forgejoKeysURL(base, owner, repo), token, body)
-	if err != nil {
-		return nil, fmt.Errorf("forgejo deploy-key register: %w", err)
-	}
-	if code < 200 || code >= 300 {
-		return nil, fmt.Errorf("forgejo deploy-key register failed: HTTP %d (is the token valid with repo admin?)", code)
-	}
-	keyID, err := parseKeyID(respBody)
-	if err != nil {
-		return nil, err
-	}
-
-	_ = os.Remove(keyPath + ".pub") // only the private key crosses the boundary
-	if err := os.Chmod(keyPath, 0o600); err != nil {
-		return nil, err
-	}
-
-	kh, err := forgejoKeyscan(ctx, host, port)
-	if err != nil {
-		return nil, err
-	}
-	if err := os.WriteFile(khPath, kh, 0o600); err != nil {
-		return nil, err
-	}
-
-	// revoke-info: "<base> <owner>/<repo> <id> <token-ref>". The token REF (op://… or env:NAME),
-	// never its value, so re-resolving at revoke time keeps no secret on disk.
-	info := base + " " + owner + "/" + repo + " " + keyID + " " + fc.Token + "\n"
-	if err := os.WriteFile(filepath.Join(sshDir, "revoke-info"), []byte(info), 0o600); err != nil {
-		return nil, err
-	}
-
-	return []string{"GIT_SSH_COMMAND=" + renderGitSSHCommand(keyPath, khPath)}, nil
+	return stageForgejoMulti(ctx, &policy.ForgejoCreds{
+		Write:   fc.Write,
+		Ttl:     fc.Ttl,
+		URL:     base,
+		Token:   fc.Token,
+		Repos:   []policy.RepoCred{{Repo: owner + "/" + repo, Write: fc.Write}},
+		SSHPort: atoiOrZero(port),
+	}, stageDir)
 }
 
 // RevokeForgejo best-effort revokes the staged Forgejo deploy key (reads stageDir/.ssh/revoke-info,

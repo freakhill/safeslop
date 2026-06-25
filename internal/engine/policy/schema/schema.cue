@@ -91,12 +91,21 @@ package safeslop
 }
 
 #SshCreds: {
+	mode:   "deploy-key" | "pat" | *"deploy-key"
 	write?: bool | *false
 	ttl?:   string | *"1h"
-	// Multi-repo: one ephemeral deploy key per entry, staged with distinct SSH host aliases +
-	// git insteadOf rewrites so git picks the right key per repo (specs/0047 P2). Omit to infer
-	// the single repo from the cwd origin (the `write`/`ttl` above apply to that inferred key).
+	// PAT opt-in (specs/0047 P2.3): stage one existing fine-grained token from this secret ref
+	// as an HTTPS credential for every repo below. The token value is never embedded in git config.
+	// safeslop does not mint or revoke account tokens; rotate/revoke PATs at the forge.
+	pat?: #SecretRef
+	// Multi-repo: deploy-key mode mints one ephemeral key per entry, staged with distinct SSH host
+	// aliases + git insteadOf rewrites. PAT mode uses the same repo list for HTTPS rewrites.
+	// Omit to infer the single repo from the cwd origin in deploy-key mode.
 	repos?: [...#RepoCred]
+	if mode == "pat" {
+		pat:   #SecretRef
+		repos: [...#RepoCred] & [_, ...]
+	}
 }
 
 // Forgejo/Gitea ephemeral deploy key — the non-GitHub-forge sibling of #SshCreds (specs/0047). The
@@ -104,15 +113,28 @@ package safeslop
 // instance base (e.g. "https://codeberg.org"); when omitted the host is inferred from the cwd
 // origin remote. The SSH host key is pinned per run via ssh-keyscan at stage time.
 #ForgejoCreds: {
+	mode:   "deploy-key" | "pat" | *"deploy-key"
 	write?: bool | *false
 	ttl?:   string | *"1h"
 	url?:   string
-	token:  #SecretRef
-	// Multi-repo: one deploy key per entry, staged with SSH aliases + insteadOf (specs/0047 P2).
-	// `url` is required in this mode (no single origin to infer the instance from). `ssh-port` is
-	// the instance's git SSH port (Forgejo instances commonly differ from the https URL), default 22.
+	// Deploy-key mode API token, used to register/revoke ephemeral keys. PAT mode does not need it.
+	token?: #SecretRef
+	// PAT opt-in (specs/0047 P2.3): stage one existing fine-grained Forgejo/Gitea token from this
+	// secret ref as an HTTPS credential for every repo below. The token value is never embedded in git config.
+	// safeslop does not mint or revoke account tokens; rotate/revoke PATs at the forge.
+	pat?: #SecretRef
+	// Multi-repo: deploy-key mode mints one deploy key per entry; PAT mode uses the same repo list
+	// for HTTPS rewrites. `url` is required in multi-repo/PAT mode (no single origin to infer the instance from).
 	repos?:      [...#RepoCred]
 	"ssh-port"?: int | *22
+	if mode == "deploy-key" {
+		token: #SecretRef
+	}
+	if mode == "pat" {
+		url:   string
+		pat:   #SecretRef
+		repos: [...#RepoCred] & [_, ...]
+	}
 }
 
 // Credential providers a profile uses (SP2: pnpm; SP/0009: aws/gcp; SP/0010: kube; SP/0011: ssh;

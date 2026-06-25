@@ -98,6 +98,9 @@ func StageSSH(ctx context.Context, creds *policy.Credentials, stageDir string) (
 	if creds == nil || creds.Ssh == nil {
 		return nil, nil
 	}
+	if creds.Ssh.Mode == "pat" {
+		return stageGitHubPAT(ctx, creds.Ssh, stageDir)
+	}
 	// Multi-repo: one deploy key per named repo, staged with SSH aliases + insteadOf (specs/0047 P2).
 	if len(creds.Ssh.Repos) > 0 {
 		return stageGitHubMulti(ctx, creds.Ssh, stageDir)
@@ -111,40 +114,7 @@ func StageSSH(ctx context.Context, creds *policy.Credentials, stageDir string) (
 		return nil, err
 	}
 
-	sshDir := filepath.Join(stageDir, ".ssh")
-	if err := os.MkdirAll(sshDir, 0o700); err != nil {
-		return nil, err
-	}
-	keyPath := filepath.Join(sshDir, "id")
-	khPath := filepath.Join(sshDir, "known_hosts")
-
-	title := "safeslop-" + owner + "-" + repo
-	if _, err := runSSHCmd(ctx, keygenArgv(keyPath, title), "is ssh-keygen on PATH?"); err != nil {
-		return nil, err
-	}
-	pub, err := os.ReadFile(keyPath + ".pub")
-	if err != nil {
-		return nil, fmt.Errorf("read generated public key: %w", err)
-	}
-	regOut, err := runSSHCmd(ctx, ghRegisterArgv(owner, repo, title, strings.TrimSpace(string(pub)), creds.Ssh.Write), "is `gh auth login` current with repo admin?")
-	if err != nil {
-		return nil, err
-	}
-	keyID, err := parseKeyID(regOut)
-	if err != nil {
-		return nil, err
-	}
-	_ = os.Remove(keyPath + ".pub") // only the private key crosses the boundary
-	if err := os.Chmod(keyPath, 0o600); err != nil {
-		return nil, err
-	}
-	if err := os.WriteFile(khPath, []byte(githubKnownHosts), 0o600); err != nil {
-		return nil, err
-	}
-	if err := os.WriteFile(filepath.Join(sshDir, "revoke-info"), []byte(owner+"/"+repo+" "+keyID+"\n"), 0o600); err != nil {
-		return nil, err
-	}
-	return []string{"GIT_SSH_COMMAND=" + renderGitSSHCommand(keyPath, khPath)}, nil
+	return stageGitHubMulti(ctx, &policy.SshCreds{Repos: []policy.RepoCred{{Repo: owner + "/" + repo, Write: creds.Ssh.Write}}}, stageDir)
 }
 
 // RevokeSSH best-effort revokes the staged deploy key (reads stageDir/.ssh/revoke-info).

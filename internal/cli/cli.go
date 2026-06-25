@@ -623,6 +623,10 @@ func resolveSession(profile, configPath string) (control.SessionSpec, error) {
 		}
 	}
 
+	if err := seedAgentDefaults(prof, ws); err != nil {
+		return control.SessionSpec{}, err
+	}
+
 	// Per-session stage dir (unique → N concurrent sessions don't collide; also the vm clone name).
 	base := filepath.Join(ws, ".safeslop", "runtime")
 	if err := os.MkdirAll(base, 0o700); err != nil {
@@ -1028,6 +1032,9 @@ func runProfile(name string, prof policy.Profile, argv []string, ws string) (int
 	// ~/.safeslop-runtime (scp'd whole), with GIT_SSH_COMMAND/KUBECONFIG exported guest-side by
 	// remoteAgentCmd — the guest $HOME is resolved via ~ rather than assumed (specs/0010, 0011,
 	// 0039). The container path remains the reference implementation.
+	if err := seedAgentDefaults(prof, ws); err != nil {
+		return 1, err
+	}
 	secretEnv, pathEnv, err := stageProfile(ctx, prof, stageDir)
 	if err != nil {
 		return 1, err

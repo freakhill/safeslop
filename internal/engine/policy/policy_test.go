@@ -184,6 +184,59 @@ safeslop: profiles: deploy: {
 	}
 }
 
+func TestLoadDecodesPATCredentials(t *testing.T) {
+	cfg, err := loadStr(t, `package safeslop
+safeslop: profiles: deploy: {
+	agent: "claude"
+	environment: "container"
+	network: "deny"
+	credentials: {
+		ssh: {mode: "pat", pat: "env:GITHUB_PAT", repos: [{repo: "acme/web"}, {repo: "acme/api"}]}
+		forgejo: {mode: "pat", url: "https://codeberg.org", pat: "env:CODEBERG_PAT", token: "env:CODEBERG_ADMIN", repos: [{repo: "jojo/web"}]}
+	}
+}`)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	c := cfg.Profiles["deploy"].Credentials
+	if c.Ssh.Mode != "pat" || c.Ssh.Pat != "env:GITHUB_PAT" || len(c.Ssh.Repos) != 2 {
+		t.Fatalf("ssh PAT creds = %+v", c.Ssh)
+	}
+	if c.Forgejo.Mode != "pat" || c.Forgejo.Pat != "env:CODEBERG_PAT" || c.Forgejo.URL != "https://codeberg.org" {
+		t.Fatalf("forgejo PAT creds = %+v", c.Forgejo)
+	}
+}
+
+func TestLoadRejectsBadCredentialMode(t *testing.T) {
+	if _, err := loadStr(t, `package safeslop
+safeslop: profiles: deploy: {agent: "claude", credentials: ssh: {mode: "oauth"}}`); err == nil {
+		t.Fatal("expected bad ssh mode to fail validation")
+	}
+	if _, err := loadStr(t, `package safeslop
+safeslop: profiles: deploy: {agent: "claude", credentials: forgejo: {mode: "oauth", token: "env:T"}}`); err == nil {
+		t.Fatal("expected bad forgejo mode to fail validation")
+	}
+}
+
+func TestLoadRejectsIncompletePATCredentials(t *testing.T) {
+	if _, err := loadStr(t, `package safeslop
+safeslop: profiles: deploy: {agent: "claude", credentials: ssh: {mode: "pat", repos: [{repo: "acme/web"}]}}`); err == nil {
+		t.Fatal("expected ssh PAT mode without pat to fail validation")
+	}
+	if _, err := loadStr(t, `package safeslop
+safeslop: profiles: deploy: {agent: "claude", credentials: ssh: {mode: "pat", pat: "env:GITHUB_PAT"}}`); err == nil {
+		t.Fatal("expected ssh PAT mode without repos to fail validation")
+	}
+	if _, err := loadStr(t, `package safeslop
+safeslop: profiles: deploy: {agent: "claude", credentials: forgejo: {mode: "deploy-key", url: "https://codeberg.org"}}`); err == nil {
+		t.Fatal("expected forgejo deploy-key mode without token to fail validation")
+	}
+	if _, err := loadStr(t, `package safeslop
+safeslop: profiles: deploy: {agent: "claude", credentials: forgejo: {mode: "pat", pat: "env:FJ", repos: [{repo: "acme/web"}]}}`); err == nil {
+		t.Fatal("expected forgejo PAT mode without url to fail validation")
+	}
+}
+
 func TestLoadSshDefaultsReadOnly(t *testing.T) {
 	cfg, err := loadStr(t, `package safeslop
 safeslop: profiles: review: {

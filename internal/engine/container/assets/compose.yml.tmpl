@@ -15,7 +15,9 @@ services:
       NO_PROXY: localhost,127.0.0.1,proxy
 {{if .NpmConfig}}      NPM_CONFIG_USERCONFIG: /safeslop/runtime/.npmrc
 {{end}}{{if .Kubeconfig}}      KUBECONFIG: /safeslop/runtime/kubeconfig
-{{end}}{{if .SshKey}}      GIT_SSH_COMMAND: ssh -i /safeslop/runtime/.ssh/id -o IdentitiesOnly=yes -o IdentityAgent=none -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/safeslop/runtime/.ssh/known_hosts
+{{end}}{{if .GitConfig}}      GIT_CONFIG_GLOBAL: {{.GitConfigPath}}
+      GIT_TERMINAL_PROMPT: 0
+{{end}}{{if .GitSSHConfig}}      GIT_SSH_COMMAND: ssh -F /safeslop/runtime/.ssh/config.container
 {{end}}{{if .Term}}      TERM: {{.Term}}
 {{end}}    volumes:
       - {{.Workspace}}:/workspace:rw

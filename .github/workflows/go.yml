@@ -8,7 +8,7 @@ on:
 
 jobs:
   go:
-    # macOS so the sandbox-exec launch tests actually run (this is a macOS tool).
+    # macOS so the sandbox-exec launch tests actually run.
     runs-on: macos-latest
     steps:
       - name: Checkout
@@ -20,28 +20,8 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: go vet
-        run: go vet ./...
+      - name: Check
+        run: make check
 
-      - name: gofmt
-        run: |
-          unformatted="$(gofmt -l cmd internal)"
-          if [ -n "$unformatted" ]; then
-            echo "These files need gofmt:"; echo "$unformatted"; exit 1
-          fi
-
-      # The control-plane schema is two hand-synced copies (Go-side source + Swift
-      # bundle). A one-sided edit drifts silently and breaks the cockpit build, so
-      # gate on it here too (Woodpecker covers this via `make check`).
-      - name: control.proto copies in sync
-        run: |
-          if ! diff -q internal/engine/control/control.proto app/Sources/SafeSlopCockpit/proto/control.proto >/dev/null; then
-            echo "drift: app/Sources/SafeSlopCockpit/proto/control.proto != internal/engine/control/control.proto (run 'make proto-sync')"
-            exit 1
-          fi
-
-      - name: go build
-        run: CGO_ENABLED=0 go build -o safeslop ./cmd/safeslop
-
-      - name: go test
-        run: go test ./...
+      - name: Build
+        run: make build

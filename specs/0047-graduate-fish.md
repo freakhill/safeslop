@@ -147,8 +147,9 @@ PAT mode stages one token as a non-secret-path env (token in the staged dir, wip
 
 ### Task 2.3: PAT opt-in mode
 
-- [ ] `creds/pat.go`: mint a fine-grained PAT scoped to `repos` (gh/tea), stage as path-env + credential rewrite.
-- [ ] Test PAT staging + revoke. Add a sample profile using `mode: "pat"`.
+- [x] `creds/pat.go`: stage an existing fine-grained PAT scoped to `repos` as HTTPS credentials for GitHub/Forgejo.
+      safeslop intentionally does not mint or revoke account PATs; rotate/revoke PATs at the forge.
+- [x] Test PAT staging for 2-repo GitHub + Forgejo fixtures; token value lives only in a 0600 staged file, never in git config/env.
 
 ---
 
@@ -170,26 +171,24 @@ Two capabilities die with fish unless ported.
 `slop-pinning.fish` scans every `*.cue` and the four agent-tools build-config files for `:latest"`,
 `@latest"`, `==latest`. `policy/lint.go` does **not** cover this today.
 
-- [ ] Add a pinning check to `internal/engine/policy/lint.go` (or a dedicated `go test` walking the repo)
-      that fails on `:latest`/`@latest`/`==latest` in `*.cue` + the build-config files.
-- [ ] Wire into `make check` (it runs `go test ./...`). Test: `go test ./internal/engine/policy/ -run Pinning -v`.
+- [x] Add a dedicated Go pinning gate that fails on `:latest`/`@latest`/`==latest` in `*.cue` + the build-config files.
+- [x] Wire into `make check` via `go test ./...`. Test: `go test ./internal/engine/policy/ -run 'Pinned|Latest' -v`.
 
 ### Task 4.2: agent config seeding parity
 
 `slop-agents seed` writes bundled agent defaults non-clobbering; Go `launch.go` is only a ctty
 terminal-spawn.
 
-- [ ] Confirm whether `run` (host env) already seeds Claude/OpenCode defaults. If not, port the
-      non-clobbering seed into the host-launch path. Add/extend a test. If already covered, note it and skip.
+- [x] Port non-clobbering Claude/OpenCode default seeding into Go launch/session paths using embedded fixtures.
 
 ---
 
 ## Phase 5 — Entrypoint hard cut
 
-- [ ] Delete `scripts/slop.fish`, `./install`, `scripts/slop-install.fish`, and the conf.d snippet generation.
-- [ ] Confirm `safeslop` exposes every user-facing verb the `slop` wrapper did (`run`/`validate`/`list`/`down`
+- [x] Delete `scripts/slop.fish`, `./install`, `scripts/slop-install.fish`, and the conf.d snippet generation.
+- [x] Confirm `safeslop` exposes every user-facing verb the `slop` wrapper did (`run`/`validate`/`list`/`down`
       already present). No `slop` alias.
-- [ ] Remove README "Install fish command shims" + "Cleanup of legacy installs" sections.
+- [x] Remove README "Install fish command shims" + "Cleanup of legacy installs" sections.
 
 ---
 
@@ -197,17 +196,18 @@ terminal-spawn.
 
 Only after Phases 1–5 are green.
 
-- [ ] Delete `scripts/*.fish` (18 files) and `scripts/_py/*.py` (7 files), including the superseded host
+- [x] Delete `scripts/*.fish` (18 files) and `scripts/_py/*.py` (7 files), including the superseded host
       isolation stack (`isolation.py`, `envoy_notifier.py`, `slop-isolate.fish`), the dev tooling
       (`slop-sandboxctl`, `slop-safe-uv/npm`, `slop-skills-install`, `slop-sync-help`, `slop-pinning`,
-      `script-template`, `brew-sandbox`), and the now-ported key scripts.
-- [ ] Delete `tests/*.fish`, `tests/run.fish`, `tests/helpers.fish`, `tests/README.md`.
-- [ ] Delete the four fish Woodpecker pipelines (`.woodpecker/{help-sync,pinning,tests,script-doc-sync}.yml`)
+      `script-template`, `brew-sandbox`), and the now-ported key scripts. The maintainer signing helper
+      moved to `app/packaging/sign-notarize.sh` so `scripts/` no longer exists.
+- [x] Delete `tests/*.fish`, `tests/run.fish`, `tests/helpers.fish`, `tests/README.md`.
+- [x] Delete the four fish Woodpecker pipelines (`.woodpecker/{help-sync,pinning,tests,script-doc-sync}.yml`)
       and the four GitHub mirror workflows (`.github/workflows/{help-sync-check,pinning-check,tests,script-doc-sync-check}.yml`).
       **Keep** `.woodpecker/go.yml` and `.github/workflows/go.yml`.
-- [ ] Rewrite `CLAUDE.md`, `AGENTS.md`, `README.md`, `scripts/CONVENTIONS.md`, `CONTRIBUTING.md` to Go-only:
-      drop the fish landmines, the four fish gates, the uv/Textual/PEP-723 sections, and the strangler framing.
-- [ ] Spin out `specs/0048-host-egress-approval-flo.md` stub referencing this decision (premium-FLO to design
+- [x] Rewrite `CLAUDE.md`, `AGENTS.md`, `README.md`, `CONTRIBUTING.md`, skills, and active library docs to Go-only;
+      delete `scripts/CONVENTIONS.md` with the rest of `scripts/`.
+- [x] Spin out `specs/0048-host-egress-approval-flo.md` stub referencing this decision (premium-FLO to design
       the Go-native replacement for the dropped `approve --once/--always` UX).
 
 ---
@@ -229,10 +229,10 @@ Binary smoke (real, in a scratch repo):
 - [ ] `safeslop creds gc --dry-run` lists orphaned `safeslop-*` keys.
 
 Graduation gate — prove fish-free:
-- [ ] `grep -rIl -E '\.fish|_py/|uv run|fish tests' --include='*.go' --include='*.yml' --include='*.md' .`
-      returns only the **allowed** residue (the `tools.go` installable-tool entry + `hostenv`
-      `config.fish` read + any historical spec text). No runtime invocations remain.
-- [ ] `scripts/` and `tests/*.fish` no longer exist; `make check` + the Go CI are the only gates.
+- [x] `grep -rIl -E '\.fish|_py/|uv run|fish tests' --include='*.go' --include='*.yml' --include='*.md' .`
+      returns only the **allowed** residue (`hostenv` reading shell startup files and historical spec text).
+      No runtime invocations remain.
+- [x] `scripts/` and `tests/*.fish` no longer exist; `make check` + the Go CI are the only gates.
 
 ---
 

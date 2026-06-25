@@ -1,5 +1,18 @@
-# library/layer/vm/
+# VM layer
 
-Disposable VM scaffolding. The Tart-based brew sandbox is the only VM workflow today; its assumptions and defaults are documented as a recipe at [`../../task/evaluate-formulae/`](../../task/evaluate-formulae/) and driven by [`slop-brew-vm`](../../../scripts/slop-brew-vm.fish).
+The VM tier launches disposable sessions for high-risk workflows. It is the
+heaviest boundary and should be used when code is untrusted or when a disposable
+machine is the desired safety property.
 
-If/when more VM workflows are added (a separate Linux clone for build experiments, a Windows guest for a Windows-only tool, etc.) their per-VM settings would land here. Today the directory is intentionally a pointer.
+Example profile:
+
+```cue
+profiles: vm_review: {
+	agent:       "shell"
+	environment: "vm"
+	network:     "deny"
+}
+```
+
+Use `safeslop run vm_review` to launch and `safeslop down` to clean up interrupted
+container/VM sessions.

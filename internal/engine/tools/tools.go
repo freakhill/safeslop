@@ -281,7 +281,7 @@ func Catalog() []Tool {
 			Note: "Proton Pass app"},
 
 		// safeslop core
-		{Name: "fish", Category: CatCore, Detect: []string{"fish"}, Brew: "fish", Note: "shell for the scripts stack"},
+		{Name: "safeslop", Category: CatCore, Detect: []string{"safeslop"}, Note: "the safeslop CLI"},
 
 		// Agents
 		{Name: "Claude Code", Category: CatAgents, Detect: []string{"claude"},
