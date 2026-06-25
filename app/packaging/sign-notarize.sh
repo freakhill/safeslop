@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Codesign + notarize the slop binaries for distribution.
+# Codesign + notarize safeslop binaries for distribution.
 #
 # This is the SP1 signing pipeline (specs/0001 §8). It is intentionally NOT run
 # in CI — it needs an Apple Developer identity and is the maintainer's gate. Run
@@ -13,7 +13,7 @@
 #                            --apple-id <you@example.com> --team-id <TEAMID> \
 #                            --password <app-specific-password>
 #
-# Usage: scripts/sign-notarize.sh dist/slop-darwin-arm64 [dist/slop-darwin-amd64 ...]
+# Usage: app/packaging/sign-notarize.sh dist/safeslop-darwin-arm64 [dist/safeslop-darwin-amd64 ...]
 #
 # Note on stapling: a bare CLI executable cannot be stapled (stapling targets
 # .app/.dmg/.pkg). The notarized zip below is what you publish (Homebrew/GitHub

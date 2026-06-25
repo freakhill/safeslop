@@ -70,7 +70,7 @@ fmtcheck:
 	@test -z "$$(gofmt -l $(GOFILES))" || { echo "unformatted files:"; gofmt -l $(GOFILES); exit 1; }
 
 ## Sync the canonical container assets into the Go embed dir (library/ stays the
-## single source of truth), and gate on drift — mirrors slop-sync-help.
+## single source of truth), and gate on drift.
 sync-container-assets:
 	@for f in $(SYNCED); do cp $(CONTAINER_SRC)/$$f $(CONTAINER_DST)/$$f; done
 	@cp $(CONTAINER_SRC)/agent-tools.env.example $(CONTAINER_DST)/agent-tools.env
@@ -116,7 +116,7 @@ dist:
 ## notarization-backed root of trust in the cockpit (internal/engine/buildinfo).
 sign:
 	$(MAKE) dist RELEASE=1
-	bash scripts/sign-notarize.sh dist/$(BINARY)-darwin-arm64 dist/$(BINARY)-darwin-amd64
+	bash app/packaging/sign-notarize.sh dist/$(BINARY)-darwin-arm64 dist/$(BINARY)-darwin-amd64
 
 clean:
 	rm -f $(BINARY)
