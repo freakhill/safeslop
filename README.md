@@ -170,6 +170,16 @@ make check
 make build
 ```
 
+Local developer install:
+
+```bash
+make install       # ~/.local/bin/safeslop + ~/.local/share/safeslop/emacs
+make install-emacs # only sync the Emacs package under ~/.local/share/safeslop/emacs
+```
+
+If a future safeslop MCP server package is added under `cmd/*mcp*`, `make install`
+will also build and install it into `~/.local/bin`.
+
 `make check` performs:
 
 - container asset drift check

@@ -5,12 +5,13 @@ PKG     := ./cmd/safeslop
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -X github.com/freakhill/safeslop/internal/cli.Version=$(VERSION)
 GOFILES := cmd internal
+EMACS  ?= emacs
 
 CONTAINER_SRC := library/layer/container
 CONTAINER_DST := internal/engine/container/assets
 SYNCED        := allowlist.domains Dockerfile.agent Dockerfile.agent.tools
 
-.PHONY: build test vet fmt fmtcheck check check-assets check-pivot-denylist sync-container-assets dist clean test-integration
+.PHONY: build test test-emacs vet fmt fmtcheck check check-assets check-pivot-denylist sync-container-assets install install-emacs install-mcp dist clean test-integration
 
 ## Build the local binary (static — no cgo, immune to the WARP/uv install path).
 build:
@@ -18,6 +19,10 @@ build:
 
 test:
 	go test ./...
+
+test-emacs:
+	$(EMACS) --batch -L emacs -l ert -l emacs/test/safeslop-test.el -f ert-run-tests-batch-and-exit
+	$(EMACS) --batch -L emacs -l emacs/safeslop.el -l emacs/safeslop-doom.el --eval '(message "safeslop emacs ok")'
 
 vet:
 	go vet ./...
@@ -55,6 +60,28 @@ check: check-assets check-pivot-denylist vet fmtcheck test
 ## manual/cron Woodpecker pipeline (.woodpecker/integration.yml), never on every push.
 test-integration:
 	go test -tags integration -timeout 35m ./...
+
+install-emacs:
+	mkdir -p "$(HOME)/.local/share/safeslop/emacs"
+	rsync -a --delete --include='*.el' --exclude='*' emacs/ "$(HOME)/.local/share/safeslop/emacs/"
+	@echo "installed safeslop Emacs package -> $(HOME)/.local/share/safeslop/emacs"
+
+install-mcp:
+	@found=0; \
+	for d in cmd/*mcp*; do \
+	  [ -d "$$d" ] || continue; \
+	  found=1; \
+	  name=$$(basename "$$d"); \
+	  mkdir -p "$(HOME)/.local/bin"; \
+	  CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o "$(HOME)/.local/bin/$$name" "./$$d"; \
+	  echo "installed $$name -> $(HOME)/.local/bin/$$name"; \
+	done; \
+	if [ "$$found" = 0 ]; then echo "no safeslop MCP server package found; skipped MCP install"; fi
+
+install: build install-emacs install-mcp
+	mkdir -p "$(HOME)/.local/bin"
+	install -m755 $(BINARY) "$(HOME)/.local/bin/$(BINARY)"
+	@echo "installed $(BINARY) -> $(HOME)/.local/bin/$(BINARY)"
 
 ## Cross-compile the two macOS arches into dist/ (signing-ready static binaries).
 dist:
