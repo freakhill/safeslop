@@ -18,5 +18,5 @@ safeslop trust
 safeslop run review
 ```
 
-For Claude and OpenCode profiles, safeslop seeds bundled project defaults
-non-clobberingly before launch. Existing project settings are left untouched.
+For Claude profiles, safeslop seeds bundled project defaults non-clobberingly
+before launch. Existing project settings are left untouched.

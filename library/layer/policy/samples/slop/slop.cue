@@ -36,13 +36,6 @@ profiles: {
 		]
 	}
 
-	// "explore" — host-side OpenCode with the bundled defaults. No
-	// container, no ephemeral creds.
-	"explore": schema.#Profile & {
-		agent:       "opencode"
-		environment: "host"
-		isolation:   presets.#OpenCode
-	}
 }
 
 default: "review"

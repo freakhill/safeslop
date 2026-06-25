@@ -11,7 +11,7 @@ package safeslop
 #Environment: "sandbox" | "container" | "vm" | "host"
 
 // What to launch.
-#Agent: "claude" | "shell" | "opencode" | "pi"
+#Agent: "claude" | "shell" | "pi"
 
 // Coarse egress policy for the sandbox-exec boundary. Not a URL allowlist —
 // that is the container's job (specs/0001 §6.2).

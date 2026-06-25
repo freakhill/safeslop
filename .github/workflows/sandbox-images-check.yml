@@ -45,21 +45,18 @@ jobs:
           # Source the .env so its KEY=value lines turn into
           # process-environment vars, which the next docker build
           # picks up as defaults for the matching ARGs in the
-          # Dockerfile (CLAUDE_CODE_VERSION, OPENCODE_VERSION,
-          # CREWAI_VERSION, etc.).
+          # Dockerfile (CLAUDE_CODE_VERSION, CREWAI_VERSION, etc.).
           . library/layer/container/agent-tools.env
           set +a
           docker build \
             -t local/agent-sandbox-tools:latest \
             -f library/layer/container/Dockerfile.agent.tools \
             --build-arg CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-}" \
-            --build-arg OPENCODE_VERSION="${OPENCODE_VERSION:-}" \
             --build-arg CREWAI_VERSION="${CREWAI_VERSION:-}" \
             --build-arg PYDANTIC_AI_VERSION="${PYDANTIC_AI_VERSION:-}" \
             --build-arg PYDANTIC_AI_HARNESS_VERSION="${PYDANTIC_AI_HARNESS_VERSION:-}" \
             --build-arg AG2_VERSION="${AG2_VERSION:-}" \
             --build-arg ENABLE_CLAUDE_CODE="${ENABLE_CLAUDE_CODE:-false}" \
-            --build-arg ENABLE_OPENCODE="${ENABLE_OPENCODE:-false}" \
             --build-arg ENABLE_CREWAI="${ENABLE_CREWAI:-true}" \
             --build-arg ENABLE_PYDANTICAI="${ENABLE_PYDANTICAI:-true}" \
             --build-arg ENABLE_AG2="${ENABLE_AG2:-true}" \

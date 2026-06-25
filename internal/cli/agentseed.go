@@ -21,10 +21,8 @@ func seedAgentDefaults(prof policy.Profile, ws string) error {
 		return seedFixture(filepath.Join(ws, ".claude", "settings.json"), "agentfixtures/claude-code.settings.json")
 	case "pi", "shell", "":
 		return nil
-	case "opencode", "vscode":
-		return fmt.Errorf("unsupported agent %q", prof.Agent)
 	default:
-		return nil
+		return fmt.Errorf("unsupported agent %q", prof.Agent)
 	}
 }
 
