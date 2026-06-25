@@ -105,10 +105,9 @@ func TestStageSSHMintsReadOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StageSSH: %v", err)
 	}
-	keyPath := filepath.Join(stage, ".ssh", "id")
-	khPath := filepath.Join(stage, ".ssh", "known_hosts")
+	keyPath := filepath.Join(stage, ".ssh", "id_acme-repo")
 	joined := strings.Join(env, " ")
-	if !strings.Contains(joined, "GIT_SSH_COMMAND=ssh -i "+keyPath) || !strings.Contains(joined, "UserKnownHostsFile="+khPath) {
+	if !strings.Contains(joined, "GIT_SSH_COMMAND=ssh -F "+filepath.Join(stage, ".ssh", "config")) || !strings.Contains(joined, "GIT_CONFIG_GLOBAL="+filepath.Join(stage, ".gitconfig")) {
 		t.Fatalf("env = %v", env)
 	}
 	if fi, _ := os.Stat(keyPath); fi == nil || fi.Mode().Perm() != 0o600 {
@@ -117,6 +116,7 @@ func TestStageSSHMintsReadOnly(t *testing.T) {
 	if _, err := os.Stat(keyPath + ".pub"); !os.IsNotExist(err) {
 		t.Fatalf(".pub must not remain staged")
 	}
+	khPath := filepath.Join(stage, ".ssh", "known_hosts")
 	if b, _ := os.ReadFile(khPath); !strings.HasPrefix(string(b), "github.com ssh-ed25519 ") {
 		t.Fatalf("known_hosts not pinned: %q", b)
 	}

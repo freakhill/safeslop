@@ -147,8 +147,9 @@ PAT mode stages one token as a non-secret-path env (token in the staged dir, wip
 
 ### Task 2.3: PAT opt-in mode
 
-- [ ] `creds/pat.go`: mint a fine-grained PAT scoped to `repos` (gh/tea), stage as path-env + credential rewrite.
-- [ ] Test PAT staging + revoke. Add a sample profile using `mode: "pat"`.
+- [x] `creds/pat.go`: stage an existing fine-grained PAT scoped to `repos` as HTTPS credentials for GitHub/Forgejo.
+      safeslop intentionally does not mint or revoke account PATs; rotate/revoke PATs at the forge.
+- [x] Test PAT staging for 2-repo GitHub + Forgejo fixtures; token value lives only in a 0600 staged file, never in git config/env.
 
 ---
 
@@ -170,17 +171,15 @@ Two capabilities die with fish unless ported.
 `slop-pinning.fish` scans every `*.cue` and the four agent-tools build-config files for `:latest"`,
 `@latest"`, `==latest`. `policy/lint.go` does **not** cover this today.
 
-- [ ] Add a pinning check to `internal/engine/policy/lint.go` (or a dedicated `go test` walking the repo)
-      that fails on `:latest`/`@latest`/`==latest` in `*.cue` + the build-config files.
-- [ ] Wire into `make check` (it runs `go test ./...`). Test: `go test ./internal/engine/policy/ -run Pinning -v`.
+- [x] Add a dedicated Go pinning gate that fails on `:latest`/`@latest`/`==latest` in `*.cue` + the build-config files.
+- [x] Wire into `make check` via `go test ./...`. Test: `go test ./internal/engine/policy/ -run 'Pinned|Latest' -v`.
 
 ### Task 4.2: agent config seeding parity
 
 `slop-agents seed` writes bundled agent defaults non-clobbering; Go `launch.go` is only a ctty
 terminal-spawn.
 
-- [ ] Confirm whether `run` (host env) already seeds Claude/OpenCode defaults. If not, port the
-      non-clobbering seed into the host-launch path. Add/extend a test. If already covered, note it and skip.
+- [x] Port non-clobbering Claude/OpenCode default seeding into Go launch/session paths using embedded fixtures.
 
 ---
 

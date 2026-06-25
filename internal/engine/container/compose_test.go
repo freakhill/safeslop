@@ -191,22 +191,28 @@ func TestSecretsEnvExcludesKubeconfig(t *testing.T) {
 	}
 }
 
-func TestComposeNoAgentSocketAndSshKey(t *testing.T) {
-	with, err := renderCompose(composeParams{RuntimeDir: "/r", Workspace: "/w", StageDir: "/r", SshKey: true})
+func TestComposeNoAgentSocketAndGitConfig(t *testing.T) {
+	with, err := renderCompose(composeParams{RuntimeDir: "/r", Workspace: "/w", StageDir: "/r", GitConfig: true, GitConfigPath: "/safeslop/runtime/.gitconfig", GitSSHConfig: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(with, "SSH_AUTH_SOCK") || strings.Contains(with, "ssh-agent.sock") {
 		t.Fatalf("agent socket must be gone from compose:\n%s", with)
 	}
-	if !strings.Contains(with, "GIT_SSH_COMMAND: ssh -i /safeslop/runtime/.ssh/id") {
-		t.Fatalf("compose missing GIT_SSH_COMMAND:\n%s", with)
+	if !strings.Contains(with, "GIT_CONFIG_GLOBAL: /safeslop/runtime/.gitconfig") {
+		t.Fatalf("compose missing GIT_CONFIG_GLOBAL:\n%s", with)
 	}
-	without, err := renderCompose(composeParams{RuntimeDir: "/r", Workspace: "/w", StageDir: "/r", SshKey: false})
+	if !strings.Contains(with, "GIT_SSH_COMMAND: ssh -F /safeslop/runtime/.ssh/config.container") {
+		t.Fatalf("compose missing container SSH config:\n%s", with)
+	}
+	if !strings.Contains(with, "GIT_TERMINAL_PROMPT: 0") {
+		t.Fatalf("compose must disable interactive git credential prompts when staged git config exists:\n%s", with)
+	}
+	without, err := renderCompose(composeParams{RuntimeDir: "/r", Workspace: "/w", StageDir: "/r", GitConfig: false, GitSSHConfig: false})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(without, "GIT_SSH_COMMAND") {
-		t.Fatalf("GIT_SSH_COMMAND must be absent when no ssh key staged:\n%s", without)
+	if strings.Contains(without, "GIT_CONFIG_GLOBAL") || strings.Contains(without, "GIT_TERMINAL_PROMPT") || strings.Contains(without, "GIT_SSH_COMMAND") {
+		t.Fatalf("git config env must be absent when no staged .gitconfig exists:\n%s", without)
 	}
 }

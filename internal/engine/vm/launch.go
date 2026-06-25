@@ -53,9 +53,14 @@ func provision(ctx context.Context, agentArgv []string, network string, secretEn
 	// Detect staged path-creds the same way the container path does (container/launch.go): their
 	// presence flips the matching guest-side env export. StageSSH/StageKube wrote these into
 	// stageDir before Launch, and runScp copied the whole tree to ~/.safeslop-runtime.
-	_, sshErr := os.Stat(filepath.Join(stageDir, ".ssh", "id"))
+	gitConfigName := ".gitconfig"
+	if _, err := os.Stat(filepath.Join(stageDir, ".gitconfig.vm")); err == nil {
+		gitConfigName = ".gitconfig.vm"
+	}
+	_, gitConfigErr := os.Stat(filepath.Join(stageDir, gitConfigName))
+	_, gitSSHConfigErr := os.Stat(filepath.Join(stageDir, ".ssh", "config.vm"))
 	_, kubeErr := os.Stat(filepath.Join(stageDir, "kubeconfig"))
-	remote := remoteAgentCmd(agentArgv, proxyURL, sshErr == nil, kubeErr == nil)
+	remote := remoteAgentCmd(agentArgv, proxyURL, gitConfigErr == nil, gitConfigName, gitSSHConfigErr == nil, kubeErr == nil)
 	return sshArgv(ip, true, "zsh", "-lc", remote), nil
 }
 

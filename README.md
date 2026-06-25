@@ -136,7 +136,24 @@ safeslop: {
 
 			// Ephemeral credentials staged before launch, torn down after.
 			credentials: {
-				ssh: {write: false, ttl: "1h"}     // repo-scoped deploy key
+				// GitHub deploy keys (default): omit repos to infer the current repo from origin,
+				// or declare repos for one key per repo with per-repo SSH aliases.
+				// PAT opt-in: set mode:"pat" and pat:<secret-ref> to stage one HTTPS token.
+				ssh: {
+					mode: "deploy-key" // or "pat"
+					// pat: "env:GITHUB_FINE_GRAINED_PAT" // only for mode:"pat"
+					repos: [{repo: "owner/web"}, {repo: "owner/api", write: true}]
+				}
+
+				// Forgejo/Gitea sibling; url is required for multi-repo/PAT, and ssh-port
+				// covers self-hosted instances whose git SSH port differs from HTTPS.
+				forgejo: {
+					url: "https://forgejo.example.com"
+					token: "env:FORGEJO_ADMIN_TOKEN" // deploy-key mode only
+					"ssh-port": 2222
+					repos: [{repo: "owner/web"}, {repo: "owner/api"}]
+				}
+
 				aws: {profile: "my-sso-profile"}    // short-lived SSO role creds
 				gcp: {}                             // ADC access token
 				pnpm: [{host: "registry.npmjs.org", token: "op://Private/npm/token"}]
@@ -149,10 +166,13 @@ safeslop: {
 }
 ```
 
-Every field except `agent` has a default or is optional. `safeslop run` is
-**fail-closed on trust**: a `safeslop.cue` is honored only after you approve its
-exact bytes with `safeslop trust` (or `safeslop run --trust`); editing the file
-afterwards re-blocks it until you re-approve. `validate`, `list`, and
+Every field except `agent` has a default or is optional. Git credentials default
+to per-repo deploy keys; `mode: "pat"` is an explicit opt-in that stages one
+existing fine-grained HTTPS token from `pat:` for the declared repos (safeslop
+wipes the staged copy on exit but does not mint or revoke account PATs). `safeslop
+run` is **fail-closed on trust**: a `safeslop.cue` is honored only after you
+approve its exact bytes with `safeslop trust` (or `safeslop run --trust`); editing
+the file afterwards re-blocks it until you re-approve. `validate`, `list`, and
 `run --dry-run` stay ungated — inspect an untrusted policy before trusting it.
 
 ### CLI

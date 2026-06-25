@@ -155,18 +155,25 @@ func provision(ctx context.Context, agentArgv []string, workspace, network strin
 	}
 	_, npmErr := os.Stat(filepath.Join(stageDir, ".npmrc"))
 	_, kubeErr := os.Stat(filepath.Join(stageDir, "kubeconfig"))
-	_, sshErr := os.Stat(filepath.Join(stageDir, ".ssh", "id"))
+	gitConfigName := ".gitconfig"
+	if _, err := os.Stat(filepath.Join(stageDir, ".gitconfig.container")); err == nil {
+		gitConfigName = ".gitconfig.container"
+	}
+	_, gitConfigErr := os.Stat(filepath.Join(stageDir, gitConfigName))
+	_, gitSSHConfigErr := os.Stat(filepath.Join(stageDir, ".ssh", "config.container"))
 	p := composeParams{
-		RuntimeDir:  stageDir,
-		Workspace:   workspace,
-		StageDir:    stageDir,
-		Term:        os.Getenv("TERM"),
-		NpmConfig:   npmErr == nil,
-		Kubeconfig:  kubeErr == nil,
-		SshKey:      sshErr == nil,
-		OpenEgress:  network == "allow",
-		InternalNet: internalNet,
-		Egress:      egress,
+		RuntimeDir:    stageDir,
+		Workspace:     workspace,
+		StageDir:      stageDir,
+		Term:          os.Getenv("TERM"),
+		NpmConfig:     npmErr == nil,
+		Kubeconfig:    kubeErr == nil,
+		GitConfig:     gitConfigErr == nil,
+		GitConfigPath: "/safeslop/runtime/" + gitConfigName,
+		GitSSHConfig:  gitSSHConfigErr == nil,
+		OpenEgress:    network == "allow",
+		InternalNet:   internalNet,
+		Egress:        egress,
 	}
 	composeFile, err = materializeRun(p, network == "allow")
 	if err != nil {

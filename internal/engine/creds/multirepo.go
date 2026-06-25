@@ -18,6 +18,11 @@ func repoSlug(ownerRepo string) string {
 	return strings.ReplaceAll(strings.TrimSpace(ownerRepo), "/", "-")
 }
 
+func atoiOrZero(s string) int {
+	i, _ := strconv.Atoi(s)
+	return i
+}
+
 // splitOwnerRepo parses an "owner/name" spec from a #RepoCred.
 func splitOwnerRepo(s string) (owner, repo string, err error) {
 	p := strings.SplitN(strings.TrimSpace(s), "/", 2)
@@ -48,22 +53,18 @@ func stageRepoSSH(stageDir, hostName, port string, knownHosts []byte, entries []
 		return nil, err
 	}
 
-	var cfg strings.Builder
-	for _, e := range entries {
-		alias := hostName + "-" + e.slug
-		fmt.Fprintf(&cfg, "Host %s\n", alias)
-		fmt.Fprintf(&cfg, "  HostName %s\n", hostName)
-		fmt.Fprintf(&cfg, "  User git\n")
-		if port != "" && port != "22" {
-			fmt.Fprintf(&cfg, "  Port %s\n", port)
-		}
-		fmt.Fprintf(&cfg, "  IdentityFile %s\n", e.keyPath)
-		fmt.Fprintf(&cfg, "  IdentitiesOnly yes\n")
-		fmt.Fprintf(&cfg, "  StrictHostKeyChecking yes\n")
-		fmt.Fprintf(&cfg, "  UserKnownHostsFile %s\n\n", khPath)
-	}
 	cfgPath := filepath.Join(sshDir, "config")
-	if err := os.WriteFile(cfgPath, []byte(cfg.String()), 0o600); err != nil {
+	if err := os.WriteFile(cfgPath, []byte(renderAliasSSHConfig(hostName, port, khPath, entries, func(p string) string { return p })), 0o600); err != nil {
+		return nil, err
+	}
+	// Container/VM runs see the same staged tree at different paths; keep separate SSH configs so
+	// IdentityFile/UserKnownHostsFile point at the path that exists inside each boundary.
+	containerKH := "/safeslop/runtime/.ssh/known_hosts"
+	if err := os.WriteFile(filepath.Join(sshDir, "config.container"), []byte(renderAliasSSHConfig(hostName, port, containerKH, entries, func(p string) string { return "/safeslop/runtime/.ssh/" + filepath.Base(p) })), 0o600); err != nil {
+		return nil, err
+	}
+	vmKH := "~/.safeslop-runtime/.ssh/known_hosts"
+	if err := os.WriteFile(filepath.Join(sshDir, "config.vm"), []byte(renderAliasSSHConfig(hostName, port, vmKH, entries, func(p string) string { return "~/.safeslop-runtime/.ssh/" + filepath.Base(p) })), 0o600); err != nil {
 		return nil, err
 	}
 
@@ -93,6 +94,24 @@ func stageRepoSSH(stageDir, hostName, port string, knownHosts []byte, entries []
 // stageGitHubMulti mints one ephemeral GitHub deploy key per repo in sc.Repos and stages them with
 // per-repo SSH aliases + insteadOf rewrites (specs/0047 P2). revoke-info gets one "owner/repo id"
 // line per key, which RevokeSSH revokes in a loop.
+func renderAliasSSHConfig(hostName, port, knownHostsPath string, entries []aliasEntry, keyPath func(string) string) string {
+	var cfg strings.Builder
+	for _, e := range entries {
+		alias := hostName + "-" + e.slug
+		fmt.Fprintf(&cfg, "Host %s\n", alias)
+		fmt.Fprintf(&cfg, "  HostName %s\n", hostName)
+		fmt.Fprintf(&cfg, "  User git\n")
+		if port != "" && port != "22" {
+			fmt.Fprintf(&cfg, "  Port %s\n", port)
+		}
+		fmt.Fprintf(&cfg, "  IdentityFile %s\n", keyPath(e.keyPath))
+		fmt.Fprintf(&cfg, "  IdentitiesOnly yes\n")
+		fmt.Fprintf(&cfg, "  StrictHostKeyChecking yes\n")
+		fmt.Fprintf(&cfg, "  UserKnownHostsFile %s\n\n", knownHostsPath)
+	}
+	return cfg.String()
+}
+
 func stageGitHubMulti(ctx context.Context, sc *policy.SshCreds, stageDir string) ([]string, error) {
 	sshDir := filepath.Join(stageDir, ".ssh")
 	if err := os.MkdirAll(sshDir, 0o700); err != nil {
