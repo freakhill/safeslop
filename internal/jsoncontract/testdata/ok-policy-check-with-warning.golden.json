@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "ok": true,
+  "data": {
+    "policy": {
+      "path": "safeslop.cue",
+      "valid": true
+    }
+  },
+  "warnings": [
+    {
+      "code": "POLICY_DENIED",
+      "message": "profile requests host isolation; review before trusting",
+      "details": {
+        "environment": "host",
+        "profile": "dev"
+      },
+      "retryable": false
+    }
+  ],
+  "errors": []
+}

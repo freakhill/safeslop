@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "ok": true,
+  "data": {
+    "session": {
+      "agent": "claude",
+      "id": "sess_01HX7Z9E6M4Q2S8R0T5N1V3W9Y",
+      "socket": "~/Library/Application Support/safeslop/safeslop.sock",
+      "state": "created",
+      "workspace": "/workspace/project"
+    }
+  },
+  "warnings": [],
+  "errors": []
+}

@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "ok": true,
+  "data": {
+    "session": {
+      "agent": "pi",
+      "id": "sess_01HX7Z9E6M4Q2S8R0T5N1V3W9Y",
+      "pid": 4242,
+      "started_at": "2026-06-26T00:00:00Z",
+      "state": "running",
+      "workspace": "/workspace/project"
+    }
+  },
+  "warnings": [],
+  "errors": []
+}
