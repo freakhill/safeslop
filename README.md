@@ -60,7 +60,7 @@ safeslop validate [safeslop.cue]    check against the embedded schema
 safeslop list [safeslop.cue]        list profiles and resolved tiers
 safeslop trust [safeslop.cue]       approve this policy's exact bytes
 safeslop run <profile> [--dry-run]  launch a trusted profile
-safeslop session create --agent <pi|claude> --workspace <dir> --output json
+safeslop session create --agent <pi|claude|claude-code> --workspace <dir> --output json
 safeslop session run --session-id <id>
 safeslop session status --session-id <id> --output <json|jsonl>
 safeslop session stop --session-id <id> --revoke-credentials --output json
@@ -87,7 +87,7 @@ safeslop: {
 	version: 1
 	profiles: {
 		work: {
-			agent:       "claude"          // "claude" | "pi"
+			agent:       "claude"          // "claude" | "claude-code" | "pi"
 			environment: "container"       // "sandbox" | "container" | "vm" | "host"
 			network:     "deny"            // "deny" | "allow"
 			workspace:   "."
@@ -128,6 +128,10 @@ safeslop: {
 	}
 }
 ```
+
+`agent: "claude-code"` is accepted as a user-facing alias for Claude Code and is
+normalized to the canonical `claude` engine value, so it launches the same
+`claude` binary and is reported as `claude` in status output.
 
 ### Trust model
 

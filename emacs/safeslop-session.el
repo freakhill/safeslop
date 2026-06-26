@@ -33,7 +33,7 @@
 (defun safeslop-session-new (&optional agent workspace)
   "Create a safeslop session for AGENT in WORKSPACE and parse the JSON envelope."
   (interactive
-   (list (completing-read "Agent: " '("claude" "pi") nil t nil nil "claude")
+   (list (completing-read "Agent: " '("claude" "claude-code" "pi") nil t nil nil "claude")
          (read-directory-name "Workspace: " nil nil t)))
   (let* ((args (safeslop-session--create-args (or agent "claude") (or workspace default-directory)))
          (envelope (safeslop--call-json args)))

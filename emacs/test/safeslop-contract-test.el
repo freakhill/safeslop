@@ -123,6 +123,16 @@ ROUTES maps exact argv JSON strings to `((stdout . STRING) (stderr . STRING)
       (should (safeslop-contract-ok-p (safeslop-session-new "claude" workspace)))
       (should (equal (safeslop-test--argv-log-lines) (list (safeslop-test--json-key argv)))))))
 
+(ert-deftest safeslop-test-session-new-claude-code-alias-exact-argv ()
+  (let* ((workspace (safeslop-test--repo-root))
+         (argv (list "session" "create" "--agent" "claude-code" "--workspace" workspace "--output" "json"))
+         (routes `((,(safeslop-test--json-key argv) .
+                   ((stdout . ,(safeslop-test--fixture "ok-session-create.golden.json"))
+                    (exit . 0))))))
+    (safeslop-test--with-fake-cli routes
+      (should (safeslop-contract-ok-p (safeslop-session-new "claude-code" workspace)))
+      (should (equal (safeslop-test--argv-log-lines) (list (safeslop-test--json-key argv)))))))
+
 (ert-deftest safeslop-test-session-new-pi-exact-argv ()
   (let* ((workspace (safeslop-test--repo-root))
          (argv (list "session" "create" "--agent" "pi" "--workspace" workspace "--output" "json"))

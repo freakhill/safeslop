@@ -350,14 +350,15 @@ func cmdSession() *cobra.Command {
 func cmdSessionCreate() *cobra.Command {
 	var agent, workspace, output string
 	c := &cobra.Command{
-		Use:   "create --agent <pi|claude> --workspace <dir> --output json",
+		Use:   "create --agent <pi|claude|claude-code> --workspace <dir> --output json",
 		Short: "Create a safeslop session record",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if output != "json" {
 				return fmt.Errorf("session create requires --output json")
 			}
-			if agent != "pi" && agent != "claude" {
+			canonicalAgent := policy.NormalizeAgent(agent)
+			if canonicalAgent != "pi" && canonicalAgent != "claude" {
 				return emitContractError(jsoncontract.CodeAgentUnsupported, fmt.Sprintf("unsupported agent %q", agent), map[string]any{"agent": agent})
 			}
 			if workspace == "" {
@@ -366,7 +367,7 @@ func cmdSessionCreate() *cobra.Command {
 			if fi, err := os.Stat(workspace); err != nil || !fi.IsDir() {
 				return emitContractError(jsoncontract.CodeInvalidArgument, "--workspace must name an existing directory", map[string]any{"workspace": workspace})
 			}
-			sess, err := sessionStore().Create(agent, workspace, time.Now())
+			sess, err := sessionStore().Create(canonicalAgent, workspace, time.Now())
 			if err != nil {
 				return emitContractError(jsoncontract.CodeIOError, "create session", map[string]any{"error": err.Error()})
 			}
@@ -374,7 +375,7 @@ func cmdSessionCreate() *cobra.Command {
 			return nil
 		},
 	}
-	c.Flags().StringVar(&agent, "agent", "", "agent to run: pi or claude")
+	c.Flags().StringVar(&agent, "agent", "", "agent to run: pi, claude, or claude-code")
 	c.Flags().StringVar(&workspace, "workspace", "", "workspace directory")
 	c.Flags().StringVar(&output, "output", "", "output format: json")
 	return c
@@ -1160,7 +1161,7 @@ func sandboxScope(f *policy.FileScope) sandbox.Scope {
 
 // agentArgv maps a profile's agent to the command to launch.
 func agentArgv(p policy.Profile) ([]string, error) {
-	switch p.Agent {
+	switch policy.NormalizeAgent(p.Agent) {
 	case "claude":
 		return []string{"claude"}, nil
 	case "pi":

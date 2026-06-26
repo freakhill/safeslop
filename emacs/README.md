@@ -40,7 +40,8 @@ Add to `~/.doom.d/config.el`:
     (safeslop-doom-bind-leader)))
 ```
 
-Default key prefix: `C-c s`.
+Default key prefix: `C-c s`. Session creation offers `claude`, `claude-code`,
+and `pi`; `claude-code` is an alias for the canonical `claude` engine agent.
 
 ## Daemon autostart
 

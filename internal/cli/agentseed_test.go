@@ -41,6 +41,16 @@ func TestAgentSeedClaudeCodeIsNonClobbering(t *testing.T) {
 	}
 }
 
+func TestAgentSeedAcceptsClaudeCodeAlias(t *testing.T) {
+	ws := t.TempDir()
+	if err := seedAgentDefaults(policy.Profile{Agent: "claude-code"}, ws); err != nil {
+		t.Fatalf("seed claude-code: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(ws, ".claude", "settings.json")); err != nil {
+		t.Fatalf("claude-code alias must seed claude settings: %v", err)
+	}
+}
+
 func TestAgentSeedAcceptsPiAsNoop(t *testing.T) {
 	ws := t.TempDir()
 	if err := seedAgentDefaults(policy.Profile{Agent: "pi"}, ws); err != nil {

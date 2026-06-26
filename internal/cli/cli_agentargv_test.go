@@ -64,6 +64,16 @@ func TestAgentArgvAcceptsClaudeCode(t *testing.T) {
 	}
 }
 
+func TestAgentArgvClaudeCodeAliasUsesClaudeBinary(t *testing.T) {
+	argv, err := agentArgv(policy.Profile{Agent: "claude-code"})
+	if err != nil {
+		t.Fatalf("agentArgv(claude-code): %v", err)
+	}
+	if len(argv) != 1 || argv[0] != "claude" {
+		t.Errorf("claude-code argv = %v, want [claude]", argv)
+	}
+}
+
 func TestAgentArgvRejectsOpenCode(t *testing.T) {
 	_, err := agentArgv(policy.Profile{Agent: "opencode"})
 	if err == nil || !strings.Contains(err.Error(), "unknown agent") {

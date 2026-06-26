@@ -22,7 +22,7 @@ file transfer between host and sandboxed runtimes.
 - `safeslop list` — list available profiles.
 - `safeslop trust` — approve a policy's exact bytes for launch.
 - `safeslop run <profile>` — launch a trusted profile.
-- `safeslop session create --agent <pi|claude> --workspace <dir> --output json` — create an Emacs-visible safe-default session record.
+- `safeslop session create --agent <pi|claude|claude-code> --workspace <dir> --output json` — create an Emacs-visible safe-default session record.
 - `safeslop session run --session-id <id>` — run the session agent under safeslop isolation.
 - `safeslop session status --session-id <id> --output <json|jsonl>` — inspect or monitor session state.
 - `safeslop session stop --session-id <id> --revoke-credentials --output json` — stop idempotently, revoking ephemeral credentials before process termination.
@@ -71,7 +71,7 @@ network and reaches HTTP(S) through the proxy allowlist.
 
 ```cue
 profiles: vm_review: {
-	agent:       "shell"
+	agent:       "pi"
 	environment: "vm"
 	network:     "deny"
 }

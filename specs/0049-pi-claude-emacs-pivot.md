@@ -17,7 +17,7 @@ Pivot safeslop to a smaller, safer product surface:
 Keep:
 
 - `pi`
-- Claude Code. For the first migration slice, preserve the existing schema value `agent: "claude"`; a later harness-registry PR may decide whether to introduce a user-facing alias `claude-code`.
+- Claude Code. The canonical engine value remains `agent: "claude"`; a follow-up PR accepts `agent: "claude-code"` as a user-facing alias and normalizes it to `claude`.
 
 Drop:
 
