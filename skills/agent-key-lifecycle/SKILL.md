@@ -23,6 +23,12 @@ Credential staging is driven by `safeslop run <profile>` from the profile's
 `credentials:` block. Manual key management commands were intentionally dropped;
 a future `safeslop creds gc` sweep is the only planned manual credential command.
 
+For Emacs-driven sessions, `safeslop session stop --session-id <id>
+--revoke-credentials` revokes ephemeral credentials before forcing process
+termination and is idempotent (a second stop neither revokes nor kills again).
+Revocation stays best-effort; the decay-first guarantee remains the wipe of
+staged private keys.
+
 ## GitHub
 
 Use `credentials.ssh` for GitHub:
