@@ -10,8 +10,9 @@ package safeslop
 // others are accepted by the schema and land in later sub-projects.
 #Environment: "sandbox" | "container" | "vm" | "host"
 
-// What to launch.
-#Agent: "claude" | "shell" | "pi"
+// What to launch. "claude-code" is accepted as a user-facing alias and
+// normalized to the canonical "claude" engine value after decode.
+#Agent: "claude" | "claude-code" | "shell" | "pi"
 
 // Coarse egress policy for the sandbox-exec boundary. Not a URL allowlist —
 // that is the container's job (specs/0001 §6.2).

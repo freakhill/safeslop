@@ -16,7 +16,7 @@ import (
 var agentFixtureFS embed.FS
 
 func seedAgentDefaults(prof policy.Profile, ws string) error {
-	switch prof.Agent {
+	switch policy.NormalizeAgent(prof.Agent) {
 	case "claude":
 		return seedFixture(filepath.Join(ws, ".claude", "settings.json"), "agentfixtures/claude-code.settings.json")
 	case "pi", "shell", "":

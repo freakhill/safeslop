@@ -156,6 +156,14 @@ type Config struct {
 	Profiles map[string]Profile `json:"profiles"`
 }
 
+// NormalizeAgent returns the canonical engine agent name for accepted aliases.
+func NormalizeAgent(agent string) string {
+	if agent == "claude-code" {
+		return "claude"
+	}
+	return agent
+}
+
 // virtualDir is an in-memory CUE package built from the embedded schema plus the
 // user's file via an overlay, so neither needs to live in a real CUE module.
 const virtualDir = "/__safeslop__"
@@ -201,6 +209,10 @@ func LoadBytes(data []byte) (*Config, error) {
 	var cfg Config
 	if err := val.LookupPath(cue.ParsePath("safeslop")).Decode(&cfg); err != nil {
 		return nil, fmt.Errorf("decode: %w", err)
+	}
+	for name, prof := range cfg.Profiles {
+		prof.Agent = NormalizeAgent(prof.Agent)
+		cfg.Profiles[name] = prof
 	}
 	return &cfg, nil
 }

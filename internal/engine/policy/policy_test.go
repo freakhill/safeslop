@@ -42,6 +42,17 @@ func TestLoadValidAppliesDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadAcceptsClaudeCodeAlias(t *testing.T) {
+	cfg, err := loadStr(t, `package safeslop
+safeslop: profiles: review: {agent: "claude-code"}`)
+	if err != nil {
+		t.Fatalf("Load claude-code alias: %v", err)
+	}
+	if got := cfg.Profiles["review"].Agent; got != "claude" {
+		t.Fatalf("agent = %q, want canonical claude", got)
+	}
+}
+
 func TestLoadRejectsUnknownAgent(t *testing.T) {
 	if _, err := Load(filepath.Join("testdata", "invalid_agent.cue")); err == nil {
 		t.Fatal("expected a validation error for an unknown agent")

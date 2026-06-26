@@ -90,6 +90,23 @@ func TestSessionCreateEmitsContractAndPersistsSafeDefaults(t *testing.T) {
 	}
 }
 
+func TestSessionCreateAcceptsClaudeCodeAlias(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+
+	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude-code", "--workspace", ws, "--output", "json")
+	if err != nil {
+		t.Fatalf("session create claude-code: %v\nout=%s", err, out)
+	}
+	env := parseEnvelopeForTest(t, out)
+	if !env.OK {
+		t.Fatalf("create returned error envelope: %+v", env.Errors)
+	}
+	if got := env.Data["agent"]; got != "claude" {
+		t.Fatalf("agent = %#v, want canonical claude", got)
+	}
+}
+
 func TestSessionCreateRejectsUnsupportedAgentAsContract(t *testing.T) {
 	ws := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
