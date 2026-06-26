@@ -6,6 +6,9 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -X github.com/freakhill/safeslop/internal/cli.Version=$(VERSION)
 GOFILES := cmd internal
 EMACS  ?= emacs
+# Local floor for the Emacs 32 line. CI pins exactly 32.1 via ci/emacs32; this
+# default keeps `make check` runnable on a 32.1 pretest (reports 32.0.x).
+EMACS_MIN ?= 32.0
 
 CONTAINER_SRC := library/layer/container
 CONTAINER_DST := internal/engine/container/assets
@@ -21,8 +24,10 @@ test:
 	go test ./...
 
 test-emacs:
-	$(EMACS) --batch -L emacs -l ert -l emacs/test/safeslop-test.el -f ert-run-tests-batch-and-exit
-	$(EMACS) --batch -L emacs -l emacs/safeslop.el -l emacs/safeslop-doom.el --eval '(message "safeslop emacs ok")'
+	@$(EMACS) --batch --eval '(princ (format "emacs %s\n" emacs-version))'
+	@$(EMACS) --batch --eval '(if (version< emacs-version "$(EMACS_MIN)") (progn (princ (format "emacs %s is older than required $(EMACS_MIN)\n" emacs-version)) (kill-emacs 1)))'
+	$(EMACS) --batch -L emacs -l ert -l emacs/test/safeslop-test.el -l emacs/test/safeslop-contract-test.el -f ert-run-tests-batch-and-exit
+	$(EMACS) --batch -L emacs -l emacs/safeslop.el -l emacs/safeslop-doom.el -l emacs/safeslop-session.el --eval '(message "safeslop emacs ok")'
 
 vet:
 	go vet ./...
@@ -52,7 +57,7 @@ check-assets:
 check-pivot-denylist:
 	ci/pivot-denylist.sh
 
-check: check-assets check-pivot-denylist vet fmtcheck test
+check: check-assets check-pivot-denylist vet fmtcheck test test-emacs
 
 ## Opt-in integration tests behind the `integration` build tag — currently the install->uninstall->install
 ## idempotency proof on a real tart VM (specs/0041 task 6). NOT part of `check`: it boots a VM and does

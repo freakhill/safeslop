@@ -1,9 +1,11 @@
 # safeslop Emacs package
 
 Raw Emacs frontend for safeslop.  Doom support is optional and lives in
-`safeslop-doom.el`; core `safeslop.el` does not depend on Doom APIs.  When
-Doom/Evil is present, output buffers enter Evil normal state and get normal-state
-bindings for refresh/error/quit actions.
+`safeslop-doom.el`; core `safeslop.el` does not depend on Doom APIs.  The package
+parses safeslop's versioned JSON envelope via `safeslop-contract.el`, and its
+ERT tests consume Go's canonical `internal/jsoncontract/testdata/*.golden.json`
+fixtures directly.  When Doom/Evil is present, output buffers enter Evil normal
+state and get normal-state bindings for refresh/error/quit actions.
 
 ## Install from the repo
 

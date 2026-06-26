@@ -1,0 +1,9 @@
+# SHA256 for the pinned Emacs source tarball consumed by ci/emacs32/build-emacs.sh.
+# Format: "<sha256>  emacs-32.1.tar.xz" (sha256sum -c compatible).
+#
+# Emacs 32.1 is not GA at the time of writing (developer machines run the 32.0.x
+# pretest). Replace the sentinel below with the real upstream SHA256 the moment
+# emacs-32.1.tar.xz is published on https://ftp.gnu.org/gnu/emacs/. The build
+# script fails closed while the sentinel is present, so CI never installs an
+# unpinned/mutable Emacs.
+PENDING_32_1_GA_REPLACE_WITH_REAL_SHA256  emacs-32.1.tar.xz
