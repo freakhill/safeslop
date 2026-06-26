@@ -169,6 +169,20 @@ ROUTES maps exact argv JSON strings to `((stdout . STRING) (stderr . STRING)
           (should (equal (safeslop-test--argv-log-lines) (list (safeslop-test--json-key argv)))))
       (delete-directory tmp t))))
 
+(ert-deftest safeslop-test-session-attach-uses-term-pty-exact-argv ()
+  (let* ((argv '("session" "run" "--session-id" "sess-term"))
+         (routes `((,(safeslop-test--json-key argv) .
+                   ((stdout . "")
+                    (exit . 0))))))
+    (safeslop-test--with-fake-cli routes
+      (let ((buf (safeslop-session-attach "sess-term")))
+        (with-current-buffer buf
+          (should (derived-mode-p 'term-mode))
+          (let ((proc (get-buffer-process buf)))
+            (while (and proc (process-live-p proc))
+              (accept-process-output proc 0.1))))
+        (should (equal (safeslop-test--argv-log-lines) (list (safeslop-test--json-key argv))))))))
+
 (ert-deftest safeslop-test-fallback-compilation-mode-on-pty-unavailable ()
   (let* ((argv '("session" "status" "--session-id" "sess-pty" "--output" "jsonl"))
          (routes `((,(safeslop-test--json-key argv) .

@@ -14,6 +14,7 @@
 ;;; Code:
 
 (require 'subr-x)
+(require 'term)
 (require 'safeslop-contract)
 
 (defvar safeslop-program)
@@ -38,11 +39,22 @@
          (envelope (safeslop--call-json args)))
     (safeslop--show-envelope-buffer "*safeslop session*" args envelope)))
 
+(defun safeslop-session--run-args (session-id)
+  "Return exact argv for running SESSION-ID."
+  (list "session" "run" "--session-id" session-id))
+
 ;;;###autoload
-(defun safeslop-session-attach ()
-  "Attach to a safeslop session placeholder."
-  (interactive)
-  (message "safeslop session attach lands with the PR5 PTY model"))
+(defun safeslop-session-attach (&optional session-id)
+  "Attach to SESSION-ID using a built-in term-mode PTY and exact argv."
+  (interactive (list (read-string "Session id: ")))
+  (let* ((argv (safeslop-session--run-args session-id))
+         (buf (apply #'make-term (concat "safeslop-" session-id)
+                     safeslop-program nil argv)))
+    (with-current-buffer buf
+      (term-mode)
+      (term-char-mode))
+    (pop-to-buffer buf)
+    buf))
 
 ;;;###autoload
 (defun safeslop-session-list ()

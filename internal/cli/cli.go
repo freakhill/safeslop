@@ -6,6 +6,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	osexec "os/exec"
@@ -13,6 +14,7 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -28,10 +30,12 @@ import (
 	"github.com/freakhill/safeslop/internal/engine/policy"
 	"github.com/freakhill/safeslop/internal/engine/sandbox"
 	"github.com/freakhill/safeslop/internal/engine/secrets"
+	engsession "github.com/freakhill/safeslop/internal/engine/session"
 	"github.com/freakhill/safeslop/internal/engine/toolchain"
 	"github.com/freakhill/safeslop/internal/engine/trust"
 	"github.com/freakhill/safeslop/internal/engine/userconfig"
 	"github.com/freakhill/safeslop/internal/engine/vm"
+	"github.com/freakhill/safeslop/internal/jsoncontract"
 )
 
 // Version is overridden at build time via -ldflags "-X .../cli.Version=...".
@@ -42,10 +46,12 @@ var jsonOut bool
 // Execute runs the root command and exits non-zero on error.
 func Execute() {
 	if err := newRoot().Execute(); err != nil {
-		if !jsonOut {
-			fmt.Fprintln(os.Stderr, "safeslop:", err)
-		} else {
-			emitJSON(map[string]any{"ok": false, "error": err.Error()})
+		if !errors.Is(err, errOutputEmitted) {
+			if !jsonOut {
+				fmt.Fprintln(os.Stderr, "safeslop:", err)
+			} else {
+				emitJSON(map[string]any{"ok": false, "error": err.Error()})
+			}
 		}
 		os.Exit(1)
 	}
@@ -60,7 +66,7 @@ func newRoot() *cobra.Command {
 		SilenceErrors: true,
 	}
 	root.PersistentFlags().BoolVar(&jsonOut, "json", false, "emit machine-readable JSON output")
-	root.AddCommand(cmdValidate(), cmdList(), cmdDoctor(), cmdRun(), cmdTrust(), cmdDown(), cmdLaunch(), cmdInstall(), cmdUninstall())
+	root.AddCommand(cmdValidate(), cmdList(), cmdDoctor(), cmdRun(), cmdSession(), cmdTrust(), cmdDown(), cmdLaunch(), cmdInstall(), cmdUninstall())
 	return root
 }
 
@@ -81,7 +87,7 @@ func cmdValidate() *cobra.Command {
 				return err
 			}
 			if jsonOut {
-				emitJSON(map[string]any{"ok": true, "path": path, "warnings": warns})
+				emitContract(jsoncontract.OK(map[string]any{"path": path}, lintWarnings(warns)...))
 			} else {
 				fmt.Printf("ok: %s is valid\n", path)
 				printWarnings(warns)
@@ -166,7 +172,7 @@ func cmdDoctor() *cobra.Command {
 		RunE: func(_ *cobra.Command, _ []string) error {
 			report := doctorReport()
 			if jsonOut {
-				emitJSON(map[string]any{"ok": true, "os": runtime.GOOS, "arch": runtime.GOARCH, "tools": report, "tiers": doctorTiers()})
+				emitContract(jsoncontract.OK(map[string]any{"os": runtime.GOOS, "arch": runtime.GOARCH, "tools": report, "tiers": doctorTiers()}))
 				return nil
 			}
 			fmt.Printf("safeslop %s  (%s/%s)\n", Version, runtime.GOOS, runtime.GOARCH)
@@ -311,6 +317,258 @@ func canonicalPolicyPath(p string) string {
 		return real
 	}
 	return abs
+}
+
+// ---- session ----
+
+var errOutputEmitted = errors.New("machine-readable error already emitted")
+
+var sessionRevokeCredentials = func(sess engsession.Session) error {
+	stageDir := filepath.Join(sess.Workspace, ".safeslop", "runtime", "session-"+sess.ID)
+	creds.RevokeSSH(context.Background(), stageDir)
+	creds.RevokeForgejo(context.Background(), stageDir)
+	return nil
+}
+
+var sessionKillProcess = func(pid int) error {
+	if pid <= 0 {
+		return nil
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+	return proc.Signal(syscall.SIGTERM)
+}
+
+func cmdSession() *cobra.Command {
+	c := &cobra.Command{Use: "session", Short: "Manage Emacs-visible safeslop sessions"}
+	c.AddCommand(cmdSessionCreate(), cmdSessionRun(), cmdSessionStatus(), cmdSessionStop(), cmdSessionList())
+	return c
+}
+
+func cmdSessionCreate() *cobra.Command {
+	var agent, workspace, output string
+	c := &cobra.Command{
+		Use:   "create --agent <pi|claude> --workspace <dir> --output json",
+		Short: "Create a safeslop session record",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if output != "json" {
+				return fmt.Errorf("session create requires --output json")
+			}
+			if agent != "pi" && agent != "claude" {
+				return emitContractError(jsoncontract.CodeAgentUnsupported, fmt.Sprintf("unsupported agent %q", agent), map[string]any{"agent": agent})
+			}
+			if workspace == "" {
+				return emitContractError(jsoncontract.CodeInvalidArgument, "--workspace is required", nil)
+			}
+			if fi, err := os.Stat(workspace); err != nil || !fi.IsDir() {
+				return emitContractError(jsoncontract.CodeInvalidArgument, "--workspace must name an existing directory", map[string]any{"workspace": workspace})
+			}
+			sess, err := sessionStore().Create(agent, workspace, time.Now())
+			if err != nil {
+				return emitContractError(jsoncontract.CodeIOError, "create session", map[string]any{"error": err.Error()})
+			}
+			emitContract(jsoncontract.OK(sessionData(sess)))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&agent, "agent", "", "agent to run: pi or claude")
+	c.Flags().StringVar(&workspace, "workspace", "", "workspace directory")
+	c.Flags().StringVar(&output, "output", "", "output format: json")
+	return c
+}
+
+func cmdSessionList() *cobra.Command {
+	var output string
+	c := &cobra.Command{
+		Use:   "list --output json",
+		Short: "List safeslop sessions",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if output != "json" {
+				return fmt.Errorf("session list requires --output json")
+			}
+			sessions, err := sessionStore().List()
+			if err != nil {
+				return emitContractError(jsoncontract.CodeIOError, "list sessions", map[string]any{"error": err.Error()})
+			}
+			items := make([]map[string]any, 0, len(sessions))
+			for _, sess := range sessions {
+				items = append(items, sessionData(sess))
+			}
+			emitContract(jsoncontract.OK(map[string]any{"sessions": items}))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&output, "output", "", "output format: json")
+	return c
+}
+
+func cmdSessionStatus() *cobra.Command {
+	var id, output string
+	c := &cobra.Command{
+		Use:   "status --session-id <id> --output <json|jsonl>",
+		Short: "Report safeslop session status",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if output != "json" && output != "jsonl" {
+				return fmt.Errorf("session status requires --output json or jsonl")
+			}
+			sess, err := sessionStore().Get(id)
+			if err != nil {
+				if errors.Is(err, engsession.ErrNotFound) {
+					return emitContractError(jsoncontract.CodeSessionNotFound, "session not found", map[string]any{"session_id": id})
+				}
+				return emitContractError(jsoncontract.CodeIOError, "load session", map[string]any{"error": err.Error()})
+			}
+			env := jsoncontract.OK(sessionData(sess))
+			if output == "jsonl" {
+				emitContractLine(env)
+			} else {
+				emitContract(env)
+			}
+			return nil
+		},
+	}
+	c.Flags().StringVar(&id, "session-id", "", "session id")
+	c.Flags().StringVar(&output, "output", "", "output format: json or jsonl")
+	return c
+}
+
+func cmdSessionStop() *cobra.Command {
+	var id, output string
+	var revoke bool
+	c := &cobra.Command{
+		Use:   "stop --session-id <id> --revoke-credentials --output json",
+		Short: "Stop a safeslop session",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if output != "json" {
+				return fmt.Errorf("session stop requires --output json")
+			}
+			sess, err := sessionStore().Stop(id, revoke, time.Now(), sessionRevokeCredentials, sessionKillProcess)
+			if err != nil {
+				if errors.Is(err, engsession.ErrNotFound) {
+					return emitContractError(jsoncontract.CodeSessionNotFound, "session not found", map[string]any{"session_id": id})
+				}
+				return emitContractError(jsoncontract.CodeCredentialRevokeFailed, "stop session", map[string]any{"error": err.Error()})
+			}
+			emitContract(jsoncontract.OK(sessionData(sess)))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&id, "session-id", "", "session id")
+	c.Flags().BoolVar(&revoke, "revoke-credentials", false, "revoke ephemeral credentials before stopping")
+	c.Flags().StringVar(&output, "output", "", "output format: json")
+	return c
+}
+
+func cmdSessionRun() *cobra.Command {
+	var id string
+	c := &cobra.Command{
+		Use:   "run --session-id <id>",
+		Short: "Run a safeslop session's agent",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			store := sessionStore()
+			sess, err := store.Get(id)
+			if err != nil {
+				return err
+			}
+			prof := policy.Profile{Agent: sess.Agent, Environment: sess.Environment, Network: sess.Network, Workspace: sess.Workspace}
+			argv, err := agentArgv(prof)
+			if err != nil {
+				return err
+			}
+			if _, err := store.MarkRunning(id, os.Getpid(), time.Now()); err != nil {
+				return err
+			}
+			code, runErr := runProfile("session-"+id, prof, argv, sess.Workspace)
+			lastErr := ""
+			if runErr != nil {
+				lastErr = runErr.Error()
+			}
+			_, _ = store.Finish(id, code, lastErr, time.Now())
+			if runErr != nil {
+				return runErr
+			}
+			os.Exit(code)
+			return nil
+		},
+	}
+	c.Flags().StringVar(&id, "session-id", "", "session id")
+	return c
+}
+
+func sessionStore() engsession.Store {
+	root := os.Getenv("SAFESLOP_STATE_DIR")
+	if root == "" {
+		if userState, err := os.UserConfigDir(); err == nil {
+			root = filepath.Join(userState, "safeslop")
+		} else {
+			root = filepath.Join(os.TempDir(), "safeslop")
+		}
+	}
+	return engsession.NewStore(filepath.Join(root, "sessions"))
+}
+
+func sessionData(sess engsession.Session) map[string]any {
+	out := map[string]any{
+		"session_id":          sess.ID,
+		"agent":               sess.Agent,
+		"workspace":           sess.Workspace,
+		"environment":         sess.Environment,
+		"network":             sess.Network,
+		"status":              sess.Status,
+		"created_at":          sess.CreatedAt.Format(time.RFC3339Nano),
+		"updated_at":          sess.UpdatedAt.Format(time.RFC3339Nano),
+		"credentials_revoked": sess.CredentialsRevoked,
+	}
+	if !sess.StartedAt.IsZero() {
+		out["started_at"] = sess.StartedAt.Format(time.RFC3339Nano)
+	}
+	if !sess.StoppedAt.IsZero() {
+		out["stopped_at"] = sess.StoppedAt.Format(time.RFC3339Nano)
+	}
+	if !sess.RevokedAt.IsZero() {
+		out["revoked_at"] = sess.RevokedAt.Format(time.RFC3339Nano)
+	}
+	if sess.PID != 0 {
+		out["pid"] = sess.PID
+	}
+	if sess.ExitCode != nil {
+		out["exit_code"] = *sess.ExitCode
+	}
+	if sess.LastError != "" {
+		out["last_error"] = sess.LastError
+	}
+	return out
+}
+
+func emitContract(env jsoncontract.Envelope) {
+	b, err := jsoncontract.Marshal(env)
+	if err != nil {
+		panic(err)
+	}
+	_, _ = os.Stdout.Write(b)
+}
+
+func emitContractLine(env jsoncontract.Envelope) {
+	if err := jsoncontract.Validate(env); err != nil {
+		panic(err)
+	}
+	b, err := json.Marshal(env)
+	if err != nil {
+		panic(err)
+	}
+	_, _ = os.Stdout.Write(append(b, '\n'))
+}
+
+func emitContractError(code jsoncontract.ErrorCode, message string, details map[string]any) error {
+	emitContract(jsoncontract.Error(jsoncontract.NewMessage(code, message, false, details)))
+	return errOutputEmitted
 }
 
 func enforceTrust(policyPath string, allowTrust bool) error {
@@ -824,6 +1082,17 @@ func printWarnings(ws []policy.Warning) {
 	for _, w := range ws {
 		fmt.Fprintf(os.Stderr, "warning: profile %q %s\n", w.Profile, w.Message)
 	}
+}
+
+func lintWarnings(ws []policy.Warning) []jsoncontract.Message {
+	out := make([]jsoncontract.Message, 0, len(ws))
+	for _, w := range ws {
+		out = append(out, jsoncontract.NewMessage(jsoncontract.CodePolicyDenied, w.Message, false, map[string]any{
+			"profile":   w.Profile,
+			"lint_code": w.Code,
+		}))
+	}
+	return out
 }
 
 func arg0(args []string) string {

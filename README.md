@@ -60,6 +60,10 @@ safeslop validate [safeslop.cue]    check against the embedded schema
 safeslop list [safeslop.cue]        list profiles and resolved tiers
 safeslop trust [safeslop.cue]       approve this policy's exact bytes
 safeslop run <profile> [--dry-run]  launch a trusted profile
+safeslop session create --agent <pi|claude> --workspace <dir> --output json
+safeslop session run --session-id <id>
+safeslop session status --session-id <id> --output <json|jsonl>
+safeslop session stop --session-id <id> --revoke-credentials --output json
 safeslop doctor                     report available tools and isolation tiers
 safeslop down                       tear down container/VM sessions
 safeslop install                    inventory and install pinned toolchains/runtimes
@@ -67,7 +71,10 @@ safeslop uninstall                  receipt-driven removal of installed tools
 safeslop launch <profile>           open a terminal running a profile
 ```
 
-Add `--json` to commands for machine-readable output where supported.
+Add `--json` to commands for machine-readable output where supported. Emacs-facing
+commands emit the shared versioned JSON contract envelope (`schema_version`,
+`ok`, `data`, `warnings`, `errors`). Session status also supports `--output
+jsonl` for a line-delimited monitor stream.
 
 ## `safeslop.cue` reference
 
@@ -187,7 +194,7 @@ will also build and install it into `~/.local/bin`.
 - `go vet ./...`
 - `gofmt` verification for `cmd` and `internal`
 - `go test ./...`
-- Emacs package smoke/contract tests via `make test-emacs`
+- Emacs package smoke/contract/session tests via `make test-emacs`
 
 Useful targeted tests:
 
@@ -195,7 +202,7 @@ Useful targeted tests:
 go test ./internal/engine/creds/ -v
 go test ./internal/engine/policy/ -run 'Pinned|Latest' -v
 go test ./internal/cli/ -v
-go test ./internal/jsoncontract -v
+go test ./internal/engine/session ./internal/jsoncontract -v
 make test-emacs EMACS=/absolute/path/to/emacs
 ```
 
