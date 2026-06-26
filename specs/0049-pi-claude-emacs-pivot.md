@@ -453,3 +453,14 @@ Complete only when:
 12. Go and Emacs parse the same golden JSON fixtures.
 13. Session stop/signal paths revoke ephemeral credentials before forced kill.
 14. No CI path uses mutable/unpinned Emacs.
+
+## PR6 reconciliation result
+
+Verified on current `main` after PR5:
+
+- Items 1, 3, 4, and 5 pass with `go test ./...`, `make check`, `make build`, and `make check-pivot-denylist`.
+- Items 6, 7, and 8 are satisfied: `app/`, `internal/engine/control/`, and the OpenCode policy fixtures/presets are absent.
+- Item 9 is satisfied for live public docs: README examples now mention only `claude` and `pi` as coding agents, alongside the Go CLI and Emacs frontend.
+- Items 10, 11, and 12 are covered by `make test-emacs`: the fake-CLI harness is used, the shell-injection fixture proves no `pwn` file is created, and Emacs parses Go's golden JSON fixtures directly.
+- Item 13 is covered by `internal/engine/session` and CLI tests: session stop revokes staged SSH/Forgejo deploy credentials before signaling a process and remains idempotent.
+- Items 2 and 14 remain upstream-blocked rather than silently waived: Emacs 32.1 is not GA in this environment. `ci/emacs32/build-emacs.sh` fails closed while the SHA256 sentinel is present, and no CI path installs mutable/unpinned Emacs. Flip `EMACS_MIN` to `32.1` and wire the pinned builder once upstream publishes `emacs-32.1.tar.xz` and its real SHA256.

@@ -32,7 +32,7 @@ safeslop: {
 	version: 1
 	profiles: {
 		review: {agent: "claude", environment: "sandbox", network: "deny"}
-		dev:    {agent: "shell", environment: "sandbox", network: "allow"}
+		pair:   {agent: "pi", environment: "sandbox", network: "deny"}
 	}
 }
 ```
@@ -87,7 +87,7 @@ safeslop: {
 	version: 1
 	profiles: {
 		work: {
-			agent:       "claude"          // "claude" | "shell" | "pi"
+			agent:       "claude"          // "claude" | "pi"
 			environment: "container"       // "sandbox" | "container" | "vm" | "host"
 			network:     "deny"            // "deny" | "allow"
 			workspace:   "."
