@@ -23,9 +23,10 @@ file transfer between host and sandboxed runtimes.
 - `safeslop trust` — approve a policy's exact bytes for launch.
 - `safeslop run <profile>` — launch a trusted profile.
 - `safeslop session create --agent <pi|claude|claude-code> --workspace <dir> --output json` — create an Emacs-visible safe-default session record.
-- `safeslop session run --session-id <id>` — run the session agent under safeslop isolation. Needs a controlling terminal (Emacs supplies one via `make-term`); with no usable TTY it emits the `PTY_UNAVAILABLE` contract error and the caller switches to the `--output jsonl` status monitor.
-- `safeslop session status --session-id <id> --output <json|jsonl>` — inspect or monitor session state.
-- `safeslop session stop --session-id <id> --revoke-credentials --output json` — stop idempotently, revoking ephemeral credentials before process termination.
+- `safeslop session run --session-id <id> [--detach]` — run the session agent under safeslop isolation. Coupled (default) needs a controlling terminal (Emacs supplies one via `make-term`); with no usable TTY it emits the `PTY_UNAVAILABLE` contract error and the caller switches to the `--output jsonl` status monitor. `--detach` instead launches a per-session supervisor that owns the agent + its PTY, serves it over a per-session unix socket, and returns immediately (the buffer is freed).
+- `safeslop session attach --session-id <id>` — rejoin a detached session's agent over its socket under a controlling terminal, exiting with the agent's code; one active attach at a time. No usable TTY emits `PTY_UNAVAILABLE`.
+- `safeslop session status --session-id <id> --output <json|jsonl>` — inspect or monitor session state; a running detached session also reports its `socket`.
+- `safeslop session stop --session-id <id> --revoke-credentials --output json` — stop idempotently, revoking ephemeral credentials before terminating the process (a detached supervisor's whole process group), and removing the socket.
 - `safeslop doctor` — report available tools and isolation tiers.
 - `safeslop down` — tear down container/VM sessions.
 

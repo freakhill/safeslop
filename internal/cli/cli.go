@@ -334,15 +334,31 @@ var sessionRevokeCredentials = func(sess engsession.Session) error {
 	return nil
 }
 
-var sessionKillProcess = func(pid int) error {
-	if pid <= 0 {
+// stopGraceTimeout bounds the graceful SIGTERM wait before a detached supervisor's
+// process group is SIGKILLed on stop (specs/0051 D6). Overridable in tests.
+var stopGraceTimeout = 5 * time.Second
+
+// sessionKillProcess signals a session's recorded target. A positive target is a
+// coupled run's wrapper PID (bare SIGTERM, unchanged from 0050). A negative target
+// is a detached supervisor's process group (-pgid): SIGTERM the group, wait bounded
+// (stopGraceTimeout), then SIGKILL the group so the whole boundary tree is reached
+// (specs/0051 D4/D6).
+var sessionKillProcess = func(target int) error {
+	switch {
+	case target == 0:
 		return nil
+	case target > 0:
+		return syscall.Kill(target, syscall.SIGTERM)
 	}
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return err
+	_ = syscall.Kill(target, syscall.SIGTERM)
+	deadline := time.Now().Add(stopGraceTimeout)
+	for time.Now().Before(deadline) {
+		if syscall.Kill(target, 0) != nil {
+			return nil // the group is gone
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
-	return proc.Signal(syscall.SIGTERM)
+	return syscall.Kill(target, syscall.SIGKILL)
 }
 
 // sessionProcessAlive probes whether a recorded session PID is still live, so
@@ -587,7 +603,7 @@ func runDetach(store engsession.Store, id string) error {
 		_ = sessionKillProcess(pid) // best-effort; the supervisor never became ready
 		return emitContractError(jsoncontract.CodeIOError, "session supervisor did not become ready", map[string]any{"session_id": id})
 	}
-	if _, err := store.MarkRunning(id, pid, time.Now()); err != nil {
+	if _, err := store.MarkRunningDetached(id, pid, time.Now()); err != nil {
 		return err
 	}
 	sess, err := store.Get(id)
@@ -756,7 +772,25 @@ func sessionData(sess engsession.Session) map[string]any {
 	if sess.LastError != "" {
 		out["last_error"] = sess.LastError
 	}
+	if path, ok := sessionSocket(sess); ok {
+		out["socket"] = path
+	}
 	return out
+}
+
+// sessionSocket reports a session's per-session socket path, but only when the
+// session is running and the socket actually exists on disk (specs/0051 D5): the
+// path is derived from the state root the supervisor binds, never persisted, so we
+// only ever advertise a socket that is really there. Overridable in tests.
+var sessionSocket = func(sess engsession.Session) (string, bool) {
+	if sess.Status != engsession.StatusRunning {
+		return "", false
+	}
+	path := filepath.Join(sessionStore().Dir, sess.ID+".sock")
+	if _, err := os.Stat(path); err != nil {
+		return "", false
+	}
+	return path, true
 }
 
 func emitContract(env jsoncontract.Envelope) {

@@ -62,7 +62,7 @@ func Supervise(ctx context.Context, store engsession.Store, id string, now func(
 		return 1, err
 	}
 
-	if _, err := store.MarkRunning(id, os.Getpid(), now()); err != nil {
+	if _, err := store.MarkRunningDetached(id, os.Getpid(), now()); err != nil {
 		_ = ln.Close()
 		_ = os.Remove(sockPath)
 		_ = ptmx.Close()
