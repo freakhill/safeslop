@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -20,6 +21,22 @@ import (
 // superviseReadBuf sizes the PTY read chunk. Terminal traffic is human-paced, so
 // a modest buffer keeps latency low and stays well under wire's frame cap.
 const superviseReadBuf = 32 * 1024
+
+// defaultSessionLogMaxBytes bounds the provisional per-session JSONL event log so a
+// chatty detached agent cannot grow <id>.jsonl without limit before teardown wipes
+// it (specs/0051 Q3). Override with SAFESLOP_SESSION_LOG_MAX_BYTES; 0 disables the cap.
+const defaultSessionLogMaxBytes = 8 << 20 // 8 MiB
+
+// sessionLogMaxBytes is the JSONL byte cap: the env override when it parses to a
+// non-negative integer, else the default.
+func sessionLogMaxBytes() int64 {
+	if v := os.Getenv("SAFESLOP_SESSION_LOG_MAX_BYTES"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n >= 0 {
+			return n
+		}
+	}
+	return defaultSessionLogMaxBytes
+}
 
 // Supervise is the per-session detached supervisor (specs/0051 D1/D2). It owns
 // the agent's single PTY, serves it over <state>/sessions/<id>.sock, tees a
@@ -72,10 +89,10 @@ func Supervise(ctx context.Context, store engsession.Store, id string, now func(
 		return 1, err
 	}
 
-	// Best-effort JSONL event log; format is provisional (specs/0051 Q3).
+	// Best-effort JSONL event log; format is provisional, byte-capped (specs/0051 Q3).
 	jsonl, _ := os.OpenFile(filepath.Join(store.Dir, id+".jsonl"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 
-	h := &supervisor{ptmx: ptmx, ln: ln, jsonl: jsonl}
+	h := &supervisor{ptmx: ptmx, ln: ln, jsonl: jsonl, jsonlCap: sessionLogMaxBytes()}
 
 	// Launch the agent on the PTY slave. runProfileCtx blocks for the agent's
 	// whole life and runs the inherited teardown on return.
@@ -140,6 +157,12 @@ type supervisor struct {
 	ln    net.Listener
 	jsonl *os.File
 
+	// JSONL cap state. Only the single PTY-reader goroutine calls teeJSONL, so these
+	// need no lock. jsonlCap == 0 means unlimited.
+	jsonlCap       int64
+	jsonlWritten   int64
+	jsonlTruncated bool
+
 	mu   sync.Mutex
 	conn net.Conn // the single active client, or nil
 }
@@ -171,15 +194,31 @@ func (h *supervisor) writeExit(code int) {
 }
 
 func (h *supervisor) teeJSONL(chunk []byte) {
-	if h.jsonl == nil {
+	if h.jsonl == nil || h.jsonlTruncated {
 		return
 	}
 	rec := struct {
 		Stream string `json:"stream"`
 		Data   string `json:"data"`
 	}{Stream: "pty", Data: base64.StdEncoding.EncodeToString(chunk)}
-	if b, err := json.Marshal(rec); err == nil {
-		_, _ = h.jsonl.Write(append(b, '\n'))
+	b, err := json.Marshal(rec)
+	if err != nil {
+		return
+	}
+	line := append(b, '\n')
+	if h.jsonlCap > 0 && h.jsonlWritten+int64(len(line)) > h.jsonlCap {
+		// Stop before overflowing the cap; leave a single marker so a reader knows the
+		// log was truncated rather than the agent having gone quiet.
+		marker, _ := json.Marshal(struct {
+			Stream string `json:"stream"`
+			Event  string `json:"event"`
+		}{Stream: "meta", Event: "truncated"})
+		_, _ = h.jsonl.Write(append(marker, '\n'))
+		h.jsonlTruncated = true
+		return
+	}
+	if n, err := h.jsonl.Write(line); err == nil {
+		h.jsonlWritten += int64(n)
 	}
 }
 

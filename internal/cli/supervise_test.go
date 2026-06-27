@@ -360,3 +360,88 @@ func jsonlContains(data []byte, marker string) bool {
 	}
 	return false
 }
+
+// TestTeeJSONLRespectsByteCap proves the per-session event log is bounded: once the
+// written bytes would exceed jsonlCap, teeJSONL stops appending PTY chunks and emits
+// a single truncation marker, so a chatty detached agent cannot grow <id>.jsonl
+// without limit (specs/0051 Q3).
+func TestTeeJSONLRespectsByteCap(t *testing.T) {
+	f, err := os.Create(filepath.Join(t.TempDir(), "log.jsonl"))
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	defer f.Close()
+
+	const cap = 400
+	h := &supervisor{jsonl: f, jsonlCap: cap}
+	for i := 0; i < 500; i++ {
+		h.teeJSONL([]byte("a reasonably sized chunk of agent terminal output\n"))
+	}
+
+	info, err := f.Stat()
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if info.Size() > cap+80 { // cap + one small truncation marker line
+		t.Fatalf("jsonl size %d exceeds cap %d (+marker slack) — not bounded", info.Size(), cap)
+	}
+	data, _ := os.ReadFile(f.Name())
+	if !strings.Contains(string(data), "truncated") {
+		t.Fatalf("no truncation marker after exceeding the cap:\n%s", data)
+	}
+
+	// Further output after truncation must not grow the file.
+	before := info.Size()
+	h.teeJSONL([]byte("more output that must be dropped\n"))
+	after, _ := f.Stat()
+	if after.Size() != before {
+		t.Fatalf("jsonl grew after truncation: %d -> %d", before, after.Size())
+	}
+}
+
+// TestSessionLogMaxBytes covers the JSONL cap config: env override, the disable
+// sentinel (0), and falling back to the default on unset/garbage.
+func TestSessionLogMaxBytes(t *testing.T) {
+	t.Setenv("SAFESLOP_SESSION_LOG_MAX_BYTES", "")
+	if got := sessionLogMaxBytes(); got != defaultSessionLogMaxBytes {
+		t.Fatalf("unset = %d, want default %d", got, defaultSessionLogMaxBytes)
+	}
+	t.Setenv("SAFESLOP_SESSION_LOG_MAX_BYTES", "1234")
+	if got := sessionLogMaxBytes(); got != 1234 {
+		t.Fatalf("override = %d, want 1234", got)
+	}
+	t.Setenv("SAFESLOP_SESSION_LOG_MAX_BYTES", "0")
+	if got := sessionLogMaxBytes(); got != 0 {
+		t.Fatalf("disable = %d, want 0 (unlimited)", got)
+	}
+	t.Setenv("SAFESLOP_SESSION_LOG_MAX_BYTES", "not-a-number")
+	if got := sessionLogMaxBytes(); got != defaultSessionLogMaxBytes {
+		t.Fatalf("garbage = %d, want default %d", got, defaultSessionLogMaxBytes)
+	}
+}
+
+// TestSuperviseJSONLCapBoundsTheLog proves the cap is honored end to end through
+// Supervise: with a tiny SAFESLOP_SESSION_LOG_MAX_BYTES, a chatty stub agent's
+// output does not grow <id>.jsonl past the cap, and a truncation marker is left
+// (specs/0051 Q3).
+func TestSuperviseJSONLCapBoundsTheLog(t *testing.T) {
+	t.Setenv("SAFESLOP_SESSION_LOG_MAX_BYTES", "500")
+	store, id, _ := newSupervisedStubSession(t, "#!/bin/sh\ni=0\nwhile [ $i -lt 1000 ]; do echo CHATTYLINE_0123456789; i=$((i+1)); done\nexit 0\n")
+	jsonlPath := filepath.Join(store.Dir, id+".jsonl")
+
+	code, err := Supervise(context.Background(), store, id, time.Now)
+	if err != nil || code != 0 {
+		t.Fatalf("Supervise: code=%d err=%v", code, err)
+	}
+	info, err := os.Stat(jsonlPath)
+	if err != nil {
+		t.Fatalf("stat jsonl: %v", err)
+	}
+	if info.Size() > 500+80 {
+		t.Fatalf("jsonl size %d exceeds cap 500 (+marker slack) — env cap not honored end to end", info.Size())
+	}
+	data, _ := os.ReadFile(jsonlPath)
+	if !strings.Contains(string(data), "truncated") {
+		t.Fatalf("no truncation marker in capped log:\n%s", data)
+	}
+}
