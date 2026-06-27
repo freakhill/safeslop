@@ -64,16 +64,22 @@ func provision(ctx context.Context, agentArgv []string, network string, secretEn
 }
 
 // Launch clones+boots a disposable session VM, copies the staged dir in, runs the agent over
-// ssh -t (sourcing secrets remotely), and destroys the VM on exit. secretEnv (resolved profile
-// secrets) is written to secrets.env in stageDir; the whole stageDir is scp'd to ~/.safeslop-runtime.
-// network "deny" requires SAFESLOP_VM_PROXY_URL (advisory egress); "allow" is full VM network.
-func Launch(ctx context.Context, agentArgv []string, network string, secretEnv []string, stageDir, profile, toolchainKind string) (int, error) {
-	argv, err := provision(ctx, agentArgv, network, secretEnv, stageDir, profile, toolchainKind)
+// ssh -t (sourcing secrets remotely), and destroys the VM on exit. spec.Argv is the agent argv;
+// secretEnv (resolved profile secrets) is written to secrets.env in stageDir; the whole stageDir
+// is scp'd to ~/.safeslop-runtime. network "deny" requires SAFESLOP_VM_PROXY_URL (advisory egress);
+// "allow" is full VM network.
+//
+// A detached supervisor passes a PTY slave it owns (spec.Stdin set); it is forwarded as the local
+// ssh process's stdio so the agent's remote tty (`ssh -t` allocates one because that stdin is a
+// tty) bridges to the supervisor's PTY for attach. The coupled path leaves stdio nil and ssh runs
+// on the user's own terminal (specs/0051).
+func Launch(ctx context.Context, spec exec.LaunchSpec, network string, secretEnv []string, stageDir, profile, toolchainKind string) (int, error) {
+	argv, err := provision(ctx, spec.Argv, network, secretEnv, stageDir, profile, toolchainKind)
 	if err != nil {
 		return 1, err
 	}
 	defer func() { _ = Destroy(context.Background(), profile) }() // disposable: always tear down
-	return exec.RunInTerminal(ctx, exec.LaunchSpec{Argv: argv})
+	return exec.RunInTerminal(ctx, exec.LaunchSpec{Argv: argv, Stdin: spec.Stdin, Stdout: spec.Stdout, Stderr: spec.Stderr})
 }
 
 func runScp(ctx context.Context, ip, src, dst string) error {

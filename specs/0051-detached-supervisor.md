@@ -368,8 +368,8 @@ Where the build diverged from the sketch above, recorded here per the 0050
 - **One PTY slave for host/sandbox (PR2, D2).** `runProfileCtx` gained an additive
   variadic `runIO`; when set, host/sandbox bind the agent's stdio to the
   supervisor's PTY slave (`RunInTerminal`/`sandbox.Launch` already forward stdio).
-  Container later got the same treatment (its own bullet below); VM (`ssh -t`) is
-  the last tier whose detached PTY binding is still a follow-up.
+  Container and VM later got the same treatment (their own bullets below), so all
+  four tiers now bind the supervisor's PTY when detached.
 - **Host controlling terminal (`Setctty`, follow-up).** Binding the PTY slave as
   the agent's *stdio* (PR2) did not make it the agent's *controlling terminal*:
   under the daemon there is no inherited tty, so the host agent could not open
@@ -390,7 +390,7 @@ Where the build diverged from the sketch above, recorded here per the 0050
   controlling terminal — the Seatbelt profile already permits the tty ioctls and
   `/dev` reads it needs. Verified end to end through `sandbox.Launch` and through a
   detached sandbox `Supervise` run (real Seatbelt; `/dev/tty` opens). Container is
-  the next bullet; VM remains the last detached-PTY follow-up.
+  the next bullet; VM is the bullet after it (last of the four tiers).
 - **Container PTY binding (follow-up).** A detached container session dropped `rio`
   entirely: `runProfileCtx`'s container branch built `LaunchSpec{Argv: argv}` and
   `container.Launch` ran `RunInPTY` with its own host pty wired to `os.Stdin` — which
@@ -402,8 +402,23 @@ Where the build diverged from the sketch above, recorded here per the 0050
   the coupled path keeps `RunInPTY`. Verified end to end against real docker: a
   detached container `Supervise` run + `session attach` round-trips I/O both ways and
   the in-container agent reports a controlling terminal (`/dev/pts/0`). The
-  `containerLaunch` seam pins the rio-forwarding hermetically (no docker). VM remains
-  the last follow-up.
+  `containerLaunch` seam pins the rio-forwarding hermetically (no docker). VM is the
+  next (final) bullet.
+- **VM PTY binding (follow-up).** Same gap as container: the detached vm path dropped
+  `rio`, and `vm.Launch` (which only took `agentArgv`) ran `RunInTerminal` with nil
+  stdio, so a detached vm agent's I/O went to the daemon's `/dev/null`. `vm.Launch`
+  now takes an `exec.LaunchSpec` and forwards its stdio to `RunInTerminal`; the vm
+  branch passes `rio` through a `vmLaunch` seam. No launch-method branch is needed —
+  vm already uses `RunInTerminal` in both modes, and `ssh -t` allocates the agent's
+  remote tty because the forwarded stdin (the supervisor PTY) is a tty, so it bridges
+  to the supervisor's PTY for attach. The coupled path is unchanged (nil stdio →
+  `os.Stdin`). The `vmLaunch` seam pins the rio-forwarding hermetically (no tart).
+  The live VM round-trip is the same proven `RunInTerminal`+pts bridge (validated
+  against real docker for container, and `RunInTerminal` is the host ctty path) plus
+  `ssh -t`; it was not exercised end to end here because the base VM's SSH
+  provisioning timed out (a `SAFESLOP_VM_SSH_KEY`/base-image environment issue that
+  is orthogonal to this change — it gates the coupled path identically). This closes
+  the 0051 detached-PTY series across all four tiers.
 - **Daemonization is `Setsid` only (PR3, D1).** `SysProcAttr{Setsid: true}` alone
   makes the supervisor a new session **and** process-group leader (`pgid == pid`) —
   exactly what D4's `kill(-pgid)` needs. `Setsid + Setpgid` together fails
