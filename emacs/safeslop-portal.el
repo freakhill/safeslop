@@ -47,6 +47,24 @@
       (concat (substring id 0 16) "…")
     (or id "")))
 
+(defun safeslop-portal--status-face (status)
+  "Return a face for a session STATUS string (slopmaxx-style mapping)."
+  (pcase status
+    ("running" 'success)
+    ("created" 'warning)
+    ("stopped" 'shadow)
+    ((or "exited" "failed" "error" "cancelled") 'error)
+    (_ 'default)))
+
+(defun safeslop-portal--status-cell (status)
+  "Return STATUS as a tabulated-list cell coloured by its status face."
+  (propertize status 'face (safeslop-portal--status-face status)))
+
+(defun safeslop-portal--pid (sess)
+  "Return SESS's pid as a display string, or an em dash when it has none."
+  (let ((pid (safeslop-portal--field sess 'pid)))
+    (if (string-empty-p pid) "—" pid)))
+
 (defun safeslop-portal--sessions ()
   "Fetch the session list and return the parsed sessions (a list of alists).
 On a failed `session list' (e.g. a stale binary), surface the error in the echo
@@ -68,7 +86,8 @@ area so the empty table is not silently mysterious."
                      (safeslop-portal--field sess 'agent)
                      (safeslop-portal--field sess 'environment)
                      (safeslop-portal--field sess 'network)
-                     (safeslop-portal--field sess 'status)
+                     (safeslop-portal--status-cell (safeslop-portal--field sess 'status))
+                     (safeslop-portal--pid sess)
                      (abbreviate-file-name (safeslop-portal--field sess 'workspace))))))
    (sort (copy-sequence (safeslop-portal--sessions))
          (lambda (a b)
@@ -172,7 +191,8 @@ column titles stay in the window header line)."
          ("Env" 10 nil)
          ("Net" 5 nil)
          ("Status" 10 nil)
-         ("Workspace" 44 nil)])
+         ("PID" 7 nil)
+         ("Workspace" 38 nil)])
   (setq tabulated-list-padding 1)
   (tabulated-list-init-header))
 
