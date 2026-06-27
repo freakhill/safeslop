@@ -203,6 +203,22 @@ ROUTES maps exact argv JSON strings to `((stdout . STRING) (stderr . STRING)
               (accept-process-output proc 0.1))))
         (should (equal (safeslop-test--argv-log-lines) (list (safeslop-test--json-key argv))))))))
 
+(ert-deftest safeslop-test-reattach-uses-attach-argv ()
+  "Reattach builds `session attach --session-id ...' argv under a term PTY
+\(specs/0051 PR4): the detached session is rejoined over its socket, not re-run."
+  (let* ((argv '("session" "attach" "--session-id" "sess-reattach"))
+         (routes `((,(safeslop-test--json-key argv) .
+                   ((stdout . "")
+                    (exit . 0))))))
+    (safeslop-test--with-fake-cli routes
+      (let ((buf (safeslop-session-reattach "sess-reattach")))
+        (with-current-buffer buf
+          (should (derived-mode-p 'term-mode))
+          (let ((proc (get-buffer-process buf)))
+            (while (and proc (process-live-p proc))
+              (accept-process-output proc 0.1))))
+        (should (equal (safeslop-test--argv-log-lines) (list (safeslop-test--json-key argv))))))))
+
 (ert-deftest safeslop-test-fallback-compilation-mode-on-pty-unavailable ()
   (let* ((argv '("session" "status" "--session-id" "sess-pty" "--output" "jsonl"))
          (routes `((,(safeslop-test--json-key argv) .

@@ -45,6 +45,10 @@
   "Return exact argv for running SESSION-ID."
   (list "session" "run" "--session-id" session-id))
 
+(defun safeslop-session--attach-args (session-id)
+  "Return exact argv for reattaching to SESSION-ID's detached supervisor."
+  (list "session" "attach" "--session-id" session-id))
+
 (defvar-local safeslop-session--run-output nil
   "Raw stdout accumulated from the `session run' process for this buffer.
 Captured before term-mode renders it, so PTY_UNAVAILABLE detection is immune to
@@ -72,23 +76,20 @@ Idempotent per buffer via `safeslop-session--fallback-done'."
         (setq safeslop-session--fallback-done t)
         (safeslop-session-status-fallback session-id)))))
 
-;;;###autoload
-(defun safeslop-session-attach (&optional session-id)
-  "Attach to SESSION-ID using a built-in term-mode PTY and exact argv.
-If the run reports the PTY_UNAVAILABLE contract error (no usable controlling
+(defun safeslop-session--launch-term (session-id argv)
+  "Launch ARGV for SESSION-ID under a built-in term-mode PTY; return the buffer.
+If the process reports the PTY_UNAVAILABLE contract error (no usable controlling
 terminal), switch to the read-only JSONL status fallback
 \(`safeslop-session-status-fallback')."
-  (interactive (list (read-string "Session id: ")))
-  (let* ((argv (safeslop-session--run-args session-id))
-         (buf (apply #'make-term (concat "safeslop-" session-id)
-                     safeslop-program nil argv)))
+  (let ((buf (apply #'make-term (concat "safeslop-" session-id)
+                    safeslop-program nil argv)))
     (with-current-buffer buf
       (term-mode)
       (term-char-mode))
     (let ((proc (get-buffer-process buf)))
       (when proc
         ;; Capture raw stdout ahead of term's renderer, then key on it when the
-        ;; run exits.  add-function (not set-process-*) preserves term's own
+        ;; process exits.  add-function (not set-process-*) preserves term's own
         ;; filter/sentinel so the PTY keeps working on the happy path.
         (add-function :before (process-filter proc)
                       (lambda (_p string)
@@ -100,11 +101,19 @@ terminal), switch to the read-only JSONL status fallback
                       (lambda (p _event)
                         (unless (process-live-p p)
                           (safeslop-session--maybe-status-fallback buf session-id))))
-        ;; Backstop for a run that already exited before the sentinel was wired.
+        ;; Backstop for a process that already exited before the sentinel was wired.
         (unless (process-live-p proc)
           (safeslop-session--maybe-status-fallback buf session-id))))
     (pop-to-buffer buf)
     buf))
+
+;;;###autoload
+(defun safeslop-session-attach (&optional session-id)
+  "Attach to SESSION-ID by running its agent under a built-in term-mode PTY.
+On PTY_UNAVAILABLE (no usable controlling terminal), switch to the read-only
+JSONL status fallback (`safeslop-session-status-fallback')."
+  (interactive (list (read-string "Session id: ")))
+  (safeslop-session--launch-term session-id (safeslop-session--run-args session-id)))
 
 ;;;###autoload
 (defun safeslop-session-list ()
@@ -131,10 +140,14 @@ terminal), switch to the read-only JSONL status fallback
     (safeslop--show-envelope-buffer "*safeslop session stop*" args envelope)))
 
 ;;;###autoload
-(defun safeslop-session-restart ()
-  "Restart a safeslop session placeholder."
-  (interactive)
-  (message "safeslop session restart lands with the PR5 PTY model"))
+(defun safeslop-session-reattach (&optional session-id)
+  "Reattach to SESSION-ID's detached supervisor over its socket, under a built-in
+term-mode PTY.  Unlike `safeslop-session-attach' (which runs the agent coupled),
+this rejoins an agent already running under a detached supervisor (specs/0051).
+On PTY_UNAVAILABLE (no usable controlling terminal), switch to the read-only
+JSONL status fallback (`safeslop-session-status-fallback')."
+  (interactive (list (read-string "Session id: ")))
+  (safeslop-session--launch-term session-id (safeslop-session--attach-args session-id)))
 
 ;;;###autoload
 (defun safeslop-session-status-fallback (&optional session-id)

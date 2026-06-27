@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	osexec "os/exec"
 	"os/signal"
@@ -351,7 +352,7 @@ var sessionProcessAlive = engsession.ProcessAlive
 
 func cmdSession() *cobra.Command {
 	c := &cobra.Command{Use: "session", Short: "Manage Emacs-visible safeslop sessions"}
-	c.AddCommand(cmdSessionCreate(), cmdSessionRun(), cmdSessionStatus(), cmdSessionStop(), cmdSessionList(), cmdSessionSupervise())
+	c.AddCommand(cmdSessionCreate(), cmdSessionRun(), cmdSessionStatus(), cmdSessionStop(), cmdSessionList(), cmdSessionSupervise(), cmdSessionAttach())
 	return c
 }
 
@@ -635,6 +636,72 @@ func cmdSessionSupervise() *cobra.Command {
 	}
 	c.Flags().StringVar(&id, "session-id", "", "session id")
 	return c
+}
+
+// cmdSessionAttach attaches to a detached session's supervisor over its socket,
+// bridging the local terminal to the agent and exiting with the agent's code.
+// Like `run`, it needs a usable controlling terminal: with none it emits
+// PTY_UNAVAILABLE pointing at the JSONL status fallback, before any connect
+// attempt. os.Exit lives only here at the cobra boundary, so attachSession stays
+// drivable to completion in tests (specs/0051 PR4).
+func cmdSessionAttach() *cobra.Command {
+	var id string
+	c := &cobra.Command{
+		Use:   "attach --session-id <id>",
+		Short: "Attach to a detached safeslop session",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if !sessionHasInteractivePTY() {
+				emitContract(jsoncontract.PTYUnavailable())
+				return errOutputEmitted
+			}
+			code, err := attachSession(sessionStore(), id, os.Stdin, os.Stdout, attachResizeChannel())
+			if err != nil {
+				return emitContractError(jsoncontract.CodeSessionStopped, "attach to session", map[string]any{"session_id": id, "error": err.Error()})
+			}
+			os.Exit(code)
+			return nil
+		},
+	}
+	c.Flags().StringVar(&id, "session-id", "", "session id")
+	return c
+}
+
+// attachSession dials the per-session socket and bridges in/out to the agent,
+// returning the agent's exit code from the X frame. Returning (rather than
+// os.Exit-ing) keeps it drivable to completion in tests.
+func attachSession(store engsession.Store, id string, in io.Reader, out io.Writer, resize <-chan [2]uint16) (int, error) {
+	conn, err := net.Dial("unix", filepath.Join(store.Dir, id+".sock"))
+	if err != nil {
+		return 1, err
+	}
+	defer conn.Close()
+	return engsession.Attach(conn, in, out, resize)
+}
+
+// attachResizeChannel reports the local terminal size on SIGWINCH (and once up
+// front) as {rows, cols}, which the attach client forwards as R frames so the
+// agent's PTY tracks the window. Lives in the cobra path (a real tty); the
+// hermetic tests pass a nil channel.
+func attachResizeChannel() <-chan [2]uint16 {
+	ch := make(chan [2]uint16, 1)
+	send := func() {
+		if w, h, err := term.GetSize(int(os.Stdout.Fd())); err == nil {
+			select {
+			case ch <- [2]uint16{uint16(h), uint16(w)}: // rows = height, cols = width
+			default:
+			}
+		}
+	}
+	winch := make(chan os.Signal, 1)
+	signal.Notify(winch, syscall.SIGWINCH)
+	go func() {
+		for range winch {
+			send()
+		}
+	}()
+	send() // initial size
+	return ch
 }
 
 // sessionHasInteractivePTY reports whether `session run` has a usable controlling

@@ -13,7 +13,7 @@
                 safeslop-session-list
                 safeslop-session-status
                 safeslop-session-stop
-                safeslop-session-restart
+                safeslop-session-reattach
                 safeslop-switch-to-session-buffer
                 safeslop-show-last-error
                 safeslop-help))

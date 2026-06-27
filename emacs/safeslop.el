@@ -244,7 +244,7 @@ ARGS is passed to `call-process' as an argv list; no shell is used."
     (define-key map (kbd "l") #'safeslop-session-list)
     (define-key map (kbd "t") #'safeslop-session-status)
     (define-key map (kbd "s") #'safeslop-session-stop)
-    (define-key map (kbd "r") #'safeslop-session-restart)
+    (define-key map (kbd "r") #'safeslop-session-reattach)
     (define-key map (kbd "b") #'safeslop-switch-to-session-buffer)
     (define-key map (kbd "e") #'safeslop-show-last-error)
     (define-key map (kbd "?") #'safeslop-help)

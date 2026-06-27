@@ -17,7 +17,7 @@
 ;;;###autoload (autoload 'safeslop-session-list "safeslop" nil t)
 ;;;###autoload (autoload 'safeslop-session-status "safeslop" nil t)
 ;;;###autoload (autoload 'safeslop-session-stop "safeslop" nil t)
-;;;###autoload (autoload 'safeslop-session-restart "safeslop" nil t)
+;;;###autoload (autoload 'safeslop-session-reattach "safeslop" nil t)
 ;;;###autoload (autoload 'safeslop-switch-to-session-buffer "safeslop" nil t)
 ;;;###autoload (autoload 'safeslop-show-last-error "safeslop" nil t)
 ;;;###autoload (autoload 'safeslop-help "safeslop" nil t)
