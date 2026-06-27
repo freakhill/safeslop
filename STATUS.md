@@ -32,5 +32,5 @@ The Go side now natively manages durable agent sessions (`internal/engine/sessio
 
 ### 6. What's Next (Uncharted Territory)
 With the UX, CLI surface, and state machine built, the immediate engine boundary is reached:
-* **Session Runtime Depth**: Currently, `safeslop session run` is just scaffolding. The next logical architectural feature is the actual execution plane: spawning the PTY, bridging the agent into its target isolation environment (sandbox/container/VM), and piping standard I/O to the Emacs terminal. 
-* This likely requires a new spec (e.g., `specs/0050-session-runtime.md`) to define the precise `exec` handoff.
+* **Session Runtime (`specs/0050`, landed)**: `safeslop session run` is a real execution plane, not scaffolding — it execs the agent under its declared boundary (sandbox/container/VM), reconciles a running-but-dead session back to `stopped`, tears the boundary down on `SIGTERM`/`SIGHUP` (so `session stop` and buffer-close don't orphan a container/VM holding staged secrets), and emits the `PTY_UNAVAILABLE` contract error with a JSONL status fallback when there is no usable controlling terminal.
+* **Detached supervisor (Stage 2, deferred to `specs/0051`)**: giving a session a life independent of the Emacs buffer that started it — a detached supervisor with reattach over a per-session socket. That is where `data.session.socket` returns; v1 emits no socket because there is no daemon.

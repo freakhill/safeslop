@@ -57,6 +57,35 @@ func parseEnvelopeForTest(t *testing.T, out string) jsoncontract.Envelope {
 	return env
 }
 
+// TestSessionCreateGoldenMatchesEmittedEnvelope pins ok-session-create.golden.json
+// to the exact envelope `session create` emits for a freshly created session, so
+// the fixture cannot drift from reality (the daemon-shaped nested session{} +
+// socket fiction is gone; the flat sessionData shape used by status/list/stop is
+// the one source of truth) — specs/0050 PR5.
+func TestSessionCreateGoldenMatchesEmittedEnvelope(t *testing.T) {
+	sess := engsession.Session{
+		ID:          "sess-0123456789abcdef01234567",
+		Agent:       "claude",
+		Workspace:   "/workspace/project",
+		Environment: "sandbox",
+		Network:     "deny",
+		Status:      engsession.StatusCreated,
+		CreatedAt:   time.Date(2026, 6, 26, 0, 0, 0, 0, time.UTC),
+		UpdatedAt:   time.Date(2026, 6, 26, 0, 0, 0, 0, time.UTC),
+	}
+	got, err := jsoncontract.Marshal(jsoncontract.OK(sessionData(sess)))
+	if err != nil {
+		t.Fatalf("marshal emitted envelope: %v", err)
+	}
+	want, err := os.ReadFile(filepath.Join("..", "jsoncontract", "testdata", "ok-session-create.golden.json"))
+	if err != nil {
+		t.Fatalf("read golden: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("ok-session-create.golden.json drifted from the emitted envelope\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
 func TestSessionCreateEmitsContractAndPersistsSafeDefaults(t *testing.T) {
 	ws := t.TempDir()
 	state := t.TempDir()

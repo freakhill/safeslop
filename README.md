@@ -87,6 +87,13 @@ the agent and runs the deferred cleanup — disposable VM destroyed, container
 removed, staged secrets wiped, ephemeral credentials revoked. Interactive
 `Ctrl-C` (`SIGINT`) is left for the agent and does not tear the session down.
 
+`session run` is an interactive attach and needs a controlling terminal — Emacs
+supplies one via `make-term`. Invoked without a usable TTY (a pipe, cron, a
+headless shell), it emits the `PTY_UNAVAILABLE` contract error
+(`details.fallback = "status-jsonl"`) and exits non-zero **without** marking the
+session running, so nothing is left as a phantom. The Emacs client switches to a
+read-only `--output jsonl` status monitor on that code.
+
 ## `safeslop.cue` reference
 
 A representative profile:

@@ -84,14 +84,18 @@ the real scope of 0050.
    usable PTY" and never emits the envelope, so the fallback is dead code on the
    Go side.
 
-6. **The `socket` field is aspirational.** `ok-session-create.golden.json`
-   includes `data.session.socket`, and Emacs carries dormant daemon-autostart
-   scaffolding (`emacs/safeslop.el`, `safeslop-daemon-args '("serve")`, whose
-   own docstring says "Current safeslop releases may not ship a daemon … until
-   safeslop grows a checked-in daemon"). But `sessionData`
-   (`internal/cli/cli.go:518`) emits no `socket`, and there is **no daemon, no
-   `serve` subcommand, and no socket listener anywhere in the Go tree**. The
-   fixture and the runtime disagree; one of them must move.
+6. **The session-create fixture is aspirational (wider than `socket`).**
+   `ok-session-create.golden.json` carries a daemon-shaped
+   `data.session.{id,state,socket,…}` object, and Emacs carries dormant
+   daemon-autostart scaffolding (`emacs/safeslop.el`, `safeslop-daemon-args
+   '("serve")`, whose own docstring says "Current safeslop releases may not ship
+   a daemon … until safeslop grows a checked-in daemon"). But `sessionData`
+   emits the **flat shape** (`session_id`, `status`, `environment`, `network`,
+   timestamps …) used by every session command, with a `sess-<hex>` id and no
+   `socket`, and there is **no daemon, no `serve` subcommand, and no socket
+   listener anywhere in the Go tree**. The fixture and the runtime disagree; the
+   fixture must move. *(Resolved in PR5: the golden is rewritten to the real flat
+   emission and pinned byte-exact; `socket` returns with Stage 2 / `specs/0051`.)*
 
 ## Locked decisions
 
@@ -161,10 +165,13 @@ PR4, not a change here.
 
 ### D5 — Reconcile the contract with reality
 
-Drop `socket` from `ok-session-create.golden.json` (and the Emacs parse
-expectations) for v1, since no socket is emitted. The field returns only if and
-when Stage 2 ships a per-session socket. This keeps the "one source of truth,
-Go and Emacs parse the same fixtures" invariant honest.
+Rewrite `ok-session-create.golden.json` to the shape `session create` actually
+emits — the flat `sessionData` object (no daemon-shaped `session{}` wrapper, no
+`socket`, real `sess-<hex>` id) — and pin it byte-exact to
+`jsoncontract.OK(sessionData(...))` so it can't drift again. `socket` (and any
+nested per-session shape) returns only if and when Stage 2 ships a per-session
+socket. This keeps the "one source of truth, Go and Emacs parse the same
+fixtures" invariant honest. (Implemented in PR5; see that section.)
 
 ## PR sequence
 
@@ -358,25 +365,44 @@ Required tests:
 
 Purpose:
 
-- Remove the aspirational `socket` field from `ok-session-create.golden.json`
-  and any Emacs parse expectation, restoring "Go and Emacs parse the same
-  fixtures with no drift."
-- Update `README.md` (session command surface, stop semantics, fallback
-  behaviour), `STATUS.md` (correct the "just scaffolding" line), and the session
-  skill under `skills/` to match the implemented runtime.
+- Reconcile `ok-session-create.golden.json` with reality, restoring "Go and
+  Emacs parse the same fixtures with no drift."
+- Update `README.md` (fallback behaviour), `STATUS.md` (correct the "just
+  scaffolding" line), and the session skill under `skills/` to match the
+  implemented runtime.
+
+Implemented decision (code-grounded rescope, the 0050 pattern):
+
+- **The drift was wider than `socket`.** The fixture carried a *daemon-shaped*
+  `data.session.{id,state,socket,...}` object, but `session create` (and every
+  other session command — `status`/`list`/`stop`) emits the **flat `sessionData`
+  shape**: `session_id`, `agent`, `workspace`, `environment`, `network`,
+  `status`, `created_at`, `updated_at`, `credentials_revoked`. The fixture also
+  used a ULID-style `sess_…` id, while real ids are `sess-<hex>` (`newID`). So the
+  whole object — not just `socket` — was fiction.
+- **Fix:** rewrite the golden to *be* the real emission for a freshly created
+  session (flat shape, real id format, no `socket`). `socket` returns only if and
+  when Stage 2 (`specs/0051`) ships a per-session socket.
+- **Anti-drift pin:** a CLI test asserts the golden is byte-identical to
+  `jsoncontract.OK(sessionData(<representative created session>))`, so the fixture
+  cannot silently diverge from the command again; a contract-layer test asserts the
+  golden carries no `socket` field. No Emacs code parses `data.session.*` (only the
+  daemon-control `socket` in `safeslop.el`, which is unrelated), so no Emacs change
+  is needed.
 
 Files:
 
 - `internal/jsoncontract/testdata/ok-session-create.golden.json`
 - `internal/jsoncontract/contract_test.go`
-- `emacs/safeslop-contract.el` / `emacs/test/*` (if they reference `socket`)
+- `internal/cli/cli_session_test.go` (byte-exact golden ↔ emission pin)
 - `README.md`
 - `STATUS.md`
-- `skills/` (session-related skill files)
+- `skills/agent-sandbox-ops/SKILL.md`
 
 Required tests:
 
-- `TestGoldenSessionCreateHasNoSocketField`
+- `TestGoldenSessionCreateHasNoSocketField` (contract layer)
+- `TestSessionCreateGoldenMatchesEmittedEnvelope` (CLI layer, byte-exact pin)
 - existing golden round-trip tests (Go + ERT) stay green
 
 ## Stage 2 (deferred) — detached supervisor and reattach

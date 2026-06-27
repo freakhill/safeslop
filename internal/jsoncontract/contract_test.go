@@ -59,6 +59,19 @@ func TestAllErrorCodesAreTheAppendOnlyV1Set(t *testing.T) {
 	}
 }
 
+func TestGoldenSessionCreateHasNoSocketField(t *testing.T) {
+	// v1 has no daemon, no `serve` subcommand, and no socket listener, so the
+	// session-create fixture must not advertise a `socket`. The field returns only
+	// if and when Stage 2 (specs/0051) ships a per-session socket (specs/0050 PR5).
+	b, err := os.ReadFile(filepath.Join("testdata", "ok-session-create.golden.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "socket") {
+		t.Fatalf("ok-session-create.golden.json still carries a socket field:\n%s", b)
+	}
+}
+
 func TestGoldenFixturesParseValidateAndRoundTrip(t *testing.T) {
 	paths, err := filepath.Glob(filepath.Join("testdata", "*.golden.json"))
 	if err != nil {
