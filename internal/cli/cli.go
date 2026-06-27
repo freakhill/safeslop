@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/freakhill/safeslop/internal/engine/container"
 	runtimepkg "github.com/freakhill/safeslop/internal/engine/container/runtime"
@@ -489,6 +490,19 @@ func cmdSessionRun() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// `session run` is an interactive attach: every boundary presents the
+			// agent under a controlling terminal (host/sandbox via RunInTerminal,
+			// container via the RunInPTY tty bridge, vm via `ssh -t`), so without a
+			// usable PTY the session is undriveable on all four. Emacs drives this via
+			// make-term, which connects the process to a pty; a no-tty invocation
+			// (cron, a pipe, a headless shell) gets the PTY_UNAVAILABLE contract error
+			// pointing at the JSONL status fallback, exits non-zero, and is *not*
+			// marked running — a session that can never start must not be left as a
+			// phantom for liveness/reconcile or `session stop` (specs/0050 PR4).
+			if !sessionHasInteractivePTY() {
+				emitContract(jsoncontract.PTYUnavailable())
+				return errOutputEmitted
+			}
 			if _, err := store.MarkRunning(id, os.Getpid(), time.Now()); err != nil {
 				return err
 			}
@@ -507,6 +521,16 @@ func cmdSessionRun() *cobra.Command {
 	}
 	c.Flags().StringVar(&id, "session-id", "", "session id")
 	return c
+}
+
+// sessionHasInteractivePTY reports whether `session run` has a usable controlling
+// terminal for the agent. Both stdin and stdout must be a tty: the agent needs a
+// keyboard (stdin) and a display (stdout) to be interactive, and Emacs make-term
+// supplies both. Either one being a pipe (the no-controlling-terminal case) means
+// the interactive run path cannot be driven, so the caller must fall back to the
+// JSONL status monitor (specs/0050 PR4).
+func sessionHasInteractivePTY() bool {
+	return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
 }
 
 func sessionStore() engsession.Store {

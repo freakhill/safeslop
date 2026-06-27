@@ -97,6 +97,20 @@ func TestGoldenFixturesParseValidateAndRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPTYUnavailableEnvelopeMatchesGolden(t *testing.T) {
+	want, err := os.ReadFile(filepath.Join("testdata", "error-pty-unavailable.golden.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Marshal(PTYUnavailable())
+	if err != nil {
+		t.Fatalf("Marshal(PTYUnavailable()): %v", err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("PTYUnavailable() is not the golden wire shape\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
 func TestConstructorsProduceNonNilArraysAndObjects(t *testing.T) {
 	ok := OK(nil)
 	if err := Validate(ok); err != nil {

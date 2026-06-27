@@ -8,8 +8,10 @@
 
 ;;; Commentary:
 
-;; Session-facing Emacs commands.  PR4 covers exact argv construction and JSON
-;; contract parsing; PR5 will add the actual PTY/status process model.
+;; Session-facing Emacs commands.  Attach runs the agent under a built-in
+;; term-mode PTY; when the CLI reports the PTY_UNAVAILABLE contract error (no
+;; usable controlling terminal), attach switches to the read-only JSONL status
+;; fallback so the buffer that started the session stays useful (specs/0050 PR4).
 
 ;;; Code:
 
@@ -43,9 +45,39 @@
   "Return exact argv for running SESSION-ID."
   (list "session" "run" "--session-id" session-id))
 
+(defvar-local safeslop-session--run-output nil
+  "Raw stdout accumulated from the `session run' process for this buffer.
+Captured before term-mode renders it, so PTY_UNAVAILABLE detection is immune to
+terminal line wrapping and term's trailing status line.")
+
+(defvar-local safeslop-session--fallback-done nil
+  "Non-nil once this run buffer has switched to the JSONL status fallback.
+Guards against the run process's filter and sentinel both triggering the switch.")
+
+(defun safeslop-session--pty-unavailable-p (output)
+  "Return non-nil if OUTPUT carries the PTY_UNAVAILABLE contract error code.
+A token match on the stable error code, not a strict JSON parse: the run process
+is interactive, so its stdout may carry agent banner text around the envelope and
+a PTY translates newlines, either of which can defeat a whole-buffer parse."
+  (and (stringp output)
+       (string-match-p "\"PTY_UNAVAILABLE\"" output)))
+
+(defun safeslop-session--maybe-status-fallback (buf session-id)
+  "Switch BUF to the JSONL status fallback if its run reported PTY_UNAVAILABLE.
+Idempotent per buffer via `safeslop-session--fallback-done'."
+  (when (buffer-live-p buf)
+    (with-current-buffer buf
+      (when (and (not safeslop-session--fallback-done)
+                 (safeslop-session--pty-unavailable-p safeslop-session--run-output))
+        (setq safeslop-session--fallback-done t)
+        (safeslop-session-status-fallback session-id)))))
+
 ;;;###autoload
 (defun safeslop-session-attach (&optional session-id)
-  "Attach to SESSION-ID using a built-in term-mode PTY and exact argv."
+  "Attach to SESSION-ID using a built-in term-mode PTY and exact argv.
+If the run reports the PTY_UNAVAILABLE contract error (no usable controlling
+terminal), switch to the read-only JSONL status fallback
+\(`safeslop-session-status-fallback')."
   (interactive (list (read-string "Session id: ")))
   (let* ((argv (safeslop-session--run-args session-id))
          (buf (apply #'make-term (concat "safeslop-" session-id)
@@ -53,6 +85,24 @@
     (with-current-buffer buf
       (term-mode)
       (term-char-mode))
+    (let ((proc (get-buffer-process buf)))
+      (when proc
+        ;; Capture raw stdout ahead of term's renderer, then key on it when the
+        ;; run exits.  add-function (not set-process-*) preserves term's own
+        ;; filter/sentinel so the PTY keeps working on the happy path.
+        (add-function :before (process-filter proc)
+                      (lambda (_p string)
+                        (when (buffer-live-p buf)
+                          (with-current-buffer buf
+                            (setq safeslop-session--run-output
+                                  (concat (or safeslop-session--run-output "") string))))))
+        (add-function :after (process-sentinel proc)
+                      (lambda (p _event)
+                        (unless (process-live-p p)
+                          (safeslop-session--maybe-status-fallback buf session-id))))
+        ;; Backstop for a run that already exited before the sentinel was wired.
+        (unless (process-live-p proc)
+          (safeslop-session--maybe-status-fallback buf session-id))))
     (pop-to-buffer buf)
     buf))
 

@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -241,5 +242,79 @@ func TestSessionContractOutputDoesNotLeakSecretRefs(t *testing.T) {
 	var raw map[string]any
 	if err := json.Unmarshal([]byte(out), &raw); err != nil {
 		t.Fatalf("json: %v", err)
+	}
+}
+
+// newHostShellSessionForTest persists a host-tier session whose agent is a host
+// shell pointed at a non-existent $SHELL. This keeps `session run` hermetic in
+// both phases of the PTY_UNAVAILABLE TDD: the guard under test must short-circuit
+// *before* any launch (so the bogus shell is never execed), and if the guard were
+// missing the launch would fail fast and cmdSessionRun would return that error —
+// never reaching its os.Exit(code) on the success path, which would otherwise
+// tear down the test binary. No live agent ever runs.
+func newHostShellSessionForTest(t *testing.T, ws string) string {
+	t.Helper()
+	t.Setenv("SHELL", filepath.Join(t.TempDir(), "no-such-shell"))
+	store := sessionStore()
+	sess, err := store.Create("shell", ws, nowForTest(t))
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	sess.Environment = "host"
+	if err := store.Save(sess); err != nil {
+		t.Fatalf("save session: %v", err)
+	}
+	return sess.ID
+}
+
+// TestSessionRunEmitsPTYUnavailableWhenNoTTY proves that `session run` invoked
+// without a usable controlling terminal (runRootForTest replaces os.Stdout with a
+// pipe, so neither stdin nor stdout is a tty) emits the PTY_UNAVAILABLE contract
+// envelope byte-for-byte and exits non-zero (specs/0050 PR4). The interactive run
+// path is undriveable without a tty for every boundary, so the honest response is
+// the JSONL status fallback advertised in the envelope details.
+func TestSessionRunEmitsPTYUnavailableWhenNoTTY(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+	id := newHostShellSessionForTest(t, ws)
+
+	out, err := runRootForTest(t, ws, "session", "run", "--session-id", id)
+	if !errors.Is(err, errOutputEmitted) {
+		t.Fatalf("session run without a usable PTY: err = %v, want errOutputEmitted; out=%q", err, out)
+	}
+	golden, gerr := os.ReadFile(filepath.Join("..", "jsoncontract", "testdata", "error-pty-unavailable.golden.json"))
+	if gerr != nil {
+		t.Fatalf("read golden: %v", gerr)
+	}
+	if out != string(golden) {
+		t.Fatalf("PTY_UNAVAILABLE envelope mismatch\n--- got ---\n%s\n--- want ---\n%s", out, golden)
+	}
+}
+
+// TestSessionRunDoesNotMarkRunningOnPTYUnavailable proves the PTY_UNAVAILABLE
+// short-circuit happens *before* MarkRunning: a session that could never start
+// must not be left recorded as running (or carrying the wrapper PID), so the
+// liveness/reconcile machinery and `session stop` are not handed a phantom
+// (specs/0050 PR4).
+func TestSessionRunDoesNotMarkRunningOnPTYUnavailable(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+	id := newHostShellSessionForTest(t, ws)
+
+	if _, err := runRootForTest(t, ws, "session", "run", "--session-id", id); !errors.Is(err, errOutputEmitted) {
+		t.Fatalf("session run without a usable PTY: err = %v, want errOutputEmitted", err)
+	}
+	sess, err := sessionStore().Get(id)
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if sess.Status != engsession.StatusCreated {
+		t.Fatalf("session status = %q, want %q (MarkRunning must not run on PTY_UNAVAILABLE)", sess.Status, engsession.StatusCreated)
+	}
+	if sess.PID != 0 {
+		t.Fatalf("session PID = %d, want 0 (run must not record a PID on PTY_UNAVAILABLE)", sess.PID)
+	}
+	if !sess.StartedAt.IsZero() {
+		t.Fatalf("session StartedAt = %v, want zero (run must not stamp a start on PTY_UNAVAILABLE)", sess.StartedAt)
 	}
 }
