@@ -17,7 +17,7 @@ import (
 )
 
 func TestProfileContainsExpectedDirectives(t *testing.T) {
-	p := Profile("/Users/x/repo", "deny", Scope{})
+	p := Profile("/Users/x/repo", "deny", "", Scope{})
 	for _, want := range []string{
 		"(version 1)",
 		`(import "system.sb")`,
@@ -56,7 +56,7 @@ func TestWrapArgvWritesProfileAndWraps(t *testing.T) {
 }
 
 func TestProfileNetworkAllow(t *testing.T) {
-	p := Profile("/w", "allow", Scope{})
+	p := Profile("/w", "allow", "", Scope{})
 	if !strings.Contains(p, "(allow network*)") {
 		t.Errorf("network=allow profile missing (allow network*)")
 	}
@@ -66,7 +66,7 @@ func TestProfileNetworkAllow(t *testing.T) {
 }
 
 func TestProfileEscapesQuotes(t *testing.T) {
-	p := Profile(`/tmp/a"b\c`, "deny", Scope{})
+	p := Profile(`/tmp/a"b\c`, "deny", "", Scope{})
 	if !strings.Contains(p, `/tmp/a\"b\\c`) {
 		t.Errorf("profile did not escape quotes/backslashes in workspace path:\n%s", p)
 	}
@@ -239,7 +239,7 @@ func TestLaunchDeniesWriteOutsideWorkspaceOnDarwin(t *testing.T) {
 }
 
 func TestProfileHonorsFileScope(t *testing.T) {
-	p := Profile("/ws", "deny", Scope{
+	p := Profile("/ws", "deny", "", Scope{
 		Read:  []string{"/extra/ro"},
 		Write: []string{"/extra/rw"},
 		Deny:  []string{"/ws/secret"},
@@ -305,13 +305,13 @@ func TestAutoDenyCredentialsOnlyWithScope(t *testing.T) {
 	sshKey := home + "/.ssh/id_ed25519"
 
 	// default workspace-only sandbox: NO auto-deny (creds already out of scope, keep profile clean)
-	plain := Profile("/ws", "deny", Scope{})
+	plain := Profile("/ws", "deny", "", Scope{})
 	if strings.Contains(plain, awsCreds) {
 		t.Errorf("default sandbox should not carry credential auto-deny:\n%s", plain)
 	}
 
 	// granting an extra read turns on the auto-deny for the credential set
-	scoped := Profile("/ws", "deny", Scope{Read: []string{home}})
+	scoped := Profile("/ws", "deny", "", Scope{Read: []string{home}})
 	for _, want := range []string{
 		`(deny file-read* (literal "` + awsCreds + `"))`,
 		`(deny file-read* (literal "` + sshKey + `"))`,
@@ -337,8 +337,106 @@ func TestAutoDenyExplicitGrantWins(t *testing.T) {
 	home, _ := os.UserHomeDir()
 	awsCreds := home + "/.aws/credentials"
 	// explicitly granting a credential path opts it out of the auto-deny
-	p := Profile("/ws", "deny", Scope{Read: []string{awsCreds}})
+	p := Profile("/ws", "deny", "", Scope{Read: []string{awsCreds}})
 	if strings.Contains(p, `(deny file-read* (literal "`+awsCreds+`"))`) {
 		t.Errorf("explicit read of %q must override the auto-deny:\n%s", awsCreds, p)
+	}
+}
+
+// buildFarm reproduces the dotfiles symlink topology that defeated the agent's exec
+// allow: a launcher dir reached via a symlink (binDir -> farmDir) holding a symlink
+// (farmDir/tool -> leaf) to the real binary — mirroring ~/.local/bin -> dotfiles farm
+// and claude -> ~/.local/share/claude/versions/X. leaf is the symlink target (a file
+// the caller created, or an existing binary like /bin/sh). It returns the (symlinked,
+// absolute) launcher path plus the three dirs the kernel touches resolving it, which
+// Seatbelt each checks — empirically all three must be read-allowed or execve is
+// denied: A the as-typed launcher dir, B the resolved binary dir, C the resolved
+// launcher dir. The tmpdir root is resolved up front so A is already in the kernel's
+// canonical form (/var -> /private/var), exactly as production paths under /Users are.
+func buildFarm(t *testing.T, leaf string) (agentBin, wantA, wantB, wantC string) {
+	t.Helper()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	farmDir := filepath.Join(root, "farm")
+	if err := os.Mkdir(farmDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(leaf, filepath.Join(farmDir, "tool")); err != nil { // claude -> versioned binary
+		t.Fatal(err)
+	}
+	binDir := filepath.Join(root, "bin")
+	if err := os.Symlink(farmDir, binDir); err != nil { // ~/.local/bin -> dotfiles farm
+		t.Fatal(err)
+	}
+	agentBin = filepath.Join(binDir, "tool")
+	realBin, err := filepath.EvalSymlinks(agentBin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// binDir is the as-typed launcher dir (its ancestor `root` is already resolved);
+	// wantC resolves the binDir symlink; wantB is the resolved binary's own dir.
+	return agentBin, binDir, filepath.Dir(realBin), resolveSymlinks(binDir)
+}
+
+// TestProfileAllowsAgentExecThroughSymlinkFarm is the unit guard for the "sandbox
+// reconciles to stopped instantly" bug: a symlinked agent binary must have all three
+// of its program dirs read-allowed, or the kernel denies the read backing execve.
+func TestProfileAllowsAgentExecThroughSymlinkFarm(t *testing.T) {
+	leaf := filepath.Join(t.TempDir(), "agent-bin")
+	if err := os.WriteFile(leaf, []byte("binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	agentBin, wantA, wantB, wantC := buildFarm(t, leaf)
+
+	p := Profile("/ws", "deny", agentBin, Scope{})
+	for _, want := range []string{wantA, wantB, wantC} {
+		rule := `(allow file-read* (subpath "` + escape(want) + `"))`
+		if !strings.Contains(p, rule) {
+			t.Errorf("profile missing agent-exec read path %q\n---\n%s", rule, p)
+		}
+	}
+
+	// A preview (no agentBin) must carry none of the host-specific exec paths —
+	// they are resolved per launch, and a bare/relative bin yields none.
+	preview := Profile("/ws", "deny", "", Scope{})
+	for _, p3 := range []string{wantA, wantB, wantC} {
+		if strings.Contains(preview, p3) {
+			t.Errorf("preview profile (no agentBin) must not contain exec path %q:\n%s", p3, preview)
+		}
+	}
+}
+
+// TestLaunchExecsAgentThroughSymlinkFarmOnDarwin is the end-to-end regression proof:
+// the real /bin/sh, reachable ONLY through a symlink farm whose dirs live under
+// $TMPDIR (outside every default allow), execs under sandbox-exec solely because
+// agentExecReadPaths granted those dirs. /bin/sh is reached in place (a COPY would
+// be SIGKILL'd on Apple Silicon for an invalid signature). Before the fix this
+// failed with "execvp() ... Operation not permitted".
+func TestLaunchExecsAgentThroughSymlinkFarmOnDarwin(t *testing.T) {
+	if !Available() {
+		t.Skip("sandbox-exec unavailable (not macOS)")
+	}
+	ws := t.TempDir()
+	agentBin, _, _, _ := buildFarm(t, "/bin/sh")
+
+	argv, cleanup, err := WrapArgv([]string{agentBin, "-c", "echo farm-exec-ok"}, ws, "deny", Scope{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	var out strings.Builder
+	cmd := osexec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Dir = ws // a readable cwd (the profile allows ws), else sh warns on getcwd
+	cmd.Stdout, cmd.Stderr = &out, &out
+	runErr := cmd.Run()
+	// The farmed sh prints the marker iff execve succeeded; sh may emit a non-fatal
+	// /var/select personality warning, so key off the marker, not stderr cleanliness.
+	if !strings.Contains(out.String(), "farm-exec-ok") {
+		t.Fatalf("farmed agent did not exec under sandbox — agentExecReadPaths regression? err=%v out=%q", runErr, out.String())
 	}
 }

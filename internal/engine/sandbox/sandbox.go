@@ -46,6 +46,68 @@ func toolchainReadPaths() []string {
 	return paths
 }
 
+// resolveSymlinks returns p with its symlinks fully resolved when it exists, else
+// p unchanged. Seatbelt matches the kernel-resolved path, so a read rule written
+// with an un-resolved path can silently never match.
+func resolveSymlinks(p string) string {
+	if real, err := filepath.EvalSymlinks(p); err == nil {
+		return real
+	}
+	return p
+}
+
+// canonicalLauncherDir returns the directory holding the agent's launcher entry
+// (filepath.Dir(bin)) with its ANCESTORS resolved but the launcher dir itself left
+// unresolved — the exact form the kernel checks when it reads the as-typed argv[0]
+// before following the launcher symlink. Resolving ancestors handles macOS firmlinks
+// (/var -> /private/var); the launcher dir is kept unresolved because it is itself
+// frequently the farm symlink (e.g. ~/.local/bin -> a dotfiles farm), and that
+// as-typed directory must match or the read backing execve is denied.
+func canonicalLauncherDir(bin string) string {
+	dir := filepath.Dir(bin)
+	return filepath.Join(resolveSymlinks(filepath.Dir(dir)), filepath.Base(dir))
+}
+
+// agentExecReadPaths returns the directories Seatbelt must read-allow so the agent
+// binary at bin can be exec'd through a symlink farm. A coding agent is frequently
+// installed behind one — e.g. ~/.local/bin -> ~/dotfiles/.../bin (the launcher dir
+// is itself a symlink), and within it claude -> ~/.local/share/claude/versions/X.
+// To resolve and read argv[0] the kernel touches the path at THREE distinct
+// locations, and Seatbelt checks each — empirically (real claude) a launch fails
+// with "execvp() ... Operation not permitted" unless ALL THREE are readable:
+//
+//	A  the as-typed launcher dir (ancestors canonicalized): ~/.local/bin
+//	B  the resolved binary's own dir:                        ~/.local/share/claude/versions
+//	C  the fully-resolved launcher dir:                      ~/dotfiles/.../.local/bin
+//
+// Returns nil for a bare or non-absolute bin, so the run then fails honestly rather
+// than mysteriously. This exposes only the agent's own program directories — never
+// user data — so it does not weaken isolation. It deliberately does NOT expose an
+// agent's runtime config (e.g. ~/.claude) or a language runtime's libraries: a
+// home-installed agent that needs those does not fully run under the workspace-only
+// sandbox tier; run it in the container or VM tier, where its runtime lives inside
+// the boundary.
+func agentExecReadPaths(bin string) []string {
+	if bin == "" || !filepath.IsAbs(bin) {
+		return nil
+	}
+	var out []string
+	seen := map[string]bool{}
+	add := func(p string) {
+		if p == "" || p == "/" || seen[p] {
+			return
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
+	add(canonicalLauncherDir(bin)) // A
+	if real, err := filepath.EvalSymlinks(bin); err == nil {
+		add(filepath.Dir(real)) // B
+	}
+	add(resolveSymlinks(filepath.Dir(bin))) // C
+	return out
+}
+
 // Scope adds paths to the sandbox boundary beyond the workspace (from policy.FileScope): Read/Write
 // are extra allowed paths; Deny is emitted last so it overrides any allow (Seatbelt is last-match).
 type Scope struct {
@@ -83,8 +145,10 @@ func canonicalizeScope(s Scope) Scope {
 
 // Profile renders a Seatbelt profile confining writes to workspace (+ temp), applying the network
 // policy ("allow" or, by default, "deny"), plus any extra file Scope (read/write add allowances;
-// deny is emitted last and wins).
-func Profile(workspace, network string, scope Scope) string {
+// deny is emitted last and wins). agentBin is the absolute host path of the agent being launched;
+// its resolved program directories are read-allowed so Seatbelt can exec it through a symlink farm
+// (pass "" when no specific binary is being wrapped, e.g. a preview).
+func Profile(workspace, network, agentBin string, scope Scope) string {
 	var b strings.Builder
 	line := func(s string) { b.WriteString(s); b.WriteByte('\n') }
 
@@ -98,6 +162,17 @@ func Profile(workspace, network string, scope Scope) string {
 		line(fmt.Sprintf(`(allow file-read* (subpath "%s"))`, escape(p)))
 	}
 	for _, p := range toolchainReadPaths() {
+		line(fmt.Sprintf(`(allow file-read* (subpath "%s"))`, escape(p)))
+	}
+	// Read-allow the agent binary's program directories (as-typed launcher, resolved
+	// launcher, resolved binary dir — see agentExecReadPaths) so the kernel can follow
+	// a symlink farm to it and back the execve. Without this a symlinked agent (e.g.
+	// ~/.local/bin/claude -> a dotfiles farm -> a versioned Mach-O) fails with
+	// "execvp() ... Operation not permitted" and the session reconciles straight to
+	// stopped. Emitted before the workspace/scope/deny section so an explicit
+	// scope.Deny still wins (Seatbelt = last match). Exposes only the agent's own
+	// program dirs, never user data, so it does not weaken isolation.
+	for _, p := range agentExecReadPaths(agentBin) {
 		line(fmt.Sprintf(`(allow file-read* (subpath "%s"))`, escape(p)))
 	}
 	line(`(allow file-read* (literal "/private/var/run/resolv.conf"))`)
@@ -236,11 +311,15 @@ func WrapArgv(agentArgv []string, workspace, network string, scope Scope) (argv 
 	if _, statErr := os.Stat(SandboxExecPath); statErr != nil {
 		return nil, func() {}, fmt.Errorf("sandbox environment requires macOS sandbox-exec at %s", SandboxExecPath)
 	}
+	agentBin := ""
+	if len(agentArgv) > 0 {
+		agentBin = agentArgv[0] // absolute by the time Launch calls us (resolveHostBinary)
+	}
 	f, err := os.CreateTemp("", "safeslop-sb-*.sb")
 	if err != nil {
 		return nil, func() {}, err
 	}
-	if _, err := f.WriteString(Profile(workspace, network, scope)); err != nil {
+	if _, err := f.WriteString(Profile(workspace, network, agentBin, scope)); err != nil {
 		_ = f.Close()
 		_ = os.Remove(f.Name())
 		return nil, func() {}, err
