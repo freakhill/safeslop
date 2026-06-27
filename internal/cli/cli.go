@@ -1265,14 +1265,20 @@ func runProfile(name string, prof policy.Profile, argv []string, ws string) (int
 
 // runIO optionally rebinds an agent's stdio. The zero value is the coupled path:
 // the agent inherits the wrapper's stdio (a tty under Emacs make-term). A detached
-// supervisor has no inherited terminal, so it passes a PTY slave it owns and the
-// host/sandbox agent runs on that slave as its controlling terminal (specs/0051
-// D2). Container/VM already provide a tty (RunInPTY / ssh -t), so they ignore it.
+// supervisor has no inherited terminal, so it passes a PTY slave it owns: host and
+// sandbox run the agent on that slave as its controlling terminal, and container
+// binds the `compose run` process's stdio to it so the container's tty bridges
+// back (specs/0051 D2). VM (`ssh -t`) is the remaining tier that still ignores it.
 type runIO struct {
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
 }
+
+// containerLaunch is the container-launch seam: the real container.Launch in
+// production, swappable in tests to assert the detached supervisor's PTY is
+// forwarded without standing up docker.
+var containerLaunch = container.Launch
 
 func runProfileCtx(ctx context.Context, name string, prof policy.Profile, argv []string, ws string, stdio ...runIO) (int, error) {
 	var rio runIO
@@ -1331,7 +1337,10 @@ func runProfileCtx(ctx context.Context, name string, prof policy.Profile, argv [
 		// are staged in stageDir and reached via the /safeslop/runtime bind mount.
 		// egress = the agent's built-in providers + the profile's egress: list (specs/0046).
 		egress := append(append([]string{}, policy.AgentEgress(prof.Agent)...), prof.Egress...)
-		return container.Launch(ctx, engexec.LaunchSpec{Argv: argv}, ws, prof.Network, egress, secretEnv, stageDir)
+		// A detached supervisor passes a PTY slave it owns (rio set); forward it so the
+		// container's tty bridges to the supervisor's PTY for attach. Coupled (rio zero)
+		// leaves stdio nil and container.Launch runs the user's terminal (specs/0051).
+		return containerLaunch(ctx, engexec.LaunchSpec{Argv: argv, Stdin: rio.Stdin, Stdout: rio.Stdout, Stderr: rio.Stderr}, ws, prof.Network, egress, secretEnv, stageDir)
 	case "vm":
 		// secrets ride secrets.env scp'd into the VM and sourced over ssh; the VM is destroyed on exit.
 		tk := ""

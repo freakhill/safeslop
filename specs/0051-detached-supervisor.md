@@ -368,8 +368,8 @@ Where the build diverged from the sketch above, recorded here per the 0050
 - **One PTY slave for host/sandbox (PR2, D2).** `runProfileCtx` gained an additive
   variadic `runIO`; when set, host/sandbox bind the agent's stdio to the
   supervisor's PTY slave (`RunInTerminal`/`sandbox.Launch` already forward stdio).
-  Container/VM keep their own tty (`RunInPTY` / `ssh -t`); their detached PTY
-  binding is a noted follow-up.
+  Container later got the same treatment (its own bullet below); VM (`ssh -t`) is
+  the last tier whose detached PTY binding is still a follow-up.
 - **Host controlling terminal (`Setctty`, follow-up).** Binding the PTY slave as
   the agent's *stdio* (PR2) did not make it the agent's *controlling terminal*:
   under the daemon there is no inherited tty, so the host agent could not open
@@ -389,8 +389,21 @@ Where the build diverged from the sketch above, recorded here per the 0050
   becomes the session leader that owns the PTY, and the agent it execs inherits the
   controlling terminal — the Seatbelt profile already permits the tty ioctls and
   `/dev` reads it needs. Verified end to end through `sandbox.Launch` and through a
-  detached sandbox `Supervise` run (real Seatbelt; `/dev/tty` opens). Container/VM
-  remain the last detached-PTY follow-up.
+  detached sandbox `Supervise` run (real Seatbelt; `/dev/tty` opens). Container is
+  the next bullet; VM remains the last detached-PTY follow-up.
+- **Container PTY binding (follow-up).** A detached container session dropped `rio`
+  entirely: `runProfileCtx`'s container branch built `LaunchSpec{Argv: argv}` and
+  `container.Launch` ran `RunInPTY` with its own host pty wired to `os.Stdin` — which
+  under the daemon is `/dev/null`, so the container's I/O went nowhere and attach saw
+  an empty PTY. Now the container branch forwards `rio.Stdin/Stdout/Stderr`, and
+  `container.Launch` binds the `compose run` process's stdio directly to that PTY via
+  `RunInTerminal` when stdio is set (`compose run` already allocates the container's
+  tty when its stdin is a tty, so it bridges in one hop and docker forwards resize);
+  the coupled path keeps `RunInPTY`. Verified end to end against real docker: a
+  detached container `Supervise` run + `session attach` round-trips I/O both ways and
+  the in-container agent reports a controlling terminal (`/dev/pts/0`). The
+  `containerLaunch` seam pins the rio-forwarding hermetically (no docker). VM remains
+  the last follow-up.
 - **Daemonization is `Setsid` only (PR3, D1).** `SysProcAttr{Setsid: true}` alone
   makes the supervisor a new session **and** process-group leader (`pgid == pid`) —
   exactly what D4's `kill(-pgid)` needs. `Setsid + Setpgid` together fails

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	engexec "github.com/freakhill/safeslop/internal/engine/exec"
 	"github.com/freakhill/safeslop/internal/engine/policy"
 	"github.com/freakhill/safeslop/internal/engine/sandbox"
 )
@@ -95,6 +97,42 @@ func TestRunProfileCtxExitCodeFidelity(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestRunProfileCtxContainerForwardsSupervisorPTY proves the detached container
+// path threads the supervisor's PTY through to container.Launch: runProfileCtx's
+// container branch must copy rio's stdin/stdout/stderr into the LaunchSpec (so the
+// container's tty bridges to the supervisor socket for attach). Hermetic via the
+// containerLaunch seam — no docker. The coupled case (no rio) is the zero value,
+// which leaves the spec stdio nil (container.Launch then keeps RunInPTY).
+func TestRunProfileCtxContainerForwardsSupervisorPTY(t *testing.T) {
+	ws := t.TempDir()
+	prof := policy.Profile{Agent: "shell", Environment: "container", Network: "deny", Workspace: ws}
+	argv, err := agentArgv(prof)
+	if err != nil {
+		t.Fatalf("argv: %v", err)
+	}
+
+	var gotSpec engexec.LaunchSpec
+	old := containerLaunch
+	containerLaunch = func(_ context.Context, spec engexec.LaunchSpec, _, _ string, _, _ []string, _ string) (int, error) {
+		gotSpec = spec
+		return 0, nil
+	}
+	defer func() { containerLaunch = old }()
+
+	stdin := strings.NewReader("")
+	var stdout, stderr bytes.Buffer
+	rio := runIO{Stdin: stdin, Stdout: &stdout, Stderr: &stderr}
+	if _, err := runProfileCtx(context.Background(), "session-ctr", prof, argv, ws, rio); err != nil {
+		t.Fatalf("runProfileCtx: %v", err)
+	}
+	if gotSpec.Stdin != stdin {
+		t.Fatalf("container spec.Stdin = %v, want the supervisor PTY reader", gotSpec.Stdin)
+	}
+	if gotSpec.Stdout != &stdout || gotSpec.Stderr != &stderr {
+		t.Fatal("container spec did not forward the supervisor stdout/stderr")
 	}
 }
 
