@@ -157,3 +157,44 @@
       (should (string-match-p "event=call" s))
       (should (string-match-p "argv=doctor --json" s))
       (should (string-match-p "event=result" s)))))
+
+;;; Robust JSON handling (stale/erroring binary) -----------------------------
+
+(ert-deftest safeslop-test-error-envelope-shape ()
+  (let ((env (safeslop--error-envelope "X_CODE" "boom")))
+    (should-not (safeslop-contract-ok-p env))
+    (should (equal (safeslop-contract-first-error-code env) "X_CODE"))
+    (should (equal (alist-get 'message (car (safeslop-contract-errors env))) "boom"))
+    (should (null (safeslop-contract-data env)))))
+
+(ert-deftest safeslop-test-call-json-handles-non-json-output ()
+  "A stale/erroring binary returns non-JSON; the client must degrade, not crash."
+  (cl-letf (((symbol-function 'call-process)
+             (lambda (&rest _)
+               (insert "safeslop: unknown command \"session\" for \"safeslop\"")
+               1)))
+    (let ((envelope (safeslop--call-json '("session" "list" "--output" "json"))))
+      (should-not (safeslop-contract-ok-p envelope))
+      (should (equal (safeslop-contract-first-error-code envelope) "CLIENT_NON_JSON"))
+      (let ((msg (alist-get 'message (car (safeslop-contract-errors envelope)))))
+        (should (string-match-p "did not return JSON" msg))
+        (should (string-match-p "unknown command" msg))
+        (should (string-match-p "make install" msg))))))
+
+(ert-deftest safeslop-test-call-json-empty-output ()
+  "Empty stdout (binary that printed nothing) yields a clear message, not a crash."
+  (cl-letf (((symbol-function 'call-process) (lambda (&rest _) 1)))
+    (let* ((envelope (safeslop--call-json '("doctor" "--json")))
+           (msg (alist-get 'message (car (safeslop-contract-errors envelope)))))
+      (should-not (safeslop-contract-ok-p envelope))
+      (should (string-match-p "no output" msg)))))
+
+(ert-deftest safeslop-test-portal-surfaces-error ()
+  "A failed session list leaves the portal empty and reports the error."
+  (let (msgs)
+    (cl-letf (((symbol-function 'safeslop--call-json)
+               (lambda (_) (safeslop--error-envelope "CLIENT_NON_JSON" "stale binary; run make install")))
+              ((symbol-function 'message)
+               (lambda (fmt &rest a) (push (apply #'format fmt a) msgs))))
+      (should (null (safeslop-portal--rows)))
+      (should (cl-some (lambda (m) (string-match-p "stale binary" m)) msgs)))))
