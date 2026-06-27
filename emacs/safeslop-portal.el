@@ -21,6 +21,7 @@
 (require 'tabulated-list)
 (require 'iso8601)
 (require 'safeslop-contract)
+(require 'safeslop-surface)
 
 (defvar safeslop-program)
 (declare-function safeslop--call-json "safeslop" (args))
@@ -76,6 +77,62 @@ A single timer serves the one portal buffer (`safeslop-portal-buffer-name').")
   "Return STATUS as a tabulated-list cell coloured by its status face."
   (propertize status 'face (safeslop-portal--status-face status)))
 
+;; --- Isolation-tier signalling (specs/0052 #5) -------------------------------
+;; The Env column already shows the environment name (host/sandbox/container/vm);
+;; we colour that text by isolation strength so the honest danger ramp the old
+;; GUI drew as chrome is back — colour reinforces the always-present word, it
+;; never replaces it (specs/0031 non-colour danger channel).
+
+(defface safeslop-tier-host '((t :inherit error))
+  "Face for the `host' environment: no isolation boundary (most dangerous)."
+  :group 'safeslop)
+(defface safeslop-tier-sandbox '((t :inherit warning))
+  "Face for the `sandbox' environment: a mistake-guard, not an escape-proof jail."
+  :group 'safeslop)
+(defface safeslop-tier-container '((t :inherit success))
+  "Face for the `container' environment: egress-allowlisted network control."
+  :group 'safeslop)
+(defface safeslop-tier-vm '((t :inherit success :weight bold))
+  "Face for the `vm' environment: adversary-grade, the strongest boundary."
+  :group 'safeslop)
+
+(defconst safeslop-portal--env-tiers
+  ;; Mirrors internal/engine/policy/policy.go EnvTier (tier label + honest note),
+  ;; ordered host < sandbox < container < vm (least -> most isolated).  Keep in sync
+  ;; with EnvTier; doctor's data.tiers carries the authoritative copy at runtime.
+  '(("host"      safeslop-tier-host      "none"               "no isolation boundary — the agent runs as you, with your full account")
+    ("sandbox"   safeslop-tier-sandbox   "mistake-guard"      "Seatbelt confines files + exec: guards agent mistakes + accidental exfil, not a malicious-code escape")
+    ("container" safeslop-tier-container "egress-allowlisted" "container + default-deny per-domain egress allowlist: stops curl|sh + accidental beaconing, not exfil via an allowed domain")
+    ("vm"        safeslop-tier-vm        "adversary-grade"    "disposable hardware-virtualized VM: the strongest boundary, heaviest to run"))
+  "Per-environment (FACE TIER NOTE) used to colour and annotate the Env cell.")
+
+(defun safeslop-portal--env-face (env)
+  "Return the isolation-tier face for environment ENV (defaults to sandbox)."
+  (or (nth 1 (assoc (if (string-empty-p env) "sandbox" env)
+                    safeslop-portal--env-tiers))
+      'default))
+
+(defun safeslop-portal--env-cell (env)
+  "Return ENV as a tier-coloured tabulated-list cell with its honest note as help-echo.
+The text label is always present, so colour is a redundant reinforcement, not the
+sole signal (specs/0031).  An unknown env renders plainly."
+  (let* ((key (if (string-empty-p env) "sandbox" env))
+         (row (assoc key safeslop-portal--env-tiers)))
+    (if row
+        (propertize env
+                    'face (nth 1 row)
+                    'help-echo (format "%s — %s" (nth 2 row) (nth 3 row)))
+      env)))
+
+(defun safeslop-portal--tier-legend ()
+  "Return a one-line isolation-tier ramp legend (host most dangerous -> vm safest)."
+  (concat
+   "tiers: "
+   (mapconcat (lambda (row)
+                (propertize (concat (car row) "=" (nth 2 row)) 'face (nth 1 row)))
+              safeslop-portal--env-tiers "  ")
+   "\n\n"))
+
 (defun safeslop-portal--pid (sess)
   "Return SESS's pid as a display string, or an em dash when it has none."
   (let ((pid (safeslop-portal--field sess 'pid)))
@@ -118,7 +175,7 @@ Pure: SESSIONS is already-fetched data, so the row builder never blocks on I/O."
        (list id
              (vector (safeslop-portal--short-id id)
                      (safeslop-portal--field sess 'agent)
-                     (safeslop-portal--field sess 'environment)
+                     (safeslop-portal--env-cell (safeslop-portal--field sess 'environment))
                      (safeslop-portal--field sess 'network)
                      (safeslop-portal--status-cell (safeslop-portal--field sess 'status))
                      (safeslop-portal--pid sess)
@@ -158,10 +215,12 @@ Pure: SESSIONS is already-fetched data, so the row builder never blocks on I/O."
       (safeslop-portal-refresh))))
 
 (defun safeslop-portal-new ()
-  "Create a new session, then refresh the portal."
+  "Create a new session.
+`safeslop-session-new' is async, so it reveals the new session in the portal
+itself once the create completes (via `safeslop-portal--reveal-session') — a
+refresh here would race the still-running create."
   (interactive)
-  (call-interactively #'safeslop-session-new)
-  (safeslop-portal-refresh))
+  (call-interactively #'safeslop-session-new))
 
 (defconst safeslop-portal--key-hints
   '(("RET" . "open") ("R" . "reattach") ("i" . "status") ("k" . "stop")
@@ -177,15 +236,39 @@ Pure: SESSIONS is already-fetched data, so the row builder never blocks on I/O."
                      safeslop-portal--key-hints "  ")
           "\n\n"))
 
-(defun safeslop-portal--render (&optional keep-point)
+(defun safeslop-portal--header ()
+  "Return the portal header block: surface tab strip, tier legend, shortcut legend."
+  (concat (safeslop-surface--tab-strip 'sessions)
+          (safeslop-portal--tier-legend)
+          (safeslop-portal--legend)))
+
+(defun safeslop-portal--goto-first-row ()
+  "Move point to the first tabulated session row, past the header block."
+  (goto-char (point-min))
+  (while (and (not (tabulated-list-get-id)) (not (eobp)))
+    (forward-line 1)))
+
+(defun safeslop-portal--goto-id (id)
+  "Move point to the row whose session id is ID; return non-nil when found."
+  (goto-char (point-min))
+  (let (found)
+    (while (and (not found) (not (eobp)))
+      (if (equal (tabulated-list-get-id) id)
+          (setq found t)
+        (forward-line 1)))
+    found))
+
+(defun safeslop-portal--render (&optional keep-point after)
   "Asynchronously fetch the session list, then fill the current portal buffer:
-the shortcut legend, then the session table.  Non-blocking: the `session list'
-fetch runs in a subprocess and the redraw happens in its callback, so neither a
-manual `g' nor the auto-refresh timer ever freezes Emacs (the whole point of the
-timer is that it must not block).  Like slopmaxx's console, the legend is plain
-buffer text above the rows (the column titles stay in the window header line).
-With KEEP-POINT non-nil, stay on the same session across the reprint (for
-auto-refresh and `g'); otherwise land on the first row (for a fresh open)."
+the surface tab strip, tier legend, shortcut legend, then the session table.
+Non-blocking: the `session list' fetch runs in a subprocess and the redraw
+happens in its callback, so neither a manual `g' nor the auto-refresh timer ever
+freezes Emacs (the whole point of the timer is that it must not block).  The
+header is plain buffer text above the rows (the column titles stay in the window
+header line).  With KEEP-POINT non-nil, stay on the same session across the
+reprint (for auto-refresh and `g'); otherwise land on the first row (for a fresh
+open).  AFTER, when given, is called with point in the buffer once the redraw is
+done (used to reveal a just-created session)."
   (let ((buf (current-buffer)))
     (safeslop--call-json-async
      '("session" "list" "--output" "json")
@@ -194,18 +277,26 @@ auto-refresh and `g'); otherwise land on the first row (for a fresh open)."
          (with-current-buffer buf
            (setq tabulated-list-entries
                  (safeslop-portal--rows (safeslop-portal--sessions-from envelope)))
-           ;; `tabulated-list-print' erases the buffer (legend included) and reprints;
-           ;; with KEEP-POINT it restores point to the same entry id, so the legend
-           ;; re-insert below (before point) shifts but does not move it off the session.
+           ;; `tabulated-list-print' erases the buffer (header included) and reprints;
+           ;; with KEEP-POINT it restores point to the same entry id, so the header
+           ;; re-insert above (before point) shifts but does not move it off the session.
            (tabulated-list-print keep-point)
            (let ((inhibit-read-only t))
              (save-excursion
                (goto-char (point-min))
-               (insert (safeslop-portal--legend))))
+               (insert (safeslop-portal--header))))
            (unless keep-point
-             ;; Land on the first session row, past the legend + its blank line.
-             (goto-char (point-min))
-             (forward-line 2))))))))
+             (safeslop-portal--goto-first-row))
+           (when after (funcall after))))))))
+
+(defun safeslop-portal--reveal-session (id)
+  "If a live portal exists, refresh it and land point on session ID.
+Called after `safeslop-session-new' creates ID so the new session shows up at
+once — the create is async, so a plain refresh would race it."
+  (let ((buf (get-buffer safeslop-portal-buffer-name)))
+    (when buf
+      (with-current-buffer buf
+        (safeslop-portal--render t (lambda () (safeslop-portal--goto-id id)))))))
 
 (defun safeslop-portal-refresh ()
   "Re-fetch the session list and redraw the portal, keeping point on its session."
@@ -270,6 +361,9 @@ A nil or non-positive interval leaves the portal static (manual `g' only)."
     (define-key map (kbd "L")   #'safeslop-debug-log)
     (define-key map (kbd "?")   #'describe-mode)
     (define-key map (kbd "q")   #'quit-window)
+    ;; Inherit the shared surface switch keys (P/I/F, [/]); the portal's own keys
+    ;; above take precedence, the unbound switch keys fall through to the parent.
+    (set-keymap-parent map safeslop-surface-mode-map)
     map)
   "Keymap for `safeslop-portal-mode'.")
 

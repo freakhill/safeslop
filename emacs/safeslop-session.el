@@ -24,6 +24,7 @@
 (declare-function safeslop--call-json "safeslop" (args))
 (declare-function safeslop--call-json-async "safeslop" (args callback))
 (declare-function safeslop--show-envelope-buffer "safeslop" (name args envelope))
+(declare-function safeslop-portal--reveal-session "safeslop-portal" (id))
 
 (defun safeslop-session--create-args (agent workspace &optional environment network)
   "Return exact argv for creating a session with AGENT in WORKSPACE.
@@ -62,7 +63,23 @@ the security argv tests keep their three-argument form."
      args
      (lambda (envelope)
        (safeslop--show-envelope-buffer "*safeslop session*" args envelope)
+       (let ((id (and (safeslop-contract-ok-p envelope)
+                      (alist-get 'session_id (safeslop-contract-data envelope)))))
+         ;; Reveal the new session in a live portal (the create is async, so a
+         ;; plain portal refresh would race it), and — only when driven
+         ;; interactively (no test CALLBACK) — offer to open it right away so
+         ;; "created" leads straight to an obvious access path (specs/0052 #3).
+         (when id
+           (when (fboundp 'safeslop-portal--reveal-session)
+             (safeslop-portal--reveal-session id))
+           (when (null callback)
+             (safeslop-session--offer-open id))))
        (when callback (funcall callback envelope))))))
+
+(defun safeslop-session--offer-open (id)
+  "Offer to open (attach) the freshly created session ID right now."
+  (when (y-or-n-p (format "Open session %s now? " id))
+    (safeslop-session-attach id)))
 
 (defun safeslop-session--run-args (session-id)
   "Return exact argv for running SESSION-ID."
