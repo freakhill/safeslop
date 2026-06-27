@@ -94,7 +94,7 @@ ROUTES maps exact argv JSON strings to `((stdout . STRING) (stderr . STRING)
   (let ((fixtures (directory-files
                    (expand-file-name "internal/jsoncontract/testdata" (safeslop-test--repo-root))
                    t "\\.golden\\.json\\'")))
-    (should (= (length fixtures) 8))
+    (should (= (length fixtures) 9))
     (dolist (fixture fixtures)
       (let ((envelope (safeslop-contract-parse-file fixture)))
         (should (= (alist-get 'schema_version envelope) safeslop-contract-schema-version))
