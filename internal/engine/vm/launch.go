@@ -74,6 +74,14 @@ func provision(ctx context.Context, agentArgv []string, network string, secretEn
 // tty) bridges to the supervisor's PTY for attach. The coupled path leaves stdio nil and ssh runs
 // on the user's own terminal (specs/0051).
 func Launch(ctx context.Context, spec exec.LaunchSpec, network string, secretEnv []string, stageDir, profile, toolchainKind string) (int, error) {
+	// JIT-stage the VM SSH key from 1Password when SAFESLOP_VM_SSH_KEY_OP is set, so
+	// the vm tier needs no key file on disk. No-op otherwise. The transient key is
+	// wiped on return.
+	cleanupKey, err := stageVMSSHKey(ctx)
+	if err != nil {
+		return 1, err
+	}
+	defer cleanupKey()
 	argv, err := provision(ctx, spec.Argv, network, secretEnv, stageDir, profile, toolchainKind)
 	if err != nil {
 		return 1, err
