@@ -373,7 +373,7 @@ func cmdSession() *cobra.Command {
 }
 
 func cmdSessionCreate() *cobra.Command {
-	var agent, workspace, output string
+	var agent, workspace, output, environment, network string
 	c := &cobra.Command{
 		Use:   "create --agent <pi|claude|claude-code> --workspace <dir> --output json",
 		Short: "Create a safeslop session record",
@@ -392,9 +392,39 @@ func cmdSessionCreate() *cobra.Command {
 			if fi, err := os.Stat(workspace); err != nil || !fi.IsDir() {
 				return emitContractError(jsoncontract.CodeInvalidArgument, "--workspace must name an existing directory", map[string]any{"workspace": workspace})
 			}
-			sess, err := sessionStore().Create(canonicalAgent, workspace, time.Now())
+			if environment != "" {
+				switch environment {
+				case "sandbox", "container", "vm", "host":
+				default:
+					return emitContractError(jsoncontract.CodeInvalidArgument,
+						fmt.Sprintf("--environment %q is not valid; must be one of: sandbox, container, vm, host", environment),
+						map[string]any{"environment": environment})
+				}
+			}
+			if network != "" {
+				switch network {
+				case "deny", "allow":
+				default:
+					return emitContractError(jsoncontract.CodeInvalidArgument,
+						fmt.Sprintf("--network %q is not valid; must be one of: deny, allow", network),
+						map[string]any{"network": network})
+				}
+			}
+			store := sessionStore()
+			sess, err := store.Create(canonicalAgent, workspace, time.Now())
 			if err != nil {
 				return emitContractError(jsoncontract.CodeIOError, "create session", map[string]any{"error": err.Error()})
+			}
+			if environment != "" {
+				sess.Environment = environment
+			}
+			if network != "" {
+				sess.Network = network
+			}
+			if environment != "" || network != "" {
+				if err := store.Save(sess); err != nil {
+					return emitContractError(jsoncontract.CodeIOError, "save session", map[string]any{"error": err.Error()})
+				}
 			}
 			emitContract(jsoncontract.OK(sessionData(sess)))
 			return nil
@@ -403,6 +433,8 @@ func cmdSessionCreate() *cobra.Command {
 	c.Flags().StringVar(&agent, "agent", "", "agent to run: pi, claude, or claude-code")
 	c.Flags().StringVar(&workspace, "workspace", "", "workspace directory")
 	c.Flags().StringVar(&output, "output", "", "output format: json")
+	c.Flags().StringVar(&environment, "environment", "", "isolation environment: sandbox, container, vm, or host (overrides profile default)")
+	c.Flags().StringVar(&network, "network", "", "network policy: deny or allow (overrides profile default)")
 	return c
 }
 
