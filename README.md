@@ -58,6 +58,7 @@ safeslop doctor
 ```text
 safeslop validate [safeslop.cue]    check against the embedded schema
 safeslop list [safeslop.cue]        list profiles and resolved tiers
+safeslop profile list|presets --output json   profiles + preset library as the JSON contract
 safeslop trust [safeslop.cue]       approve this policy's exact bytes
 safeslop run <profile> [--dry-run]  launch a trusted profile
 safeslop session create --agent <pi|claude|claude-code> --workspace <dir> --output json

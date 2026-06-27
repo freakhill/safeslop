@@ -4,7 +4,7 @@
 
 ### 1. Repository & Branch State
 * **Branch**: `main` is clean.
-* **Code Health**: `make check` and `make build` pass cleanly. The full suite — Go engine/CLI tests, the pivot denylist, `gofmt`/`go vet`, and the **35 Emacs ERT tests** — is green. Go and Emacs validate against the same **9 shared golden JSON fixtures** (`internal/jsoncontract/testdata/*.golden.json`) to prevent cross-language drift.
+* **Code Health**: `make check` and `make build` pass cleanly. The full suite — Go engine/CLI tests, the pivot denylist, `gofmt`/`go vet`, and the **60 Emacs ERT tests** — is green. Go and Emacs validate against the same **9 shared golden JSON fixtures** (`internal/jsoncontract/testdata/*.golden.json`) to prevent cross-language drift.
 
 ### 2. The specs/0049 Pivot is Complete
 The repository has successfully pivoted away from the Swift macOS cockpit and OpenCode towards a focused Emacs + Go architecture:
@@ -13,13 +13,15 @@ The repository has successfully pivoted away from the Swift macOS cockpit and Op
 * **Cross-Language Contract**: A stable, version-1 JSON contract (`internal/jsoncontract`) now brokers all communication between the Go CLI and Emacs. Both Go and Emacs test suites validate against the exact same shared golden JSON fixtures to prevent drift.
 
 ### 3. Emacs Frontend Capabilities
-The `safeslop` Emacs package (`~/.local/share/safeslop/emacs`) is the primary operator surface:
-* **Portal** (`M-x safeslop`, alias `safeslop-portal`, `C-c s P`): a `tabulated-list` session dashboard — id, agent, environment, network, colour-coded status, PID, age, workspace — with in-place actions (open/attach, reattach, status, stop, new, refresh). It opens full-window with a slopmaxx-style in-buffer shortcut legend and re-fetches the session list in place.
+The `safeslop` Emacs package (`~/.local/share/safeslop/emacs`) is the primary operator surface. It is three sibling dashboards — **Sessions / Install / Profiles** — sharing one navigation model: `P`/`I`/`F` jump between surfaces, `[`/`]` cycle, and each renders a textual tab strip (active surface bold, the others clickable) so the current view is legible without colour.
+* **Portal** (Sessions; `M-x safeslop`, alias `safeslop-portal`, `C-c s P`): a `tabulated-list` session dashboard — id, agent, environment, network, colour-coded status, PID, age, workspace — with in-place actions (open/attach, reattach, status, stop, new, refresh). The **Env** cell is now coloured by isolation tier (host red … vm green, mirroring `policy.EnvTier`) with the honest one-line caveat on hover and a tier-ramp legend; colour only reinforces the always-present label. Creating a session reveals it in the portal and offers to open it right away. Opens full-window, auto-refreshing in place.
+* **Install** (`C-c s I`): a `tabulated-list` over `install status --output json` (toolchains + runtimes, each Tool/Kind/Version/State) with `p` plan, `x` apply (confirmed), `D` dry-run, and `b` rollback the tool at point — the install/uninstall engine, finally surfaced. Async, so a slow `install apply` download never blocks Emacs.
+* **Profiles** (`C-c s F`): a `tabulated-list` over `profile list --output json` (Profile/Agent/Env/Net, Env tier-coloured) — `RET`/`e` edits the safeslop.cue directly with quiet validate-on-save, `n` scaffolds from a preset (`profile presets`), `v` validates, `d` is a guided manual delete. Authoring stays CUE-canonical; no machine rewrite of the guard.
 * **Debug buffer** (`C-c s L`): `*safeslop debug*`, a redacted, timestamped client diagnostics log — one line per CLI call and its result, allowlisted non-secret fields only (safeslop never passes secret values as argv).
 * **Daemonless command path**: commands run as direct subprocesses. The legacy daemon-autostart machinery has been removed, so there is no daemon round-trip, no stale-socket guesswork, and no misleading "no daemon binary" message.
 * **Core Commands**: `safeslop-doctor`, `safeslop-policy-check-file`, and the full session lifecycle (`new`, `attach`, `status`, `list`, `stop`, `reattach`), each rendering the envelope's full `data` payload (not just `ok:`). Non-JSON output from a stale binary degrades to a clear `CLIENT_NON_JSON` message instead of crashing.
 * **Session UX**: PTY attachment runs through exactly-routed argv into the built-in `term-mode`; falls back to a read-only `compilation-mode` JSONL monitor when no PTY is available; reattach rejoins a detached supervisor over its per-session socket.
-* **Doom/Evil Support**: optional `safeslop-doom.el` binds the command map under `C-c s` and Doom's leader at `SPC o s` (a deliberate override of the `:os macos` prefix), with Evil normal-state bindings for the portal and output buffers.
+* **Doom/Evil Support**: optional `safeslop-doom.el` binds the command map under `C-c s` and Doom's leader at `SPC o s` (a deliberate override of the `:os macos` prefix), with Evil normal-state bindings for the portal, install, and profiles dashboards (the parent keymap isn't consulted in Evil state, so the switch keys are bound explicitly) and the output buffers.
 * **Hermetic Testing**: ERT runs offline against a fake CLI, proving contract parsing and shell-injection guardrails without executing the real binary.
 
 ### 4. Session Lifecycle Engine

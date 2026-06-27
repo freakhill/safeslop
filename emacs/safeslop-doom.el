@@ -22,6 +22,8 @@
 ;;;###autoload (autoload 'safeslop-switch-to-session-buffer "safeslop" nil t)
 ;;;###autoload (autoload 'safeslop-show-last-error "safeslop" nil t)
 ;;;###autoload (autoload 'safeslop-help "safeslop" nil t)
+;;;###autoload (autoload 'safeslop-install "safeslop" nil t)
+;;;###autoload (autoload 'safeslop-profiles "safeslop" nil t)
 
 (require 'safeslop)
 
@@ -34,7 +36,21 @@
 (declare-function safeslop-portal-new "safeslop-portal" ())
 (declare-function safeslop-portal-refresh "safeslop-portal" ())
 (declare-function safeslop-portal-toggle-auto-refresh "safeslop-portal" ())
+(declare-function safeslop-surface-next "safeslop-surface" ())
+(declare-function safeslop-surface-prev "safeslop-surface" ())
+(declare-function safeslop-install-refresh "safeslop-install" ())
+(declare-function safeslop-install-plan "safeslop-install" ())
+(declare-function safeslop-install-apply "safeslop-install" ())
+(declare-function safeslop-install-dry-run "safeslop-install" ())
+(declare-function safeslop-install-rollback "safeslop-install" ())
+(declare-function safeslop-profiles-edit "safeslop-profiles" ())
+(declare-function safeslop-profiles-new "safeslop-profiles" ())
+(declare-function safeslop-profiles-validate "safeslop-profiles" ())
+(declare-function safeslop-profiles-delete "safeslop-profiles" ())
+(declare-function safeslop-profiles-refresh "safeslop-profiles" ())
 (defvar safeslop-portal-mode-map)
+(defvar safeslop-install-mode-map)
+(defvar safeslop-profiles-mode-map)
 
 (with-eval-after-load 'evil
   ;; `safeslop-output-mode' buffers are read-only command output buffers.  In
@@ -61,7 +77,47 @@
     (kbd "d")   #'safeslop-doctor
     (kbd "L")   #'safeslop-debug-log
     (kbd "?")   #'describe-mode
-    (kbd "q")   #'quit-window))
+    (kbd "q")   #'quit-window
+    ;; Shared surface switch keys (Evil does not consult the keymap parent).
+    (kbd "P")   #'safeslop-portal
+    (kbd "I")   #'safeslop-install
+    (kbd "F")   #'safeslop-profiles
+    (kbd "[")   #'safeslop-surface-prev
+    (kbd "]")   #'safeslop-surface-next)
+  ;; The Install + Profiles surfaces are tabulated-list dashboards too; drive
+  ;; their single-key actions and the shared switch keys through Evil normal state.
+  (evil-set-initial-state 'safeslop-install-mode 'normal)
+  (evil-define-key 'normal safeslop-install-mode-map
+    (kbd "g") #'safeslop-install-refresh
+    (kbd "p") #'safeslop-install-plan
+    (kbd "x") #'safeslop-install-apply
+    (kbd "D") #'safeslop-install-dry-run
+    (kbd "b") #'safeslop-install-rollback
+    (kbd "d") #'safeslop-doctor
+    (kbd "L") #'safeslop-debug-log
+    (kbd "?") #'describe-mode
+    (kbd "q") #'quit-window
+    (kbd "P") #'safeslop-portal
+    (kbd "I") #'safeslop-install
+    (kbd "F") #'safeslop-profiles
+    (kbd "[") #'safeslop-surface-prev
+    (kbd "]") #'safeslop-surface-next)
+  (evil-set-initial-state 'safeslop-profiles-mode 'normal)
+  (evil-define-key 'normal safeslop-profiles-mode-map
+    (kbd "RET") #'safeslop-profiles-edit
+    (kbd "e")   #'safeslop-profiles-edit
+    (kbd "n")   #'safeslop-profiles-new
+    (kbd "v")   #'safeslop-profiles-validate
+    (kbd "d")   #'safeslop-profiles-delete
+    (kbd "g")   #'safeslop-profiles-refresh
+    (kbd "L")   #'safeslop-debug-log
+    (kbd "?")   #'describe-mode
+    (kbd "q")   #'quit-window
+    (kbd "P")   #'safeslop-portal
+    (kbd "I")   #'safeslop-install
+    (kbd "F")   #'safeslop-profiles
+    (kbd "[")   #'safeslop-surface-prev
+    (kbd "]")   #'safeslop-surface-next))
 
 ;;;###autoload
 (defun safeslop-doom-bind-leader ()
