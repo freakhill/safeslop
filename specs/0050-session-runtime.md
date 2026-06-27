@@ -133,15 +133,31 @@ unambiguous.
 
 ### D4 — One PTY contract for all boundaries
 
-`session run`'s job is to hand the agent **exactly one** correctly-sized,
-raw-mode, signal-forwarding controlling PTY, regardless of boundary, and to
-propagate the agent's exit code verbatim. When `session run`'s own stdout is
-already a terminal (the Emacs `make-term` case), host/sandbox keep inheriting it
-directly and we do **not** add a second PTY. The container path's inner
-`RunInPTY` is only used when the wrapper is *not* already on a terminal; the
-nesting case (terminal-in, container) reuses the inherited terminal instead of
-allocating a second one. (Implementation detail proven by test, not by
-inspection — see PR3.)
+`session run`'s job is to hand the agent **exactly one** controlling PTY *from
+the agent's point of view*, regardless of boundary, and to propagate the agent's
+exit code verbatim.
+
+Corrected during PR3 against the live code — the earlier "don't allocate a
+second host-side PTY for container" clause was a misconception:
+
+- **host / sandbox** — `exec.RunInTerminal`: the agent inherits the wrapper's
+  stdio, which under Emacs `make-term` *is* a PTY. One hop, the agent's
+  controlling terminal. (`internal/engine/sandbox/sandbox.go:277` →
+  `RunInTerminal`.)
+- **container** — `exec.RunInPTY` allocates a host-side PTY for `docker compose
+  run` and proxies. This intermediate PTY is **intentional**: it guarantees the
+  in-container agent a TTY *uniformly*, including when the wrapper itself has no
+  TTY (a script, the JSONL monitor). Removing it to "avoid nesting" would
+  regress the no-TTY case, so it stays. The agent still sees exactly one
+  controlling terminal — the container's.
+- **vm** — `ssh -t`: a remote PTY in the guest, sized from the wrapper's
+  terminal.
+
+So the contract is already satisfied for the interactive (`make-term`) path on
+every boundary; PR3 locks the **exit-code** half with a hermetic table test and
+records this correction. The remaining PTY work — what to do when *no* usable
+TTY exists for a boundary that needs one — is the `PTY_UNAVAILABLE` detection in
+PR4, not a change here.
 
 ### D5 — Reconcile the contract with reality
 
@@ -249,32 +265,40 @@ cancelled vm run leaves no tart clone — covered by the existing `defer Destroy
 / `--rm` and the integration suite, not new hermetic tests. Surfacing the
 boundary PID via `onStart` is no longer needed and is dropped.
 
-### PR3 — Uniform PTY contract and exit-code fidelity
+### PR3 — PTY contract reconciled + exit-code fidelity locked (implemented)
 
-Purpose:
+Investigating against the live code showed the D4 PTY contract is **already
+satisfied** for the interactive (`make-term`) path on every boundary (see D4,
+corrected): host/sandbox inherit the wrapper's TTY, container's intermediate
+`RunInPTY` PTY is the intentional uniform-TTY bridge, vm uses `ssh -t`. The
+spec's original "don't allocate a redundant second PTY" clause was a
+misconception — the container PTY must stay. The PTY paths are also already
+covered by the `exec` tests (`TestRunInPTYInteractive` proves PTY I/O + raw mode
++ SIGWINCH forwarding; `TestRunInTerminal*` prove inherited stdio).
 
-- Define and enforce the D4 contract: when the wrapper's stdout is a terminal,
-  host/sandbox inherit it; container does not allocate a redundant second PTY;
-  vm `ssh -t` continues to size from the inherited terminal. When the wrapper's
-  stdout is **not** a terminal, allocate a PTY where the boundary needs one.
-- Guarantee verbatim exit-code propagation from agent → wrapper → `Finish`
-  across all four boundaries (already mostly true; lock it with tests).
-- Forward window-resize (SIGWINCH) end to end with a single PTY hop in the
-  common case.
+So PR3's verifiable, hermetic delivery is the **exit-code** half of the
+contract, plus recording the D4 correction:
+
+- Lock verbatim exit-code propagation agent → boundary launcher → `runProfileCtx`
+  return, for codes 0 / 1 / 42, on the boundaries that launch hermetically
+  (host + sandbox via a real stub agent). Confirms `sandbox.Launch`
+  (`sandbox-exec` wrapper) and the host path both preserve the inner code.
+- No production code change: exit-code propagation (`exec.exitCode`) and the PTY
+  contract were already correct.
+
+Container/VM exit-code propagation rides `exec.RunInPTY`/`RunInTerminal` (already
+tested) plus `docker compose run` / `ssh`, which forward the inner command's
+code — runtime-dependent, not unit-tested here.
 
 Files:
 
-- `internal/engine/exec/exec.go`
-- `internal/engine/exec/exec_test.go`
-- `internal/cli/cli.go`
-- `internal/engine/sandbox/sandbox_test.go`
+- `internal/cli/cli_runprofile_test.go` (the exit-code table test)
+- `specs/0050-session-runtime.md` (D4 correction)
 
 Required tests:
 
-- `TestRunInheritsTerminalNoDoublePTY` (stdout is a PTY → no second PTY allocated; assert via the inner runner seam)
-- `TestRunAllocatesPTYWhenNotOnTerminal`
-- `TestExitCodePropagatesAcrossBoundaries` (table: host/sandbox/container/vm via fakes, codes 0/1/42)
-- `TestResizeForwardsToAgent`
+- `TestRunProfileCtxExitCodeFidelity` (table: host/sandbox × codes 0/1/42, real
+  stub agent; sandbox row skipped when `sandbox-exec` is unavailable)
 
 ### PR4 — `PTY_UNAVAILABLE` detection and JSONL fallback wiring
 
