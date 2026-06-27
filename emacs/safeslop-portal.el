@@ -35,6 +35,20 @@
 (defconst safeslop-portal-buffer-name "*safeslop portal*"
   "Buffer name for the safeslop session dashboard.")
 
+(defcustom safeslop-portal-refresh-interval 5
+  "Seconds between automatic portal refreshes, or nil to disable.
+While the portal buffer is displayed in a window, it re-fetches the session list
+on this interval so status, PID, and age stay live; point is kept on the same
+session across refreshes.  Press \\`g' to refresh immediately, or \\`a' to toggle
+auto-refresh.  Set to nil for a static, manual-only portal."
+  :type '(choice (const :tag "Disabled (manual `g' only)" nil)
+                 (number :tag "Seconds"))
+  :group 'safeslop)
+
+(defvar safeslop-portal--timer nil
+  "Repeating timer driving portal auto-refresh, or nil when inactive.
+A single timer serves the one portal buffer (`safeslop-portal-buffer-name').")
+
 (defun safeslop-portal--field (sess key)
   "Return SESS's KEY as a display string (empty when absent)."
   (let ((v (alist-get key sess)))
@@ -150,8 +164,8 @@ area so the empty table is not silently mysterious."
 
 (defconst safeslop-portal--key-hints
   '(("RET" . "open") ("R" . "reattach") ("i" . "status") ("k" . "stop")
-    ("n" . "new") ("g" . "refresh") ("d" . "doctor") ("L" . "debug")
-    ("?" . "help") ("q" . "quit"))
+    ("n" . "new") ("g" . "refresh") ("a" . "auto") ("d" . "doctor")
+    ("L" . "debug") ("?" . "help") ("q" . "quit"))
   "Key/action pairs shown in the portal's in-buffer shortcut legend.")
 
 (defun safeslop-portal--legend ()
@@ -162,27 +176,74 @@ area so the empty table is not silently mysterious."
                      safeslop-portal--key-hints "  ")
           "\n\n"))
 
-(defun safeslop-portal--render ()
+(defun safeslop-portal--render (&optional keep-point)
   "Fill the current portal buffer: the shortcut legend, then the session table.
 Like slopmaxx's console, the legend is plain buffer text above the rows (the
-column titles stay in the window header line)."
+column titles stay in the window header line).  With KEEP-POINT non-nil, stay on
+the same session across the reprint (for auto-refresh and `g'); otherwise land on
+the first row (for a fresh open)."
   (setq tabulated-list-entries (safeslop-portal--rows))
-  (tabulated-list-print)
+  ;; `tabulated-list-print' erases the buffer (legend included) and reprints; with
+  ;; KEEP-POINT it restores point to the same entry id, so the legend re-insert
+  ;; below (before point) shifts but does not move it off the session.
+  (tabulated-list-print keep-point)
   (let ((inhibit-read-only t))
     (save-excursion
       (goto-char (point-min))
       (insert (safeslop-portal--legend))))
-  ;; Land on the first session row, past the legend + its blank line.
-  (goto-char (point-min))
-  (forward-line 2))
+  (unless keep-point
+    ;; Land on the first session row, past the legend + its blank line.
+    (goto-char (point-min))
+    (forward-line 2)))
 
 (defun safeslop-portal-refresh ()
-  "Re-fetch the session list and redraw the portal."
+  "Re-fetch the session list and redraw the portal, keeping point on its session."
   (interactive)
   (let ((buf (get-buffer safeslop-portal-buffer-name)))
     (when buf
       (with-current-buffer buf
-        (safeslop-portal--render)))))
+        (safeslop-portal--render t)))))
+
+(defun safeslop-portal--cancel-timer ()
+  "Cancel the portal auto-refresh timer if one is running."
+  (when safeslop-portal--timer
+    (cancel-timer safeslop-portal--timer)
+    (setq safeslop-portal--timer nil)))
+
+(defun safeslop-portal--auto-refresh ()
+  "Timer callback: refresh the portal when it is live, shown, and not prompting.
+Self-cancels once the portal buffer is gone; skips a tick while any minibuffer is
+active so it never fights a `k'-stop confirmation or other prompt."
+  (let ((buf (get-buffer safeslop-portal-buffer-name)))
+    (cond
+     ((not (buffer-live-p buf)) (safeslop-portal--cancel-timer))
+     ((and (get-buffer-window buf 'visible)
+           (not (active-minibuffer-window)))
+      (safeslop-portal-refresh)))))
+
+(defun safeslop-portal--start-timer ()
+  "(Re)start the auto-refresh timer per `safeslop-portal-refresh-interval'.
+A nil or non-positive interval leaves the portal static (manual `g' only)."
+  (safeslop-portal--cancel-timer)
+  (when (and (numberp safeslop-portal-refresh-interval)
+             (> safeslop-portal-refresh-interval 0))
+    (setq safeslop-portal--timer
+          (run-at-time safeslop-portal-refresh-interval
+                       safeslop-portal-refresh-interval
+                       #'safeslop-portal--auto-refresh))))
+
+(defun safeslop-portal-toggle-auto-refresh ()
+  "Toggle the portal's automatic refresh on or off for this Emacs session."
+  (interactive)
+  (if safeslop-portal--timer
+      (progn (safeslop-portal--cancel-timer)
+             (message "safeslop portal: auto-refresh off (g to refresh)"))
+    (if (and (numberp safeslop-portal-refresh-interval)
+             (> safeslop-portal-refresh-interval 0))
+        (progn (safeslop-portal--start-timer)
+               (message "safeslop portal: auto-refresh every %ss"
+                        safeslop-portal-refresh-interval))
+      (user-error "Set `safeslop-portal-refresh-interval' to a positive number first"))))
 
 (defvar safeslop-portal-mode-map
   (let ((map (make-sparse-keymap)))
@@ -193,6 +254,7 @@ column titles stay in the window header line)."
     (define-key map (kbd "k")   #'safeslop-portal-stop)
     (define-key map (kbd "n")   #'safeslop-portal-new)
     (define-key map (kbd "g")   #'safeslop-portal-refresh)
+    (define-key map (kbd "a")   #'safeslop-portal-toggle-auto-refresh)
     (define-key map (kbd "d")   #'safeslop-doctor)
     (define-key map (kbd "L")   #'safeslop-debug-log)
     (define-key map (kbd "?")   #'describe-mode)
@@ -215,13 +277,18 @@ column titles stay in the window header line)."
          ("Age" 6 nil)
          ("Workspace" 32 nil)])
   (setq tabulated-list-padding 1)
-  (tabulated-list-init-header))
+  (tabulated-list-init-header)
+  ;; Stop the shared auto-refresh timer when the dashboard goes away.
+  (add-hook 'kill-buffer-hook #'safeslop-portal--cancel-timer nil t))
 
 ;;;###autoload
 (defun safeslop-portal ()
   "Open the safeslop session portal: a dashboard of sessions you can act on.
 Keys: RET/o open (run), R reattach, i status, k stop, n new, g refresh,
-d doctor, L debug log, q quit."
+a toggle auto-refresh, d doctor, L debug log, q quit.
+
+While displayed, the portal auto-refreshes every
+`safeslop-portal-refresh-interval' seconds (nil disables)."
   (interactive)
   (let ((buf (get-buffer-create safeslop-portal-buffer-name)))
     (with-current-buffer buf
@@ -232,6 +299,8 @@ d doctor, L debug log, q quit."
     ;; transient popup.  Plain `pop-to-buffer' would split into a half window on
     ;; first open (the fix slopmaxx's console uses).
     (pop-to-buffer-same-window buf)
+    ;; Start (or restart) the shared auto-refresh timer for the live dashboard.
+    (safeslop-portal--start-timer)
     buf))
 
 ;;;###autoload

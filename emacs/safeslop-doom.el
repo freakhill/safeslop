@@ -33,6 +33,7 @@
 (declare-function safeslop-portal-stop "safeslop-portal" ())
 (declare-function safeslop-portal-new "safeslop-portal" ())
 (declare-function safeslop-portal-refresh "safeslop-portal" ())
+(declare-function safeslop-portal-toggle-auto-refresh "safeslop-portal" ())
 (defvar safeslop-portal-mode-map)
 
 (with-eval-after-load 'evil
@@ -56,6 +57,7 @@
     (kbd "k")   #'safeslop-portal-stop
     (kbd "n")   #'safeslop-portal-new
     (kbd "g")   #'safeslop-portal-refresh
+    (kbd "a")   #'safeslop-portal-toggle-auto-refresh
     (kbd "d")   #'safeslop-doctor
     (kbd "L")   #'safeslop-debug-log
     (kbd "?")   #'describe-mode

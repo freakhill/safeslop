@@ -69,7 +69,39 @@
   (should (eq (lookup-key safeslop-portal-mode-map (kbd "RET")) #'safeslop-portal-open))
   (should (eq (lookup-key safeslop-portal-mode-map (kbd "k")) #'safeslop-portal-stop))
   (should (eq (lookup-key safeslop-portal-mode-map (kbd "g")) #'safeslop-portal-refresh))
+  (should (eq (lookup-key safeslop-portal-mode-map (kbd "a")) #'safeslop-portal-toggle-auto-refresh))
   (should (eq (lookup-key safeslop-portal-mode-map (kbd "L")) #'safeslop-debug-log)))
+
+(ert-deftest safeslop-test-portal-legend-lists-auto ()
+  "The in-buffer legend advertises the auto-refresh toggle."
+  (should (string-match-p "auto" (safeslop-portal--legend))))
+
+(ert-deftest safeslop-test-portal-timer-start-and-cancel ()
+  "A positive interval starts a repeating timer; cancel tears it down."
+  (let ((safeslop-portal-refresh-interval 5)
+        (safeslop-portal--timer nil))
+    (unwind-protect
+        (progn
+          (safeslop-portal--start-timer)
+          (should (timerp safeslop-portal--timer)))
+      (safeslop-portal--cancel-timer))
+    (should-not safeslop-portal--timer)))
+
+(ert-deftest safeslop-test-portal-timer-nil-interval-stays-static ()
+  "A nil interval leaves the portal static: no timer is created."
+  (let ((safeslop-portal-refresh-interval nil)
+        (safeslop-portal--timer nil))
+    (safeslop-portal--start-timer)
+    (should-not safeslop-portal--timer)))
+
+(ert-deftest safeslop-test-portal-auto-refresh-self-cancels-without-buffer ()
+  "The timer callback cancels itself once the portal buffer is gone."
+  (when (get-buffer safeslop-portal-buffer-name)
+    (kill-buffer safeslop-portal-buffer-name))
+  (let ((safeslop-portal--timer (run-at-time 100 100 #'ignore)))
+    (unwind-protect (safeslop-portal--auto-refresh)
+      (safeslop-portal--cancel-timer))
+    (should-not safeslop-portal--timer)))
 
 (ert-deftest safeslop-test-portal-rows-from-sessions ()
   "`safeslop-portal--rows' builds id + columns from a parsed session list."
