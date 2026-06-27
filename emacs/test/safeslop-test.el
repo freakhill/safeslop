@@ -198,3 +198,21 @@
                (lambda (fmt &rest a) (push (apply #'format fmt a) msgs))))
       (should (null (safeslop-portal--rows)))
       (should (cl-some (lambda (m) (string-match-p "stale binary" m)) msgs)))))
+
+;;; Portal header-line shortcuts + help -------------------------------------
+
+(ert-deftest safeslop-test-portal-header-line-shows-shortcuts ()
+  "The portal shows its key shortcuts in the window header line."
+  (with-temp-buffer
+    (safeslop-portal-mode)
+    (should (stringp header-line-format))
+    (let ((hl (substring-no-properties header-line-format)))
+      (should (string-match-p "open" hl))
+      (should (string-match-p "stop" hl))
+      (should (string-match-p "refresh" hl))
+      (should (string-match-p "quit" hl)))
+    ;; Column header moved into the buffer, freeing the header line.
+    (should-not tabulated-list-use-header-line)))
+
+(ert-deftest safeslop-test-portal-has-help-key ()
+  (should (eq (lookup-key safeslop-portal-mode-map (kbd "?")) #'describe-mode)))

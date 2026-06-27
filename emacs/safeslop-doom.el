@@ -59,6 +59,7 @@
     (kbd "g")   #'safeslop-portal-refresh
     (kbd "d")   #'safeslop-doctor
     (kbd "L")   #'safeslop-debug-log
+    (kbd "?")   #'describe-mode
     (kbd "q")   #'quit-window))
 
 ;;;###autoload
