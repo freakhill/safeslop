@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,9 +20,16 @@ import (
 // shell script (the same SHELL seam the runProfile tests use), so Supervise runs
 // it hermetically with no real agent and no network.
 func newSupervisedStubSession(t *testing.T, script string) (engsession.Store, string, string) {
+	return newSupervisedStubSessionIn(t, script, shortStateDir(t))
+}
+
+// newSupervisedStubSessionIn is newSupervisedStubSession with an explicit state
+// dir, so a test can force the sun_path-overflow (relocation) branch with a long
+// one.
+func newSupervisedStubSessionIn(t *testing.T, script, stateDir string) (engsession.Store, string, string) {
 	t.Helper()
 	ws := t.TempDir()
-	t.Setenv("SAFESLOP_STATE_DIR", shortStateDir(t))
+	t.Setenv("SAFESLOP_STATE_DIR", stateDir)
 	stub := filepath.Join(ws, "agent")
 	if err := os.WriteFile(stub, []byte(script), 0o755); err != nil {
 		t.Fatalf("write stub: %v", err)
@@ -43,6 +51,9 @@ func newSupervisedStubSession(t *testing.T, script string) (engsession.Store, st
 // socket lives at <state>/sessions/<id>.sock, and a unix socket path must fit in
 // sun_path (104 bytes on macOS); t.TempDir() under /var/folders/... is already
 // too long once the 43-char "sessions/sess-<24hex>.sock" suffix is appended.
+// Store.SocketPath now relocates such overflowing paths, so this is no longer
+// required for correctness; tests use it to keep the socket at its natural
+// in-state-dir path (the common, default-state-dir branch).
 func shortStateDir(t *testing.T) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("/tmp", "ss")
@@ -50,6 +61,17 @@ func shortStateDir(t *testing.T) string {
 		t.Fatalf("short state dir: %v", err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
+// longStateDir returns a state dir long enough that <state>/sessions/<id>.sock
+// overflows sun_path, forcing Store.SocketPath's relocation branch.
+func longStateDir(t *testing.T) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), strings.Repeat("x", 90))
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("long state dir: %v", err)
+	}
 	return dir
 }
 
@@ -88,7 +110,7 @@ func TestSuperviseRunsAgentAndServesSocket(t *testing.T) {
 		done <- sret{c, e}
 	}()
 
-	conn := dialSocketForTest(t, filepath.Join(store.Dir, id+".sock"))
+	conn := dialSocketForTest(t, store.SocketPath(id))
 	defer conn.Close()
 
 	if err := wire.Write(conn, wire.DataFrame([]byte("go\n"))); err != nil {
@@ -136,7 +158,7 @@ exited:
 // removed, and the session is Finished with the agent's real code.
 func TestSuperviseExitRunsTeardownAndRemovesSocket(t *testing.T) {
 	store, id, ws := newSupervisedStubSession(t, "#!/bin/sh\nexit 42\n")
-	sockPath := filepath.Join(store.Dir, id+".sock")
+	sockPath := store.SocketPath(id)
 	stageDir := filepath.Join(ws, ".safeslop", "runtime", "session-"+id)
 
 	code, err := Supervise(context.Background(), store, id, time.Now)
@@ -220,6 +242,45 @@ func TestSuperviseTeesOutputToJSONL(t *testing.T) {
 	}
 	if !jsonlContains(data, "LOGGED") {
 		t.Fatalf("jsonl did not capture agent output:\n%s", data)
+	}
+}
+
+// TestSuperviseAndAttachUnderOverflowingStateDir proves the sun_path guard end to
+// end. With a $SAFESLOP_STATE_DIR long enough that <Dir>/<id>.sock would overflow
+// sun_path — net.Listen("unix", …) on the natural path fails with "invalid
+// argument" — the supervisor still binds (SocketPath relocates the socket to a
+// short runtime dir) and a client attaches, drives stdin, and gets the agent's
+// output and exit code (specs/0051 sun_path hardening).
+func TestSuperviseAndAttachUnderOverflowingStateDir(t *testing.T) {
+	store, id, _ := newSupervisedStubSessionIn(t, "#!/bin/sh\nread x\nprintf 'MARKER\\n'\nexit 42\n", longStateDir(t))
+
+	natural := filepath.Join(store.Dir, id+".sock")
+	if len(natural) <= 103 {
+		t.Fatalf("test misconfigured: natural socket path len = %d, want > 103 to exercise relocation", len(natural))
+	}
+	sock := store.SocketPath(id)
+	if len(sock) > 103 || strings.HasPrefix(sock, store.Dir) {
+		t.Fatalf("SocketPath did not relocate the overflowing path: %q (len %d, under dir %q)", sock, len(sock), store.Dir)
+	}
+	t.Cleanup(func() { _ = os.Remove(sock) }) // teardown removes it; belt-and-suspenders since it lives outside t.TempDir
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _, _ = Supervise(ctx, store, id, time.Now) }()
+
+	if !waitForFile(sock, 5*time.Second) {
+		t.Fatalf("supervisor never bound the relocated socket %q", sock)
+	}
+	var out bytes.Buffer
+	code, err := attachSession(store, id, strings.NewReader("go\n"), &out, nil)
+	if err != nil {
+		t.Fatalf("attachSession: %v", err)
+	}
+	if code != 42 {
+		t.Fatalf("exit code = %d, want 42 (from the X frame)", code)
+	}
+	if !strings.Contains(out.String(), "MARKER") {
+		t.Fatalf("attach did not bridge the agent's output: %q", out.String())
 	}
 }
 

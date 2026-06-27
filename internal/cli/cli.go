@@ -598,7 +598,7 @@ func runDetach(store engsession.Store, id string) error {
 	if err != nil {
 		return emitContractError(jsoncontract.CodeIOError, "launch session supervisor", map[string]any{"error": err.Error()})
 	}
-	sockPath := filepath.Join(store.Dir, id+".sock")
+	sockPath := store.SocketPath(id)
 	if !waitForFile(sockPath, detachReadyTimeout) {
 		_ = sessionKillProcess(pid) // best-effort; the supervisor never became ready
 		return emitContractError(jsoncontract.CodeIOError, "session supervisor did not become ready", map[string]any{"session_id": id})
@@ -695,7 +695,7 @@ var errSupervisorUnreachable = errors.New("no live supervisor socket to attach t
 // os.Exit-ing) keeps it drivable to completion in tests. A failed dial is wrapped
 // in errSupervisorUnreachable so the caller can report SESSION_NOT_RUNNING.
 func attachSession(store engsession.Store, id string, in io.Reader, out io.Writer, resize <-chan [2]uint16) (int, error) {
-	conn, err := net.Dial("unix", filepath.Join(store.Dir, id+".sock"))
+	conn, err := net.Dial("unix", store.SocketPath(id))
 	if err != nil {
 		return 1, fmt.Errorf("%w: %v", errSupervisorUnreachable, err)
 	}
@@ -807,7 +807,7 @@ var sessionSocket = func(sess engsession.Session) (string, bool) {
 	if sess.Status != engsession.StatusRunning {
 		return "", false
 	}
-	path := filepath.Join(sessionStore().Dir, sess.ID+".sock")
+	path := sessionStore().SocketPath(sess.ID)
 	if _, err := os.Stat(path); err != nil {
 		return "", false
 	}

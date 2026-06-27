@@ -387,3 +387,17 @@ Where the build diverged from the sketch above, recorded here per the 0050
 - **`data.session.socket` (PR5, D5).** `sessionData` advertises `socket` only when
   the session is running and the file exists, derived from the state root (never
   persisted). Pinned byte-exact by `ok-session-detached.golden.json`.
+- **`sun_path` overflow hardening (follow-up).** A unix socket path must fit
+  `sockaddr_un.sun_path` (104 bytes on macOS, incl. NUL); `net.Listen("unix", …)`
+  on a longer path fails with `bind: invalid argument`. The default state root
+  keeps `<root>/sessions/<id>.sock` at ~92 bytes, but a long `$SAFESLOP_STATE_DIR`
+  (or a deep test temp dir) overflows. `Store.SocketPath(id)` is now the single
+  canonical derivation used by the supervisor (bind), the attach client (dial), the
+  status surfacing, and the reconcile sweep: it returns the natural in-state-dir
+  path when it fits (the common case, unchanged) and otherwise relocates the socket
+  to a short, private per-user runtime dir (`$XDG_RUNTIME_DIR`, else the OS temp
+  dir) under a name hashed from `(Dir, id)` — deterministic and per-id distinct, so
+  every caller agrees without persisting it. The supervisor `chmod`s the bound
+  socket to `0600` so a socket relocated under a shared runtime dir stays
+  owner-only. This retired the tests' `shortStateDir` necessity (kept only to pin
+  the natural-path branch).

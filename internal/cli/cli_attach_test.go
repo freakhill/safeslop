@@ -23,7 +23,7 @@ func TestAttachBridgesIOAndPropagatesExitCode(t *testing.T) {
 	defer cancel()
 	go func() { _, _ = Supervise(ctx, store, id, time.Now) }()
 
-	if !waitForFile(filepath.Join(store.Dir, id+".sock"), 5*time.Second) {
+	if !waitForFile(store.SocketPath(id), 5*time.Second) {
 		t.Fatal("supervisor socket never appeared")
 	}
 
