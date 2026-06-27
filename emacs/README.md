@@ -70,11 +70,11 @@ Add to `~/.doom.d/config.el`:
 ```
 
 Default key prefix: `C-c s` (global), and `safeslop-doom-bind-leader` puts the
-same command map under `SPC o S` on Doom's leader.  The capital `S` is deliberate:
-Doom's `:os macos` module owns `SPC o s` ("send to application"), so a lowercase
-binding would clobber it.  `SPC o S` sits beside slopmaxx's `SPC o m`.  Session
-creation offers `claude`, `claude-code`, and `pi`; `claude-code` is an alias for
-the canonical `claude` engine agent.
+same command map under `SPC o s` on Doom's leader.  That deliberately overrides
+Doom's `:os macos` "send to application" prefix on `SPC o s` (slopmaxx sits at
+`SPC o m`); rebind `safeslop-doom-bind-leader` if you want the macOS prefix back.
+Session creation offers `claude`, `claude-code`, and `pi`; `claude-code` is an
+alias for the canonical `claude` engine agent.
 
 ## Daemon autostart
 
