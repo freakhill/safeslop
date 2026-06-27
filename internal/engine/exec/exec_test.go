@@ -3,7 +3,10 @@ package exec
 import (
 	"bytes"
 	"context"
+	"os"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -69,6 +72,63 @@ func TestRunInPTYInteractive(t *testing.T) {
 	if !strings.Contains(got, "GOT=world") {
 		t.Fatalf("pty output %q missing GOT=world (stdin was not delivered through the pty)", got)
 	}
+}
+
+// TestRunInPTYCancelTearsDownProcessGroup proves that cancelling the context
+// kills the child's whole process group, not just the direct child. pty.Start
+// makes the shell a session leader, so the backgrounded `sleep` is a grandchild
+// in that group; a direct-child-only kill would orphan it, a group teardown
+// takes it down too. This is the mechanism `session stop` relies on to avoid
+// leaving an agent (or its boundary) running after teardown (specs/0050 PR2).
+func TestRunInPTYCancelTearsDownProcessGroup(t *testing.T) {
+	dir := t.TempDir()
+	grandpid := dir + "/grandpid"
+	script := "sleep 60 & echo $! > " + grandpid + "; wait"
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		_, _ = RunInPTY(ctx, LaunchSpec{Argv: []string{"/bin/sh", "-c", script}, Stdin: strings.NewReader("")})
+		close(done)
+	}()
+
+	pid := waitForPidFile(t, grandpid)
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("RunInPTY did not return after cancel")
+	}
+	requireProcessDies(t, pid, 5*time.Second)
+}
+
+func waitForPidFile(t *testing.T, path string) int {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		b, err := os.ReadFile(path)
+		if err == nil {
+			if pid, perr := strconv.Atoi(strings.TrimSpace(string(b))); perr == nil && pid > 0 {
+				return pid
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("pid file %s never appeared", path)
+	return 0
+}
+
+func requireProcessDies(t *testing.T, pid int, within time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	for time.Now().Before(deadline) {
+		if syscall.Kill(pid, syscall.Signal(0)) != nil {
+			return // ESRCH: gone
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("process %d still alive %s after group teardown", pid, within)
 }
 
 func TestRunInPTYExitCode(t *testing.T) {

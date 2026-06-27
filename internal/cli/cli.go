@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	osexec "os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -987,8 +988,22 @@ func stageProfile(ctx context.Context, prof policy.Profile, stageDir string) (se
 // workspace, launches the agent under its environment, and wipes the stage on
 // exit. Returns the child's exit code.
 func runProfile(name string, prof policy.Profile, argv []string, ws string) (int, error) {
-	ctx := context.Background()
+	// SIGTERM (what `session stop` sends to this wrapper) and SIGHUP (terminal /
+	// Emacs-buffer close) cancel the run so the boundary is torn down and staged
+	// secrets are wiped via the deferred teardown in runProfileCtx, instead of
+	// the process dying with its defers unrun and leaving a live container/VM
+	// holding staged secrets (specs/0050 PR2, gap #2). SIGINT is deliberately
+	// NOT caught: interactive Ctrl-C must reach the agent (e.g. interrupt a
+	// generation), not tear the session down. runProfile is shared with
+	// `safeslop run`, so this also gives that path a graceful teardown without
+	// changing its Ctrl-C behavior. SIGKILL is uncatchable; PR1's liveness
+	// reconcile is the backstop for a wrapper that dies without cleaning up.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGHUP)
+	defer stop()
+	return runProfileCtx(ctx, name, prof, argv, ws)
+}
 
+func runProfileCtx(ctx context.Context, name string, prof policy.Profile, argv []string, ws string) (int, error) {
 	stageDir := filepath.Join(ws, ".safeslop", "runtime", name)
 	defer os.RemoveAll(stageDir) // wipe staged secrets/.npmrc regardless of outcome
 

@@ -193,41 +193,61 @@ Required tests:
 - `TestListReconciledCorrectsDeadSessions`
 - `TestSessionStatusReportsReconciledState`
 
-### PR2 — Process-group ownership, boundary PID, and teardown
+### PR2 — Boundary teardown on signal (implemented)
 
-Purpose:
+Closes gap #2: `session stop` sends `SIGTERM` to the run wrapper, but the
+wrapper used `context.Background()` (never cancelled), so the signal killed the
+wrapper with its defers unrun — leaving a live VM clone / container with
+`secrets.env` still staged.
 
-- Surface the boundary leader PID via an `onStart(pid)` callback threaded
-  through the boundary launchers, and record it through `MarkRunning` so the
-  stored PID identifies the agent's boundary process, not the run wrapper
-  (`TestMarkRunningRecordsBoundaryPID`).
-- Launch boundary processes with `Setpgid` so the wrapper leads a process group
-  (`internal/engine/exec`).
-- Install a `SIGTERM`/`SIGINT` handler in the run path that runs the full
-  teardown (group kill → `compose down` / `vm Destroy` → stage wipe → cred
-  revoke) instead of letting the signal bypass the defers. Factor the teardown
-  out of `runProfile`'s defer soup into a named `teardown` closure so the signal
-  path and the normal-return path share one implementation.
-- Make `stop` signal the group (`-PGID`) and bound-wait for teardown
-  confirmation; keep revoke-before-kill ordering and idempotency.
+Implemented design (chosen over the original group-signal-from-stop sketch
+because it is smaller, needs no tty/process-group surgery on the interactive
+path, and keeps the wrapper PID as the single control point — see below):
+
+- `runProfile` wraps the run in `signal.NotifyContext(ctx, SIGTERM, SIGHUP)` and
+  delegates to `runProfileCtx(ctx, …)`. An explicit `SIGTERM` (`session stop`)
+  or `SIGHUP` (terminal / Emacs-buffer close) **cancels the run context**. The
+  cancellation propagates to the boundary launchers' `exec.CommandContext`,
+  which kills the child; the launcher returns normally, so the existing deferred
+  teardown runs: `vm.Launch`'s `defer Destroy`, container `--rm`, the stage-dir
+  wipe, and SSH/Forgejo credential revoke.
+- `SIGINT` is deliberately **not** caught: `runProfile` is shared with
+  `safeslop run`, and interactive Ctrl-C must reach the agent, not tear the
+  session down. `SIGKILL` is uncatchable — PR1's liveness reconcile is the
+  backstop for a wrapper that dies without cleaning up.
+
+Why no boundary PID / `Setpgid` / `stop`-signals-the-group:
+
+- The wrapper PID stays the correct anchor (liveness, PR1) and target (`stop`):
+  the wrapper now self-tears-down on signal, so nothing needs to reach into the
+  boundary process tree from `stop`.
+- The container (PTY) path already cascades teardown to the child's group: a
+  `pty.Start` child is a session leader, so when it is killed the kernel
+  `SIGHUP`s the pty's foreground group — no explicit `Setpgid`/group-kill
+  needed. `TestRunInPTYCancelTearsDownProcessGroup` guards this property.
+- Adding `Setpgid` to the host/sandbox `RunInTerminal` path would background the
+  child relative to the controlling tty and risk `SIGTTIN`/`SIGTTOU` stops — a
+  real interactive regression we avoid.
 
 Files:
 
-- `internal/engine/exec/exec.go`
-- `internal/engine/exec/exec_test.go`
-- `internal/cli/cli.go`
-- `internal/cli/cli_session_test.go`
-- `internal/engine/container/launch.go` (expose an idempotent `Down`/teardown hook if not already reachable)
-- `internal/engine/vm/launch.go` (expose idempotent `Destroy` teardown hook)
+- `internal/cli/cli.go` (the `runProfile` → `runProfileCtx` split + signal wiring)
+- `internal/cli/cli_runprofile_test.go`
+- `internal/engine/exec/exec_test.go` (regression guard for the relied-upon
+  cancel→PTY-group teardown; `exec.go` itself needs no change)
 
 Required tests:
 
-- `TestMarkRunningRecordsBoundaryPID`
-- `TestRunTeardownRunsOnSIGTERM` (stub agent that blocks; assert stage dir wiped + teardown hook fired after signal)
-- `TestStopSignalsProcessGroupNotBarePID`
-- `TestStopRevokesBeforeKillAndIsIdempotent` (extend existing)
-- `TestContainerStopRunsComposeDown` (fake runtime engine records `compose down`)
-- `TestVMStopRunsDestroy` (fake tart runner records destroy)
+- `TestRunProfileCtxTeardownOnCancel` (host env + stub agent: cancel kills the
+  agent and runs the deferred teardown)
+- `TestRunInPTYCancelTearsDownProcessGroup` (cancel kills the whole pty session,
+  grandchild included)
+
+Deferred (need a live runtime, so not unit-tested here): asserting that a
+cancelled container run actually `compose down`s the agent container, and that a
+cancelled vm run leaves no tart clone — covered by the existing `defer Destroy`
+/ `--rm` and the integration suite, not new hermetic tests. Surfacing the
+boundary PID via `onStart` is no longer needed and is dropped.
 
 ### PR3 — Uniform PTY contract and exit-code fidelity
 
