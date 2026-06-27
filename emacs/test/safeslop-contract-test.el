@@ -89,6 +89,22 @@ ROUTES maps exact argv JSON strings to `((stdout . STRING) (stderr . STRING)
                                  (buffer-string)))
                   "\n" t)))
 
+(defun safeslop-test--await (thunk &optional timeout)
+  "Call THUNK with a capturing callback, pump the event loop until it fires, and
+return the contract envelope it received.  THUNK is a function of one argument (a
+callback); it must start an async safeslop command passing that callback, e.g.
+\(safeslop-test--await (lambda (cb) (safeslop-doctor cb))).  Because the async
+command runs the fake CLI in a real subprocess and the callback fires only in its
+sentinel, awaiting also guarantees the argv log has been written before the test
+inspects it.  Signals after TIMEOUT seconds (default 10) so a wedged call fails
+the test instead of hanging it."
+  (let ((done nil) (result nil))
+    (funcall thunk (lambda (env) (setq result env done t)))
+    (with-timeout ((or timeout 10) (error "safeslop-test--await: timed out"))
+      (while (not done)
+        (accept-process-output nil 0.05)))
+    result))
+
 (ert-deftest safeslop-test-go-golden-fixtures-parse-in-emacs ()
   (let ((fixtures (directory-files
                    (expand-file-name "internal/jsoncontract/testdata" (safeslop-test--repo-root))
@@ -105,10 +121,36 @@ ROUTES maps exact argv JSON strings to `((stdout . STRING) (stderr . STRING)
                    ((stdout . ,(safeslop-test--fixture "ok-minimal.golden.json"))
                     (exit . 0))))))
     (safeslop-test--with-fake-cli routes
-      (let ((envelope (safeslop-doctor)))
+      (let ((envelope (safeslop-test--await (lambda (cb) (safeslop-doctor cb)))))
         (should (safeslop-contract-ok-p envelope))
         (should (equal (safeslop-test--argv-log-lines)
                        (list (safeslop-test--json-key '("doctor" "--json")))))))))
+
+(ert-deftest safeslop-test-call-json-async-delivers-envelope ()
+  "`safeslop--call-json-async' runs the CLI off the main thread and delivers a
+parsed envelope to its callback (the non-blocking substitute for `call-json')."
+  (let* ((argv '("doctor" "--json"))
+         (routes `((,(safeslop-test--json-key argv) .
+                   ((stdout . ,(safeslop-test--fixture "ok-minimal.golden.json"))
+                    (exit . 0))))))
+    (safeslop-test--with-fake-cli routes
+      (let ((envelope (safeslop-test--await
+                       (lambda (cb) (safeslop--call-json-async argv cb)))))
+        (should (safeslop-contract-ok-p envelope))
+        (should (equal (safeslop-test--argv-log-lines)
+                       (list (safeslop-test--json-key argv))))))))
+
+(ert-deftest safeslop-test-call-json-async-degrades-on-non-json ()
+  "Async path degrades like the sync one: non-JSON stdout yields a CLIENT_NON_JSON
+envelope via the callback, never a crash."
+  (let* ((argv '("session" "list" "--output" "json"))
+         (routes `((,(safeslop-test--json-key argv) .
+                   ((stdout . "safeslop: unknown command") (exit . 1))))))
+    (safeslop-test--with-fake-cli routes
+      (let ((envelope (safeslop-test--await
+                       (lambda (cb) (safeslop--call-json-async argv cb)))))
+        (should-not (safeslop-contract-ok-p envelope))
+        (should (equal (safeslop-contract-first-error-code envelope) "CLIENT_NON_JSON"))))))
 
 (ert-deftest safeslop-test-policy-check-surfaces-warning ()
   (let* ((policy (expand-file-name "safeslop.cue" (safeslop-test--repo-root)))
@@ -117,7 +159,7 @@ ROUTES maps exact argv JSON strings to `((stdout . STRING) (stderr . STRING)
                    ((stdout . ,(safeslop-test--fixture "ok-policy-check-with-warning.golden.json"))
                     (exit . 0))))))
     (safeslop-test--with-fake-cli routes
-      (let ((envelope (safeslop-policy-check-file policy)))
+      (let ((envelope (safeslop-test--await (lambda (cb) (safeslop-policy-check-file policy cb)))))
         (should (safeslop-contract-ok-p envelope))
         (should (equal (alist-get 'code (car (safeslop-contract-warnings envelope)))
                        "POLICY_DENIED"))))))
@@ -129,7 +171,7 @@ ROUTES maps exact argv JSON strings to `((stdout . STRING) (stderr . STRING)
                    ((stdout . ,(safeslop-test--fixture "ok-session-create.golden.json"))
                     (exit . 0))))))
     (safeslop-test--with-fake-cli routes
-      (should (safeslop-contract-ok-p (safeslop-session-new "claude" workspace)))
+      (should (safeslop-contract-ok-p (safeslop-test--await (lambda (cb) (safeslop-session-new "claude" workspace cb)))))
       (should (equal (safeslop-test--argv-log-lines) (list (safeslop-test--json-key argv)))))))
 
 (ert-deftest safeslop-test-session-new-claude-code-alias-exact-argv ()
@@ -139,7 +181,7 @@ ROUTES maps exact argv JSON strings to `((stdout . STRING) (stderr . STRING)
                    ((stdout . ,(safeslop-test--fixture "ok-session-create.golden.json"))
                     (exit . 0))))))
     (safeslop-test--with-fake-cli routes
-      (should (safeslop-contract-ok-p (safeslop-session-new "claude-code" workspace)))
+      (should (safeslop-contract-ok-p (safeslop-test--await (lambda (cb) (safeslop-session-new "claude-code" workspace cb)))))
       (should (equal (safeslop-test--argv-log-lines) (list (safeslop-test--json-key argv)))))))
 
 (ert-deftest safeslop-test-session-new-pi-exact-argv ()
@@ -149,7 +191,7 @@ ROUTES maps exact argv JSON strings to `((stdout . STRING) (stderr . STRING)
                    ((stdout . ,(safeslop-test--fixture "ok-session-create.golden.json"))
                     (exit . 0))))))
     (safeslop-test--with-fake-cli routes
-      (should (safeslop-contract-ok-p (safeslop-session-new "pi" workspace)))
+      (should (safeslop-contract-ok-p (safeslop-test--await (lambda (cb) (safeslop-session-new "pi" workspace cb)))))
       (should (equal (safeslop-test--argv-log-lines) (list (safeslop-test--json-key argv)))))))
 
 (ert-deftest safeslop-test-unsupported-agent-error-code ()
@@ -159,7 +201,7 @@ ROUTES maps exact argv JSON strings to `((stdout . STRING) (stderr . STRING)
                    ((stdout . ,(safeslop-test--fixture "error-agent-unsupported.golden.json"))
                     (exit . 2))))))
     (safeslop-test--with-fake-cli routes
-      (let ((envelope (safeslop-session-new "cursor" workspace)))
+      (let ((envelope (safeslop-test--await (lambda (cb) (safeslop-session-new "cursor" workspace cb)))))
         (should-not (safeslop-contract-ok-p envelope))
         (should (equal (safeslop-contract-first-error-code envelope) "AGENT_UNSUPPORTED"))
         (should (equal safeslop-last-error "AGENT_UNSUPPORTED"))))))
@@ -170,7 +212,7 @@ ROUTES maps exact argv JSON strings to `((stdout . STRING) (stderr . STRING)
                    ((stdout . ,(safeslop-test--fixture "ok-minimal.golden.json"))
                     (exit . 0))))))
     (safeslop-test--with-fake-cli routes
-      (should (safeslop-contract-ok-p (safeslop-session-stop "sess-1")))
+      (should (safeslop-contract-ok-p (safeslop-test--await (lambda (cb) (safeslop-session-stop "sess-1" cb)))))
       (should (equal (safeslop-test--argv-log-lines) (list (safeslop-test--json-key argv)))))))
 
 (ert-deftest safeslop-test-workspace-path-never-shell-expanded ()
@@ -183,7 +225,7 @@ ROUTES maps exact argv JSON strings to `((stdout . STRING) (stderr . STRING)
                     (exit . 0))))))
     (unwind-protect
         (safeslop-test--with-fake-cli routes
-          (should (safeslop-contract-ok-p (safeslop-session-new "claude" workspace)))
+          (should (safeslop-contract-ok-p (safeslop-test--await (lambda (cb) (safeslop-session-new "claude" workspace cb)))))
           (should-not (file-exists-p pwn))
           (should (equal (safeslop-test--argv-log-lines) (list (safeslop-test--json-key argv)))))
       (delete-directory tmp t))))

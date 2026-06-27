@@ -24,6 +24,7 @@
 
 (defvar safeslop-program)
 (declare-function safeslop--call-json "safeslop" (args))
+(declare-function safeslop--call-json-async "safeslop" (args callback))
 (declare-function safeslop-doctor "safeslop" ())
 (declare-function safeslop-debug-log "safeslop" ())
 (declare-function safeslop-session-new "safeslop-session" (&optional agent workspace))
@@ -98,19 +99,19 @@ A single timer serves the one portal buffer (`safeslop-portal-buffer-name').")
                                       (encode-time (iso8601-parse ts)))))
         (error "—")))))
 
-(defun safeslop-portal--sessions ()
-  "Fetch the session list and return the parsed sessions (a list of alists).
-On a failed `session list' (e.g. a stale binary), surface the error in the echo
-area so the empty table is not silently mysterious."
-  (let ((envelope (safeslop--call-json '("session" "list" "--output" "json"))))
-    (unless (safeslop-contract-ok-p envelope)
-      (message "safeslop portal: %s"
-               (or (alist-get 'message (car (safeslop-contract-errors envelope)))
-                   "session list failed")))
-    (alist-get 'sessions (safeslop-contract-data envelope))))
+(defun safeslop-portal--sessions-from (envelope)
+  "Return the parsed sessions (a list of alists) from a `session list' ENVELOPE.
+On a failed list (e.g. a stale binary), surface the error in the echo area so the
+empty table is not silently mysterious."
+  (unless (safeslop-contract-ok-p envelope)
+    (message "safeslop portal: %s"
+             (or (alist-get 'message (car (safeslop-contract-errors envelope)))
+                 "session list failed")))
+  (alist-get 'sessions (safeslop-contract-data envelope)))
 
-(defun safeslop-portal--rows ()
-  "Build `tabulated-list-entries' from the live session list, status-ordered."
+(defun safeslop-portal--rows (sessions)
+  "Build `tabulated-list-entries' from SESSIONS (a list of alists), status-ordered.
+Pure: SESSIONS is already-fetched data, so the row builder never blocks on I/O."
   (mapcar
    (lambda (sess)
      (let ((id (safeslop-portal--field sess 'session_id)))
@@ -123,7 +124,7 @@ area so the empty table is not silently mysterious."
                      (safeslop-portal--pid sess)
                      (safeslop-portal--age sess)
                      (abbreviate-file-name (safeslop-portal--field sess 'workspace))))))
-   (sort (copy-sequence (safeslop-portal--sessions))
+   (sort (copy-sequence sessions)
          (lambda (a b)
            (string< (safeslop-portal--field a 'status)
                     (safeslop-portal--field b 'status))))))
@@ -177,24 +178,34 @@ area so the empty table is not silently mysterious."
           "\n\n"))
 
 (defun safeslop-portal--render (&optional keep-point)
-  "Fill the current portal buffer: the shortcut legend, then the session table.
-Like slopmaxx's console, the legend is plain buffer text above the rows (the
-column titles stay in the window header line).  With KEEP-POINT non-nil, stay on
-the same session across the reprint (for auto-refresh and `g'); otherwise land on
-the first row (for a fresh open)."
-  (setq tabulated-list-entries (safeslop-portal--rows))
-  ;; `tabulated-list-print' erases the buffer (legend included) and reprints; with
-  ;; KEEP-POINT it restores point to the same entry id, so the legend re-insert
-  ;; below (before point) shifts but does not move it off the session.
-  (tabulated-list-print keep-point)
-  (let ((inhibit-read-only t))
-    (save-excursion
-      (goto-char (point-min))
-      (insert (safeslop-portal--legend))))
-  (unless keep-point
-    ;; Land on the first session row, past the legend + its blank line.
-    (goto-char (point-min))
-    (forward-line 2)))
+  "Asynchronously fetch the session list, then fill the current portal buffer:
+the shortcut legend, then the session table.  Non-blocking: the `session list'
+fetch runs in a subprocess and the redraw happens in its callback, so neither a
+manual `g' nor the auto-refresh timer ever freezes Emacs (the whole point of the
+timer is that it must not block).  Like slopmaxx's console, the legend is plain
+buffer text above the rows (the column titles stay in the window header line).
+With KEEP-POINT non-nil, stay on the same session across the reprint (for
+auto-refresh and `g'); otherwise land on the first row (for a fresh open)."
+  (let ((buf (current-buffer)))
+    (safeslop--call-json-async
+     '("session" "list" "--output" "json")
+     (lambda (envelope)
+       (when (buffer-live-p buf)
+         (with-current-buffer buf
+           (setq tabulated-list-entries
+                 (safeslop-portal--rows (safeslop-portal--sessions-from envelope)))
+           ;; `tabulated-list-print' erases the buffer (legend included) and reprints;
+           ;; with KEEP-POINT it restores point to the same entry id, so the legend
+           ;; re-insert below (before point) shifts but does not move it off the session.
+           (tabulated-list-print keep-point)
+           (let ((inhibit-read-only t))
+             (save-excursion
+               (goto-char (point-min))
+               (insert (safeslop-portal--legend))))
+           (unless keep-point
+             ;; Land on the first session row, past the legend + its blank line.
+             (goto-char (point-min))
+             (forward-line 2))))))))
 
 (defun safeslop-portal-refresh ()
   "Re-fetch the session list and redraw the portal, keeping point on its session."

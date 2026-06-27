@@ -97,43 +97,84 @@ like a real failed envelope."
         (cons 'warnings nil)
         (cons 'errors (list (list (cons 'code code) (cons 'message message))))))
 
-(defun safeslop--call-json (args)
-  "Run safeslop with ARGS and parse stdout as a contract envelope.
-ARGS is passed to `call-process' as an argv list; no shell is used.  safeslop is
-a self-contained CLI (no daemon round-trip), so each command is a direct
-subprocess; the call and its result are recorded in the debug log.
+(defun safeslop--finish-envelope (stdout status)
+  "Parse CLI STDOUT (process exit STATUS) into a contract envelope, gracefully.
+Shared by the synchronous `safeslop--call-json' and the asynchronous
+`safeslop--call-json-async': records the result in the debug log, updates
+`safeslop-last-error', and never raises — non-JSON or empty output (e.g. a stale
+binary that predates a subcommand) yields a CLIENT_* error envelope with a clear,
+actionable message instead of a `json-parse-error' crash."
+  (let ((envelope (condition-case _err
+                      (safeslop-contract-parse-string stdout)
+                    (error nil))))
+    (if envelope
+        (let ((code (safeslop-contract-first-error-code envelope)))
+          (unless (equal status 0)
+            (setq safeslop-last-error
+                  (or code (format "safeslop exited with status %s" status))))
+          (safeslop--debug :event 'result :status status
+                           :ok (if (safeslop-contract-ok-p envelope) "t" "nil")
+                           :error (or code "-"))
+          envelope)
+      ;; Non-JSON / unparseable output: surface a useful message, don't crash.
+      (let* ((line (string-trim (or (car (split-string stdout "\n" t "[ \t\r]*")) "")))
+             (msg (if (string-empty-p line)
+                      (format "safeslop produced no output (status %s); is `%s' installed and current? Run `make install'."
+                              status safeslop-program)
+                    (format "safeslop did not return JSON (status %s): %s — is `%s' current? Run `make install'."
+                            status line safeslop-program))))
+        (setq safeslop-last-error msg)
+        (safeslop--debug :event 'result :status status :ok "nil" :error "non-json")
+        (safeslop--error-envelope "CLIENT_NON_JSON" msg)))))
 
-Degrades gracefully: a missing program or non-JSON output (e.g. a stale binary
-that predates a subcommand) yields a CLIENT_* error envelope with a clear,
-actionable message instead of a raw `json-parse-error' crash."
+(defun safeslop--call-json (args)
+  "Run safeslop with ARGS synchronously and parse stdout as a contract envelope.
+ARGS is passed to `call-process' as an argv list; no shell is used.  This BLOCKS
+Emacs until the subprocess exits — prefer `safeslop--call-json-async' for anything
+user-facing so a slow command (credential staging, `doctor' probing the toolchain,
+a boundary launch) never freezes the editor.  Kept for the parse-path tests and
+any genuinely fast, must-be-synchronous caller.  Degrades gracefully via
+`safeslop--finish-envelope'."
   (safeslop--debug :event 'call :argv (string-join args " "))
   (with-temp-buffer
     (let ((status (condition-case err
                       (apply #'call-process safeslop-program nil t nil args)
                     (error (insert (error-message-string err)) -1))))
-      (let* ((stdout (buffer-string))
-             (envelope (condition-case _err
-                           (safeslop-contract-parse-string stdout)
-                         (error nil))))
-        (if envelope
-            (let ((code (safeslop-contract-first-error-code envelope)))
-              (unless (equal status 0)
-                (setq safeslop-last-error
-                      (or code (format "safeslop exited with status %s" status))))
-              (safeslop--debug :event 'result :status status
-                               :ok (if (safeslop-contract-ok-p envelope) "t" "nil")
-                               :error (or code "-"))
-              envelope)
-          ;; Non-JSON / unparseable output: surface a useful message, don't crash.
-          (let* ((line (string-trim (or (car (split-string stdout "\n" t "[ \t\r]*")) "")))
-                 (msg (if (string-empty-p line)
-                          (format "safeslop produced no output (status %s); is `%s' installed and current? Run `make install'."
-                                  status safeslop-program)
-                        (format "safeslop did not return JSON (status %s): %s — is `%s' current? Run `make install'."
-                                status line safeslop-program))))
-            (setq safeslop-last-error msg)
-            (safeslop--debug :event 'result :status status :ok "nil" :error "non-json")
-            (safeslop--error-envelope "CLIENT_NON_JSON" msg)))))))
+      (safeslop--finish-envelope (buffer-string) status))))
+
+(defun safeslop--call-json-async (args callback)
+  "Run safeslop with ARGS asynchronously; call CALLBACK with the parsed envelope.
+ARGS is the argv list (no shell).  CALLBACK receives one argument — the contract
+envelope (a real one, or a CLIENT_* error envelope on a missing program / non-JSON
+output) — and runs in the process sentinel once the subprocess exits, so a slow
+command never blocks Emacs's main thread.  Returns the process, or nil when it
+could not be spawned (CALLBACK is still invoked, with a client error envelope)."
+  (safeslop--debug :event 'call :argv (string-join args " "))
+  (let ((buf (generate-new-buffer " *safeslop-call*")))
+    (condition-case err
+        (make-process
+         :name "safeslop-call-json"
+         :buffer buf
+         :command (cons safeslop-program args)
+         :connection-type 'pipe
+         :noquery t
+         :sentinel
+         (lambda (proc _event)
+           (unless (process-live-p proc)
+             (let ((stdout (if (buffer-live-p buf)
+                               (with-current-buffer buf (buffer-string))
+                             ""))
+                   (status (process-exit-status proc)))
+               (when (buffer-live-p buf) (kill-buffer buf))
+               (funcall callback (safeslop--finish-envelope stdout status))))))
+      (error
+       (when (buffer-live-p buf) (kill-buffer buf))
+       (let ((msg (format "could not run `%s': %s — is it installed? Run `make install'."
+                          safeslop-program (error-message-string err))))
+         (setq safeslop-last-error msg)
+         (safeslop--debug :event 'result :status -1 :ok "nil" :error "client-spawn")
+         (funcall callback (safeslop--error-envelope "CLIENT_SPAWN" msg))
+         nil)))))
 
 (defun safeslop--scalar (v)
   "Render a parsed JSON scalar V as a display string.
@@ -201,20 +242,30 @@ Handles JSON objects (alists), arrays (lists), and scalars."
   envelope)
 
 ;;;###autoload
-(defun safeslop-doctor ()
-  "Run `safeslop doctor --json' and parse the contract envelope."
+(defun safeslop-doctor (&optional callback)
+  "Run `safeslop doctor --json' asynchronously and show the contract envelope.
+`doctor' probes the whole toolchain, so it can take a while; the call is async so
+Emacs stays responsive.  CALLBACK, when given, is called with the envelope once it
+arrives (used by tests)."
   (interactive)
-  (let* ((args '("doctor" "--json"))
-         (envelope (safeslop--call-json args)))
-    (safeslop--show-envelope-buffer "*safeslop doctor*" args envelope)))
+  (let ((args '("doctor" "--json")))
+    (safeslop--call-json-async
+     args
+     (lambda (envelope)
+       (safeslop--show-envelope-buffer "*safeslop doctor*" args envelope)
+       (when callback (funcall callback envelope))))))
 
 ;;;###autoload
-(defun safeslop-policy-check-file (file)
-  "Validate safeslop policy FILE and parse the contract envelope."
+(defun safeslop-policy-check-file (file &optional callback)
+  "Validate safeslop policy FILE asynchronously and show the contract envelope.
+CALLBACK, when given, is called with the envelope once it arrives (used by tests)."
   (interactive (list (read-file-name "Policy file: " nil nil t "safeslop.cue")))
-  (let* ((args (list "validate" (expand-file-name file) "--json"))
-         (envelope (safeslop--call-json args)))
-    (safeslop--show-envelope-buffer "*safeslop validate*" args envelope)))
+  (let ((args (list "validate" (expand-file-name file) "--json")))
+    (safeslop--call-json-async
+     args
+     (lambda (envelope)
+       (safeslop--show-envelope-buffer "*safeslop validate*" args envelope)
+       (when callback (funcall callback envelope))))))
 
 (require 'safeslop-session)
 (require 'safeslop-portal)
