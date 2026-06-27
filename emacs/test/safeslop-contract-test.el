@@ -217,5 +217,42 @@ ROUTES maps exact argv JSON strings to `((stdout . STRING) (stderr . STRING)
               (accept-process-output proc 0.1))))
         (should (equal (safeslop-test--argv-log-lines) (list (safeslop-test--json-key argv))))))))
 
+(ert-deftest safeslop-test-pty-unavailable-triggers-jsonl-fallback ()
+  "Go->Emacs round trip: when `session run' emits the PTY_UNAVAILABLE envelope,
+attach must switch to the read-only JSONL status fallback for the same session
+\(specs/0050 PR4).  The fake CLI replays the Go golden over the term PTY and the
+status route, and the argv log proves both the run and the keyed fallback ran."
+  (let* ((run-argv '("session" "run" "--session-id" "sess-pty"))
+         (status-argv '("session" "status" "--session-id" "sess-pty" "--output" "jsonl"))
+         (routes `((,(safeslop-test--json-key run-argv) .
+                   ((stdout . ,(safeslop-test--fixture "error-pty-unavailable.golden.json"))
+                    (exit . 1)))
+                   (,(safeslop-test--json-key status-argv) .
+                   ((stdout . "{\"schema_version\":1,\"ok\":true,\"data\":{},\"warnings\":[],\"errors\":[]}\n")
+                    (exit . 0))))))
+    (safeslop-test--with-fake-cli routes
+      (let ((run-buf (safeslop-session-attach "sess-pty")))
+        ;; drive the run to completion so its sentinel keys on PTY_UNAVAILABLE
+        (let ((proc (get-buffer-process run-buf)))
+          (while (and proc (process-live-p proc))
+            (accept-process-output proc 0.1)))
+        ;; the sentinel launches the JSONL fallback; wait for the buffer (bounded)
+        (let ((tries 0))
+          (while (and (not (get-buffer "*safeslop session status jsonl*"))
+                      (< tries 50))
+            (accept-process-output nil 0.1)
+            (setq tries (1+ tries))))
+        (let ((fb (get-buffer "*safeslop session status jsonl*")))
+          (should fb)
+          (with-current-buffer fb
+            (should (derived-mode-p 'compilation-mode))
+            (let ((fproc (get-buffer-process fb)))
+              (while (and fproc (process-live-p fproc))
+                (accept-process-output fproc 0.1)))))
+        ;; both legs ran, in order: the run first, then the keyed status fallback
+        (should (equal (safeslop-test--argv-log-lines)
+                       (list (safeslop-test--json-key run-argv)
+                             (safeslop-test--json-key status-argv))))))))
+
 (provide 'safeslop-contract-test)
 ;;; safeslop-contract-test.el ends here

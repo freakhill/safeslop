@@ -304,26 +304,54 @@ Required tests:
 
 Purpose:
 
-- When `session run` cannot obtain a usable PTY for a boundary that requires one
-  (e.g. stdin/stdout not a tty and no PTY allocatable), emit the contract error
+- When `session run` has no usable controlling terminal, emit the contract error
   envelope `PTY_UNAVAILABLE` with `details.fallback = "status-jsonl"` to stdout
   and exit non-zero **without** marking the session running — matching
   `error-pty-unavailable.golden.json` exactly.
-- Confirm the Emacs side already switches to `safeslop-session-status-fallback`
-  (`--output jsonl`, `compilation-mode`) on that code; add the Go→Emacs
-  round-trip to the hermetic ERT harness if not covered.
+- Wire the Go→Emacs round-trip: Emacs `safeslop-session-attach` keys on
+  `PTY_UNAVAILABLE` and switches to `safeslop-session-status-fallback`
+  (`--output jsonl`, `compilation-mode`).
+
+Implemented decision (code-grounded rescope, the 0050 pattern):
+
+- **Which boundaries need a tty: all four.** `session run` is an interactive
+  attach — host/sandbox present the agent via `RunInTerminal`, container via the
+  `RunInPTY` tty bridge (PR3), vm via `ssh -t`. Without a local controlling
+  terminal the session is undriveable on *every* boundary (no keyboard for the
+  agent), so the check is uniform, not per-boundary. The honest response is the
+  JSONL status monitor, which needs no tty.
+- **Detection:** `term.IsTerminal` (golang.org/x/term, already vendored and used
+  in `internal/engine/exec`) on **both** stdin and stdout. Emacs `make-term`
+  connects the process to a pty so both are ttys (happy path); a no-controlling-
+  terminal invocation (cron, a pipe, a headless shell) fails the check. Lives in
+  `sessionHasInteractivePTY()`.
+- **Order:** the check runs in `cmdSessionRun` *after* `agentArgv` but *before*
+  `MarkRunning`, so a session that can never start is never recorded as running
+  (no phantom PID for liveness/reconcile or `session stop`).
+- **Single source of the wire shape:** `jsoncontract.PTYUnavailable()` builds the
+  canonical envelope; `cmdSessionRun` emits it and the contract test pins it to
+  `error-pty-unavailable.golden.json`, so the magic string is not duplicated.
+- **Emacs round-trip:** `safeslop-session-attach` captures the run's raw stdout
+  via an `add-function :before` process filter (immune to term line-wrapping and
+  term's trailing status line) and, via an `add-function :after` sentinel, keys on
+  the `PTY_UNAVAILABLE` code to launch `safeslop-session-status-fallback`.
+  `add-function` (not `set-process-*`) preserves term's own filter/sentinel so the
+  PTY keeps working on the happy path.
 
 Files:
 
-- `internal/cli/cli.go`
+- `internal/cli/cli.go` (`sessionHasInteractivePTY`, the pre-`MarkRunning` guard)
+- `internal/jsoncontract/errors.go` (`PTYUnavailable()` constructor)
 - `internal/cli/cli_session_test.go`
-- `internal/jsoncontract/contract_test.go` (assert run-path emission matches the golden)
+- `internal/jsoncontract/contract_test.go` (assert the constructor matches the golden)
+- `emacs/safeslop-session.el` (attach keys on `PTY_UNAVAILABLE` → fallback)
 - `emacs/test/safeslop-contract-test.el` (fake CLI returns `PTY_UNAVAILABLE`; assert fallback monitor launches)
 
 Required tests:
 
 - `TestSessionRunEmitsPTYUnavailableWhenNoTTY`
 - `TestSessionRunDoesNotMarkRunningOnPTYUnavailable`
+- `TestPTYUnavailableEnvelopeMatchesGolden`
 - `safeslop-test-pty-unavailable-triggers-jsonl-fallback` (ERT)
 
 ### PR5 — Contract reconciliation and docs

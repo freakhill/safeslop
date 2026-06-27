@@ -84,3 +84,18 @@ func IsValidCode(code ErrorCode) bool {
 	}
 	return false
 }
+
+// PTYUnavailable returns the canonical PTY_UNAVAILABLE error envelope. `session
+// run` emits it when no usable controlling terminal is available, so the caller
+// switches to the JSONL status fallback named in details.fallback. It is
+// retryable: a later attach from a real terminal can still succeed. This is the
+// single source of the wire shape, pinned to error-pty-unavailable.golden.json by
+// the contract tests (specs/0050 PR4).
+func PTYUnavailable() Envelope {
+	return Error(NewMessage(
+		CodePTYUnavailable,
+		"interactive PTY is unavailable; use status JSONL fallback",
+		true,
+		map[string]any{"fallback": "status-jsonl"},
+	))
+}
