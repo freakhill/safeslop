@@ -347,3 +347,112 @@ func TestSessionRunDoesNotMarkRunningOnPTYUnavailable(t *testing.T) {
 		t.Fatalf("session StartedAt = %v, want zero (run must not stamp a start on PTY_UNAVAILABLE)", sess.StartedAt)
 	}
 }
+
+// TestSessionCreateEnvironmentOverride proves that --environment and --network flags
+// override the profile defaults and are persisted in the session record so that
+// `session run` launches under the requested boundary.
+func TestSessionCreateEnvironmentOverride(t *testing.T) {
+	ws := t.TempDir()
+	state := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", state)
+
+	out, err := runRootForTest(t, ws, "session", "create",
+		"--agent", "claude", "--workspace", ws, "--output", "json",
+		"--environment", "container", "--network", "allow",
+	)
+	if err != nil {
+		t.Fatalf("session create: %v\nout=%s", err, out)
+	}
+	env := parseEnvelopeForTest(t, out)
+	if !env.OK {
+		t.Fatalf("create returned error envelope: %+v", env.Errors)
+	}
+	if got := env.Data["environment"]; got != "container" {
+		t.Fatalf("environment = %#v, want container", got)
+	}
+	if got := env.Data["network"]; got != "allow" {
+		t.Fatalf("network = %#v, want allow", got)
+	}
+
+	// Verify the override is also persisted in the stored session record.
+	id := env.Data["session_id"].(string)
+	sess, err := sessionStore().Get(id)
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if sess.Environment != "container" {
+		t.Fatalf("persisted environment = %q, want container", sess.Environment)
+	}
+	if sess.Network != "allow" {
+		t.Fatalf("persisted network = %q, want allow", sess.Network)
+	}
+}
+
+// TestSessionCreateEnvironmentOnlyOverride proves that supplying only --environment
+// overrides the environment while leaving network at the default ("deny").
+func TestSessionCreateEnvironmentOnlyOverride(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+
+	out, err := runRootForTest(t, ws, "session", "create",
+		"--agent", "claude", "--workspace", ws, "--output", "json",
+		"--environment", "vm",
+	)
+	if err != nil {
+		t.Fatalf("session create: %v\nout=%s", err, out)
+	}
+	env := parseEnvelopeForTest(t, out)
+	if !env.OK {
+		t.Fatalf("create returned error envelope: %+v", env.Errors)
+	}
+	if got := env.Data["environment"]; got != "vm" {
+		t.Fatalf("environment = %#v, want vm", got)
+	}
+	if got := env.Data["network"]; got != "deny" {
+		t.Fatalf("network = %#v, want deny (default unchanged)", got)
+	}
+}
+
+// TestSessionCreateRejectsInvalidEnvironment proves that an unrecognised
+// --environment value is rejected with a CodeInvalidArgument contract error.
+func TestSessionCreateRejectsInvalidEnvironment(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+
+	out, err := runRootForTest(t, ws, "session", "create",
+		"--agent", "claude", "--workspace", ws, "--output", "json",
+		"--environment", "bogus",
+	)
+	if err == nil {
+		t.Fatalf("invalid --environment unexpectedly succeeded: %s", out)
+	}
+	env := parseEnvelopeForTest(t, out)
+	if env.OK || len(env.Errors) == 0 {
+		t.Fatalf("expected error envelope, got: %+v", env)
+	}
+	if env.Errors[0].Code != jsoncontract.CodeInvalidArgument {
+		t.Fatalf("error code = %q, want %q", env.Errors[0].Code, jsoncontract.CodeInvalidArgument)
+	}
+}
+
+// TestSessionCreateRejectsInvalidNetwork proves that an unrecognised --network
+// value is rejected with a CodeInvalidArgument contract error.
+func TestSessionCreateRejectsInvalidNetwork(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+
+	out, err := runRootForTest(t, ws, "session", "create",
+		"--agent", "claude", "--workspace", ws, "--output", "json",
+		"--network", "open",
+	)
+	if err == nil {
+		t.Fatalf("invalid --network unexpectedly succeeded: %s", out)
+	}
+	env := parseEnvelopeForTest(t, out)
+	if env.OK || len(env.Errors) == 0 {
+		t.Fatalf("expected error envelope, got: %+v", env)
+	}
+	if env.Errors[0].Code != jsoncontract.CodeInvalidArgument {
+		t.Fatalf("error code = %q, want %q", env.Errors[0].Code, jsoncontract.CodeInvalidArgument)
+	}
+}
