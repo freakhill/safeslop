@@ -193,6 +193,15 @@ func Launch(ctx context.Context, spec exec.LaunchSpec, workspace, network string
 	if err != nil {
 		return 1, err
 	}
+	// A detached supervisor passes a PTY slave it owns (spec.Stdin set). `compose
+	// run` already allocates the container's tty when its stdin is a tty, so binding
+	// the compose process's stdio directly to that PTY (RunInTerminal) bridges the
+	// container's tty straight to the supervisor's PTY — single hop, docker forwards
+	// resize. The coupled path (no stdio) keeps RunInPTY, which owns the host pty and
+	// puts the user's real terminal in raw mode + forwards SIGWINCH (specs/0051).
+	if spec.Stdin != nil {
+		return exec.RunInTerminal(ctx, exec.LaunchSpec{Argv: argv, Stdin: spec.Stdin, Stdout: spec.Stdout, Stderr: spec.Stderr})
+	}
 	return exec.RunInPTY(ctx, exec.LaunchSpec{Argv: argv})
 }
 
