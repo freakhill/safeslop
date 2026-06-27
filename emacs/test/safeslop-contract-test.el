@@ -76,7 +76,6 @@ ROUTES maps exact argv JSON strings to `((stdout . STRING) (stderr . STRING)
   (declare (indent 1))
   `(let* ((tmp (make-temp-file "safeslop-fake-cli" t))
           (safeslop-test--argv-log (expand-file-name "argv.log" tmp))
-          (safeslop-autostart-daemon nil)
           (safeslop-program (safeslop-test--write-fake-cli tmp ,routes safeslop-test--argv-log)))
      (unwind-protect
          (progn ,@body)

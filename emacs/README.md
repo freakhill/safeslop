@@ -35,8 +35,8 @@ becomes the portal table.
 diagnostics log: each CLI invocation and its result is one timestamped line
 (`event=call argv=… / event=result status=0 ok=t`).  Only allowlisted, non-secret
 fields are written.  Toggle with `safeslop-debug-log-enabled`.  safeslop is a
-self-contained CLI, so commands run as direct subprocesses — no daemon round-trip
-is attempted on the command path (see Daemon autostart below).
+self-contained CLI, so commands run as direct subprocesses — it is daemonless,
+and no daemon is ever started.
 
 ## Install from the repo
 
@@ -75,23 +75,3 @@ Doom's `:os macos` "send to application" prefix on `SPC o s` (slopmaxx sits at
 `SPC o m`); rebind `safeslop-doom-bind-leader` if you want the macOS prefix back.
 Session creation offers `claude`, `claude-code`, and `pi`; `claude-code` is an
 alias for the canonical `claude` engine agent.
-
-## Daemon autostart
-
-The Emacs package mirrors slopmaxx's local developer shape:
-
-- state dir: `~/Library/Application Support/safeslop/`
-- socket: `~/Library/Application Support/safeslop/safeslop.sock`
-- log: `~/Library/Application Support/safeslop/daemon.log`
-
-safeslop is a self-contained CLI, so the Emacs commands no longer attempt a daemon
-autostart on the command path.  `M-x safeslop-daemon-start` (`C-c s D`) remains for
-explicitly launching a daemon should one ship later; it resolves a binary from one
-of these:
-
-- `safeslop-daemon-program`
-- `$SAFESLOP_DAEMON_BIN`
-- `safeslopd` on `exec-path`
-- `safeslop-mcp` on `exec-path`
-
-Manual start from Emacs: `M-x safeslop-daemon-start` or `C-c s D`.
