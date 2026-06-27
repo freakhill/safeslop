@@ -22,6 +22,7 @@
 (defvar safeslop-program)
 (defvar safeslop-last-error)
 (declare-function safeslop--call-json "safeslop" (args))
+(declare-function safeslop--call-json-async "safeslop" (args callback))
 (declare-function safeslop--show-envelope-buffer "safeslop" (name args envelope))
 
 (defun safeslop-session--create-args (agent workspace)
@@ -32,14 +33,20 @@
         "--output" "json"))
 
 ;;;###autoload
-(defun safeslop-session-new (&optional agent workspace)
-  "Create a safeslop session for AGENT in WORKSPACE and parse the JSON envelope."
+(defun safeslop-session-new (&optional agent workspace callback)
+  "Create a safeslop session for AGENT in WORKSPACE and show the JSON envelope.
+Runs asynchronously (session create may stage credentials, which can be slow), so
+Emacs does not block.  CALLBACK, when given, is called with the envelope once it
+arrives (used by tests)."
   (interactive
    (list (completing-read "Agent: " '("claude" "claude-code" "pi") nil t nil nil "claude")
          (read-directory-name "Workspace: " nil nil t)))
-  (let* ((args (safeslop-session--create-args (or agent "claude") (or workspace default-directory)))
-         (envelope (safeslop--call-json args)))
-    (safeslop--show-envelope-buffer "*safeslop session*" args envelope)))
+  (let ((args (safeslop-session--create-args (or agent "claude") (or workspace default-directory))))
+    (safeslop--call-json-async
+     args
+     (lambda (envelope)
+       (safeslop--show-envelope-buffer "*safeslop session*" args envelope)
+       (when callback (funcall callback envelope))))))
 
 (defun safeslop-session--run-args (session-id)
   "Return exact argv for running SESSION-ID."
@@ -116,28 +123,41 @@ JSONL status fallback (`safeslop-session-status-fallback')."
   (safeslop-session--launch-term session-id (safeslop-session--run-args session-id)))
 
 ;;;###autoload
-(defun safeslop-session-list ()
-  "List safeslop sessions via the JSON contract."
+(defun safeslop-session-list (&optional callback)
+  "List safeslop sessions via the JSON contract, asynchronously.
+CALLBACK, when given, is called with the envelope once it arrives (used by tests)."
   (interactive)
-  (let* ((args '("session" "list" "--output" "json"))
-         (envelope (safeslop--call-json args)))
-    (safeslop--show-envelope-buffer "*safeslop sessions*" args envelope)))
+  (let ((args '("session" "list" "--output" "json")))
+    (safeslop--call-json-async
+     args
+     (lambda (envelope)
+       (safeslop--show-envelope-buffer "*safeslop sessions*" args envelope)
+       (when callback (funcall callback envelope))))))
 
 ;;;###autoload
-(defun safeslop-session-status (&optional session-id)
-  "Show SESSION-ID status via the JSON contract."
+(defun safeslop-session-status (&optional session-id callback)
+  "Show SESSION-ID status via the JSON contract, asynchronously.
+CALLBACK, when given, is called with the envelope once it arrives (used by tests)."
   (interactive (list (read-string "Session id: ")))
-  (let* ((args (list "session" "status" "--session-id" session-id "--output" "json"))
-         (envelope (safeslop--call-json args)))
-    (safeslop--show-envelope-buffer "*safeslop session status*" args envelope)))
+  (let ((args (list "session" "status" "--session-id" session-id "--output" "json")))
+    (safeslop--call-json-async
+     args
+     (lambda (envelope)
+       (safeslop--show-envelope-buffer "*safeslop session status*" args envelope)
+       (when callback (funcall callback envelope))))))
 
 ;;;###autoload
-(defun safeslop-session-stop (&optional session-id)
-  "Stop SESSION-ID, revoking credentials, and parse the JSON envelope."
+(defun safeslop-session-stop (&optional session-id callback)
+  "Stop SESSION-ID, revoking credentials, asynchronously, and show the envelope.
+Credential revocation can take a moment, so the call is async and never blocks
+Emacs.  CALLBACK, when given, is called with the envelope once it arrives (tests)."
   (interactive (list (read-string "Session id: ")))
-  (let* ((args (list "session" "stop" "--session-id" session-id "--revoke-credentials" "--output" "json"))
-         (envelope (safeslop--call-json args)))
-    (safeslop--show-envelope-buffer "*safeslop session stop*" args envelope)))
+  (let ((args (list "session" "stop" "--session-id" session-id "--revoke-credentials" "--output" "json")))
+    (safeslop--call-json-async
+     args
+     (lambda (envelope)
+       (safeslop--show-envelope-buffer "*safeslop session stop*" args envelope)
+       (when callback (funcall callback envelope))))))
 
 ;;;###autoload
 (defun safeslop-session-reattach (&optional session-id)

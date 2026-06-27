@@ -105,22 +105,21 @@
 
 (ert-deftest safeslop-test-portal-rows-from-sessions ()
   "`safeslop-portal--rows' builds id + columns from a parsed session list."
-  (let ((envelope (safeslop-contract-parse-string
-                   (concat "{\"schema_version\":1,\"ok\":true,\"data\":{\"sessions\":"
-                           "[{\"session_id\":\"sess-abc123\",\"agent\":\"claude\","
-                           "\"environment\":\"sandbox\",\"network\":\"deny\","
-                           "\"status\":\"running\",\"workspace\":\"/tmp/ws\"}]},"
-                           "\"warnings\":[],\"errors\":[]}"))))
-    (cl-letf (((symbol-function 'safeslop--call-json) (lambda (_args) envelope)))
-      (let* ((rows (safeslop-portal--rows))
-             (row (car rows))
-             (cols (cadr row)))
-        (should (= (length rows) 1))
-        (should (equal (car row) "sess-abc123"))
-        (should (equal (aref cols 1) "claude"))
-        (should (equal (aref cols 2) "sandbox"))
-        (should (equal (aref cols 3) "deny"))
-        (should (equal (aref cols 4) "running"))))))
+  (let* ((envelope (safeslop-contract-parse-string
+                    (concat "{\"schema_version\":1,\"ok\":true,\"data\":{\"sessions\":"
+                            "[{\"session_id\":\"sess-abc123\",\"agent\":\"claude\","
+                            "\"environment\":\"sandbox\",\"network\":\"deny\","
+                            "\"status\":\"running\",\"workspace\":\"/tmp/ws\"}]},"
+                            "\"warnings\":[],\"errors\":[]}")))
+         (rows (safeslop-portal--rows (safeslop-portal--sessions-from envelope)))
+         (row (car rows))
+         (cols (cadr row)))
+    (should (= (length rows) 1))
+    (should (equal (car row) "sess-abc123"))
+    (should (equal (aref cols 1) "claude"))
+    (should (equal (aref cols 2) "sandbox"))
+    (should (equal (aref cols 3) "deny"))
+    (should (equal (aref cols 4) "running"))))
 
 (ert-deftest safeslop-test-scalar-json-sentinels ()
   (should (equal (safeslop--scalar t) "true"))
@@ -200,21 +199,22 @@
 (ert-deftest safeslop-test-portal-surfaces-error ()
   "A failed session list leaves the portal empty and reports the error."
   (let (msgs)
-    (cl-letf (((symbol-function 'safeslop--call-json)
-               (lambda (_) (safeslop--error-envelope "CLIENT_NON_JSON" "stale binary; run make install")))
-              ((symbol-function 'message)
+    (cl-letf (((symbol-function 'message)
                (lambda (fmt &rest a) (push (apply #'format fmt a) msgs))))
-      (should (null (safeslop-portal--rows)))
-      (should (cl-some (lambda (m) (string-match-p "stale binary" m)) msgs)))))
+      (let ((sessions (safeslop-portal--sessions-from
+                       (safeslop--error-envelope "CLIENT_NON_JSON" "stale binary; run make install"))))
+        (should (null sessions))
+        (should (null (safeslop-portal--rows sessions)))
+        (should (cl-some (lambda (m) (string-match-p "stale binary" m)) msgs))))))
 
 ;;; Portal in-buffer shortcut legend + help (slopmaxx-style) -----------------
 
 (ert-deftest safeslop-test-portal-legend-in-buffer ()
   "The portal renders its shortcut legend as buffer text above the rows."
-  (cl-letf (((symbol-function 'safeslop--call-json)
-             (lambda (_)
-               (safeslop-contract-parse-string
-                "{\"schema_version\":1,\"ok\":true,\"data\":{\"sessions\":[]},\"warnings\":[],\"errors\":[]}"))))
+  (cl-letf (((symbol-function 'safeslop--call-json-async)
+             (lambda (_args cb)
+               (funcall cb (safeslop-contract-parse-string
+                            "{\"schema_version\":1,\"ok\":true,\"data\":{\"sessions\":[]},\"warnings\":[],\"errors\":[]}")))))
     (with-temp-buffer
       (safeslop-portal-mode)
       (safeslop-portal--render)
@@ -245,14 +245,13 @@
                            "{\"session_id\":\"sess-c\",\"agent\":\"pi\",\"environment\":\"sandbox\","
                            "\"network\":\"deny\",\"status\":\"created\",\"workspace\":\"/w\"}]},"
                            "\"warnings\":[],\"errors\":[]}"))))
-    (cl-letf (((symbol-function 'safeslop--call-json) (lambda (_) envelope)))
-      (let* ((rows (safeslop-portal--rows))
-             (running (cl-find "sess-r" rows :key #'car :test #'equal))
-             (created (cl-find "sess-c" rows :key #'car :test #'equal)))
-        (should (eq (get-text-property 0 'face (aref (cadr running) 4)) 'success))
-        (should (eq (get-text-property 0 'face (aref (cadr created) 4)) 'warning))
-        (should (equal (aref (cadr running) 5) "4242"))
-        (should (equal (aref (cadr created) 5) "—"))))))
+    (let* ((rows (safeslop-portal--rows (safeslop-portal--sessions-from envelope)))
+           (running (cl-find "sess-r" rows :key #'car :test #'equal))
+           (created (cl-find "sess-c" rows :key #'car :test #'equal)))
+      (should (eq (get-text-property 0 'face (aref (cadr running) 4)) 'success))
+      (should (eq (get-text-property 0 'face (aref (cadr created) 4)) 'warning))
+      (should (equal (aref (cadr running) 5) "4242"))
+      (should (equal (aref (cadr created) 5) "—")))))
 
 ;;; Portal Age column --------------------------------------------------------
 
