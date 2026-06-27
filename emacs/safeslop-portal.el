@@ -117,6 +117,20 @@ area so the empty table is not silently mysterious."
         (when (and tabulated-list-entries (= (point) (point-min)))
           (ignore-errors (forward-line 1)))))))
 
+(defconst safeslop-portal--key-hints
+  '(("RET" . "open") ("R" . "reattach") ("i" . "status") ("k" . "stop")
+    ("n" . "new") ("g" . "refresh") ("d" . "doctor") ("L" . "debug")
+    ("?" . "help") ("q" . "quit"))
+  "Key/action pairs shown in the portal header line.")
+
+(defun safeslop-portal--header-line ()
+  "Build the portal's shortcut header-line string (keys faced as bindings)."
+  (concat " "
+          (mapconcat (lambda (pair)
+                       (concat (propertize (car pair) 'face 'help-key-binding)
+                               " " (cdr pair)))
+                     safeslop-portal--key-hints "  ")))
+
 (defvar safeslop-portal-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "RET") #'safeslop-portal-open)
@@ -128,6 +142,7 @@ area so the empty table is not silently mysterious."
     (define-key map (kbd "g")   #'safeslop-portal-refresh)
     (define-key map (kbd "d")   #'safeslop-doctor)
     (define-key map (kbd "L")   #'safeslop-debug-log)
+    (define-key map (kbd "?")   #'describe-mode)
     (define-key map (kbd "q")   #'quit-window)
     map)
   "Keymap for `safeslop-portal-mode'.")
@@ -144,7 +159,11 @@ area so the empty table is not silently mysterious."
          ("Workspace" 44 t)])
   (setq tabulated-list-padding 1)
   (setq tabulated-list-sort-key '("Status" . nil))
-  (tabulated-list-init-header))
+  ;; Move the column header into the buffer so the window header line is free for
+  ;; the shortcut hints.  init-header resets `header-line-format', so set it after.
+  (setq tabulated-list-use-header-line nil)
+  (tabulated-list-init-header)
+  (setq header-line-format (safeslop-portal--header-line)))
 
 ;;;###autoload
 (defun safeslop-portal ()
@@ -158,7 +177,8 @@ d doctor, L debug log, q quit."
         (safeslop-portal-mode))
       (setq tabulated-list-entries (safeslop-portal--rows))
       (tabulated-list-print t))
-    (pop-to-buffer buf)
+    ;; Take the whole window rather than splitting it; the portal is a full view.
+    (switch-to-buffer buf)
     buf))
 
 ;;;###autoload
