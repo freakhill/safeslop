@@ -203,24 +203,53 @@ Return non-nil if the socket is up after this call."
         (when (safeslop-daemon-start)
           (safeslop-daemon-wait)))))
 
+(defun safeslop--error-envelope (code message)
+  "Build a client-side error envelope alist carrying CODE and MESSAGE.
+Shaped so the `safeslop-contract-*' accessors and the output renderer treat it
+like a real failed envelope."
+  (list (cons 'schema_version 1)
+        (cons 'ok :json-false)
+        (cons 'data nil)
+        (cons 'warnings nil)
+        (cons 'errors (list (list (cons 'code code) (cons 'message message))))))
+
 (defun safeslop--call-json (args)
   "Run safeslop with ARGS and parse stdout as a contract envelope.
 ARGS is passed to `call-process' as an argv list; no shell is used.  safeslop is
 a self-contained CLI (no daemon round-trip), so each command is a direct
-subprocess; the call and its result are recorded in the debug log."
+subprocess; the call and its result are recorded in the debug log.
+
+Degrades gracefully: a missing program or non-JSON output (e.g. a stale binary
+that predates a subcommand) yields a CLIENT_* error envelope with a clear,
+actionable message instead of a raw `json-parse-error' crash."
   (safeslop--debug :event 'call :argv (string-join args " "))
   (with-temp-buffer
-    (let* ((status (apply #'call-process safeslop-program nil t nil args))
-           (stdout (buffer-string))
-           (envelope (safeslop-contract-parse-string stdout))
-           (code (safeslop-contract-first-error-code envelope)))
-      (unless (equal status 0)
-        (setq safeslop-last-error
-              (or code (format "safeslop exited with status %s" status))))
-      (safeslop--debug :event 'result :status status
-                       :ok (if (safeslop-contract-ok-p envelope) "t" "nil")
-                       :error (or code "-"))
-      envelope)))
+    (let ((status (condition-case err
+                      (apply #'call-process safeslop-program nil t nil args)
+                    (error (insert (error-message-string err)) -1))))
+      (let* ((stdout (buffer-string))
+             (envelope (condition-case _err
+                           (safeslop-contract-parse-string stdout)
+                         (error nil))))
+        (if envelope
+            (let ((code (safeslop-contract-first-error-code envelope)))
+              (unless (equal status 0)
+                (setq safeslop-last-error
+                      (or code (format "safeslop exited with status %s" status))))
+              (safeslop--debug :event 'result :status status
+                               :ok (if (safeslop-contract-ok-p envelope) "t" "nil")
+                               :error (or code "-"))
+              envelope)
+          ;; Non-JSON / unparseable output: surface a useful message, don't crash.
+          (let* ((line (string-trim (or (car (split-string stdout "\n" t "[ \t\r]*")) "")))
+                 (msg (if (string-empty-p line)
+                          (format "safeslop produced no output (status %s); is `%s' installed and current? Run `make install'."
+                                  status safeslop-program)
+                        (format "safeslop did not return JSON (status %s): %s — is `%s' current? Run `make install'."
+                                status line safeslop-program))))
+            (setq safeslop-last-error msg)
+            (safeslop--debug :event 'result :status status :ok "nil" :error "non-json")
+            (safeslop--error-envelope "CLIENT_NON_JSON" msg)))))))
 
 (defun safeslop--scalar (v)
   "Render a parsed JSON scalar V as a display string.

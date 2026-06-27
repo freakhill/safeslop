@@ -48,10 +48,15 @@
     (or id "")))
 
 (defun safeslop-portal--sessions ()
-  "Fetch the session list and return the parsed sessions (a list of alists)."
-  (let* ((envelope (safeslop--call-json '("session" "list" "--output" "json")))
-         (data (safeslop-contract-data envelope)))
-    (alist-get 'sessions data)))
+  "Fetch the session list and return the parsed sessions (a list of alists).
+On a failed `session list' (e.g. a stale binary), surface the error in the echo
+area so the empty table is not silently mysterious."
+  (let ((envelope (safeslop--call-json '("session" "list" "--output" "json"))))
+    (unless (safeslop-contract-ok-p envelope)
+      (message "safeslop portal: %s"
+               (or (alist-get 'message (car (safeslop-contract-errors envelope)))
+                   "session list failed")))
+    (alist-get 'sessions (safeslop-contract-data envelope))))
 
 (defun safeslop-portal--rows ()
   "Build `tabulated-list-entries' from the live session list."
