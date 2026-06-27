@@ -351,7 +351,7 @@ var sessionProcessAlive = engsession.ProcessAlive
 
 func cmdSession() *cobra.Command {
 	c := &cobra.Command{Use: "session", Short: "Manage Emacs-visible safeslop sessions"}
-	c.AddCommand(cmdSessionCreate(), cmdSessionRun(), cmdSessionStatus(), cmdSessionStop(), cmdSessionList())
+	c.AddCommand(cmdSessionCreate(), cmdSessionRun(), cmdSessionStatus(), cmdSessionStop(), cmdSessionList(), cmdSessionSupervise())
 	return c
 }
 
@@ -476,6 +476,7 @@ func cmdSessionStop() *cobra.Command {
 
 func cmdSessionRun() *cobra.Command {
 	var id string
+	var detach bool
 	c := &cobra.Command{
 		Use:   "run --session-id <id>",
 		Short: "Run a safeslop session's agent",
@@ -485,6 +486,15 @@ func cmdSessionRun() *cobra.Command {
 			sess, err := store.Get(id)
 			if err != nil {
 				return err
+			}
+			if detach {
+				// Detached: re-exec a supervisor that owns the agent + its PTY and
+				// serves it over the per-session socket, then return so the issuing
+				// buffer is freed immediately. No local tty is needed here (the
+				// supervisor allocates the PTY; the user attaches later), so the
+				// interactive PTY guard below is intentionally skipped (specs/0051
+				// D1, PR3).
+				return runDetach(store, id)
 			}
 			prof := policy.Profile{Agent: sess.Agent, Environment: sess.Environment, Network: sess.Network, Workspace: sess.Workspace}
 			argv, err := agentArgv(prof)
@@ -515,6 +525,109 @@ func cmdSessionRun() *cobra.Command {
 			_, _ = store.Finish(id, code, lastErr, time.Now())
 			if runErr != nil {
 				return runErr
+			}
+			os.Exit(code)
+			return nil
+		},
+	}
+	c.Flags().StringVar(&id, "session-id", "", "session id")
+	c.Flags().BoolVar(&detach, "detach", false, "run the agent under a detached supervisor and return immediately")
+	return c
+}
+
+// detachReadyTimeout bounds how long `run --detach` waits for the supervisor's
+// socket to appear before declaring the launch failed (specs/0051 Q1). Overridable
+// in tests.
+var detachReadyTimeout = 2 * time.Second
+
+// launchSupervisor re-execs this binary as a detached per-session supervisor (the
+// hidden `session supervise`) and returns the supervisor's PID. This is the
+// canonical Go daemonization: a new session via Setsid (no controlling tty), which
+// also makes the child its own process-group leader so a later `session stop` can
+// signal the whole tree via kill(-pgid) (specs/0051 D4), plus fully detached stdio.
+// Overridable in tests so no real setsid or second binary is needed (the specs/0051
+// D1 test seam).
+var launchSupervisor = func(id string) (int, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return 0, err
+	}
+	null, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+	if err != nil {
+		return 0, err
+	}
+	defer null.Close()
+	cmd := osexec.Command(exe, "session", "supervise", "--session-id", id)
+	// Setsid only: it makes the child a new session AND process-group leader
+	// (pgid == pid). Adding Setpgid on top is invalid — a session leader cannot
+	// setpgid (EPERM), which fails the fork/exec ("operation not permitted").
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = null, null, null
+	if err := cmd.Start(); err != nil {
+		return 0, err
+	}
+	pid := cmd.Process.Pid
+	_ = cmd.Process.Release() // detach: the daemon is never Wait()ed on
+	return pid, nil
+}
+
+// runDetach launches the supervisor, waits (bounded) for its socket so a reported
+// success means the agent is actually reachable, records the supervisor PID, and
+// emits the session envelope. On readiness timeout it kills the half-born
+// supervisor and emits a contract error, leaving the session not-running so no
+// phantom is left for liveness/reconcile or `session stop` (specs/0051 Q1).
+func runDetach(store engsession.Store, id string) error {
+	pid, err := launchSupervisor(id)
+	if err != nil {
+		return emitContractError(jsoncontract.CodeIOError, "launch session supervisor", map[string]any{"error": err.Error()})
+	}
+	sockPath := filepath.Join(store.Dir, id+".sock")
+	if !waitForFile(sockPath, detachReadyTimeout) {
+		_ = sessionKillProcess(pid) // best-effort; the supervisor never became ready
+		return emitContractError(jsoncontract.CodeIOError, "session supervisor did not become ready", map[string]any{"session_id": id})
+	}
+	if _, err := store.MarkRunning(id, pid, time.Now()); err != nil {
+		return err
+	}
+	sess, err := store.Get(id)
+	if err != nil {
+		return err
+	}
+	emitContract(jsoncontract.OK(sessionData(sess)))
+	return nil
+}
+
+// waitForFile polls until path exists or the timeout elapses.
+func waitForFile(path string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// cmdSessionSupervise is the hidden re-exec target launched by `run --detach`. It
+// runs the per-session supervisor in this process and exits with the agent's code.
+// SIGTERM cancels the run so the supervisor tears the agent + boundary down before
+// exiting; os.Exit lives only here at the cobra boundary (specs/0051 PR2/PR3).
+func cmdSessionSupervise() *cobra.Command {
+	var id string
+	c := &cobra.Command{
+		Use:    "supervise --session-id <id>",
+		Short:  "(internal) run a detached session supervisor",
+		Hidden: true,
+		Args:   cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM)
+			defer stop()
+			code, err := Supervise(ctx, sessionStore(), id, time.Now)
+			if err != nil {
+				return err
 			}
 			os.Exit(code)
 			return nil
