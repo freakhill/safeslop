@@ -9,6 +9,35 @@ ERT tests consume Go's canonical `internal/jsoncontract/testdata/*.golden.json`
 fixtures directly.  When Doom/Evil is present, output buffers enter Evil normal
 state and get normal-state bindings for refresh/error/quit actions.
 
+## Portal
+
+`M-x safeslop` (alias of `safeslop-portal`, also `C-c s P`) opens the **portal**: a
+`tabulated-list` dashboard of every session — id, agent, environment, network,
+status, workspace — that you act on in place:
+
+| key | action |
+|---|---|
+| `RET` / `o` | open (run the agent in a term buffer) |
+| `R` | reattach to a detached supervisor |
+| `i` | status |
+| `k` | stop (revoke credentials) |
+| `n` | new session |
+| `g` | refresh |
+| `d` | doctor · `L` debug log · `q` quit |
+
+Every command shows its result — `doctor`, `status`, `validate`, and the rest
+render the envelope's full `data` payload (not just `ok:`), and `session list`
+becomes the portal table.
+
+## Debug buffer
+
+`M-x safeslop-debug-log` (`C-c s L`) opens `*safeslop debug*`, a redacted client
+diagnostics log: each CLI invocation and its result is one timestamped line
+(`event=call argv=… / event=result status=0 ok=t`).  Only allowlisted, non-secret
+fields are written.  Toggle with `safeslop-debug-log-enabled`.  safeslop is a
+self-contained CLI, so commands run as direct subprocesses — no daemon round-trip
+is attempted on the command path (see Daemon autostart below).
+
 ## Install from the repo
 
 ```sh
@@ -51,9 +80,10 @@ The Emacs package mirrors slopmaxx's local developer shape:
 - socket: `~/Library/Application Support/safeslop/safeslop.sock`
 - log: `~/Library/Application Support/safeslop/daemon.log`
 
-When a command runs and no socket is present, `safeslop-autostart-daemon` tries to
-start a daemon.  Current safeslop builds may not ship a daemon yet; in that case
-autostart is a no-op until one of these points at an executable:
+safeslop is a self-contained CLI, so the Emacs commands no longer attempt a daemon
+autostart on the command path.  `M-x safeslop-daemon-start` (`C-c s D`) remains for
+explicitly launching a daemon should one ship later; it resolves a binary from one
+of these:
 
 - `safeslop-daemon-program`
 - `$SAFESLOP_DAEMON_BIN`
