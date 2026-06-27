@@ -245,3 +245,16 @@
         (should (eq (get-text-property 0 'face (aref (cadr created) 4)) 'warning))
         (should (equal (aref (cadr running) 5) "4242"))
         (should (equal (aref (cadr created) 5) "—"))))))
+
+;;; Portal Age column --------------------------------------------------------
+
+(ert-deftest safeslop-test-portal-humanize-age ()
+  (should (equal (safeslop-portal--humanize-age 5) "now"))
+  (should (equal (safeslop-portal--humanize-age 90) "1m"))
+  (should (equal (safeslop-portal--humanize-age 7200) "2h"))
+  (should (equal (safeslop-portal--humanize-age 200000) "2d")))
+
+(ert-deftest safeslop-test-portal-age-cell ()
+  (should (equal (safeslop-portal--age '((updated_at . ""))) "—"))
+  (should (equal (safeslop-portal--age '((updated_at . "not-a-time"))) "—"))
+  (should-not (equal (safeslop-portal--age '((updated_at . "2026-06-28T00:00:00Z"))) "—")))

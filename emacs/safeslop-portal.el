@@ -19,6 +19,7 @@
 
 (require 'subr-x)
 (require 'tabulated-list)
+(require 'iso8601)
 (require 'safeslop-contract)
 
 (defvar safeslop-program)
@@ -65,6 +66,24 @@
   (let ((pid (safeslop-portal--field sess 'pid)))
     (if (string-empty-p pid) "—" pid)))
 
+(defun safeslop-portal--humanize-age (seconds)
+  "Render an age of SECONDS as a compact relative string."
+  (cond ((< seconds 60) "now")
+        ((< seconds 3600) (format "%dm" (floor seconds 60)))
+        ((< seconds 86400) (format "%dh" (floor seconds 3600)))
+        (t (format "%dd" (floor seconds 86400)))))
+
+(defun safeslop-portal--age (sess)
+  "Return how long ago SESS was last updated, compact, or an em dash."
+  (let ((ts (safeslop-portal--field sess 'updated_at)))
+    (if (string-empty-p ts)
+        "—"
+      (condition-case nil
+          (safeslop-portal--humanize-age
+           (float-time (time-subtract (current-time)
+                                      (encode-time (iso8601-parse ts)))))
+        (error "—")))))
+
 (defun safeslop-portal--sessions ()
   "Fetch the session list and return the parsed sessions (a list of alists).
 On a failed `session list' (e.g. a stale binary), surface the error in the echo
@@ -88,6 +107,7 @@ area so the empty table is not silently mysterious."
                      (safeslop-portal--field sess 'network)
                      (safeslop-portal--status-cell (safeslop-portal--field sess 'status))
                      (safeslop-portal--pid sess)
+                     (safeslop-portal--age sess)
                      (abbreviate-file-name (safeslop-portal--field sess 'workspace))))))
    (sort (copy-sequence (safeslop-portal--sessions))
          (lambda (a b)
@@ -192,7 +212,8 @@ column titles stay in the window header line)."
          ("Net" 5 nil)
          ("Status" 10 nil)
          ("PID" 7 nil)
-         ("Workspace" 38 nil)])
+         ("Age" 6 nil)
+         ("Workspace" 32 nil)])
   (setq tabulated-list-padding 1)
   (tabulated-list-init-header))
 
