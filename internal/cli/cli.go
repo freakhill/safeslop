@@ -1280,6 +1280,10 @@ type runIO struct {
 // forwarded without standing up docker.
 var containerLaunch = container.Launch
 
+// vmLaunch is the vm-launch seam: the real vm.Launch in production, swappable in
+// tests to assert the detached supervisor's PTY is forwarded without booting a VM.
+var vmLaunch = vm.Launch
+
 func runProfileCtx(ctx context.Context, name string, prof policy.Profile, argv []string, ws string, stdio ...runIO) (int, error) {
 	var rio runIO
 	if len(stdio) > 0 {
@@ -1347,7 +1351,10 @@ func runProfileCtx(ctx context.Context, name string, prof policy.Profile, argv [
 		if prof.Toolchain != nil {
 			tk = prof.Toolchain.Kind
 		}
-		return vm.Launch(ctx, argv, prof.Network, secretEnv, stageDir, name, tk)
+		// A detached supervisor passes a PTY slave it owns (rio set); forward it so the
+		// agent's remote tty (ssh -t) bridges to the supervisor's PTY for attach. Coupled
+		// (rio zero) leaves stdio nil and ssh runs on the user's terminal (specs/0051).
+		return vmLaunch(ctx, engexec.LaunchSpec{Argv: argv, Stdin: rio.Stdin, Stdout: rio.Stdout, Stderr: rio.Stderr}, prof.Network, secretEnv, stageDir, name, tk)
 	default:
 		return 1, fmt.Errorf("unknown environment %q", prof.Environment)
 	}
