@@ -13,7 +13,7 @@ state and get normal-state bindings for refresh/error/quit actions.
 
 `M-x safeslop` (alias of `safeslop-portal`, also `C-c s P`) opens the **portal**: a
 `tabulated-list` dashboard of every session — id, agent, environment, network,
-status, workspace — that you act on in place:
+status (colour-coded), PID, age, workspace — that you act on in place:
 
 | key | action |
 |---|---|
@@ -22,12 +22,19 @@ status, workspace — that you act on in place:
 | `i` | status |
 | `k` | stop (revoke credentials) |
 | `n` | new session |
-| `g` | refresh |
+| `g` | refresh now |
+| `a` | toggle auto-refresh |
 | `d` | doctor · `L` debug log · `q` quit |
 
 Every command shows its result — `doctor`, `status`, `validate`, and the rest
 render the envelope's full `data` payload (not just `ok:`), and `session list`
 becomes the portal table.
+
+While the portal is displayed, it **auto-refreshes** every
+`safeslop-portal-refresh-interval` seconds (default 5; set to nil to disable),
+keeping point on the same session across redraws and skipping a tick while a
+prompt is open.  `g` forces an immediate refresh; `a` toggles the timer for the
+session.
 
 ## Debug buffer
 
