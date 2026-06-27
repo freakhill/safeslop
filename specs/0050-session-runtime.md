@@ -156,19 +156,26 @@ Each PR is independently shippable, TDD-first, and hermetic (no live forge,
 container daemon, or VM in unit tests — fake the boundary via the existing
 `engexec`/runner seams and a stub agent binary).
 
-### PR1 — Honest liveness and PID
+### PR1 — Honest liveness (implemented)
 
 Purpose:
 
-- Record the **agent/boundary** PID, not the wrapper's, by having each boundary
-  launcher report the leader PID it started (extend the `engexec.LaunchSpec`
-  call sites to surface `cmd.Process.Pid` / the ssh client PID through a small
-  result struct). Store it via `MarkRunning`.
-- Add liveness reconciliation: `Store.Get`/`List` mark a `running` session whose
-  recorded PID is no longer alive as `stopped` with a synthetic
-  `last_error: "process exited without recording status"` (a `reconcile(now)`
-  helper, pure and unit-testable with an injected `isAlive func(int) bool`).
-- `session status` reports the reconciled state.
+- Add liveness reconciliation: a `running` session whose recorded PID is no
+  longer alive is reported (and persisted once) as `stopped` with
+  `last_error: "run process exited without recording status"`. A pure
+  `reconcile(sess, now, isAlive)` helper, unit-testable with an injected
+  `isAlive func(int) bool`, plus `Store.GetReconciled`/`ListReconciled` wrappers
+  that persist the correction, and a default `ProcessAlive` probe (signal 0).
+- `session status` and `session list` report the reconciled state
+  (`sessionProcessAlive`, overridable in tests).
+
+Decomposition refinement: PR1 anchors liveness on the **run-wrapper PID** that
+`MarkRunning` already records — in the coupled lifecycle (D1) the wrapper holds
+the agent for the whole run, so a dead wrapper PID faithfully means the run
+ended. Surfacing the *boundary* process PID requires an `onStart` callback
+through the blocking launchers, which is the same plumbing PR2 needs for
+`Setpgid`/group-kill — so boundary-PID recording moves to PR2, where it belongs.
+PID reuse is a known, accepted limitation of the wrapper-PID anchor.
 
 Files:
 
@@ -182,13 +189,18 @@ Required tests:
 - `TestReconcileMarksDeadRunningSessionStopped`
 - `TestReconcileLeavesLiveSessionRunning`
 - `TestReconcileIsIdempotentOnStopped`
+- `TestGetReconciledPersistsDeadTransition`
+- `TestListReconciledCorrectsDeadSessions`
 - `TestSessionStatusReportsReconciledState`
-- `TestMarkRunningRecordsBoundaryPID`
 
-### PR2 — Process-group ownership and boundary-aware teardown
+### PR2 — Process-group ownership, boundary PID, and teardown
 
 Purpose:
 
+- Surface the boundary leader PID via an `onStart(pid)` callback threaded
+  through the boundary launchers, and record it through `MarkRunning` so the
+  stored PID identifies the agent's boundary process, not the run wrapper
+  (`TestMarkRunningRecordsBoundaryPID`).
 - Launch boundary processes with `Setpgid` so the wrapper leads a process group
   (`internal/engine/exec`).
 - Install a `SIGTERM`/`SIGINT` handler in the run path that runs the full
@@ -210,6 +222,7 @@ Files:
 
 Required tests:
 
+- `TestMarkRunningRecordsBoundaryPID`
 - `TestRunTeardownRunsOnSIGTERM` (stub agent that blocks; assert stage dir wiped + teardown hook fired after signal)
 - `TestStopSignalsProcessGroupNotBarePID`
 - `TestStopRevokesBeforeKillAndIsIdempotent` (extend existing)

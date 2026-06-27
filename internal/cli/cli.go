@@ -341,6 +341,11 @@ var sessionKillProcess = func(pid int) error {
 	return proc.Signal(syscall.SIGTERM)
 }
 
+// sessionProcessAlive probes whether a recorded session PID is still live, so
+// status/list can reconcile a session whose run wrapper died without recording
+// an exit. Overridable in tests.
+var sessionProcessAlive = engsession.ProcessAlive
+
 func cmdSession() *cobra.Command {
 	c := &cobra.Command{Use: "session", Short: "Manage Emacs-visible safeslop sessions"}
 	c.AddCommand(cmdSessionCreate(), cmdSessionRun(), cmdSessionStatus(), cmdSessionStop(), cmdSessionList())
@@ -391,7 +396,7 @@ func cmdSessionList() *cobra.Command {
 			if output != "json" {
 				return fmt.Errorf("session list requires --output json")
 			}
-			sessions, err := sessionStore().List()
+			sessions, err := sessionStore().ListReconciled(time.Now(), sessionProcessAlive)
 			if err != nil {
 				return emitContractError(jsoncontract.CodeIOError, "list sessions", map[string]any{"error": err.Error()})
 			}
@@ -417,7 +422,7 @@ func cmdSessionStatus() *cobra.Command {
 			if output != "json" && output != "jsonl" {
 				return fmt.Errorf("session status requires --output json or jsonl")
 			}
-			sess, err := sessionStore().Get(id)
+			sess, err := sessionStore().GetReconciled(id, time.Now(), sessionProcessAlive)
 			if err != nil {
 				if errors.Is(err, engsession.ErrNotFound) {
 					return emitContractError(jsoncontract.CodeSessionNotFound, "session not found", map[string]any{"session_id": id})

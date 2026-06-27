@@ -185,6 +185,35 @@ func TestSessionStopRevokesBeforeKillAndIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestSessionStatusReportsReconciledState(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+	oldAlive := sessionProcessAlive
+	sessionProcessAlive = func(int) bool { return false } // run wrapper is gone
+	defer func() { sessionProcessAlive = oldAlive }()
+
+	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--workspace", ws, "--output", "json")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	id := parseEnvelopeForTest(t, out).Data["session_id"].(string)
+	if _, err := sessionStore().MarkRunning(id, 4242, nowForTest(t)); err != nil {
+		t.Fatalf("mark running: %v", err)
+	}
+
+	out, err = runRootForTest(t, ws, "session", "status", "--session-id", id, "--output", "json")
+	if err != nil {
+		t.Fatalf("status: %v\nout=%s", err, out)
+	}
+	env := parseEnvelopeForTest(t, out)
+	if !env.OK || env.Data["status"] != "stopped" {
+		t.Fatalf("status not reconciled to stopped: %+v", env.Data)
+	}
+	if _, ok := env.Data["last_error"].(string); !ok {
+		t.Fatalf("expected last_error on a reconciled session: %+v", env.Data)
+	}
+}
+
 func TestSessionStatusNotFoundUsesContractCode(t *testing.T) {
 	ws := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())

@@ -76,6 +76,11 @@ commands emit the shared versioned JSON contract envelope (`schema_version`,
 `ok`, `data`, `warnings`, `errors`). Session status also supports `--output
 jsonl` for a line-delimited monitor stream.
 
+`session status` and `session list` reconcile liveness: a session still marked
+`running` whose run process is gone (crash, kill, host sleep) is reported — and
+persisted — as `stopped`, so status never lies about a session that is no longer
+executing.
+
 ## `safeslop.cue` reference
 
 A representative profile:
