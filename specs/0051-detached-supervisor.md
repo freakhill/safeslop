@@ -370,6 +370,19 @@ Where the build diverged from the sketch above, recorded here per the 0050
   supervisor's PTY slave (`RunInTerminal`/`sandbox.Launch` already forward stdio).
   Container/VM keep their own tty (`RunInPTY` / `ssh -t`); their detached PTY
   binding is a noted follow-up.
+- **Host controlling terminal (`Setctty`, follow-up).** Binding the PTY slave as
+  the agent's *stdio* (PR2) did not make it the agent's *controlling terminal*:
+  under the daemon there is no inherited tty, so the host agent could not open
+  `/dev/tty`, receive terminal-generated signals, or hang up cleanly. `LaunchSpec`
+  gained `ControllingTTY`; the detached host path (`rio.Stdin != nil`) now launches
+  the agent with `SysProcAttr{Setsid, Setctty, Ctty: 0}`, making the PTY slave its
+  controlling terminal. The coupled path (`rio` zero) is untouched — it inherits
+  the user's real terminal and a `TIOCSCTTY` there would steal it. Teardown is not
+  regressed: the agent is now a session leader, so killing it on ctx-cancel hangs
+  up the terminal and the kernel `SIGHUP`s its foreground group — the same subtree
+  teardown `RunInPTY` already relies on (proven by a mirrored test). Sandbox ctty
+  (it launches through `sandbox.Launch`, a separate path) and container/VM remain
+  follow-ups.
 - **Daemonization is `Setsid` only (PR3, D1).** `SysProcAttr{Setsid: true}` alone
   makes the supervisor a new session **and** process-group leader (`pgid == pid`) —
   exactly what D4's `kill(-pgid)` needs. `Setsid + Setpgid` together fails

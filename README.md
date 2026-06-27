@@ -97,7 +97,9 @@ read-only `--output jsonl` status monitor on that code.
 
 `session run --detach` gives a session a life independent of the Emacs buffer that
 started it: it launches a per-session **supervisor** that owns the agent and its
-PTY, serves that PTY over a per-session unix socket
+PTY — which, for a host session, is made the agent's controlling terminal so it
+behaves like a real interactive run (`/dev/tty`, terminal signals, hangup) — and
+serves that PTY over a per-session unix socket
 (`$SAFESLOP_STATE_DIR/sessions/<id>.sock`, surfaced as the session's `socket`
 field; when that path would exceed the `sun_path` limit it is transparently
 relocated to a short private runtime dir), and returns immediately. `session attach --session-id <id>` rejoins the

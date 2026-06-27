@@ -37,15 +37,26 @@ type LaunchSpec struct {
 	Stdin  io.Reader // nil means os.Stdin
 	Stdout io.Writer // nil means os.Stdout
 	Stderr io.Writer // nil means os.Stderr
+
+	// ControllingTTY makes the child a session leader and acquires its stdin (an
+	// *os.File PTY slave, child fd 0) as its controlling terminal. The detached
+	// supervisor host path sets it so the agent gets real controlling-terminal
+	// semantics (/dev/tty, terminal-generated signals, SIGHUP-on-hangup) on the PTY
+	// the supervisor owns (specs/0051). It must NOT be set on the coupled path,
+	// where the child shares the user's real terminal and a TIOCSCTTY would steal
+	// it. When set, Stdin must be an *os.File (the PTY slave).
+	ControllingTTY bool
 }
 
 // ErrNoArgv is returned when a LaunchSpec has no command to run.
 var ErrNoArgv = errors.New("exec: empty Argv")
 
 // RunInTerminal runs the child with inherited stdio (the direct host launch).
-// The child shares the parent's controlling terminal; because the parent blocks
-// in Wait, the child runs in the foreground and reads/writes the real tty.
-// Returns the child's exit code (or a non-zero code if it never started).
+// In the coupled path the child shares the parent's controlling terminal; because
+// the parent blocks in Wait, the child runs in the foreground and reads/writes the
+// real tty. With spec.ControllingTTY (the detached supervisor) the child instead
+// becomes a session leader and acquires its PTY-slave stdin as a fresh controlling
+// terminal. Returns the child's exit code (or a non-zero code if it never started).
 func RunInTerminal(ctx context.Context, spec LaunchSpec) (int, error) {
 	if len(spec.Argv) == 0 {
 		return 1, ErrNoArgv
@@ -56,6 +67,14 @@ func RunInTerminal(ctx context.Context, spec LaunchSpec) (int, error) {
 	cmd.Stdin = readerOr(spec.Stdin, os.Stdin)
 	cmd.Stdout = writerOr(spec.Stdout, os.Stdout)
 	cmd.Stderr = writerOr(spec.Stderr, os.Stderr)
+	if spec.ControllingTTY {
+		// Setsid puts the child in a new session (so it can own a controlling tty);
+		// Setctty + Ctty:0 makes its PTY-slave stdin that controlling terminal. On
+		// ctx-cancel exec kills the session leader, and the kernel then hangs up the
+		// terminal — SIGHUP to the foreground group — so the agent's subtree is torn
+		// down too (the same teardown RunInPTY relies on).
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true, Ctty: 0}
+	}
 	err := cmd.Run()
 	return exitCode(err), err
 }
