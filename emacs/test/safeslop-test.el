@@ -218,3 +218,30 @@
 
 (ert-deftest safeslop-test-portal-has-help-key ()
   (should (eq (lookup-key safeslop-portal-mode-map (kbd "?")) #'describe-mode)))
+
+;;; Portal status colours + PID column ---------------------------------------
+
+(ert-deftest safeslop-test-portal-status-face ()
+  (should (eq (safeslop-portal--status-face "running") 'success))
+  (should (eq (safeslop-portal--status-face "stopped") 'shadow))
+  (should (eq (safeslop-portal--status-face "created") 'warning))
+  (should (eq (safeslop-portal--status-face "exited") 'error))
+  (should (eq (safeslop-portal--status-face "weird") 'default)))
+
+(ert-deftest safeslop-test-portal-status-cell-and-pid ()
+  "Rows colour the Status cell by status and carry a PID column."
+  (let ((envelope (safeslop-contract-parse-string
+                   (concat "{\"schema_version\":1,\"ok\":true,\"data\":{\"sessions\":"
+                           "[{\"session_id\":\"sess-r\",\"agent\":\"claude\",\"environment\":\"vm\","
+                           "\"network\":\"deny\",\"status\":\"running\",\"pid\":4242,\"workspace\":\"/w\"},"
+                           "{\"session_id\":\"sess-c\",\"agent\":\"pi\",\"environment\":\"sandbox\","
+                           "\"network\":\"deny\",\"status\":\"created\",\"workspace\":\"/w\"}]},"
+                           "\"warnings\":[],\"errors\":[]}"))))
+    (cl-letf (((symbol-function 'safeslop--call-json) (lambda (_) envelope)))
+      (let* ((rows (safeslop-portal--rows))
+             (running (cl-find "sess-r" rows :key #'car :test #'equal))
+             (created (cl-find "sess-c" rows :key #'car :test #'equal)))
+        (should (eq (get-text-property 0 'face (aref (cadr running) 4)) 'success))
+        (should (eq (get-text-property 0 'face (aref (cadr created) 4)) 'warning))
+        (should (equal (aref (cadr running) 5) "4242"))
+        (should (equal (aref (cadr created) 5) "—"))))))
