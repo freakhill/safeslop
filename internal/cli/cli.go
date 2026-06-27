@@ -251,7 +251,7 @@ func cmdRun() *cobra.Command {
 					out["pnpm"] = prof.Credentials.Pnpm // token field is a ref, not a value
 				}
 				if prof.Environment == "sandbox" {
-					out["sandbox_profile"] = sandbox.Profile(ws, prof.Network, sandboxScope(prof.Files))
+					out["sandbox_profile"] = sandbox.Profile(ws, prof.Network, "", sandboxScope(prof.Files))
 				}
 				if jsonOut {
 					emitJSON(out)
@@ -274,7 +274,7 @@ func cmdRun() *cobra.Command {
 						}
 					}
 					if prof.Environment == "sandbox" {
-						fmt.Printf("--- seatbelt profile ---\n%s", sandbox.Profile(ws, prof.Network, sandboxScope(prof.Files)))
+						fmt.Printf("--- seatbelt profile ---\n%s", sandbox.Profile(ws, prof.Network, "", sandboxScope(prof.Files)))
 					}
 				}
 				return nil
