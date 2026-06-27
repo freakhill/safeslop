@@ -102,7 +102,9 @@ PTY, serves that PTY over a per-session unix socket
 field), and returns immediately. `session attach --session-id <id>` rejoins the
 running agent over that socket — bridging the local terminal, forwarding
 window-size changes, and exiting with the agent's code — with at most one client
-attached at a time. `session stop` then signals the supervisor's whole process
+attached at a time. Attaching when no supervisor is serving the socket reports
+`SESSION_NOT_RUNNING` rather than the more specific `SESSION_STOPPED`. `session
+stop` then signals the supervisor's whole process
 group (graceful `SIGTERM`, then `SIGKILL`) so the boundary tree is torn down and
 the socket removed; a supervisor that dies uncleanly has its stale socket swept on
 the next `session status`/`list` reconcile.

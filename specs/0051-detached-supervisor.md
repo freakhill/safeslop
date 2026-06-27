@@ -333,10 +333,15 @@ Required tests:
 - **Q1 — readiness race (resolved, PR3).** `run --detach` polls for the socket up
   to `detachReadyTimeout` (2s); on timeout it kills the half-born supervisor and
   emits an `IO_ERROR` contract error, leaving the session not-running (no phantom).
-- **Q2 — attach error code (deferred).** Attach to a session with no live
-  supervisor currently reuses `SESSION_STOPPED`; a dedicated `SESSION_NOT_RUNNING`
-  is deferred (the dial-failure path is unpinned by tests and the reuse is honest
-  enough for v1). The registry is append-only, so adding it later stays cheap.
+- **Q2 — attach error code (resolved, follow-up).** Attach now distinguishes the
+  dial failure from a bridge failure: a dial that never reaches a live supervisor
+  is wrapped in `errSupervisorUnreachable` and reported as the new
+  `SESSION_NOT_RUNNING` (added to the append-only registry, mirrored in
+  `safeslop-contract.el`); a failure on an already-live bridge keeps
+  `SESSION_STOPPED`. `attach` stays a pure client — it never loads the store — so a
+  never-created id and a stopped session both honestly read as "not running"
+  (distinguishing `SESSION_NOT_FOUND` would need a store lookup and is out of
+  scope). `attachFailureContract` is the pinned mapping.
 - **Q3 — JSONL event log retention (left for v1).** The per-session `<id>.jsonl`
   is a provisional event log: one JSON line per PTY-output chunk (base64), written
   by the supervisor's continuous reader and removed on teardown. Format and

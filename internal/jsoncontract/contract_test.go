@@ -29,6 +29,7 @@ func TestAllErrorCodesAreTheAppendOnlyV1Set(t *testing.T) {
 		CodeAgentUnsupported,
 		CodeSessionNotFound,
 		CodeSessionAlreadyRunning,
+		CodeSessionNotRunning,
 		CodeSessionStopped,
 		CodeSessionCancelled,
 		CodePTYUnavailable,
