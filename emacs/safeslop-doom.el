@@ -63,13 +63,18 @@
 
 ;;;###autoload
 (defun safeslop-doom-bind-leader ()
-  "Bind `safeslop-command-map' under Doom's leader at SPC o s when Doom is present.
-A no-op outside Doom Emacs.  Call this from Doom `config.el'."
+  "Bind `safeslop-command-map' under Doom's leader at SPC o S when Doom is present.
+A no-op outside Doom Emacs.  Call this from Doom `config.el'.
+
+The key is the capital S, not s: Doom's default `:os macos' module already owns
+SPC o s as the \"send to application\" prefix (Transmit/Launchbar/iTerm), so a
+lowercase binding would silently clobber it.  SPC o S is free and sits beside
+slopmaxx's SPC o m."
   (interactive)
   (when (fboundp 'map!)
     (eval '(map! :leader
                  (:prefix ("o" . "open")
-                  :desc "safeslop" "s" #'safeslop-command-map))
+                  :desc "safeslop" "S" #'safeslop-command-map))
           t)
     t))
 
