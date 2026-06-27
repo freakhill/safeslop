@@ -61,7 +61,8 @@ safeslop list [safeslop.cue]        list profiles and resolved tiers
 safeslop trust [safeslop.cue]       approve this policy's exact bytes
 safeslop run <profile> [--dry-run]  launch a trusted profile
 safeslop session create --agent <pi|claude|claude-code> --workspace <dir> --output json
-safeslop session run --session-id <id>
+safeslop session run --session-id <id> [--detach]
+safeslop session attach --session-id <id>
 safeslop session status --session-id <id> --output <json|jsonl>
 safeslop session stop --session-id <id> --revoke-credentials --output json
 safeslop doctor                     report available tools and isolation tiers
@@ -93,6 +94,24 @@ headless shell), it emits the `PTY_UNAVAILABLE` contract error
 (`details.fallback = "status-jsonl"`) and exits non-zero **without** marking the
 session running, so nothing is left as a phantom. The Emacs client switches to a
 read-only `--output jsonl` status monitor on that code.
+
+`session run --detach` gives a session a life independent of the Emacs buffer that
+started it: it launches a per-session **supervisor** that owns the agent and its
+PTY, serves that PTY over a per-session unix socket
+(`$SAFESLOP_STATE_DIR/sessions/<id>.sock`, surfaced as the session's `socket`
+field), and returns immediately. `session attach --session-id <id>` rejoins the
+running agent over that socket — bridging the local terminal, forwarding
+window-size changes, and exiting with the agent's code — with at most one client
+attached at a time. `session stop` then signals the supervisor's whole process
+group (graceful `SIGTERM`, then `SIGKILL`) so the boundary tree is torn down and
+the socket removed; a supervisor that dies uncleanly has its stale socket swept on
+the next `session status`/`list` reconcile.
+
+Detaching is a deliberate trade-off: a detached agent holds its staged secrets
+(`secrets.env`, deploy keys, kubeconfig) for its whole — possibly long — life,
+where a coupled run bounds them to the buffer's lifetime. `stop
+--revoke-credentials` still revokes before the kill, and liveness reconcile plus
+the stale-resource sweep bound the leak if the supervisor dies uncleanly.
 
 ## `safeslop.cue` reference
 

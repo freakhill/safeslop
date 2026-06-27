@@ -1,12 +1,88 @@
 package session
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
 
 func testNow() time.Time { return time.Date(2026, 6, 26, 0, 0, 0, 0, time.UTC) }
+
+func TestStopSignalsSupervisorGroupAndRemovesSocket(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(dir)
+	sess, err := store.Create("claude", t.TempDir(), testNow())
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := store.MarkRunningDetached(sess.ID, 4242, testNow()); err != nil {
+		t.Fatalf("mark detached: %v", err)
+	}
+	sock := filepath.Join(dir, sess.ID+".sock")
+	if err := os.WriteFile(sock, nil, 0o600); err != nil {
+		t.Fatalf("seed socket: %v", err)
+	}
+
+	var killedWith int
+	killer := func(target int) error { killedWith = target; return nil }
+	if _, err := store.Stop(sess.ID, false, testNow(), func(Session) error { return nil }, killer); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	if killedWith != -4242 {
+		t.Fatalf("kill target = %d, want -4242 (the supervisor's process group)", killedWith)
+	}
+	if _, err := os.Stat(sock); !os.IsNotExist(err) {
+		t.Fatalf("socket not removed on stop (stat err = %v)", err)
+	}
+}
+
+func TestStopCoupledSignalsBarePID(t *testing.T) {
+	store := NewStore(t.TempDir())
+	sess, err := store.Create("claude", t.TempDir(), testNow())
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := store.MarkRunning(sess.ID, 4242, testNow()); err != nil { // coupled, not detached
+		t.Fatalf("mark running: %v", err)
+	}
+	var killedWith int
+	if _, err := store.Stop(sess.ID, false, testNow(), func(Session) error { return nil },
+		func(target int) error { killedWith = target; return nil }); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	if killedWith != 4242 {
+		t.Fatalf("coupled kill target = %d, want bare 4242 (no group negation)", killedWith)
+	}
+}
+
+func TestReconcileRemovesStaleSocket(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(dir)
+	sess, err := store.Create("claude", t.TempDir(), testNow())
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := store.MarkRunningDetached(sess.ID, 4242, testNow()); err != nil {
+		t.Fatalf("mark detached: %v", err)
+	}
+	sock := filepath.Join(dir, sess.ID+".sock")
+	if err := os.WriteFile(sock, nil, 0o600); err != nil {
+		t.Fatalf("seed socket: %v", err)
+	}
+
+	got, err := store.GetReconciled(sess.ID, testNow(), func(int) bool { return false }) // supervisor dead
+	if err != nil {
+		t.Fatalf("get reconciled: %v", err)
+	}
+	if got.Status != StatusStopped {
+		t.Fatalf("status = %q, want stopped", got.Status)
+	}
+	if _, err := os.Stat(sock); !os.IsNotExist(err) {
+		t.Fatalf("stale socket not swept on reconcile (stat err = %v)", err)
+	}
+}
 
 func TestStoreStopRevokesBeforeKillAndIsIdempotent(t *testing.T) {
 	store := NewStore(t.TempDir())

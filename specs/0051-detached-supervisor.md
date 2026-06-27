@@ -328,17 +328,57 @@ Required tests:
 - Changing credential staging or boundary construction — like 0050, this spec
   governs the *process lifecycle and I/O contract*, here extended across a socket.
 
-## Open questions
+## Open questions — resolved
 
-- **Q1 — readiness race.** `run --detach` waits for the socket before printing
-  success. Bound and behaviour on timeout? Proposal: poll up to 2s; on timeout
-  emit a contract error and `stop` the half-born supervisor, leaving the session
-  not-running (no phantom).
-  (Q2 multi-attach and Q3 input authority are now resolved — see D8.)
-- **Q2 — new error codes.** Attach to a session with no live supervisor needs a
-  code: reuse `SESSION_STOPPED`, or add `SESSION_NOT_RUNNING`? The registry is
-  append-only, so adding is cheap; proposal: add `SESSION_NOT_RUNNING` for the
-  "exists but nothing to attach to" case, distinct from `SESSION_NOT_FOUND`.
-- **Q3 — JSONL event log retention.** Per-session `<id>.jsonl` grows for a
-  long-lived agent. Cap/rotate, or leave to the OS + `stop` cleanup? Proposal:
-  leave for v1, remove on teardown; revisit if it bites.
+- **Q1 — readiness race (resolved, PR3).** `run --detach` polls for the socket up
+  to `detachReadyTimeout` (2s); on timeout it kills the half-born supervisor and
+  emits an `IO_ERROR` contract error, leaving the session not-running (no phantom).
+- **Q2 — attach error code (deferred).** Attach to a session with no live
+  supervisor currently reuses `SESSION_STOPPED`; a dedicated `SESSION_NOT_RUNNING`
+  is deferred (the dial-failure path is unpinned by tests and the reuse is honest
+  enough for v1). The registry is append-only, so adding it later stays cheap.
+- **Q3 — JSONL event log retention (left for v1).** The per-session `<id>.jsonl`
+  is a provisional event log: one JSON line per PTY-output chunk (base64), written
+  by the supervisor's continuous reader and removed on teardown. Format and
+  cap/rotate are revisited if it bites.
+
+## Implementation notes (as-built, PR1–PR5)
+
+Where the build diverged from the sketch above, recorded here per the 0050
+"reconcile the spec in the PR" habit:
+
+- **Bridge signature (PR1, D3).** `Bridge(conn, ptmx, onResize)` gained
+  `waitExit func() int` (it supplies the exit code the `X` frame carries) and
+  returns `(Outcome, error)` — `ChildExited` vs `ClientGone` — so a consumer can
+  tell agent-exit from client-disconnect. `Attach(conn, in, out, resize)` is the
+  client side.
+- **The supervisor's IO is a hub, not `Bridge` (PR2, D2).** A faithful detached
+  supervisor must drain the agent PTY continuously (so it never blocks with no
+  client attached), tee the JSONL log, and serve reattach over a swappable current
+  connection — none of which `Bridge` (one PTY read bound to one conn) can do. So
+  `Supervise` (`internal/cli/supervise.go`) owns a continuous PTY reader that tees
+  JSONL + forwards to the attached client, plus a per-attach input pump
+  (`Data`→PTY, `Resize`→`pty.Setsize`) and a single-active-attach accept loop (D8).
+  `Bridge`/`Attach` remain the lower-level primitives (`Attach` is the PR4 client).
+- **One PTY slave for host/sandbox (PR2, D2).** `runProfileCtx` gained an additive
+  variadic `runIO`; when set, host/sandbox bind the agent's stdio to the
+  supervisor's PTY slave (`RunInTerminal`/`sandbox.Launch` already forward stdio).
+  Container/VM keep their own tty (`RunInPTY` / `ssh -t`); their detached PTY
+  binding is a noted follow-up.
+- **Daemonization is `Setsid` only (PR3, D1).** `SysProcAttr{Setsid: true}` alone
+  makes the supervisor a new session **and** process-group leader (`pgid == pid`) —
+  exactly what D4's `kill(-pgid)` needs. `Setsid + Setpgid` together fails
+  `fork/exec` with EPERM (a session leader cannot `setpgid`). The detached
+  supervisor's stdio is `/dev/null`; the `<id>.jsonl` event log (not the
+  supervisor's own stdout) is the observability channel.
+- **`MarkRunningDetached` (PR3/PR5, D4).** Both the launcher and `Supervise` mark
+  the session running with the supervisor PID and `Detached: true`; `Detached`
+  routes `stop` to signal `-pgid`. The double-mark is harmless (same PID, and each
+  path is exercised independently).
+- **Group stop + sweep (PR5, D4/D6/D7).** `Store.Stop` signals `-pid` for a
+  detached session — the real `sessionKillProcess` does group `SIGTERM`, a bounded
+  `stopGraceTimeout` (5s) wait, then group `SIGKILL` — and removes the socket;
+  reconcile sweeps a dead supervisor's stale socket on the next `status`/`list`.
+- **`data.session.socket` (PR5, D5).** `sessionData` advertises `socket` only when
+  the session is running and the file exists, derived from the state root (never
+  persisted). Pinned byte-exact by `ok-session-detached.golden.json`.

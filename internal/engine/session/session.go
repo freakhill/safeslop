@@ -41,6 +41,10 @@ type Session struct {
 	PID                int       `json:"pid,omitempty"`
 	ExitCode           *int      `json:"exit_code,omitempty"`
 	LastError          string    `json:"last_error,omitempty"`
+	// Detached marks a session whose recorded PID is a detached supervisor that
+	// leads its own process group, so `stop` signals the group, not a bare PID
+	// (specs/0051 D4). Internal routing state; not surfaced in the JSON envelope.
+	Detached bool `json:"detached,omitempty"`
 }
 
 type Store struct{ Dir string }
@@ -125,6 +129,17 @@ func (s Store) Save(sess Session) error {
 }
 
 func (s Store) MarkRunning(id string, pid int, now time.Time) (Session, error) {
+	return s.markRunning(id, pid, false, now)
+}
+
+// MarkRunningDetached records a session as running under a detached supervisor
+// (specs/0051): the recorded PID is the supervisor's, and Detached routes `stop`
+// to signal the whole process group (D4).
+func (s Store) MarkRunningDetached(id string, pid int, now time.Time) (Session, error) {
+	return s.markRunning(id, pid, true, now)
+}
+
+func (s Store) markRunning(id string, pid int, detached bool, now time.Time) (Session, error) {
 	sess, err := s.Get(id)
 	if err != nil {
 		return Session{}, err
@@ -134,6 +149,7 @@ func (s Store) MarkRunning(id string, pid int, now time.Time) (Session, error) {
 	}
 	sess.Status = StatusRunning
 	sess.PID = pid
+	sess.Detached = detached
 	sess.StartedAt = now.UTC()
 	sess.UpdatedAt = now.UTC()
 	return sess, s.Save(sess)
@@ -201,6 +217,7 @@ func (s Store) GetReconciled(id string, now time.Time, isAlive func(int) bool) (
 		if err := s.Save(fixed); err != nil {
 			return Session{}, err
 		}
+		_ = os.Remove(s.socketPath(id)) // sweep the orphaned socket of a dead supervisor (specs/0051 D7)
 		return fixed, nil
 	}
 	return sess, nil
@@ -217,6 +234,7 @@ func (s Store) ListReconciled(now time.Time, isAlive func(int) bool) ([]Session,
 			if err := s.Save(fixed); err != nil {
 				return nil, err
 			}
+			_ = os.Remove(s.socketPath(sess.ID)) // sweep the orphaned socket (specs/0051 D7)
 			sessions[i] = fixed
 		}
 	}
@@ -248,10 +266,18 @@ func (s Store) Stop(id string, revoke bool, now time.Time, revokeCredentials fun
 		sess.RevokedAt = now.UTC()
 	}
 	if sess.PID != 0 {
-		if err := killProcess(sess.PID); err != nil {
+		// A detached supervisor leads its own process group (specs/0051 D4): signal
+		// the group (negative PID) so the boundary process tree is reached, not just
+		// the supervisor. A coupled run keeps the bare-PID signal.
+		target := sess.PID
+		if sess.Detached {
+			target = -sess.PID
+		}
+		if err := killProcess(target); err != nil {
 			return Session{}, err
 		}
 	}
+	_ = os.Remove(s.socketPath(id)) // remove the per-session socket regardless (D4); no-op when coupled
 	sess.Status = StatusStopped
 	sess.PID = 0
 	sess.StoppedAt = now.UTC()
@@ -260,6 +286,10 @@ func (s Store) Stop(id string, revoke bool, now time.Time, revokeCredentials fun
 }
 
 func (s Store) path(id string) string { return filepath.Join(s.Dir, id+".json") }
+
+// socketPath is where a detached session's supervisor binds its per-session unix
+// socket (specs/0051 D5). Derived, never persisted, so it cannot go stale.
+func (s Store) socketPath(id string) string { return filepath.Join(s.Dir, id+".sock") }
 
 func newID() (string, error) {
 	var b [12]byte
