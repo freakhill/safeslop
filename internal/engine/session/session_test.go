@@ -10,6 +10,35 @@ import (
 
 func testNow() time.Time { return time.Date(2026, 6, 26, 0, 0, 0, 0, time.UTC) }
 
+// TestSocketPathFitsSunPath pins the sun_path-overflow guard (specs/0051): a
+// per-session socket path must fit the platform sun_path cap (104 bytes on macOS),
+// so when the natural <Dir>/<id>.sock would overflow, SocketPath relocates it to a
+// short runtime dir. A short Dir keeps the natural path; the mapping is always
+// deterministic and per-id distinct so supervisor, attach client, and the
+// reconcile sweep agree without persisting it.
+func TestSocketPathFitsSunPath(t *testing.T) {
+	short := NewStore("/tmp/ss")
+	if got, want := short.SocketPath("sess-abcd"), "/tmp/ss/sess-abcd.sock"; got != want {
+		t.Fatalf("short-dir SocketPath = %q, want the natural %q", got, want)
+	}
+
+	long := NewStore(filepath.Join(t.TempDir(), strings.Repeat("x", 90), "sessions"))
+	id := "sess-0123456789abcdef01234567"
+	p := long.SocketPath(id)
+	if len(p) > 103 {
+		t.Fatalf("relocated SocketPath len = %d (%q), want <= 103 to fit sun_path", len(p), p)
+	}
+	if strings.HasPrefix(p, long.Dir) {
+		t.Fatalf("overflowing SocketPath %q was not relocated out of the long dir %q", p, long.Dir)
+	}
+	if again := long.SocketPath(id); again != p {
+		t.Fatalf("SocketPath not deterministic: %q then %q", p, again)
+	}
+	if other := long.SocketPath("sess-ffffffffffffffffffffffff"); other == p {
+		t.Fatalf("distinct ids collided on the same relocated socket path %q", p)
+	}
+}
+
 func TestStopSignalsSupervisorGroupAndRemovesSocket(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore(dir)
@@ -20,7 +49,7 @@ func TestStopSignalsSupervisorGroupAndRemovesSocket(t *testing.T) {
 	if _, err := store.MarkRunningDetached(sess.ID, 4242, testNow()); err != nil {
 		t.Fatalf("mark detached: %v", err)
 	}
-	sock := filepath.Join(dir, sess.ID+".sock")
+	sock := store.SocketPath(sess.ID)
 	if err := os.WriteFile(sock, nil, 0o600); err != nil {
 		t.Fatalf("seed socket: %v", err)
 	}
@@ -67,7 +96,7 @@ func TestReconcileRemovesStaleSocket(t *testing.T) {
 	if _, err := store.MarkRunningDetached(sess.ID, 4242, testNow()); err != nil {
 		t.Fatalf("mark detached: %v", err)
 	}
-	sock := filepath.Join(dir, sess.ID+".sock")
+	sock := store.SocketPath(sess.ID)
 	if err := os.WriteFile(sock, nil, 0o600); err != nil {
 		t.Fatalf("seed socket: %v", err)
 	}

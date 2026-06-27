@@ -99,7 +99,8 @@ read-only `--output jsonl` status monitor on that code.
 started it: it launches a per-session **supervisor** that owns the agent and its
 PTY, serves that PTY over a per-session unix socket
 (`$SAFESLOP_STATE_DIR/sessions/<id>.sock`, surfaced as the session's `socket`
-field), and returns immediately. `session attach --session-id <id>` rejoins the
+field; when that path would exceed the `sun_path` limit it is transparently
+relocated to a short private runtime dir), and returns immediately. `session attach --session-id <id>` rejoins the
 running agent over that socket — bridging the local terminal, forwarding
 window-size changes, and exiting with the agent's code — with at most one client
 attached at a time. Attaching when no supervisor is serving the socket reports

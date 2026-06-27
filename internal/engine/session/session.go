@@ -4,6 +4,7 @@ package session
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -217,7 +218,7 @@ func (s Store) GetReconciled(id string, now time.Time, isAlive func(int) bool) (
 		if err := s.Save(fixed); err != nil {
 			return Session{}, err
 		}
-		_ = os.Remove(s.socketPath(id)) // sweep the orphaned socket of a dead supervisor (specs/0051 D7)
+		_ = os.Remove(s.SocketPath(id)) // sweep the orphaned socket of a dead supervisor (specs/0051 D7)
 		return fixed, nil
 	}
 	return sess, nil
@@ -234,7 +235,7 @@ func (s Store) ListReconciled(now time.Time, isAlive func(int) bool) ([]Session,
 			if err := s.Save(fixed); err != nil {
 				return nil, err
 			}
-			_ = os.Remove(s.socketPath(sess.ID)) // sweep the orphaned socket (specs/0051 D7)
+			_ = os.Remove(s.SocketPath(sess.ID)) // sweep the orphaned socket (specs/0051 D7)
 			sessions[i] = fixed
 		}
 	}
@@ -277,7 +278,7 @@ func (s Store) Stop(id string, revoke bool, now time.Time, revokeCredentials fun
 			return Session{}, err
 		}
 	}
-	_ = os.Remove(s.socketPath(id)) // remove the per-session socket regardless (D4); no-op when coupled
+	_ = os.Remove(s.SocketPath(id)) // remove the per-session socket regardless (D4); no-op when coupled
 	sess.Status = StatusStopped
 	sess.PID = 0
 	sess.StoppedAt = now.UTC()
@@ -287,9 +288,42 @@ func (s Store) Stop(id string, revoke bool, now time.Time, revokeCredentials fun
 
 func (s Store) path(id string) string { return filepath.Join(s.Dir, id+".json") }
 
-// socketPath is where a detached session's supervisor binds its per-session unix
-// socket (specs/0051 D5). Derived, never persisted, so it cannot go stale.
-func (s Store) socketPath(id string) string { return filepath.Join(s.Dir, id+".sock") }
+// SocketPath is where a detached session's supervisor binds its per-session unix
+// socket (specs/0051 D5). Derived, never persisted, so it cannot go stale — the
+// supervisor (bind), the attach client (dial), and the reconcile sweep (remove)
+// all call this single function and therefore always agree.
+//
+// A unix socket path must fit the platform sun_path cap (104 bytes on macOS, 108
+// on Linux; we use the smaller, portable budget). The natural <Dir>/<id>.sock is
+// kept whenever it fits — the default state dir is ~92 bytes — so the common case
+// is unchanged. When a long $SAFESLOP_STATE_DIR (or a deep test temp dir) would
+// overflow, the socket is relocated to a short private runtime dir under a name
+// hashed from (Dir, id), keeping it deterministic and per-id distinct.
+func (s Store) SocketPath(id string) string {
+	natural := filepath.Join(s.Dir, id+".sock")
+	if len(natural) <= maxUnixSocketPathLen {
+		return natural
+	}
+	sum := sha256.Sum256([]byte(s.Dir + "\x00" + id))
+	return filepath.Join(socketRuntimeBase(), "safeslop-"+hex.EncodeToString(sum[:8])+".sock")
+}
+
+// maxUnixSocketPathLen is the longest socket path we will bind/dial directly. The
+// macOS sockaddr_un.sun_path is 104 bytes including the NUL terminator, so 103 is
+// the portable strlen ceiling (Linux's 107 is looser; the smaller budget is safe
+// everywhere).
+const maxUnixSocketPathLen = 103
+
+// socketRuntimeBase is a short, per-user, private directory to relocate an
+// otherwise-overflowing socket into: XDG_RUNTIME_DIR when set (Linux, 0700), else
+// the OS temp dir (the per-user 0700 confinement dir on macOS). Both already exist,
+// so binding never has to create them.
+func socketRuntimeBase() string {
+	if d := os.Getenv("XDG_RUNTIME_DIR"); d != "" {
+		return d
+	}
+	return os.TempDir()
+}
 
 func newID() (string, error) {
 	var b [12]byte

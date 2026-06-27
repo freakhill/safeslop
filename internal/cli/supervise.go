@@ -53,14 +53,16 @@ func Supervise(ctx context.Context, store engsession.Store, id string, now func(
 		return 1, err
 	}
 
-	sockPath := filepath.Join(store.Dir, id+".sock")
-	_ = os.Remove(sockPath) // clear a stale socket from an unclean prior supervisor (D7)
+	sockPath := store.SocketPath(id)               // fits sun_path; relocates to a short runtime dir if the state dir is too long
+	_ = os.MkdirAll(filepath.Dir(sockPath), 0o700) // ensure the bind dir exists (no-op when it already does)
+	_ = os.Remove(sockPath)                        // clear a stale socket from an unclean prior supervisor (D7)
 	ln, err := net.Listen("unix", sockPath)
 	if err != nil {
 		_ = ptmx.Close()
 		_ = pts.Close()
 		return 1, err
 	}
+	_ = os.Chmod(sockPath, 0o600) // owner-only: protects a socket relocated under a shared runtime dir
 
 	if _, err := store.MarkRunningDetached(id, os.Getpid(), now()); err != nil {
 		_ = ln.Close()

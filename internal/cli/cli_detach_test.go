@@ -3,7 +3,6 @@ package cli
 import (
 	"errors"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -30,7 +29,7 @@ func TestRunDetachRecordsSupervisorPIDAndReturns(t *testing.T) {
 	old := launchSupervisor
 	launchSupervisor = func(sid string) (int, error) {
 		// Simulate the detached supervisor becoming ready by binding its socket.
-		f, ferr := os.Create(filepath.Join(sessionStore().Dir, sid+".sock"))
+		f, ferr := os.Create(sessionStore().SocketPath(sid))
 		if ferr == nil {
 			_ = f.Close()
 		}

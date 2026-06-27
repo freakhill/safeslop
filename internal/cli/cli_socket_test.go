@@ -19,7 +19,7 @@ func TestSessionDataSocketPresentWhenRunningDetached(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 	id := "sess-aaaa0000"
-	sock := filepath.Join(store.Dir, id+".sock")
+	sock := store.SocketPath(id)
 	if err := os.WriteFile(sock, nil, 0o600); err != nil {
 		t.Fatalf("seed socket: %v", err)
 	}
