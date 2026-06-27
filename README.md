@@ -81,6 +81,12 @@ jsonl` for a line-delimited monitor stream.
 persisted — as `stopped`, so status never lies about a session that is no longer
 executing.
 
+`session stop` (and a terminal/buffer close) tears the boundary down rather than
+just killing the wrapper: the run receives `SIGTERM`/`SIGHUP`, which tears down
+the agent and runs the deferred cleanup — disposable VM destroyed, container
+removed, staged secrets wiped, ephemeral credentials revoked. Interactive
+`Ctrl-C` (`SIGINT`) is left for the agent and does not tear the session down.
+
 ## `safeslop.cue` reference
 
 A representative profile:
