@@ -10,13 +10,23 @@
 (defvar safeslop-test--argv-log nil
   "Path to the fake CLI argv log for the current test.")
 
+(defconst safeslop-test--this-file
+  (or load-file-name buffer-file-name)
+  "Absolute path of this test file, captured at load time.
+At test-run time under `emacs --batch ... -f ert-run-tests-batch-and-exit'
+both `load-file-name' and `buffer-file-name' are nil, so the repo root must
+be anchored here while the file is still loading, not recomputed later.")
+
 (defun safeslop-test--repo-root ()
-  "Return the safeslop repo root from this test file path."
-  (file-truename
-   (expand-file-name
-    "../.."
-    (file-name-directory
-     (or load-file-name buffer-file-name default-directory)))))
+  "Return the safeslop repo root.
+Locate it by walking up from this test file to the directory that holds
+`go.mod', so fixtures resolve identically whatever the process working
+directory is (repo root, a git worktree, or anywhere else)."
+  (let ((from (file-name-directory
+               (or safeslop-test--this-file default-directory))))
+    (file-truename
+     (or (locate-dominating-file from "go.mod")
+         (error "safeslop-test--repo-root: no go.mod above %s" from)))))
 
 (defun safeslop-test--fixture (name)
   "Return raw JSON for golden fixture NAME."
