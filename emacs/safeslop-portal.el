@@ -59,7 +59,7 @@ area so the empty table is not silently mysterious."
     (alist-get 'sessions (safeslop-contract-data envelope))))
 
 (defun safeslop-portal--rows ()
-  "Build `tabulated-list-entries' from the live session list."
+  "Build `tabulated-list-entries' from the live session list, status-ordered."
   (mapcar
    (lambda (sess)
      (let ((id (safeslop-portal--field sess 'session_id)))
@@ -70,7 +70,10 @@ area so the empty table is not silently mysterious."
                      (safeslop-portal--field sess 'network)
                      (safeslop-portal--field sess 'status)
                      (abbreviate-file-name (safeslop-portal--field sess 'workspace))))))
-   (safeslop-portal--sessions)))
+   (sort (copy-sequence (safeslop-portal--sessions))
+         (lambda (a b)
+           (string< (safeslop-portal--field a 'status)
+                    (safeslop-portal--field b 'status))))))
 
 (defun safeslop-portal--id-at-point ()
   "Return the session id on the current line, or signal a user error."
@@ -106,30 +109,41 @@ area so the empty table is not silently mysterious."
   (call-interactively #'safeslop-session-new)
   (safeslop-portal-refresh))
 
-(defun safeslop-portal-refresh ()
-  "Re-fetch the session list and redraw the portal, keeping point."
-  (interactive)
-  (let ((buf (get-buffer safeslop-portal-buffer-name)))
-    (when buf
-      (with-current-buffer buf
-        (setq tabulated-list-entries (safeslop-portal--rows))
-        (tabulated-list-print t)
-        (when (and tabulated-list-entries (= (point) (point-min)))
-          (ignore-errors (forward-line 1)))))))
-
 (defconst safeslop-portal--key-hints
   '(("RET" . "open") ("R" . "reattach") ("i" . "status") ("k" . "stop")
     ("n" . "new") ("g" . "refresh") ("d" . "doctor") ("L" . "debug")
     ("?" . "help") ("q" . "quit"))
-  "Key/action pairs shown in the portal header line.")
+  "Key/action pairs shown in the portal's in-buffer shortcut legend.")
 
-(defun safeslop-portal--header-line ()
-  "Build the portal's shortcut header-line string (keys faced as bindings)."
-  (concat " "
-          (mapconcat (lambda (pair)
+(defun safeslop-portal--legend ()
+  "Return the shortcut legend line (keys faced as bindings), trailing blank line."
+  (concat (mapconcat (lambda (pair)
                        (concat (propertize (car pair) 'face 'help-key-binding)
                                " " (cdr pair)))
-                     safeslop-portal--key-hints "  ")))
+                     safeslop-portal--key-hints "  ")
+          "\n\n"))
+
+(defun safeslop-portal--render ()
+  "Fill the current portal buffer: the shortcut legend, then the session table.
+Like slopmaxx's console, the legend is plain buffer text above the rows (the
+column titles stay in the window header line)."
+  (setq tabulated-list-entries (safeslop-portal--rows))
+  (tabulated-list-print)
+  (let ((inhibit-read-only t))
+    (save-excursion
+      (goto-char (point-min))
+      (insert (safeslop-portal--legend))))
+  ;; Land on the first session row, past the legend + its blank line.
+  (goto-char (point-min))
+  (forward-line 2))
+
+(defun safeslop-portal-refresh ()
+  "Re-fetch the session list and redraw the portal."
+  (interactive)
+  (let ((buf (get-buffer safeslop-portal-buffer-name)))
+    (when buf
+      (with-current-buffer buf
+        (safeslop-portal--render)))))
 
 (defvar safeslop-portal-mode-map
   (let ((map (make-sparse-keymap)))
@@ -150,20 +164,17 @@ area so the empty table is not silently mysterious."
 (define-derived-mode safeslop-portal-mode tabulated-list-mode "safeslop-portal"
   "Major mode for the safeslop session dashboard.
 \\{safeslop-portal-mode-map}"
+  ;; Columns are non-sortable so an interactive header click never re-prints and
+  ;; wipes the in-buffer legend; rows are status-ordered in `safeslop-portal--rows'.
   (setq tabulated-list-format
-        [("Session" 17 t)
-         ("Agent" 12 t)
-         ("Env" 10 t)
-         ("Net" 5 t)
-         ("Status" 10 t)
-         ("Workspace" 44 t)])
+        [("Session" 17 nil)
+         ("Agent" 12 nil)
+         ("Env" 10 nil)
+         ("Net" 5 nil)
+         ("Status" 10 nil)
+         ("Workspace" 44 nil)])
   (setq tabulated-list-padding 1)
-  (setq tabulated-list-sort-key '("Status" . nil))
-  ;; Move the column header into the buffer so the window header line is free for
-  ;; the shortcut hints.  init-header resets `header-line-format', so set it after.
-  (setq tabulated-list-use-header-line nil)
-  (tabulated-list-init-header)
-  (setq header-line-format (safeslop-portal--header-line)))
+  (tabulated-list-init-header))
 
 ;;;###autoload
 (defun safeslop-portal ()
@@ -175,10 +186,11 @@ d doctor, L debug log, q quit."
     (with-current-buffer buf
       (unless (derived-mode-p 'safeslop-portal-mode)
         (safeslop-portal-mode))
-      (setq tabulated-list-entries (safeslop-portal--rows))
-      (tabulated-list-print t))
-    ;; Take the whole window rather than splitting it; the portal is a full view.
-    (switch-to-buffer buf)
+      (safeslop-portal--render))
+    ;; Reuse the selected window and fill it: the portal is the primary view, not a
+    ;; transient popup.  Plain `pop-to-buffer' would split into a half window on
+    ;; first open (the fix slopmaxx's console uses).
+    (pop-to-buffer-same-window buf)
     buf))
 
 ;;;###autoload

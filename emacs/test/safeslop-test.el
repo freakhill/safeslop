@@ -199,20 +199,22 @@
       (should (null (safeslop-portal--rows)))
       (should (cl-some (lambda (m) (string-match-p "stale binary" m)) msgs)))))
 
-;;; Portal header-line shortcuts + help -------------------------------------
+;;; Portal in-buffer shortcut legend + help (slopmaxx-style) -----------------
 
-(ert-deftest safeslop-test-portal-header-line-shows-shortcuts ()
-  "The portal shows its key shortcuts in the window header line."
-  (with-temp-buffer
-    (safeslop-portal-mode)
-    (should (stringp header-line-format))
-    (let ((hl (substring-no-properties header-line-format)))
-      (should (string-match-p "open" hl))
-      (should (string-match-p "stop" hl))
-      (should (string-match-p "refresh" hl))
-      (should (string-match-p "quit" hl)))
-    ;; Column header moved into the buffer, freeing the header line.
-    (should-not tabulated-list-use-header-line)))
+(ert-deftest safeslop-test-portal-legend-in-buffer ()
+  "The portal renders its shortcut legend as buffer text above the rows."
+  (cl-letf (((symbol-function 'safeslop--call-json)
+             (lambda (_)
+               (safeslop-contract-parse-string
+                "{\"schema_version\":1,\"ok\":true,\"data\":{\"sessions\":[]},\"warnings\":[],\"errors\":[]}"))))
+    (with-temp-buffer
+      (safeslop-portal-mode)
+      (safeslop-portal--render)
+      (let ((s (buffer-substring-no-properties (point-min) (point-max))))
+        (should (string-match-p "open" s))
+        (should (string-match-p "stop" s))
+        (should (string-match-p "refresh" s))
+        (should (string-match-p "quit" s))))))
 
 (ert-deftest safeslop-test-portal-has-help-key ()
   (should (eq (lookup-key safeslop-portal-mode-map (kbd "?")) #'describe-mode)))
