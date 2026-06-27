@@ -2,13 +2,15 @@
   "schema_version": 1,
   "ok": true,
   "data": {
-    "session": {
-      "agent": "claude",
-      "id": "sess_01HX7Z9E6M4Q2S8R0T5N1V3W9Y",
-      "socket": "~/Library/Application Support/safeslop/safeslop.sock",
-      "state": "created",
-      "workspace": "/workspace/project"
-    }
+    "agent": "claude",
+    "created_at": "2026-06-26T00:00:00Z",
+    "credentials_revoked": false,
+    "environment": "sandbox",
+    "network": "deny",
+    "session_id": "sess-0123456789abcdef01234567",
+    "status": "created",
+    "updated_at": "2026-06-26T00:00:00Z",
+    "workspace": "/workspace/project"
   },
   "warnings": [],
   "errors": []

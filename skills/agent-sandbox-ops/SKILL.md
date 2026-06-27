@@ -23,7 +23,7 @@ file transfer between host and sandboxed runtimes.
 - `safeslop trust` — approve a policy's exact bytes for launch.
 - `safeslop run <profile>` — launch a trusted profile.
 - `safeslop session create --agent <pi|claude|claude-code> --workspace <dir> --output json` — create an Emacs-visible safe-default session record.
-- `safeslop session run --session-id <id>` — run the session agent under safeslop isolation.
+- `safeslop session run --session-id <id>` — run the session agent under safeslop isolation. Needs a controlling terminal (Emacs supplies one via `make-term`); with no usable TTY it emits the `PTY_UNAVAILABLE` contract error and the caller switches to the `--output jsonl` status monitor.
 - `safeslop session status --session-id <id> --output <json|jsonl>` — inspect or monitor session state.
 - `safeslop session stop --session-id <id> --revoke-credentials --output json` — stop idempotently, revoking ephemeral credentials before process termination.
 - `safeslop doctor` — report available tools and isolation tiers.
