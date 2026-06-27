@@ -1317,7 +1317,10 @@ func runProfileCtx(ctx context.Context, name string, prof policy.Profile, argv [
 	case "host":
 		argv = resolveHostBinary(argv)
 		env := childEnv(secretEnv, pathEnv)
-		return engexec.RunInTerminal(ctx, engexec.LaunchSpec{Argv: argv, Dir: ws, Env: env, Stdin: rio.Stdin, Stdout: rio.Stdout, Stderr: rio.Stderr})
+		// A detached supervisor passes a PTY slave it owns (rio set); make it the
+		// agent's controlling terminal. The coupled path (rio zero) inherits the
+		// user's real terminal and must not steal it (specs/0051).
+		return engexec.RunInTerminal(ctx, engexec.LaunchSpec{Argv: argv, Dir: ws, Env: env, Stdin: rio.Stdin, Stdout: rio.Stdout, Stderr: rio.Stderr, ControllingTTY: rio.Stdin != nil})
 	case "container":
 		// secrets go in secrets.env (sourced by the entrypoint); .npmrc and kubeconfig
 		// are staged in stageDir and reached via the /safeslop/runtime bind mount.

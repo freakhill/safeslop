@@ -284,6 +284,31 @@ func TestSuperviseAndAttachUnderOverflowingStateDir(t *testing.T) {
 	}
 }
 
+// TestSuperviseGivesHostAgentAControllingTerminal proves the detached host
+// supervisor launches the agent with the PTY it owns as the agent's controlling
+// terminal: the agent can open /dev/tty. Under the daemon there is no inherited
+// terminal, so without the Setctty wiring the agent would have none. The probe's
+// output is captured via the JSONL tee (specs/0051 host Setctty).
+func TestSuperviseGivesHostAgentAControllingTerminal(t *testing.T) {
+	store, id, _ := newSupervisedStubSession(t, "#!/bin/sh\nif : </dev/tty 2>/dev/null; then printf 'CTTY=yes\\n'; else printf 'CTTY=no\\n'; fi\nexit 0\n")
+	jsonlPath := filepath.Join(store.Dir, id+".jsonl")
+
+	code, err := Supervise(context.Background(), store, id, time.Now)
+	if err != nil || code != 0 {
+		t.Fatalf("Supervise: code=%d err=%v", code, err)
+	}
+	data, err := os.ReadFile(jsonlPath)
+	if err != nil {
+		t.Fatalf("read jsonl: %v", err)
+	}
+	if jsonlContains(data, "CTTY=no") {
+		t.Fatalf("agent reported no controlling terminal under the supervisor:\n%s", data)
+	}
+	if !jsonlContains(data, "CTTY=yes") {
+		t.Fatalf("agent controlling-terminal probe never captured:\n%s", data)
+	}
+}
+
 func jsonlContains(data []byte, marker string) bool {
 	for _, line := range bytes.Split(bytes.TrimSpace(data), []byte("\n")) {
 		if len(line) == 0 {
