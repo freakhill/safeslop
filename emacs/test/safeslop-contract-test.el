@@ -194,6 +194,33 @@ envelope via the callback, never a crash."
       (should (safeslop-contract-ok-p (safeslop-test--await (lambda (cb) (safeslop-session-new "pi" workspace cb)))))
       (should (equal (safeslop-test--argv-log-lines) (list (safeslop-test--json-key argv)))))))
 
+(ert-deftest safeslop-test-session-new-environment-network-exact-argv ()
+  "ENVIRONMENT/NETWORK thread into the create argv as overrides (specs/0074, #4)."
+  (let* ((workspace (safeslop-test--repo-root))
+         (argv (list "session" "create" "--agent" "claude" "--workspace" workspace
+                     "--environment" "container" "--network" "allow" "--output" "json"))
+         (routes `((,(safeslop-test--json-key argv) .
+                   ((stdout . ,(safeslop-test--fixture "ok-session-create.golden.json"))
+                    (exit . 0))))))
+    (safeslop-test--with-fake-cli routes
+      (should (safeslop-contract-ok-p
+               (safeslop-test--await
+                (lambda (cb) (safeslop-session-new "claude" workspace cb "container" "allow")))))
+      (should (equal (safeslop-test--argv-log-lines) (list (safeslop-test--json-key argv)))))))
+
+(ert-deftest safeslop-test-session-new-omits-empty-environment-network ()
+  "An empty ENVIRONMENT/NETWORK appends no flag, leaving the engine default (#4)."
+  (let* ((workspace (safeslop-test--repo-root))
+         (argv (list "session" "create" "--agent" "claude" "--workspace" workspace "--output" "json"))
+         (routes `((,(safeslop-test--json-key argv) .
+                   ((stdout . ,(safeslop-test--fixture "ok-session-create.golden.json"))
+                    (exit . 0))))))
+    (safeslop-test--with-fake-cli routes
+      (should (safeslop-contract-ok-p
+               (safeslop-test--await
+                (lambda (cb) (safeslop-session-new "claude" workspace cb "" "")))))
+      (should (equal (safeslop-test--argv-log-lines) (list (safeslop-test--json-key argv)))))))
+
 (ert-deftest safeslop-test-unsupported-agent-error-code ()
   (let* ((workspace (safeslop-test--repo-root))
          (argv (list "session" "create" "--agent" "cursor" "--workspace" workspace "--output" "json"))

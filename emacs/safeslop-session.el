@@ -25,23 +25,39 @@
 (declare-function safeslop--call-json-async "safeslop" (args callback))
 (declare-function safeslop--show-envelope-buffer "safeslop" (name args envelope))
 
-(defun safeslop-session--create-args (agent workspace)
-  "Return exact argv for creating a session with AGENT in WORKSPACE."
-  (list "session" "create"
-        "--agent" agent
-        "--workspace" (expand-file-name workspace)
-        "--output" "json"))
+(defun safeslop-session--create-args (agent workspace &optional environment network)
+  "Return exact argv for creating a session with AGENT in WORKSPACE.
+ENVIRONMENT (sandbox|container|vm|host) and NETWORK (deny|allow), when a non-empty
+string, are appended as `--environment'/`--network' overrides of the profile
+default (specs/0074); nil or empty leaves the engine default untouched.  The
+overrides precede `--output json' so a default create keeps its existing argv."
+  (append
+   (list "session" "create" "--agent" agent "--workspace" (expand-file-name workspace))
+   (when (and (stringp environment) (not (string-empty-p environment)))
+     (list "--environment" environment))
+   (when (and (stringp network) (not (string-empty-p network)))
+     (list "--network" network))
+   (list "--output" "json")))
 
 ;;;###autoload
-(defun safeslop-session-new (&optional agent workspace callback)
+(defun safeslop-session-new (&optional agent workspace callback environment network)
   "Create a safeslop session for AGENT in WORKSPACE and show the JSON envelope.
-Runs asynchronously (session create may stage credentials, which can be slow), so
+ENVIRONMENT (sandbox|container|vm|host) and NETWORK (deny|allow) override the
+session's isolation/network for this run (specs/0074); interactively they are
+prompted with the engine defaults (sandbox, deny) preselected.  Runs
+asynchronously (session create may stage credentials, which can be slow), so
 Emacs does not block.  CALLBACK, when given, is called with the envelope once it
-arrives (used by tests)."
+arrives (used by tests); it precedes ENVIRONMENT/NETWORK so existing callers and
+the security argv tests keep their three-argument form."
   (interactive
    (list (completing-read "Agent: " '("claude" "claude-code" "pi") nil t nil nil "claude")
-         (read-directory-name "Workspace: " nil nil t)))
-  (let ((args (safeslop-session--create-args (or agent "claude") (or workspace default-directory))))
+         (read-directory-name "Workspace: " nil nil t)
+         nil ; callback: interactive use shows the envelope buffer, no extra hook
+         (completing-read "Environment: " '("sandbox" "container" "vm" "host") nil t nil nil "sandbox")
+         (completing-read "Network: " '("deny" "allow") nil t nil nil "deny")))
+  (let ((args (safeslop-session--create-args (or agent "claude")
+                                             (or workspace default-directory)
+                                             environment network)))
     (safeslop--call-json-async
      args
      (lambda (envelope)
