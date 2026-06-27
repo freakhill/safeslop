@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	osexec "os/exec"
 	"os/signal"
@@ -1027,7 +1028,22 @@ func runProfile(name string, prof policy.Profile, argv []string, ws string) (int
 	return runProfileCtx(ctx, name, prof, argv, ws)
 }
 
-func runProfileCtx(ctx context.Context, name string, prof policy.Profile, argv []string, ws string) (int, error) {
+// runIO optionally rebinds an agent's stdio. The zero value is the coupled path:
+// the agent inherits the wrapper's stdio (a tty under Emacs make-term). A detached
+// supervisor has no inherited terminal, so it passes a PTY slave it owns and the
+// host/sandbox agent runs on that slave as its controlling terminal (specs/0051
+// D2). Container/VM already provide a tty (RunInPTY / ssh -t), so they ignore it.
+type runIO struct {
+	Stdin  io.Reader
+	Stdout io.Writer
+	Stderr io.Writer
+}
+
+func runProfileCtx(ctx context.Context, name string, prof policy.Profile, argv []string, ws string, stdio ...runIO) (int, error) {
+	var rio runIO
+	if len(stdio) > 0 {
+		rio = stdio[0]
+	}
 	stageDir := filepath.Join(ws, ".safeslop", "runtime", name)
 	defer os.RemoveAll(stageDir) // wipe staged secrets/.npmrc regardless of outcome
 
@@ -1062,11 +1078,11 @@ func runProfileCtx(ctx context.Context, name string, prof policy.Profile, argv [
 	case "sandbox":
 		argv = resolveHostBinary(argv) // Finder launch: resolve "claude" off the reconstructed PATH
 		env := childEnv(secretEnv, pathEnv)
-		return sandbox.Launch(ctx, engexec.LaunchSpec{Argv: argv, Dir: ws, Env: env}, ws, prof.Network, sandboxScope(prof.Files))
+		return sandbox.Launch(ctx, engexec.LaunchSpec{Argv: argv, Dir: ws, Env: env, Stdin: rio.Stdin, Stdout: rio.Stdout, Stderr: rio.Stderr}, ws, prof.Network, sandboxScope(prof.Files))
 	case "host":
 		argv = resolveHostBinary(argv)
 		env := childEnv(secretEnv, pathEnv)
-		return engexec.RunInTerminal(ctx, engexec.LaunchSpec{Argv: argv, Dir: ws, Env: env})
+		return engexec.RunInTerminal(ctx, engexec.LaunchSpec{Argv: argv, Dir: ws, Env: env, Stdin: rio.Stdin, Stdout: rio.Stdout, Stderr: rio.Stderr})
 	case "container":
 		// secrets go in secrets.env (sourced by the entrypoint); .npmrc and kubeconfig
 		// are staged in stageDir and reached via the /safeslop/runtime bind mount.
