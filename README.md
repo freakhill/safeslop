@@ -201,6 +201,17 @@ trust the new bytes.
 Use `sandbox` for routine local agent sessions, `container` when URL-level egress
 control matters, and `vm` for untrusted code.
 
+The `vm` tier reaches the disposable VM over SSH with the key its base image
+authorizes. Provide that key one of two ways: set `SAFESLOP_VM_SSH_KEY` to a private
+key file path, or set `SAFESLOP_VM_SSH_KEY_OP` to a 1Password reference and safeslop
+reads the key just-in-time (into a transient, wiped-on-exit file) so no key lives on
+disk. Request the OpenSSH format in the reference — op's default is PKCS#8, which ssh
+cannot use:
+
+```sh
+export SAFESLOP_VM_SSH_KEY_OP='op://homelab-infra/safeslop-base-vm/private key?ssh-format=openssh'
+```
+
 ## Credentials
 
 Credentials are staged under the run's runtime directory and wiped on exit.
