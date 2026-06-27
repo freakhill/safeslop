@@ -70,7 +70,7 @@ func newRoot() *cobra.Command {
 		SilenceErrors: true,
 	}
 	root.PersistentFlags().BoolVar(&jsonOut, "json", false, "emit machine-readable JSON output")
-	root.AddCommand(cmdValidate(), cmdList(), cmdDoctor(), cmdRun(), cmdSession(), cmdTrust(), cmdDown(), cmdLaunch(), cmdInstall(), cmdUninstall())
+	root.AddCommand(cmdValidate(), cmdList(), cmdDoctor(), cmdRun(), cmdSession(), cmdTrust(), cmdDown(), cmdLaunch(), cmdProfile(), cmdInstall(), cmdUninstall())
 	return root
 }
 
@@ -958,16 +958,80 @@ func cmdDown() *cobra.Command {
 	}
 }
 
+// cmdProfile groups the enveloped, read-only policy surfaces the Emacs profiles view consumes
+// (specs/0052 E2/E3). Authoring stays CUE-canonical (the Emacs surface edits safeslop.cue directly);
+// these commands only list what exists and expose the embedded preset library as a starting point.
+func cmdProfile() *cobra.Command {
+	c := &cobra.Command{Use: "profile", Short: "Inspect safeslop.cue profiles and the preset library"}
+	c.AddCommand(cmdProfileList(), cmdProfilePresets())
+	return c
+}
+
+func cmdProfileList() *cobra.Command {
+	var output string
+	c := &cobra.Command{
+		Use:   "list [safeslop.cue] --output json",
+		Short: "List the profiles defined in a safeslop.cue (enveloped JSON contract)",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			if output != "json" {
+				return fmt.Errorf("profile list requires --output json")
+			}
+			path, err := findConfig(arg0(args))
+			if err != nil {
+				return err
+			}
+			cfg, err := policy.Load(path)
+			if err != nil {
+				return err
+			}
+			emitContract(jsoncontract.OK(map[string]any{"path": path, "profiles": cfg.Profiles}))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&output, "output", "", "output format: json")
+	return c
+}
+
+func cmdProfilePresets() *cobra.Command {
+	var output string
+	c := &cobra.Command{
+		Use:   "presets --output json",
+		Short: "List the embedded policy presets offered as starting points",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if output != "json" {
+				return fmt.Errorf("profile presets requires --output json")
+			}
+			emitContract(jsoncontract.OK(map[string]any{"presets": policy.Presets()}))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&output, "output", "", "output format: json")
+	return c
+}
+
 func cmdInstall() *cobra.Command {
+	var output string
 	c := &cobra.Command{
 		Use:   "install",
 		Short: "Inventory and (later) provision the safeslop toolchain",
 	}
+	// `--output json` adds the enveloped contract shape the Emacs surfaces parse, alongside the
+	// legacy raw `--json`; a persistent flag so every subcommand honors it (specs/0052 E1).
+	c.PersistentFlags().StringVar(&output, "output", "", "enveloped JSON contract output: json")
 	c.AddCommand(&cobra.Command{
 		Use:   "status",
 		Short: "Report whether safeslop, toolchains, and runtimes are installed",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
+			if output == "json" {
+				st := install.Status(context.Background(), Version)
+				emitContract(jsoncontract.OK(map[string]any{
+					"self": st.Self, "toolchains": st.Toolchains, "runtimes": st.Runtimes,
+				}))
+				return nil
+			}
 			if jsonOut {
 				fmt.Println(renderInstallStatusJSON(Version))
 				return nil
@@ -987,6 +1051,14 @@ func cmdInstall() *cobra.Command {
 		Short: "Show the pinned actions needed to install/upgrade toolchains + runtimes",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
+			if output == "json" {
+				res, err := installPlanResult(Version)
+				if err != nil {
+					return err
+				}
+				emitContract(jsoncontract.OK(map[string]any{"pending": res.Pending(), "actions": res.Actions}))
+				return nil
+			}
 			if jsonOut {
 				out, err := renderInstallPlanJSON(Version)
 				if err != nil {
@@ -1028,6 +1100,12 @@ func cmdInstall() *cobra.Command {
 					return err
 				}
 				if dryRun {
+					if output == "json" {
+						emitContract(jsoncontract.OK(map[string]any{
+							"dry_run": true, "pending": res.Pending(), "actions": res.Actions,
+						}))
+						return nil
+					}
 					if jsonOut {
 						out, _ := renderInstallApplyDryRunJSON(Version)
 						fmt.Println(out)
@@ -1045,17 +1123,28 @@ func cmdInstall() *cobra.Command {
 				if err != nil {
 					return err
 				}
+				var events []install.Event
 				emit := func(e install.Event) {
-					if jsonOut {
+					switch {
+					case output == "json":
+						events = append(events, e) // buffered; one terminal envelope below
+					case jsonOut:
 						emitJSON(map[string]any{"kind": e.Kind, "tool": e.Tool, "msg": e.Msg})
-					} else {
+					default:
 						fmt.Printf("  [%s] %s %s\n", e.Tool, e.Kind, e.Msg)
 					}
 				}
 				if err := install.Apply(cmd.Context(), res, dirs, install.HTTPFetcher{}, emit); err != nil {
+					if output == "json" {
+						return emitContractError(jsoncontract.CodeIOError, "install apply failed",
+							map[string]any{"error": err.Error(), "events": events})
+					}
 					return err
 				}
 				warnIfNotOnPath(dirs.BinDir)
+				if output == "json" {
+					emitContract(jsoncontract.OK(map[string]any{"events": events}))
+				}
 				return nil
 			},
 		}
@@ -1073,7 +1162,15 @@ func cmdInstall() *cobra.Command {
 			}
 			name := args[0]
 			if err := install.Rollback(name, dirs); err != nil {
+				if output == "json" {
+					return emitContractError(jsoncontract.CodeIOError, "rollback failed",
+						map[string]any{"error": err.Error(), "tool": name})
+				}
 				return err // fail clearly when there is no backup to restore
+			}
+			if output == "json" {
+				emitContract(jsoncontract.OK(map[string]any{"rolled_back": name}))
+				return nil
 			}
 			if jsonOut {
 				emitJSON(map[string]any{"ok": true, "rolled_back": name})
