@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 )
 
@@ -150,6 +151,76 @@ func (s Store) Finish(id string, exitCode int, lastErr string, now time.Time) (S
 	sess.StoppedAt = now.UTC()
 	sess.UpdatedAt = now.UTC()
 	return sess, s.Save(sess)
+}
+
+// ProcessAlive reports whether pid names a live process. It is the default
+// liveness probe used to reconcile sessions whose run wrapper died without
+// recording an exit. On macOS/unix, signal 0 succeeds for a live process we
+// own, and EPERM means the process is alive but owned by another user.
+func ProcessAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	err = proc.Signal(syscall.Signal(0))
+	return err == nil || errors.Is(err, syscall.EPERM)
+}
+
+// reconcile corrects sess for liveness. In the coupled lifecycle the run wrapper
+// holds the agent for the whole run, so a session still marked running whose
+// recorded PID is no longer alive means the run ended without recording an exit
+// (crash, SIGKILL, host sleep): report it as stopped. Pure given isAlive; the
+// bool reports whether sess changed so the caller can persist exactly once.
+//
+// The recorded PID is today the run-wrapper PID — an honest liveness anchor for
+// the coupled model. Surfacing the boundary process PID and a process-group
+// teardown is specs/0050 PR2; PID reuse is a known, accepted limitation here.
+func reconcile(sess Session, now time.Time, isAlive func(int) bool) (Session, bool) {
+	if sess.Status != StatusRunning || sess.PID <= 0 || isAlive(sess.PID) {
+		return sess, false
+	}
+	sess.Status = StatusStopped
+	sess.PID = 0
+	sess.LastError = "run process exited without recording status"
+	sess.StoppedAt = now.UTC()
+	sess.UpdatedAt = now.UTC()
+	return sess, true
+}
+
+// GetReconciled is Get plus a liveness pass: a session marked running whose PID
+// is dead is persisted and returned as stopped, so status never lies.
+func (s Store) GetReconciled(id string, now time.Time, isAlive func(int) bool) (Session, error) {
+	sess, err := s.Get(id)
+	if err != nil {
+		return Session{}, err
+	}
+	if fixed, changed := reconcile(sess, now, isAlive); changed {
+		if err := s.Save(fixed); err != nil {
+			return Session{}, err
+		}
+		return fixed, nil
+	}
+	return sess, nil
+}
+
+// ListReconciled is List with the same per-session liveness pass as GetReconciled.
+func (s Store) ListReconciled(now time.Time, isAlive func(int) bool) ([]Session, error) {
+	sessions, err := s.List()
+	if err != nil {
+		return nil, err
+	}
+	for i, sess := range sessions {
+		if fixed, changed := reconcile(sess, now, isAlive); changed {
+			if err := s.Save(fixed); err != nil {
+				return nil, err
+			}
+			sessions[i] = fixed
+		}
+	}
+	return sessions, nil
 }
 
 func (s Store) Stop(id string, revoke bool, now time.Time, revokeCredentials func(Session) error, killProcess func(int) error) (Session, error) {
