@@ -30,6 +30,7 @@ const (
 	CodeAgentUnsupported       ErrorCode = "AGENT_UNSUPPORTED"
 	CodeSessionNotFound        ErrorCode = "SESSION_NOT_FOUND"
 	CodeSessionAlreadyRunning  ErrorCode = "SESSION_ALREADY_RUNNING"
+	CodeSessionNotRunning      ErrorCode = "SESSION_NOT_RUNNING"
 	CodeSessionStopped         ErrorCode = "SESSION_STOPPED"
 	CodeSessionCancelled       ErrorCode = "SESSION_CANCELLED"
 	CodePTYUnavailable         ErrorCode = "PTY_UNAVAILABLE"
@@ -59,6 +60,7 @@ var allErrorCodes = []ErrorCode{
 	CodeAgentUnsupported,
 	CodeSessionNotFound,
 	CodeSessionAlreadyRunning,
+	CodeSessionNotRunning,
 	CodeSessionStopped,
 	CodeSessionCancelled,
 	CodePTYUnavailable,

@@ -673,7 +673,8 @@ func cmdSessionAttach() *cobra.Command {
 			}
 			code, err := attachSession(sessionStore(), id, os.Stdin, os.Stdout, attachResizeChannel())
 			if err != nil {
-				return emitContractError(jsoncontract.CodeSessionStopped, "attach to session", map[string]any{"session_id": id, "error": err.Error()})
+				contractCode, message := attachFailureContract(err)
+				return emitContractError(contractCode, message, map[string]any{"session_id": id, "error": err.Error()})
 			}
 			os.Exit(code)
 			return nil
@@ -683,16 +684,36 @@ func cmdSessionAttach() *cobra.Command {
 	return c
 }
 
+// errSupervisorUnreachable marks an attach that failed at the dial: there is no
+// live supervisor socket to bridge to. It is wrapped around the net.Dial error so
+// attachFailureContract can map it to SESSION_NOT_RUNNING, distinct from a bridge
+// that died after the connection was already live (SESSION_STOPPED).
+var errSupervisorUnreachable = errors.New("no live supervisor socket to attach to")
+
 // attachSession dials the per-session socket and bridges in/out to the agent,
 // returning the agent's exit code from the X frame. Returning (rather than
-// os.Exit-ing) keeps it drivable to completion in tests.
+// os.Exit-ing) keeps it drivable to completion in tests. A failed dial is wrapped
+// in errSupervisorUnreachable so the caller can report SESSION_NOT_RUNNING.
 func attachSession(store engsession.Store, id string, in io.Reader, out io.Writer, resize <-chan [2]uint16) (int, error) {
 	conn, err := net.Dial("unix", filepath.Join(store.Dir, id+".sock"))
 	if err != nil {
-		return 1, err
+		return 1, fmt.Errorf("%w: %v", errSupervisorUnreachable, err)
 	}
 	defer conn.Close()
 	return engsession.Attach(conn, in, out, resize)
+}
+
+// attachFailureContract maps an attachSession error to its contract code and
+// message. A dial that never reached a live supervisor is SESSION_NOT_RUNNING (the
+// session exists in the store, or did, but nothing is serving its socket); any
+// other failure happened on an already-live bridge and stays SESSION_STOPPED.
+// attach is a pure client that never loads the store, so it does not distinguish a
+// never-created id from a stopped one — both honestly read as "not running".
+func attachFailureContract(err error) (jsoncontract.ErrorCode, string) {
+	if errors.Is(err, errSupervisorUnreachable) {
+		return jsoncontract.CodeSessionNotRunning, "session is not running; start it before attaching"
+	}
+	return jsoncontract.CodeSessionStopped, "attach to session ended"
 }
 
 // attachResizeChannel reports the local terminal size on SIGWINCH (and once up
