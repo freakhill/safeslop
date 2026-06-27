@@ -269,6 +269,8 @@ CALLBACK, when given, is called with the envelope once it arrives (used by tests
 
 (require 'safeslop-session)
 (require 'safeslop-portal)
+(require 'safeslop-install)
+(require 'safeslop-profiles)
 
 ;;;###autoload
 (defun safeslop-switch-to-session-buffer ()
@@ -292,11 +294,13 @@ CALLBACK, when given, is called with the envelope once it arrives (used by tests
 (defun safeslop-help ()
   "Show safeslop Emacs help."
   (interactive)
-  (message "safeslop: C-c s P portal, d doctor, n new session, l list, L debug log"))
+  (message "safeslop: C-c s P portal, I install, F profiles, d doctor, n new session, l list, L debug log"))
 
 (defvar safeslop-command-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "P") #'safeslop-portal)
+    (define-key map (kbd "I") #'safeslop-install)
+    (define-key map (kbd "F") #'safeslop-profiles)
     (define-key map (kbd "d") #'safeslop-doctor)
     (define-key map (kbd "p") #'safeslop-policy-check-file)
     (define-key map (kbd "n") #'safeslop-session-new)

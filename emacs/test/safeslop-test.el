@@ -265,3 +265,80 @@
   (should (equal (safeslop-portal--age '((updated_at . ""))) "—"))
   (should (equal (safeslop-portal--age '((updated_at . "not-a-time"))) "—"))
   (should-not (equal (safeslop-portal--age '((updated_at . "2026-06-28T00:00:00Z"))) "—")))
+
+;;; Surface navigation (specs/0052 M0) ---------------------------------------
+
+(ert-deftest safeslop-test-surface-order-has-three ()
+  (should (= (length safeslop-surface--order) 3))
+  (should (equal (mapcar #'car safeslop-surface--order) '(sessions install profiles))))
+
+(ert-deftest safeslop-test-surface-tab-strip ()
+  "The tab strip names all three surfaces; the active one is emphasized."
+  (let ((strip (safeslop-surface--tab-strip 'install)))
+    (should (string-match-p "Sessions" strip))
+    (should (string-match-p "Install" strip))
+    (should (string-match-p "Profiles" strip))
+    (should (eq (get-text-property (string-match "Install" strip) 'face strip)
+                'mode-line-emphasis))
+    ;; an inactive label is a clickable link, not emphasized
+    (should (eq (get-text-property (string-match "Sessions" strip) 'face strip)
+                'link))))
+
+(ert-deftest safeslop-test-portal-inherits-surface-keys ()
+  "The portal keymap inherits the shared surface switch keys."
+  (should (eq (lookup-key safeslop-portal-mode-map (kbd "I")) #'safeslop-install))
+  (should (eq (lookup-key safeslop-portal-mode-map (kbd "F")) #'safeslop-profiles))
+  (should (eq (lookup-key safeslop-portal-mode-map (kbd "]")) #'safeslop-surface-next))
+  ;; the portal's own keys still win over the parent
+  (should (eq (lookup-key safeslop-portal-mode-map (kbd "k")) #'safeslop-portal-stop)))
+
+;;; Isolation-tier colour (specs/0052 #5) ------------------------------------
+
+(ert-deftest safeslop-test-portal-env-face ()
+  (should (eq (safeslop-portal--env-face "host") 'safeslop-tier-host))
+  (should (eq (safeslop-portal--env-face "vm") 'safeslop-tier-vm))
+  (should (eq (safeslop-portal--env-face "") 'safeslop-tier-sandbox))
+  (should (eq (safeslop-portal--env-face "weird") 'default)))
+
+(ert-deftest safeslop-test-portal-env-cell ()
+  "The Env cell keeps its text, colours by tier, and carries the honest note."
+  (let ((host (safeslop-portal--env-cell "host"))
+        (vm (safeslop-portal--env-cell "vm")))
+    (should (equal host "host"))            ; text preserved (equal ignores props)
+    (should (eq (get-text-property 0 'face host) 'safeslop-tier-host))
+    (should (get-text-property 0 'help-echo host))
+    (should-not (eq (get-text-property 0 'face host)
+                    (get-text-property 0 'face vm)))))
+
+(ert-deftest safeslop-test-portal-tier-legend ()
+  (let ((legend (safeslop-portal--tier-legend)))
+    (should (string-match-p "host=none" legend))
+    (should (string-match-p "vm=adversary-grade" legend))))
+
+;;; Post-create open affordance (specs/0052 #3) ------------------------------
+
+(ert-deftest safeslop-test-session-offer-open-attaches-on-yes ()
+  (let (attached)
+    (cl-letf (((symbol-function 'y-or-n-p) (lambda (&rest _) t))
+              ((symbol-function 'safeslop-session-attach) (lambda (id) (setq attached id))))
+      (safeslop-session--offer-open "sess-xyz"))
+    (should (equal attached "sess-xyz"))))
+
+(ert-deftest safeslop-test-session-offer-open-declines-on-no ()
+  (let (attached)
+    (cl-letf (((symbol-function 'y-or-n-p) (lambda (&rest _) nil))
+              ((symbol-function 'safeslop-session-attach) (lambda (id) (setq attached id))))
+      (safeslop-session--offer-open "sess-xyz"))
+    (should (null attached))))
+
+(ert-deftest safeslop-test-portal-goto-id ()
+  "`safeslop-portal--goto-id' lands point on the row with the given id."
+  (with-temp-buffer
+    (safeslop-portal-mode)
+    (setq tabulated-list-entries
+          '(("sess-1" ["sess-1" "claude" "sandbox" "deny" "running" "1" "now" "/ws"])
+            ("sess-2" ["sess-2" "pi" "vm" "allow" "created" "2" "now" "/ws"])))
+    (tabulated-list-print)
+    (should (safeslop-portal--goto-id "sess-2"))
+    (should (equal (tabulated-list-get-id) "sess-2"))
+    (should-not (safeslop-portal--goto-id "sess-nope"))))
