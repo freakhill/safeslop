@@ -342,10 +342,17 @@ Required tests:
   never-created id and a stopped session both honestly read as "not running"
   (distinguishing `SESSION_NOT_FOUND` would need a store lookup and is out of
   scope). `attachFailureContract` is the pinned mapping.
-- **Q3 — JSONL event log retention (left for v1).** The per-session `<id>.jsonl`
-  is a provisional event log: one JSON line per PTY-output chunk (base64), written
-  by the supervisor's continuous reader and removed on teardown. Format and
-  cap/rotate are revisited if it bites.
+- **Q3 — JSONL event log retention (resolved, follow-up).** The per-session
+  `<id>.jsonl` stays a provisional event log — one JSON line per PTY-output chunk
+  (base64), written by the supervisor's continuous reader and removed on teardown —
+  and nothing reads it yet (the `status --output jsonl` fallback is a separate
+  status stream, not this file). The one way it could bite was unbounded growth, so
+  the writer is now byte-capped: once a chunk would push the log past
+  `SAFESLOP_SESSION_LOG_MAX_BYTES` (default 8 MiB; `0` disables) it stops appending
+  and leaves a single `{"stream":"meta","event":"truncated"}` marker. The cap is
+  approximate (it stops before the overflowing chunk) and the field is bound to one
+  goroutine, so it needs no lock. Rotation/structured events are still deferred until
+  a consumer needs them.
 
 ## Implementation notes (as-built, PR1–PR5)
 
