@@ -381,8 +381,16 @@ Where the build diverged from the sketch above, recorded here per the 0050
   regressed: the agent is now a session leader, so killing it on ctx-cancel hangs
   up the terminal and the kernel `SIGHUP`s its foreground group — the same subtree
   teardown `RunInPTY` already relies on (proven by a mirrored test). Sandbox ctty
-  (it launches through `sandbox.Launch`, a separate path) and container/VM remain
-  follow-ups.
+  is the next bullet; container/VM remain follow-ups.
+- **Sandbox controlling terminal (`Setctty`, follow-up).** The sandbox launch path
+  (`sandbox.Launch`) already forwards the whole `LaunchSpec` to `RunInTerminal`
+  (`inner := spec`), so the only change is `runProfileCtx`'s sandbox branch setting
+  `ControllingTTY: rio.Stdin != nil` like host. The `sandbox-exec` child then
+  becomes the session leader that owns the PTY, and the agent it execs inherits the
+  controlling terminal — the Seatbelt profile already permits the tty ioctls and
+  `/dev` reads it needs. Verified end to end through `sandbox.Launch` and through a
+  detached sandbox `Supervise` run (real Seatbelt; `/dev/tty` opens). Container/VM
+  remain the last detached-PTY follow-up.
 - **Daemonization is `Setsid` only (PR3, D1).** `SysProcAttr{Setsid: true}` alone
   makes the supervisor a new session **and** process-group leader (`pgid == pid`) —
   exactly what D4's `kill(-pgid)` needs. `Setsid + Setpgid` together fails

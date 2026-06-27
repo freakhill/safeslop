@@ -1313,7 +1313,12 @@ func runProfileCtx(ctx context.Context, name string, prof policy.Profile, argv [
 	case "sandbox":
 		argv = resolveHostBinary(argv) // Finder launch: resolve "claude" off the reconstructed PATH
 		env := childEnv(secretEnv, pathEnv)
-		return sandbox.Launch(ctx, engexec.LaunchSpec{Argv: argv, Dir: ws, Env: env, Stdin: rio.Stdin, Stdout: rio.Stdout, Stderr: rio.Stderr}, ws, prof.Network, sandboxScope(prof.Files))
+		// Detached: make the supervisor's PTY the agent's controlling terminal, same
+		// as host. sandbox.Launch forwards ControllingTTY through to RunInTerminal,
+		// so the sandbox-exec child becomes the session leader that owns the tty
+		// (the Seatbelt profile already permits the tty ioctls). Coupled (rio zero)
+		// inherits the user's terminal and must not steal it (specs/0051).
+		return sandbox.Launch(ctx, engexec.LaunchSpec{Argv: argv, Dir: ws, Env: env, Stdin: rio.Stdin, Stdout: rio.Stdout, Stderr: rio.Stderr, ControllingTTY: rio.Stdin != nil}, ws, prof.Network, sandboxScope(prof.Files))
 	case "host":
 		argv = resolveHostBinary(argv)
 		env := childEnv(secretEnv, pathEnv)

@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"bytes"
 	"context"
 	"os"
 	osexec "os/exec"
@@ -161,6 +162,55 @@ func TestLaunchAllowsTtyJobControlOnDarwin(t *testing.T) {
 	}
 	if !regexp.MustCompile(`\d+\s+\d+`).MatchString(out) {
 		t.Fatalf("stty size produced no numeric size — tty ioctl likely denied: %q", out)
+	}
+}
+
+// TestLaunchControllingTTYGivesSandboxedChildATTYOnDarwin proves Launch forwards
+// ControllingTTY: the sandbox-exec child becomes the session leader that owns the
+// PTY slave, so the sandboxed command can open /dev/tty (the detached supervisor
+// path). /dev is read-allowed by the profile, so the open succeeds iff a
+// controlling terminal exists; without the flag a detached agent would have none
+// (specs/0051).
+func TestLaunchControllingTTYGivesSandboxedChildATTYOnDarwin(t *testing.T) {
+	if !Available() {
+		t.Skip("sandbox-exec unavailable (not macOS)")
+	}
+	ptmx, tty, err := pty.Open()
+	if err != nil {
+		t.Fatalf("pty.Open: %v", err)
+	}
+	defer func() { _ = ptmx.Close() }()
+	defer func() { _ = tty.Close() }()
+
+	ws := t.TempDir()
+	result := filepath.Join(ws, "ctty") // ws is write-allowed under the profile
+	script := "if : </dev/tty 2>/dev/null; then echo yes; else echo no; fi > " + result
+
+	// Only stdin is the PTY slave (so Ctty:0 makes it the controlling terminal);
+	// stdout/stderr go to a buffer exec drains, so sandbox-exec's startup chatter
+	// can't fill the undrained PTY and block the child.
+	var sink bytes.Buffer
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	code, err := Launch(ctx, exec.LaunchSpec{
+		Argv:           []string{"/bin/sh", "-c", script},
+		Stdin:          tty,
+		Stdout:         &sink,
+		Stderr:         &sink,
+		ControllingTTY: true,
+	}, ws, "deny", Scope{})
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	b, rerr := os.ReadFile(result)
+	if rerr != nil {
+		t.Fatalf("read result: %v", rerr)
+	}
+	if got := strings.TrimSpace(string(b)); got != "yes" {
+		t.Fatalf("sandboxed controlling-tty probe = %q, want \"yes\" (Launch did not forward ControllingTTY)", got)
 	}
 }
 
