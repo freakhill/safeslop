@@ -9,6 +9,8 @@
 
 ;;; Code:
 
+;;;###autoload (autoload 'safeslop-portal "safeslop" nil t)
+;;;###autoload (autoload 'safeslop-debug-log "safeslop" nil t)
 ;;;###autoload (autoload 'safeslop-daemon-start "safeslop" nil t)
 ;;;###autoload (autoload 'safeslop-doctor "safeslop" nil t)
 ;;;###autoload (autoload 'safeslop-policy-check-file "safeslop" nil t)
@@ -26,6 +28,13 @@
 
 (declare-function evil-set-initial-state "ext:evil-states" (mode state))
 (declare-function evil-define-key "ext:evil-core" (state keymap key def &rest bindings))
+(declare-function safeslop-portal-open "safeslop-portal" ())
+(declare-function safeslop-portal-reattach "safeslop-portal" ())
+(declare-function safeslop-portal-status "safeslop-portal" ())
+(declare-function safeslop-portal-stop "safeslop-portal" ())
+(declare-function safeslop-portal-new "safeslop-portal" ())
+(declare-function safeslop-portal-refresh "safeslop-portal" ())
+(defvar safeslop-portal-mode-map)
 
 (with-eval-after-load 'evil
   ;; `safeslop-output-mode' buffers are read-only command output buffers.  In
@@ -35,7 +44,22 @@
   (evil-define-key 'normal safeslop-output-mode-map
     (kbd "g") #'safeslop-doctor
     (kbd "e") #'safeslop-show-last-error
-    (kbd "q") #'quit-window))
+    (kbd "q") #'quit-window)
+  ;; The portal is a tabulated-list dashboard whose single-key actions (o/i/k/n/R…)
+  ;; would otherwise be Evil normal-state motions; bind them through Evil so the
+  ;; dashboard is drivable.
+  (evil-set-initial-state 'safeslop-portal-mode 'normal)
+  (evil-define-key 'normal safeslop-portal-mode-map
+    (kbd "RET") #'safeslop-portal-open
+    (kbd "o")   #'safeslop-portal-open
+    (kbd "R")   #'safeslop-portal-reattach
+    (kbd "i")   #'safeslop-portal-status
+    (kbd "k")   #'safeslop-portal-stop
+    (kbd "n")   #'safeslop-portal-new
+    (kbd "g")   #'safeslop-portal-refresh
+    (kbd "d")   #'safeslop-doctor
+    (kbd "L")   #'safeslop-debug-log
+    (kbd "q")   #'quit-window))
 
 ;;;###autoload
 (defun safeslop-doom-bind-leader ()

@@ -15,6 +15,7 @@
 ;;; Code:
 
 (require 'subr-x)
+(require 'cl-lib)
 (require 'safeslop-contract)
 
 (defgroup safeslop nil
@@ -64,6 +65,51 @@ server binary configurable until safeslop grows a checked-in daemon."
 
 (defvar safeslop-last-error nil
   "Last error surfaced by a safeslop command.")
+
+;;; Debug log -------------------------------------------------------------
+;; A redacted client diagnostics buffer, mirroring slopmaxx's debug log: every
+;; CLI invocation and its result land here as one timestamped line so the UI is
+;; inspectable.  safeslop never passes secret values as CLI arguments (secrets are
+;; resolved by the engine from 1Password / staged dirs), so the argv is safe to log.
+
+(defcustom safeslop-debug-log-enabled t
+  "When non-nil, record redacted safeslop client diagnostics to a buffer."
+  :type 'boolean
+  :group 'safeslop)
+
+(defconst safeslop-debug-buffer-name "*safeslop debug*"
+  "Buffer name for safeslop client diagnostics.")
+
+(defun safeslop--debug-format (event)
+  "Format a redacted debug EVENT plist as a single log line.
+Only allowlisted, non-secret fields are emitted."
+  (let (out)
+    (cl-loop for (k v) on event by #'cddr do
+             (pcase k
+               ((or :event :argv :status :ok :error :buffer :detail)
+                (push (format "%s=%s" (substring (symbol-name k) 1) v) out))
+               (_ nil)))
+    (string-join (nreverse out) "  ")))
+
+(defun safeslop--debug (&rest event)
+  "Append a redacted debug EVENT plist line to the safeslop debug buffer."
+  (when safeslop-debug-log-enabled
+    (let ((line (format "%s  %s\n"
+                        (format-time-string "%Y-%m-%dT%H:%M:%S.%3N")
+                        (safeslop--debug-format event))))
+      (with-current-buffer (get-buffer-create safeslop-debug-buffer-name)
+        (unless (derived-mode-p 'special-mode)
+          (special-mode))
+        (let ((inhibit-read-only t))
+          (goto-char (point-max))
+          (insert line))))))
+
+;;;###autoload
+(defun safeslop-debug-log ()
+  "Open the safeslop client debug log buffer."
+  (interactive)
+  (pop-to-buffer (get-buffer-create safeslop-debug-buffer-name))
+  (special-mode))
 
 (defvar safeslop-output-mode-map
   (let ((map (make-sparse-keymap)))
@@ -159,18 +205,63 @@ Return non-nil if the socket is up after this call."
 
 (defun safeslop--call-json (args)
   "Run safeslop with ARGS and parse stdout as a contract envelope.
-ARGS is passed to `call-process' as an argv list; no shell is used."
-  (safeslop--ensure-daemon)
+ARGS is passed to `call-process' as an argv list; no shell is used.  safeslop is
+a self-contained CLI (no daemon round-trip), so each command is a direct
+subprocess; the call and its result are recorded in the debug log."
+  (safeslop--debug :event 'call :argv (string-join args " "))
   (with-temp-buffer
-    (let ((status (apply #'call-process safeslop-program nil t nil args))
-          (stdout nil))
-      (setq stdout (buffer-string))
-      (let ((envelope (safeslop-contract-parse-string stdout)))
-        (unless (equal status 0)
-          (setq safeslop-last-error
-                (or (safeslop-contract-first-error-code envelope)
-                    (format "safeslop exited with status %s" status))))
-        envelope))))
+    (let* ((status (apply #'call-process safeslop-program nil t nil args))
+           (stdout (buffer-string))
+           (envelope (safeslop-contract-parse-string stdout))
+           (code (safeslop-contract-first-error-code envelope)))
+      (unless (equal status 0)
+        (setq safeslop-last-error
+              (or code (format "safeslop exited with status %s" status))))
+      (safeslop--debug :event 'result :status status
+                       :ok (if (safeslop-contract-ok-p envelope) "t" "nil")
+                       :error (or code "-"))
+      envelope)))
+
+(defun safeslop--scalar (v)
+  "Render a parsed JSON scalar V as a display string.
+Matches the contract parser's :json-false/:json-null sentinels."
+  (cond ((eq v t) "true")
+        ((memq v '(:false :json-false)) "false")
+        ((memq v '(:null :json-null)) "null")
+        ((stringp v) v)
+        ((numberp v) (number-to-string v))
+        (t (format "%S" v))))
+
+(defun safeslop--alist-p (x)
+  "Return non-nil when X is a parsed JSON object (a symbol-keyed alist)."
+  (and (consp x) (consp (car x)) (symbolp (caar x))))
+
+(defun safeslop--insert-data (data indent)
+  "Insert parsed envelope DATA readably at point, indented by INDENT levels.
+Handles JSON objects (alists), arrays (lists), and scalars."
+  (let ((pad (make-string (* 2 indent) ?\s)))
+    (cond
+     ((safeslop--alist-p data)
+      (dolist (kv data)
+        (let ((k (car kv)) (v (cdr kv)))
+          (cond
+           ((safeslop--alist-p v)
+            (insert (format "%s%s:\n" pad k))
+            (safeslop--insert-data v (1+ indent)))
+           ((and (consp v) (safeslop--alist-p (car v)))
+            (insert (format "%s%s:\n" pad k))
+            (safeslop--insert-data v (1+ indent)))
+           ((and (consp v) (not (safeslop--alist-p v)))
+            (insert (format "%s%s: %s\n" pad k
+                            (mapconcat #'safeslop--scalar v ", "))))
+           (t (insert (format "%s%s: %s\n" pad k (safeslop--scalar v))))))))
+     ((consp data)
+      (dolist (item data)
+        (if (safeslop--alist-p item)
+            (progn (insert (format "%s-\n" pad))
+                   (safeslop--insert-data item (1+ indent)))
+          (insert (format "%s- %s\n" pad (safeslop--scalar item))))))
+     (t (insert (format "%s%s\n" pad (safeslop--scalar data)))))))
 
 (defun safeslop--show-envelope-buffer (name args envelope)
   "Render ENVELOPE for safeslop ARGS into buffer NAME and return ENVELOPE."
@@ -188,6 +279,10 @@ ARGS is passed to `call-process' as an argv list; no shell is used."
           (insert (format "error[%s]: %s\n"
                           (alist-get 'code err)
                           (alist-get 'message err))))
+        (let ((data (safeslop-contract-data envelope)))
+          (when data
+            (insert "\n")
+            (safeslop--insert-data data 0)))
         (safeslop-output-mode)))
     (pop-to-buffer buf))
   envelope)
@@ -209,6 +304,7 @@ ARGS is passed to `call-process' as an argv list; no shell is used."
     (safeslop--show-envelope-buffer "*safeslop validate*" args envelope)))
 
 (require 'safeslop-session)
+(require 'safeslop-portal)
 
 ;;;###autoload
 (defun safeslop-switch-to-session-buffer ()
@@ -232,10 +328,11 @@ ARGS is passed to `call-process' as an argv list; no shell is used."
 (defun safeslop-help ()
   "Show safeslop Emacs help."
   (interactive)
-  (message "safeslop: C-c s d doctor, C-c s p validate policy, C-c s n new session"))
+  (message "safeslop: C-c s P portal, d doctor, n new session, l list, L debug log"))
 
 (defvar safeslop-command-map
   (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "P") #'safeslop-portal)
     (define-key map (kbd "D") #'safeslop-daemon-start)
     (define-key map (kbd "d") #'safeslop-doctor)
     (define-key map (kbd "p") #'safeslop-policy-check-file)
@@ -246,6 +343,7 @@ ARGS is passed to `call-process' as an argv list; no shell is used."
     (define-key map (kbd "s") #'safeslop-session-stop)
     (define-key map (kbd "r") #'safeslop-session-reattach)
     (define-key map (kbd "b") #'safeslop-switch-to-session-buffer)
+    (define-key map (kbd "L") #'safeslop-debug-log)
     (define-key map (kbd "e") #'safeslop-show-last-error)
     (define-key map (kbd "?") #'safeslop-help)
     map)

@@ -57,9 +57,9 @@
     (should-not (safeslop--ensure-daemon))))
 
 (ert-deftest safeslop-test-output-mode-has-evil-normal-bindings ()
-  (let (initial-state)
+  (let (initial-states)
     (cl-letf (((symbol-function 'evil-set-initial-state)
-               (lambda (mode state) (setq initial-state (list mode state))))
+               (lambda (mode state) (push (list mode state) initial-states)))
               ((symbol-function 'evil-define-key)
                (lambda (_state keymap key def &rest bindings)
                  (define-key keymap key def)
@@ -67,8 +67,93 @@
                    (define-key keymap (pop bindings) (pop bindings))))))
       (unless (featurep 'evil)
         (provide 'evil))
-      (should (equal initial-state '(safeslop-output-mode normal)))
+      ;; Both the output buffers and the portal dashboard enter Evil normal state.
+      (should (member '(safeslop-output-mode normal) initial-states))
+      (should (member '(safeslop-portal-mode normal) initial-states))
       (should (eq (lookup-key safeslop-output-mode-map (kbd "g")) #'safeslop-doctor))
-      (should (eq (lookup-key safeslop-output-mode-map (kbd "q")) #'quit-window)))))
+      (should (eq (lookup-key safeslop-output-mode-map (kbd "q")) #'quit-window))
+      (should (eq (lookup-key safeslop-portal-mode-map (kbd "k")) #'safeslop-portal-stop)))))
 
 ;;; safeslop-test.el ends here
+
+;;; Portal + debug + data-rendering tests ------------------------------------
+
+(ert-deftest safeslop-test-portal-and-debug-commands-load ()
+  (dolist (fn '(safeslop-portal safeslop-portal-refresh safeslop-portal-open
+                safeslop-portal-stop safeslop-debug-log))
+    (should (fboundp fn)))
+  (should (eq (symbol-function 'safeslop) 'safeslop-portal)))
+
+(ert-deftest safeslop-test-keymap-has-portal-and-debug ()
+  (safeslop-bind-default-keys)
+  (should (eq (lookup-key global-map (kbd "C-c s P")) #'safeslop-portal))
+  (should (eq (lookup-key global-map (kbd "C-c s L")) #'safeslop-debug-log)))
+
+(ert-deftest safeslop-test-portal-keymap-actions ()
+  (should (eq (lookup-key safeslop-portal-mode-map (kbd "RET")) #'safeslop-portal-open))
+  (should (eq (lookup-key safeslop-portal-mode-map (kbd "k")) #'safeslop-portal-stop))
+  (should (eq (lookup-key safeslop-portal-mode-map (kbd "g")) #'safeslop-portal-refresh))
+  (should (eq (lookup-key safeslop-portal-mode-map (kbd "L")) #'safeslop-debug-log)))
+
+(ert-deftest safeslop-test-portal-rows-from-sessions ()
+  "`safeslop-portal--rows' builds id + columns from a parsed session list."
+  (let ((envelope (safeslop-contract-parse-string
+                   (concat "{\"schema_version\":1,\"ok\":true,\"data\":{\"sessions\":"
+                           "[{\"session_id\":\"sess-abc123\",\"agent\":\"claude\","
+                           "\"environment\":\"sandbox\",\"network\":\"deny\","
+                           "\"status\":\"running\",\"workspace\":\"/tmp/ws\"}]},"
+                           "\"warnings\":[],\"errors\":[]}"))))
+    (cl-letf (((symbol-function 'safeslop--call-json) (lambda (_args) envelope)))
+      (let* ((rows (safeslop-portal--rows))
+             (row (car rows))
+             (cols (cadr row)))
+        (should (= (length rows) 1))
+        (should (equal (car row) "sess-abc123"))
+        (should (equal (aref cols 1) "claude"))
+        (should (equal (aref cols 2) "sandbox"))
+        (should (equal (aref cols 3) "deny"))
+        (should (equal (aref cols 4) "running"))))))
+
+(ert-deftest safeslop-test-scalar-json-sentinels ()
+  (should (equal (safeslop--scalar t) "true"))
+  (should (equal (safeslop--scalar :json-false) "false"))
+  (should (equal (safeslop--scalar :json-null) "null"))
+  (should (equal (safeslop--scalar "x") "x"))
+  (should (equal (safeslop--scalar 7) "7")))
+
+(ert-deftest safeslop-test-insert-data-renders-fields ()
+  "Rendering an envelope's data shows the data payload, not just ok."
+  (let* ((envelope (safeslop-contract-parse-string
+                    (concat "{\"schema_version\":1,\"ok\":true,\"data\":"
+                            "{\"session_id\":\"sess-x\",\"status\":\"running\",\"agent\":\"pi\"},"
+                            "\"warnings\":[],\"errors\":[]}")))
+         (data (safeslop-contract-data envelope)))
+    (with-temp-buffer
+      (safeslop--insert-data data 0)
+      (let ((s (buffer-string)))
+        (should (string-match-p "session_id: sess-x" s))
+        (should (string-match-p "status: running" s))
+        (should (string-match-p "agent: pi" s))))))
+
+(ert-deftest safeslop-test-debug-format-redacts ()
+  "`safeslop--debug-format' emits only allowlisted, non-secret fields."
+  (let ((line (safeslop--debug-format '(:event call :argv "session list" :secret "TOPSECRET"))))
+    (should (string-match-p "event=call" line))
+    (should (string-match-p "argv=session list" line))
+    (should-not (string-match-p "secret" line))
+    (should-not (string-match-p "TOPSECRET" line))))
+
+(ert-deftest safeslop-test-call-json-logs-to-debug ()
+  "Each CLI call is recorded in the debug buffer (call + result)."
+  (when (get-buffer safeslop-debug-buffer-name)
+    (kill-buffer safeslop-debug-buffer-name))
+  (cl-letf (((symbol-function 'call-process)
+             (lambda (&rest _)
+               (insert "{\"schema_version\":1,\"ok\":true,\"data\":{},\"warnings\":[],\"errors\":[]}")
+               0)))
+    (safeslop--call-json '("doctor" "--json")))
+  (with-current-buffer safeslop-debug-buffer-name
+    (let ((s (buffer-string)))
+      (should (string-match-p "event=call" s))
+      (should (string-match-p "argv=doctor --json" s))
+      (should (string-match-p "event=result" s)))))
