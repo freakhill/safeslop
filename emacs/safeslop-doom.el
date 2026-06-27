@@ -11,7 +11,6 @@
 
 ;;;###autoload (autoload 'safeslop-portal "safeslop" nil t)
 ;;;###autoload (autoload 'safeslop-debug-log "safeslop" nil t)
-;;;###autoload (autoload 'safeslop-daemon-start "safeslop" nil t)
 ;;;###autoload (autoload 'safeslop-doctor "safeslop" nil t)
 ;;;###autoload (autoload 'safeslop-policy-check-file "safeslop" nil t)
 ;;;###autoload (autoload 'safeslop-session-new "safeslop" nil t)
