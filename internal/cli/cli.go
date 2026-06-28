@@ -32,7 +32,6 @@ import (
 	"github.com/freakhill/safeslop/internal/engine/install"
 	"github.com/freakhill/safeslop/internal/engine/launch"
 	"github.com/freakhill/safeslop/internal/engine/policy"
-	"github.com/freakhill/safeslop/internal/engine/sandbox"
 	"github.com/freakhill/safeslop/internal/engine/secrets"
 	engsession "github.com/freakhill/safeslop/internal/engine/session"
 	"github.com/freakhill/safeslop/internal/engine/toolchain"
@@ -150,7 +149,6 @@ func doctorReport() map[string]any {
 		p, err := osexec.LookPath(t)
 		report[t] = map[string]any{"present": err == nil, "path": p}
 	}
-	report["sandbox-exec"] = map[string]any{"present": sandbox.Available(), "path": sandbox.SandboxExecPath}
 	report["1password-signedin"] = map[string]any{"present": secrets.OpSignedIn(context.Background()), "path": ""}
 	report["container-runtime"] = map[string]any{"present": container.Available(), "path": ""}
 	report["vm-runtime"] = map[string]any{"present": vm.Available(), "path": ""}
@@ -161,7 +159,7 @@ func doctorReport() map[string]any {
 // so the honest "what each boundary protects" framing is never implicit (ayo §10.5 H1).
 func doctorTiers() map[string]map[string]string {
 	out := map[string]map[string]string{}
-	for _, env := range []string{"host", "sandbox", "container", "vm"} {
+	for _, env := range []string{"host", "container", "vm"} {
 		tier, note := policy.EnvTier(env)
 		out[env] = map[string]string{"tier": tier, "note": note}
 	}
@@ -194,7 +192,7 @@ func cmdDoctor() *cobra.Command {
 				fmt.Printf("  %-14s %-4s %s\n", n, mark, m["path"])
 			}
 			fmt.Println("isolation tiers (what each environment actually protects):")
-			for _, env := range []string{"host", "sandbox", "container", "vm"} {
+			for _, env := range []string{"host", "container", "vm"} {
 				tier, note := policy.EnvTier(env)
 				fmt.Printf("  %-10s %-16s %s\n", env, tier, note)
 			}
@@ -250,9 +248,6 @@ func cmdRun() *cobra.Command {
 				if prof.Credentials != nil && len(prof.Credentials.Pnpm) > 0 {
 					out["pnpm"] = prof.Credentials.Pnpm // token field is a ref, not a value
 				}
-				if prof.Environment == "sandbox" {
-					out["sandbox_profile"] = sandbox.Profile(ws, prof.Network, "", sandboxScope(prof.Files))
-				}
 				if jsonOut {
 					emitJSON(out)
 				} else {
@@ -272,9 +267,6 @@ func cmdRun() *cobra.Command {
 						for _, r := range prof.Credentials.Pnpm {
 							fmt.Printf("  pnpm %s token <- %s\n", hostOr(r.Host), r.Token)
 						}
-					}
-					if prof.Environment == "sandbox" {
-						fmt.Printf("--- seatbelt profile ---\n%s", sandbox.Profile(ws, prof.Network, "", sandboxScope(prof.Files)))
 					}
 				}
 				return nil
@@ -301,7 +293,7 @@ func cmdRun() *cobra.Command {
 			return nil
 		},
 	}
-	c.Flags().BoolVar(&dryRun, "dry-run", false, "print the resolved launch + sandbox profile without executing")
+	c.Flags().BoolVar(&dryRun, "dry-run", false, "print the resolved launch plan without executing")
 	c.Flags().BoolVar(&trustFlag, "trust", false, "approve this safeslop.cue, then run it")
 	return c
 }
@@ -375,7 +367,7 @@ func cmdSession() *cobra.Command {
 func cmdSessionCreate() *cobra.Command {
 	var agent, workspace, output, environment, network string
 	c := &cobra.Command{
-		Use:   "create --agent <pi|claude|claude-code> --workspace <dir> --output json",
+		Use:   "create --agent <pi|claude|claude-code> --environment <host|container|vm> --workspace <dir> --output json",
 		Short: "Create a safeslop session record",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -392,14 +384,15 @@ func cmdSessionCreate() *cobra.Command {
 			if fi, err := os.Stat(workspace); err != nil || !fi.IsDir() {
 				return emitContractError(jsoncontract.CodeInvalidArgument, "--workspace must name an existing directory", map[string]any{"workspace": workspace})
 			}
-			if environment != "" {
-				switch environment {
-				case "sandbox", "container", "vm", "host":
-				default:
-					return emitContractError(jsoncontract.CodeInvalidArgument,
-						fmt.Sprintf("--environment %q is not valid; must be one of: sandbox, container, vm, host", environment),
-						map[string]any{"environment": environment})
-				}
+			switch environment {
+			case "container", "vm", "host":
+			case "":
+				return emitContractError(jsoncontract.CodeInvalidArgument,
+					"--environment is required; must be one of: host, container, vm", nil)
+			default:
+				return emitContractError(jsoncontract.CodeInvalidArgument,
+					fmt.Sprintf("--environment %q is not valid; must be one of: host, container, vm", environment),
+					map[string]any{"environment": environment})
 			}
 			if network != "" {
 				switch network {
@@ -411,17 +404,12 @@ func cmdSessionCreate() *cobra.Command {
 				}
 			}
 			store := sessionStore()
-			sess, err := store.Create(canonicalAgent, workspace, time.Now())
+			sess, err := store.Create(canonicalAgent, environment, workspace, time.Now())
 			if err != nil {
 				return emitContractError(jsoncontract.CodeIOError, "create session", map[string]any{"error": err.Error()})
 			}
-			if environment != "" {
-				sess.Environment = environment
-			}
 			if network != "" {
 				sess.Network = network
-			}
-			if environment != "" || network != "" {
 				if err := store.Save(sess); err != nil {
 					return emitContractError(jsoncontract.CodeIOError, "save session", map[string]any{"error": err.Error()})
 				}
@@ -433,7 +421,7 @@ func cmdSessionCreate() *cobra.Command {
 	c.Flags().StringVar(&agent, "agent", "", "agent to run: pi, claude, or claude-code")
 	c.Flags().StringVar(&workspace, "workspace", "", "workspace directory")
 	c.Flags().StringVar(&output, "output", "", "output format: json")
-	c.Flags().StringVar(&environment, "environment", "", "isolation environment: sandbox, container, vm, or host (overrides profile default)")
+	c.Flags().StringVar(&environment, "environment", "", "isolation environment (required): host, container, or vm")
 	c.Flags().StringVar(&network, "network", "", "network policy: deny or allow (overrides profile default)")
 	return c
 }
@@ -551,7 +539,7 @@ func cmdSessionRun() *cobra.Command {
 				return err
 			}
 			// `session run` is an interactive attach: every boundary presents the
-			// agent under a controlling terminal (host/sandbox via RunInTerminal,
+			// agent under a controlling terminal (host via RunInTerminal,
 			// container via the RunInPTY tty bridge, vm via `ssh -t`), so without a
 			// usable PTY the session is undriveable on all four. Emacs drives this via
 			// make-term, which connects the process to a pty; a no-tty invocation
@@ -1316,7 +1304,7 @@ func launchProfile(name, configPath string) (int, error) {
 // stageProfile resolves the profile's secrets and stages its credentials into stageDir. It
 // returns secretEnv (sensitive KEY=VAL — the resolved secrets plus aws/gcp env creds, destined
 // for the secrets.env channel / the process env) and pathEnv (non-secret NPM_CONFIG_USERCONFIG /
-// KUBECONFIG / GIT_SSH_COMMAND host paths into stageDir, for the host/sandbox process env). The
+// KUBECONFIG / GIT_SSH_COMMAND host paths into stageDir, for the host process env). The
 // caller owns the stageDir lifecycle (creation, the on-exit wipe, and creds.RevokeSSH if an ssh
 // key was staged).
 func stageProfile(ctx context.Context, prof policy.Profile, stageDir string) (secretEnv, pathEnv []string, err error) {
@@ -1335,7 +1323,7 @@ func stageProfile(ctx context.Context, prof policy.Profile, stageDir string) (se
 	}
 	// Cloud creds are short-lived (SSO role creds / ADC access token) and delivered as env vars
 	// through the secret channel, so they ride secrets.env (container) / the scp'd env (vm) and
-	// reach host/sandbox children too. No revoke: decay-first.
+	// reach host children too. No revoke: decay-first.
 	awsEnv, err := creds.StageAWS(ctx, prof.Credentials, stageDir)
 	if err != nil {
 		return nil, nil, err
@@ -1348,7 +1336,7 @@ func stageProfile(ctx context.Context, prof policy.Profile, stageDir string) (se
 	secretEnv = append(secretEnv, gcpEnv...)
 	// kubeconfig / .npmrc / ssh key bearers are staged 0600 in stageDir; KUBECONFIG /
 	// NPM_CONFIG_USERCONFIG / GIT_SSH_COMMAND are non-secret host paths delivered via the env for
-	// host/sandbox, and via the bind mount (paths set by the compose file) for container.
+	// host, and via the bind mount (paths set by the compose file) for container.
 	kubeEnv, err := creds.StageKube(ctx, prof.Credentials, stageDir)
 	if err != nil {
 		return nil, nil, err
@@ -1395,7 +1383,7 @@ func runProfile(name string, prof policy.Profile, argv []string, ws string) (int
 // runIO optionally rebinds an agent's stdio. The zero value is the coupled path:
 // the agent inherits the wrapper's stdio (a tty under Emacs make-term). A detached
 // supervisor has no inherited terminal, so it passes a PTY slave it owns: host and
-// sandbox run the agent on that slave as its controlling terminal, and container
+// host runs the agent on that slave as its controlling terminal, and container
 // binds the `compose run` process's stdio to it so the container's tty bridges
 // back (specs/0051 D2). VM (`ssh -t`) is the remaining tier that still ignores it.
 type runIO struct {
@@ -1449,15 +1437,6 @@ func runProfileCtx(ctx context.Context, name string, prof policy.Profile, argv [
 	defer warnGitExecSurface(ws, gitBefore)
 
 	switch prof.Environment {
-	case "sandbox":
-		argv = resolveHostBinary(argv) // Finder launch: resolve "claude" off the reconstructed PATH
-		env := childEnv(secretEnv, pathEnv)
-		// Detached: make the supervisor's PTY the agent's controlling terminal, same
-		// as host. sandbox.Launch forwards ControllingTTY through to RunInTerminal,
-		// so the sandbox-exec child becomes the session leader that owns the tty
-		// (the Seatbelt profile already permits the tty ioctls). Coupled (rio zero)
-		// inherits the user's terminal and must not steal it (specs/0051).
-		return sandbox.Launch(ctx, engexec.LaunchSpec{Argv: argv, Dir: ws, Env: env, Stdin: rio.Stdin, Stdout: rio.Stdout, Stderr: rio.Stderr, ControllingTTY: rio.Stdin != nil}, ws, prof.Network, sandboxScope(prof.Files))
 	case "host":
 		argv = resolveHostBinary(argv)
 		env := childEnv(secretEnv, pathEnv)
@@ -1599,14 +1578,6 @@ func selectProfile(cfg *policy.Config, requested string) (string, policy.Profile
 	return "", policy.Profile{}, fmt.Errorf("multiple profiles; name one of them (run `safeslop list`)")
 }
 
-// sandboxScope maps a profile's optional file scope to the sandbox boundary's extra paths.
-func sandboxScope(f *policy.FileScope) sandbox.Scope {
-	if f == nil {
-		return sandbox.Scope{}
-	}
-	return sandbox.Scope{Read: f.Read, Write: f.Write, Deny: f.Deny}
-}
-
 // agentArgv maps a profile's agent to the command to launch.
 func agentArgv(p policy.Profile) ([]string, error) {
 	switch policy.NormalizeAgent(p.Agent) {
@@ -1616,7 +1587,7 @@ func agentArgv(p policy.Profile) ([]string, error) {
 		return []string{"pi"}, nil
 	case "shell":
 		// The host's $SHELL is an absolute host path (e.g. /bin/zsh, /opt/homebrew/bin/fish).
-		// That path is correct for host/sandbox (the agent runs on the host) but does NOT exist
+		// That path is correct for host (the agent runs on the host) but does NOT exist
 		// inside a container or VM guest, where exec would fail ("/bin/zsh: not found"). For those
 		// tiers, name a shell guaranteed to exist in the image instead — resolved via the guest's
 		// PATH, not the host path.
@@ -1626,7 +1597,7 @@ func agentArgv(p policy.Profile) ([]string, error) {
 			return []string{"bash"}, nil
 		case "vm":
 			return []string{"/bin/sh"}, nil
-		default: // host, sandbox
+		default: // host
 			sh := os.Getenv("SHELL")
 			if sh == "" {
 				sh = "/bin/sh"
@@ -1638,12 +1609,12 @@ func agentArgv(p policy.Profile) ([]string, error) {
 	}
 }
 
-// resolveHostBinary makes argv[0] an absolute path via the reconstructed host PATH, for the host and
-// sandbox tiers where the agent runs in the host process namespace. Under a Finder/launchd launch the
+// resolveHostBinary makes argv[0] an absolute path via the reconstructed host PATH, for the host
+// tier where the agent runs in the host process namespace. Under a Finder/launchd launch the
 // process PATH is stripped, so a bare "claude" would fail to exec; resolving it against the
 // host_discovery_env recovers the real location. Container/VM tiers resolve inside the guest and must
-// NOT be passed through here. Uses the same rich-env-for-discovery path as detection (the sandbox
-// firewall is childEnv, not this).
+// NOT be passed through here. Uses the same rich-env-for-discovery path as detection (the host child
+// env firewall is childEnv, not this).
 func resolveHostBinary(argv []string) []string {
 	return resolveBinaryWith(argv, func(name string) (string, bool) {
 		return hostenv.Reconstruct().LookPath(name)

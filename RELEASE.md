@@ -5,7 +5,7 @@
 ## Current release focus
 
 - Single Go CLI entrypoint: `safeslop`.
-- Policy-driven launch with host, sandbox, container, and VM tiers.
+- Policy-driven launch with host, container, and VM tiers.
 - Fail-closed policy trust gate.
 - Staged, wipe-on-exit credentials and secrets.
 - Receipt-driven install/uninstall flows.

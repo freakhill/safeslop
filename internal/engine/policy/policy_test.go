@@ -31,8 +31,8 @@ func TestLoadValidAppliesDefaults(t *testing.T) {
 	if dev.Agent != "shell" {
 		t.Errorf("dev.agent = %q, want shell", dev.Agent)
 	}
-	if dev.Environment != "sandbox" {
-		t.Errorf("dev.environment = %q, want sandbox (schema default)", dev.Environment)
+	if dev.Environment != "host" {
+		t.Errorf("dev.environment = %q, want host", dev.Environment)
 	}
 	if dev.Network != "deny" {
 		t.Errorf("dev.network = %q, want deny (schema default)", dev.Network)
@@ -44,7 +44,7 @@ func TestLoadValidAppliesDefaults(t *testing.T) {
 
 func TestLoadAcceptsClaudeCodeAlias(t *testing.T) {
 	cfg, err := loadStr(t, `package safeslop
-safeslop: profiles: review: {agent: "claude-code"}`)
+safeslop: profiles: review: {agent: "claude-code", environment: "host"}`)
 	if err != nil {
 		t.Fatalf("Load claude-code alias: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestLoadRejectsBadSecretRef(t *testing.T) {
 
 func TestToolchainDecodes(t *testing.T) {
 	cfg, err := loadStr(t, `package safeslop
-safeslop: profiles: dev: {agent: "claude", toolchain: {kind: "mise", run: "build"}}`)
+safeslop: profiles: dev: {agent: "claude", environment: "host", toolchain: {kind: "mise", run: "build"}}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ safeslop: profiles: dev: {agent: "claude", toolchain: {kind: "mise", run: "build
 
 func TestToolchainRejectsBadKind(t *testing.T) {
 	if _, err := loadStr(t, `package safeslop
-safeslop: profiles: dev: {agent: "claude", toolchain: {kind: "cargo"}}`); err == nil {
+safeslop: profiles: dev: {agent: "claude", environment: "host", toolchain: {kind: "cargo"}}`); err == nil {
 		t.Fatal("expected validation error for kind \"cargo\"")
 	}
 }
@@ -252,7 +252,7 @@ func TestLoadSshDefaultsReadOnly(t *testing.T) {
 	cfg, err := loadStr(t, `package safeslop
 safeslop: profiles: review: {
 	agent: "claude"
-	environment: "sandbox"
+	environment: "container"
 	credentials: ssh: {}
 }`)
 	if err != nil {
@@ -267,8 +267,7 @@ safeslop: profiles: review: {
 func TestEnvTier(t *testing.T) {
 	cases := map[string]string{
 		"host":      "none",
-		"sandbox":   "mistake-guard",
-		"":          "mistake-guard", // unspecified defaults to sandbox
+		"":          "none", // environment is required (specs/0053); empty/unknown implies no boundary
 		"container": "egress-allowlisted",
 		"vm":        "adversary-grade",
 	}

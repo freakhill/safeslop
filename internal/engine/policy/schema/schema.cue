@@ -3,19 +3,24 @@ package safeslop
 // Embedded engine schema for safeslop.cue (specs/0001 §6.1). Compiled into the
 // binary via go:embed; the external `cue` binary is never needed.
 //
-// SP1 scope: enough to launch claude/shell under the sandbox-exec boundary.
-// credentials (SP2), container/vm (SP3/SP4), and toolchains (SP5) extend this.
+// Scope: launch claude/shell/pi under an isolation boundary. credentials (SP2),
+// container/vm (SP3/SP4), and toolchains (SP5) extend this.
 
-// Where the agent runs. SP1 implements "sandbox" (default) and "host"; the
-// others are accepted by the schema and land in later sub-projects.
-#Environment: "sandbox" | "container" | "vm" | "host"
+// Where the agent runs (specs/0053 removed the macOS sandbox/Seatbelt tier):
+//   host      — no isolation boundary; runs as you
+//   container — Docker + egress allowlist (network-bound agents belong here)
+//   vm        — disposable Tart VM; the strongest boundary
+// Required — there is no default, so a profile must always state its isolation
+// explicitly (a security tool must never silently run weaker than intended).
+#Environment: "container" | "vm" | "host"
 
 // What to launch. "claude-code" is accepted as a user-facing alias and
 // normalized to the canonical "claude" engine value after decode.
 #Agent: "claude" | "claude-code" | "shell" | "pi"
 
-// Coarse egress policy for the sandbox-exec boundary. Not a URL allowlist —
-// that is the container's job (specs/0001 §6.2).
+// Coarse egress policy. "deny" + environment:container is the egress-allowlisted
+// path (the per-domain allowlist is the container's job, specs/0001 §6.2);
+// "allow" opens egress. On host, network is always unrestricted regardless.
 #Network: "deny" | "allow"
 
 // A secret reference resolved at launch (specs/0001 §7): a 1Password URI
@@ -160,29 +165,17 @@ package safeslop
 	run?: string
 }
 
-// #FileScope adds paths to the sandbox boundary. read/write are extra allowed paths; deny is
-// subtracted last and always wins. Paths are absolute (or "~"-relative, expanded at launch).
-#FileScope: {
-	read?:  [...string]
-	write?: [...string]
-	deny?:  [...string]
-}
-
 #Profile: {
 	agent:       #Agent
-	environment: #Environment | *"sandbox"
+	environment: #Environment
 	// Directory the boundary confines file access to. Empty (default) means the
 	// directory safeslop was invoked from.
 	workspace?: string
-	// Extra file scope for the sandbox boundary beyond the workspace. read/write add allowed paths;
-	// deny overrides (deny always wins in Seatbelt). Honored by environment:sandbox today;
-	// container/vm support + auto-deny of secret-bearing children are tracked in specs/0029.
-	files?: #FileScope
 	network: #Network | *"deny"
 	// Extra egress domains for environment:container with network:deny — unioned with the
 	// base allowlist + the agent's built-in providers (specs/0046). A leading dot
 	// (".example.com") is a subdomain suffix match; a bare host is exact. Ignored on
-	// network:allow and on host/sandbox/vm.
+	// network:allow and on host/vm.
 	egress?: [...string]
 	// Env var name -> secret ref; injected into the agent's environment at launch.
 	secrets?: {[string]: #SecretRef}

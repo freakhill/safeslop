@@ -1,7 +1,7 @@
 ---
 name: agent-sandbox-ops
 description: >
-  Operate safeslop isolation profiles safely: host, sandbox, container, and VM.
+  Operate safeslop isolation profiles safely: host, container, and VM.
 ---
 
 # Agent Sandbox Ops Skill
@@ -22,7 +22,7 @@ file transfer between host and sandboxed runtimes.
 - `safeslop list` — list available profiles.
 - `safeslop trust` — approve a policy's exact bytes for launch.
 - `safeslop run <profile>` — launch a trusted profile.
-- `safeslop session create --agent <pi|claude|claude-code> --workspace <dir> --output json` — create an Emacs-visible safe-default session record.
+- `safeslop session create --agent <pi|claude|claude-code> --environment <host|container|vm> --workspace <dir> --output json` — create an Emacs-visible session record (`--environment` is required).
 - `safeslop session run --session-id <id> [--detach]` — run the session agent under safeslop isolation. Coupled (default) needs a controlling terminal (Emacs supplies one via `make-term`); with no usable TTY it emits the `PTY_UNAVAILABLE` contract error and the caller switches to the `--output jsonl` status monitor. `--detach` instead launches a per-session supervisor that owns the agent + its PTY, serves it over a per-session unix socket, and returns immediately (the buffer is freed).
 - `safeslop session attach --session-id <id>` — rejoin a detached session's agent over its socket under a controlling terminal, exiting with the agent's code; one active attach at a time. No usable TTY emits `PTY_UNAVAILABLE`.
 - `safeslop session status --session-id <id> --output <json|jsonl>` — inspect or monitor session state; a running detached session also reports its `socket`.
@@ -32,9 +32,12 @@ file transfer between host and sandboxed runtimes.
 
 ## Default policy
 
-- Prefer `environment: "sandbox"` and `network: "deny"` for everyday agent work.
-- Use `environment: "container"` when per-domain egress control matters.
+- `environment` is required (`host` | `container` | `vm`) — there is no default
+  tier (specs/0053 removed the macOS Seatbelt `sandbox` tier).
+- Prefer `environment: "container"` with `network: "deny"` for everyday agent work:
+  network-bound agents (claude, pi) need their runtime + egress inside the boundary.
 - Use `environment: "vm"` for untrusted code or maximum isolation.
+- Use `environment: "host"` only when you accept no isolation.
 - Do not mount or expose host credential directories to agents.
 
 ## Common workflows
@@ -91,6 +94,6 @@ rely on broad host mounts.
 ## Verification
 
 ```bash
-go test ./internal/engine/container/ ./internal/engine/vm/ ./internal/engine/sandbox/ -v
+go test ./internal/engine/container/ ./internal/engine/vm/ -v
 make check
 ```

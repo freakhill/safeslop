@@ -10,8 +10,9 @@ staged state down on exit.
 
 ## What it provides
 
-- **Honest isolation tiers**: `host`, `sandbox`, `container`, and `vm`, with the
-  active tier printed by `run`/`doctor`.
+- **Honest isolation tiers**: `host`, `container`, and `vm`, with the active tier
+  printed by `run`/`doctor`. `environment` is required — there is no default, so a
+  profile always states its isolation explicitly.
 - **Fail-closed policy trust**: `safeslop run` refuses an unapproved or changed
   `safeslop.cue` until you review and trust it.
 - **Scrubbed child environments**: ambient host credentials are not inherited;
@@ -31,8 +32,8 @@ package safeslop
 safeslop: {
 	version: 1
 	profiles: {
-		review: {agent: "claude", environment: "sandbox", network: "deny"}
-		pair:   {agent: "pi", environment: "sandbox", network: "deny"}
+		review: {agent: "claude", environment: "container", network: "deny"}
+		pair:   {agent: "pi", environment: "container", network: "deny"}
 	}
 }
 ```
@@ -98,7 +99,7 @@ read-only `--output jsonl` status monitor on that code.
 
 `session run --detach` gives a session a life independent of the Emacs buffer that
 started it: it launches a per-session **supervisor** that owns the agent and its
-PTY — which, for a host or sandbox session, is made the agent's controlling
+PTY — which, for a host session, is made the agent's controlling
 terminal so it behaves like a real interactive run (`/dev/tty`, terminal signals,
 hangup) — and
 serves that PTY over a per-session unix socket
@@ -132,7 +133,7 @@ safeslop: {
 	profiles: {
 		work: {
 			agent:       "claude"          // "claude" | "claude-code" | "pi"
-			environment: "container"       // "sandbox" | "container" | "vm" | "host"
+			environment: "container"       // "host" | "container" | "vm"  (required)
 			network:     "deny"            // "deny" | "allow"
 			workspace:   "."
 			egress:      [".internal.example.com"]
@@ -192,15 +193,18 @@ trust the new bytes.
 
 ### Isolation tiers
 
+`environment` is required — there is no default (specs/0053 removed the macOS
+Seatbelt `sandbox` tier: it could not run the network-bound, home-installed agents
+safeslop launches, only confined accidents).
+
 | environment | label | summary |
 |---|---|---|
 | `host` | none | No isolation boundary; the agent runs as you. |
-| `sandbox` | mistake-guard | macOS Seatbelt file/exec boundary for everyday agent work. |
 | `container` | egress-allowlisted | Docker/Lima container plus proxy topology for per-domain egress control. |
 | `vm` | adversary-grade | Disposable Tart VM; strongest boundary and heaviest workflow. |
 
-Use `sandbox` for routine local agent sessions, `container` when URL-level egress
-control matters, and `vm` for untrusted code.
+Use `container` for routine agent sessions (network-bound agents belong here),
+`vm` for untrusted code, and `host` only when you accept no isolation.
 
 The `vm` tier reaches the disposable VM over SSH with the key its base image
 authorizes. Provide that key one of two ways: set `SAFESLOP_VM_SSH_KEY` to a private

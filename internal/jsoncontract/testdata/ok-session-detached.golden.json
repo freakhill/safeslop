@@ -5,7 +5,7 @@
     "agent": "claude",
     "created_at": "2026-06-26T00:00:00Z",
     "credentials_revoked": false,
-    "environment": "sandbox",
+    "environment": "host",
     "network": "deny",
     "pid": 4242,
     "session_id": "sess-0123456789abcdef01234567",

@@ -2,8 +2,9 @@ package safeslop
 
 safeslop: profiles: {
 	work: {
-		agent:   "shell"
-		network: "allow"
+		agent:       "shell"
+		environment: "container"
+		network:     "allow"
 		secrets: {
 			ANTHROPIC_API_KEY: "op://dev/anthropic/key"
 			FOO:               "env:FOO_SRC"

@@ -123,21 +123,12 @@ type Toolchain struct {
 	Run  string `json:"run,omitempty"`
 }
 
-// FileScope adds paths to the sandbox boundary: Read/Write are extra allowed paths, Deny is
-// subtracted last (deny wins in Seatbelt). Honored by environment:sandbox today (specs/0029).
-type FileScope struct {
-	Read  []string `json:"read,omitempty"`
-	Write []string `json:"write,omitempty"`
-	Deny  []string `json:"deny,omitempty"`
-}
-
 // Profile is one launchable configuration from safeslop.cue.
 type Profile struct {
-	Agent       string     `json:"agent"`
-	Environment string     `json:"environment"`
-	Workspace   string     `json:"workspace,omitempty"`
-	Files       *FileScope `json:"files,omitempty"`
-	Network     string     `json:"network"`
+	Agent       string `json:"agent"`
+	Environment string `json:"environment"`
+	Workspace   string `json:"workspace,omitempty"`
+	Network     string `json:"network"`
 	// Egress lists extra allowlist domains for environment:container with network:deny,
 	// unioned with the base allowlist + the agent's built-in providers (specs/0046).
 	Egress []string `json:"egress,omitempty"`
@@ -218,9 +209,9 @@ func LoadBytes(data []byte) (*Config, error) {
 }
 
 // EnvTier returns an honest one-line characterization of an environment's isolation strength so
-// run/doctor (and the GUI) never imply the default sandbox contains a determined adversary
-// (ayo specs/0012 §10.5 H1). tier is a short label; note is the honest caveat. An empty env is the
-// default (sandbox).
+// run/doctor (and the GUI) never overstate the boundary (ayo specs/0012 §10.5 H1). tier is a short
+// label; note is the honest caveat. environment is required (specs/0053), so an empty/unknown env is
+// not a valid run — it is reported as no boundary rather than silently treated as isolated.
 func EnvTier(env string) (tier, note string) {
 	switch env {
 	case "host":
@@ -229,8 +220,8 @@ func EnvTier(env string) (tier, note string) {
 		return "egress-allowlisted", "container + default-deny per-domain egress allowlist (SNI-trust): stops curl|sh + accidental beaconing, not exfil via an allowed domain; shared-kernel file isolation"
 	case "vm":
 		return "adversary-grade", "disposable hardware-virtualized VM: the strongest boundary, heaviest to run"
-	default: // "sandbox" and "" (the default)
-		return "mistake-guard", "Seatbelt confines files + exec: guards agent mistakes + accidental exfil, not a malicious-code escape"
+	default: // "" / unknown — not a valid environment (specs/0053): treat as no boundary, never imply isolation
+		return "none", "unrecognized environment — no isolation boundary"
 	}
 }
 

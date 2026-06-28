@@ -22,8 +22,6 @@ func TestAllErrorCodesAreTheAppendOnlyV1Set(t *testing.T) {
 		CodeCredentialRevokeFailed,
 		CodePolicyDenied,
 		CodeNetworkDenied,
-		CodeSandboxDenied,
-		CodeSandboxUnavailable,
 		CodeRuntimeUnavailable,
 		CodeToolUnavailable,
 		CodeAgentUnsupported,

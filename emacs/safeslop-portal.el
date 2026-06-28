@@ -78,16 +78,13 @@ A single timer serves the one portal buffer (`safeslop-portal-buffer-name').")
   (propertize status 'face (safeslop-portal--status-face status)))
 
 ;; --- Isolation-tier signalling (specs/0052 #5) -------------------------------
-;; The Env column already shows the environment name (host/sandbox/container/vm);
-;; we colour that text by isolation strength so the honest danger ramp the old
-;; GUI drew as chrome is back — colour reinforces the always-present word, it
-;; never replaces it (specs/0031 non-colour danger channel).
+;; The Env column already shows the environment name (host/container/vm); we
+;; colour that text by isolation strength so the honest danger ramp the old GUI
+;; drew as chrome is back — colour reinforces the always-present word, it never
+;; replaces it (specs/0031 non-colour danger channel).
 
 (defface safeslop-tier-host '((t :inherit error))
   "Face for the `host' environment: no isolation boundary (most dangerous)."
-  :group 'safeslop)
-(defface safeslop-tier-sandbox '((t :inherit warning))
-  "Face for the `sandbox' environment: a mistake-guard, not an escape-proof jail."
   :group 'safeslop)
 (defface safeslop-tier-container '((t :inherit success))
   "Face for the `container' environment: egress-allowlisted network control."
@@ -98,26 +95,23 @@ A single timer serves the one portal buffer (`safeslop-portal-buffer-name').")
 
 (defconst safeslop-portal--env-tiers
   ;; Mirrors internal/engine/policy/policy.go EnvTier (tier label + honest note),
-  ;; ordered host < sandbox < container < vm (least -> most isolated).  Keep in sync
-  ;; with EnvTier; doctor's data.tiers carries the authoritative copy at runtime.
+  ;; ordered host < container < vm (least -> most isolated).  Keep in sync with
+  ;; EnvTier; doctor's data.tiers carries the authoritative copy at runtime.
   '(("host"      safeslop-tier-host      "none"               "no isolation boundary — the agent runs as you, with your full account")
-    ("sandbox"   safeslop-tier-sandbox   "mistake-guard"      "Seatbelt confines files + exec: guards agent mistakes + accidental exfil, not a malicious-code escape")
     ("container" safeslop-tier-container "egress-allowlisted" "container + default-deny per-domain egress allowlist: stops curl|sh + accidental beaconing, not exfil via an allowed domain")
     ("vm"        safeslop-tier-vm        "adversary-grade"    "disposable hardware-virtualized VM: the strongest boundary, heaviest to run"))
   "Per-environment (FACE TIER NOTE) used to colour and annotate the Env cell.")
 
 (defun safeslop-portal--env-face (env)
-  "Return the isolation-tier face for environment ENV (defaults to sandbox)."
-  (or (nth 1 (assoc (if (string-empty-p env) "sandbox" env)
-                    safeslop-portal--env-tiers))
+  "Return the isolation-tier face for environment ENV, or `default' if unknown."
+  (or (nth 1 (assoc env safeslop-portal--env-tiers))
       'default))
 
 (defun safeslop-portal--env-cell (env)
   "Return ENV as a tier-coloured tabulated-list cell with its honest note as help-echo.
 The text label is always present, so colour is a redundant reinforcement, not the
 sole signal (specs/0031).  An unknown env renders plainly."
-  (let* ((key (if (string-empty-p env) "sandbox" env))
-         (row (assoc key safeslop-portal--env-tiers)))
+  (let* ((row (assoc env safeslop-portal--env-tiers)))
     (if row
         (propertize env
                     'face (nth 1 row)

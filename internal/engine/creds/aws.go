@@ -34,7 +34,7 @@ func parseAWSProcessCreds(out []byte) (awsCreds, error) {
 }
 
 // awsEnv renders the short-lived creds as the standard AWS SDK/CLI env vars.
-// Env (not a credentials file) so the same values work in host/sandbox AND inside
+// Env (not a credentials file) so the same values work in host AND inside
 // container/vm without path remapping; the run's secret channel keeps them out of
 // `docker inspect`/`ps`.
 func awsEnv(c awsCreds, region string) []string {

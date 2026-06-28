@@ -23,8 +23,6 @@ const (
 	CodeCredentialRevokeFailed ErrorCode = "CREDENTIAL_REVOKE_FAILED"
 	CodePolicyDenied           ErrorCode = "POLICY_DENIED"
 	CodeNetworkDenied          ErrorCode = "NETWORK_DENIED"
-	CodeSandboxDenied          ErrorCode = "SANDBOX_DENIED"
-	CodeSandboxUnavailable     ErrorCode = "SANDBOX_UNAVAILABLE"
 	CodeRuntimeUnavailable     ErrorCode = "RUNTIME_UNAVAILABLE"
 	CodeToolUnavailable        ErrorCode = "TOOL_UNAVAILABLE"
 	CodeAgentUnsupported       ErrorCode = "AGENT_UNSUPPORTED"
@@ -53,8 +51,6 @@ var allErrorCodes = []ErrorCode{
 	CodeCredentialRevokeFailed,
 	CodePolicyDenied,
 	CodeNetworkDenied,
-	CodeSandboxDenied,
-	CodeSandboxUnavailable,
 	CodeRuntimeUnavailable,
 	CodeToolUnavailable,
 	CodeAgentUnsupported,

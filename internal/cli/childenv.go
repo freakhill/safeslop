@@ -7,8 +7,8 @@ import (
 	"github.com/freakhill/safeslop/internal/engine/hostenv"
 )
 
-// allowlistEnv is the set of host environment variable NAMES safe to carry into an isolated
-// (sandbox/host) child. Everything else — cloud tokens, the 1Password session, the ssh-agent
+// allowlistEnv is the set of host environment variable NAMES safe to carry into the host-tier
+// child. Everything else — cloud tokens, the 1Password session, the ssh-agent
 // socket, forge tokens, even ANTHROPIC_API_KEY — is dropped, so host ambient authority never
 // crosses the boundary (specs/0024 S2). Credentials reach the agent ONLY via the policy's
 // secrets:/credentials: blocks (the secretEnv/pathEnv channels), never by inheritance.
@@ -31,7 +31,7 @@ func carryName(name string) bool {
 //
 // SECURITY: this map is RICH (AWS_*, GITHUB_TOKEN, SSH_AUTH_SOCK, …). childEnv pulls ONLY allowlisted
 // names from it, so those credentials are structurally excluded from the child — the rich env never
-// crosses the sandbox boundary. This is the two-environment firewall: rich env for host-side discovery
+// crosses the boundary. This is the two-environment firewall: rich env for host-side discovery
 // and binary resolution, scrubbed allowlist for what reaches the agent.
 var hostDiscoveryEnv = func() map[string]string {
 	out := map[string]string{}
@@ -43,9 +43,9 @@ var hostDiscoveryEnv = func() map[string]string {
 	return out
 }
 
-// childEnv builds the environment for an isolated child (the sandbox + host tiers, which share the
-// host process namespace) from the allowlist above plus the staged secretEnv/pathEnv. It must NOT
-// inherit os.Environ() wholesale: that is the ambient-authority leak specs/0024 S2 closes.
+// childEnv builds the environment for the host-tier child (which shares the host process namespace)
+// from the allowlist above plus the staged secretEnv/pathEnv. It must NOT inherit os.Environ()
+// wholesale: that is the ambient-authority leak specs/0024 S2 closes.
 //
 // The reconstructed host_discovery_env is overlaid on top of the allowlisted os.Environ values, so a
 // Finder-launched app still hands the agent the user's real PATH/SHELL (otherwise the agent would

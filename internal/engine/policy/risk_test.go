@@ -58,16 +58,6 @@ func TestRiskSummaryListsSecretsAndCreds(t *testing.T) {
 	}
 }
 
-func TestRiskSummarySandboxDenyIsContainedOffline(t *testing.T) {
-	r := RiskSummary(Profile{Environment: "sandbox", Network: "deny"})
-	if r.Level != "contained" {
-		t.Errorf("sandbox+deny level = %q, want contained", r.Level)
-	}
-	if !strings.Contains(strings.Join(r.Lines, " "), "offline") {
-		t.Errorf("sandbox deny should read offline:\n%v", r.Lines)
-	}
-}
-
 func axesByName(axes []RiskAxis) map[string]RiskAxis {
 	m := map[string]RiskAxis{}
 	for _, a := range axes {
@@ -86,21 +76,21 @@ func TestRiskAxesHostIsAllUnrestricted(t *testing.T) {
 	}
 }
 
-func TestRiskAxesSandboxDenyIsAllRestricted(t *testing.T) {
-	for _, a := range RiskAxes(Profile{Environment: "sandbox", Network: "deny"}) {
+func TestRiskAxesContainerDenyIsAllRestricted(t *testing.T) {
+	for _, a := range RiskAxes(Profile{Environment: "container", Network: "deny"}) {
 		if !a.Restricted {
-			t.Errorf("sandbox+deny axis %q=%q should be restricted", a.Name, a.Value)
+			t.Errorf("container+deny axis %q=%q should be restricted", a.Name, a.Value)
 		}
 	}
 }
 
 func TestRiskAxesOpenEgressIsLoudButFilesBounded(t *testing.T) {
-	by := axesByName(RiskAxes(Profile{Environment: "sandbox", Network: "allow"}))
+	by := axesByName(RiskAxes(Profile{Environment: "container", Network: "allow"}))
 	if by["network"].Restricted || by["network"].Severity != "elevated" {
-		t.Errorf("sandbox+allow network = %+v, want unrestricted elevated", by["network"])
+		t.Errorf("container+allow network = %+v, want unrestricted elevated", by["network"])
 	}
 	if !by["files"].Restricted {
-		t.Errorf("sandbox files should be bounded: %+v", by["files"])
+		t.Errorf("container files should be bounded: %+v", by["files"])
 	}
 }
 
@@ -117,9 +107,9 @@ func TestTechStackListsUnderlyingTech(t *testing.T) {
 	if strings.Contains(j, "x/y/z") || strings.Contains(j, "CLAUDE_CODE_OAUTH_TOKEN") {
 		t.Errorf("secret ref/name leaked into tech stack:\n%s", j)
 	}
-	// sandbox uses Seatbelt
-	if !strings.Contains(strings.Join(TechStack(Profile{Agent: "shell", Environment: "sandbox"}), " "), "Seatbelt") {
-		t.Error("sandbox tech stack must mention Seatbelt")
+	// vm uses Tart
+	if !strings.Contains(strings.Join(TechStack(Profile{Agent: "shell", Environment: "vm"}), " "), "Tart") {
+		t.Error("vm tech stack must mention Tart")
 	}
 }
 
@@ -129,7 +119,7 @@ func TestAgentLabelAndTechStackPi(t *testing.T) {
 	if got := agentLabel("pi"); got != "Pi" {
 		t.Errorf("agentLabel(pi) = %q, want Pi", got)
 	}
-	s := strings.Join(TechStack(Profile{Agent: "pi", Environment: "sandbox"}), "\n")
+	s := strings.Join(TechStack(Profile{Agent: "pi", Environment: "host"}), "\n")
 	if !strings.Contains(s, "Agent: Pi") {
 		t.Errorf("tech stack must label the pi agent:\n%s", s)
 	}

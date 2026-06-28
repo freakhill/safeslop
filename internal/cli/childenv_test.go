@@ -11,7 +11,7 @@ func TestChildEnvScrubsAmbientAuthority(t *testing.T) {
 	hostDiscoveryEnv = func() map[string]string { return nil }
 	defer func() { hostDiscoveryEnv = restore }()
 
-	// host ambient credentials that must NOT cross into the sandbox/host tiers
+	// host ambient credentials that must NOT cross into the host tier
 	t.Setenv("AWS_ACCESS_KEY_ID", "AKIA-HOST")
 	t.Setenv("OP_SESSION_my", "op-host-token")
 	t.Setenv("OP_SERVICE_ACCOUNT_TOKEN", "ops_host")

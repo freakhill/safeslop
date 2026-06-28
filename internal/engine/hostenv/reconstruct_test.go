@@ -124,7 +124,7 @@ func TestReconstructMinimalCaptureSuccess(t *testing.T) {
 		t.Errorf("PATH should also include the fallback floor (/usr/local/bin): %q", env.PATH())
 	}
 	// The reconstructed env is intentionally RICH (it is the host_discovery_env). The firewall that
-	// keeps these out of the sandbox lives in cli.childEnv, not here.
+	// keeps these out of the child env lives in cli.childEnv, not here.
 	if v, ok := env.Get("AWS_SECRET_ACCESS_KEY"); !ok || v != "shhh" {
 		t.Errorf("host_discovery_env should carry the captured credential (got %q,%v)", v, ok)
 	}
