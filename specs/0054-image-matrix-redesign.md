@@ -227,6 +227,11 @@ presets stay untouched — they no longer pre-bake but that is a later cleanup).
 
 Goal: id-tagged, content-addressed images; correct skip; build lock. Bug B dies.
 
+Status: implemented and verified on branch `image-matrix` (`make check` + `make build`
+green; recipeID / agentImageTags / withBuildLock / double-checked ensureImage unit-tested;
+compose `AgentImage` threaded). NOT yet observed live: the real image rebuild / 3.68GB
+reclaim — needs a real `safeslop run` with docker (the W1 gate's optional live check).
+
 - [ ] **Add `recipeID` (content hash of build inputs)**
   FILE: `internal/engine/container/identity.go` (new)
   CHANGE: `func recipeID(dockerfile []byte, buildArgs map[string]string) string` —

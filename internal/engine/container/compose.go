@@ -16,6 +16,7 @@ type composeParams struct {
 	RuntimeDir    string
 	Workspace     string
 	StageDir      string
+	AgentImage    string // content-addressed agent image tag (local/safeslop-tools:<id>) -> compose image:
 	GitConfig     bool   // true when staged .gitconfig exists (GIT_CONFIG_GLOBAL -> bind-mount path)
 	GitConfigPath string // path to the in-boundary gitconfig, usually /safeslop/runtime/.gitconfig
 	GitSSHConfig  bool   // true when staged .ssh/config.container exists (GIT_SSH_COMMAND -> bind-mount path)

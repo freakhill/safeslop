@@ -1,4 +1,5 @@
-FROM local/agent-sandbox:latest
+ARG BASE=local/safeslop-base:latest
+FROM ${BASE}
 
 ARG ENABLE_CLAUDE_CODE=false
 ARG ENABLE_PI=false

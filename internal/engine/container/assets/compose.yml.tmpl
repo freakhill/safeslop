@@ -6,7 +6,7 @@ services:
       - {{.RuntimeDir}}/allowlist.domains:/etc/squid/allowlist.domains:ro
     networks: [internal, egress]
   agent:
-    image: local/agent-sandbox-tools:latest
+    image: {{.AgentImage}}
     working_dir: /workspace
     entrypoint: ["/bin/sh", "/safeslop/runtime/entrypoint.sh"]
     environment:

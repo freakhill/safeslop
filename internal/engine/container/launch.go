@@ -159,10 +159,15 @@ func provision(ctx context.Context, agentArgv []string, workspace, network strin
 	}
 	_, gitConfigErr := os.Stat(filepath.Join(stageDir, gitConfigName))
 	_, gitSSHConfigErr := os.Stat(filepath.Join(stageDir, ".ssh", "config.container"))
+	_, toolsImg, _, err := agentImageTags()
+	if err != nil {
+		return nil, "", nil, err
+	}
 	p := composeParams{
 		RuntimeDir:    stageDir,
 		Workspace:     workspace,
 		StageDir:      stageDir,
+		AgentImage:    toolsImg,
 		Term:          os.Getenv("TERM"),
 		NpmConfig:     npmErr == nil,
 		Kubeconfig:    kubeErr == nil,

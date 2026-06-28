@@ -216,3 +216,16 @@ func TestComposeNoAgentSocketAndGitConfig(t *testing.T) {
 		t.Fatalf("git config env must be absent when no staged .gitconfig exists:\n%s", without)
 	}
 }
+
+func TestComposeUsesAgentImage(t *testing.T) {
+	yml, err := renderCompose(composeParams{RuntimeDir: "/r", Workspace: "/w", StageDir: "/r", AgentImage: "local/safeslop-tools:deadbeef1234"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(yml, "image: local/safeslop-tools:deadbeef1234") {
+		t.Fatalf("agent image not threaded from composeParams.AgentImage:\n%s", yml)
+	}
+	if strings.Contains(yml, "agent-sandbox-tools:latest") {
+		t.Fatalf("stale hardcoded :latest agent image still present:\n%s", yml)
+	}
+}
