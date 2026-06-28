@@ -12,7 +12,7 @@ Before using a skill, read:
 Current skills:
 
 - `agent-key-lifecycle` — ephemeral GitHub/Forgejo credential staging and cleanup.
-- `agent-sandbox-ops` — safe operation of host/sandbox/container/VM profiles.
+- `agent-sandbox-ops` — safe operation of host/container/VM isolation profiles.
 
 When command behavior changes, update the affected skill, `README.md`, and Go
 tests in the same change.
