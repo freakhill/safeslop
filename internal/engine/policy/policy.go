@@ -139,6 +139,12 @@ type Profile struct {
 	Credentials *Credentials `json:"credentials,omitempty"`
 	// Toolchain provisions a pinned tool environment, orthogonal to Environment (SP5).
 	Toolchain *Toolchain `json:"toolchain,omitempty"`
+	// Bundles and Packages select build-time packages from the curated catalog
+	// (specs/0058): Bundles are named sets, Packages are à la carte. Resolved by
+	// policy.Resolve against the catalog (unknown names error); the agent's default
+	// bundle is always included so the agent can launch.
+	Bundles  []string `json:"bundles,omitempty"`
+	Packages []string `json:"packages,omitempty"`
 }
 
 // Config is the decoded top-level `safeslop:` value from safeslop.cue.
