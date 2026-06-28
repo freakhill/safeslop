@@ -1,14 +1,12 @@
 # safeslop library
 
-This directory contains static assets and reference material used by the Go
-engine and documentation.
+Static assets used by the Go engine.
 
-- `layer/container/` — canonical container assets copied into the Go embed tree
-  by `make sync-container-assets` and checked by `make check`.
-- `layer/policy/` — reference policy fixtures and generated examples kept for
-  compatibility with the design history.
-- `task/` — explanatory recipes for isolation and agent workflows. Current
-  runtime behavior is implemented by the `safeslop` Go binary.
+- `layer/container/` — canonical container assets (Dockerfiles, compose, squid
+  allowlist, the agent-tools env example) copied into the Go embed tree by
+  `make sync-container-assets` and verified by `make check`.
 
-For day-to-day use, prefer `safeslop validate`, `safeslop run`, `safeslop doctor`,
-and `safeslop down`.
+Everything the engine does at runtime is implemented by the `safeslop` Go binary —
+use `safeslop validate`, `safeslop run`, `safeslop doctor`, and `safeslop down`.
+The former fish/Python toolkit's policy fixtures, `.sb` Seatbelt profiles, and task
+recipes were removed in specs/0054 (reference-only, superseded by the Go engine).
