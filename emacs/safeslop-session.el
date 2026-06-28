@@ -51,7 +51,7 @@ Emacs does not block.  CALLBACK, when given, is called with the envelope once it
 arrives (used by tests); it precedes ENVIRONMENT/NETWORK so existing callers and
 the security argv tests keep their three-argument form."
   (interactive
-   (list (completing-read "Agent: " '("claude" "claude-code" "pi") nil t nil nil "claude")
+   (list (completing-read "Agent: " '("claude" "pi" "fish" "zsh") nil t nil nil "claude")
          (read-directory-name "Workspace: " nil nil t)
          nil ; callback: interactive use shows the envelope buffer, no extra hook
          (completing-read "Environment: " '("container" "vm" "host") nil t nil nil "container")

@@ -155,6 +155,21 @@ func NormalizeAgent(agent string) string {
 	return agent
 }
 
+// IsLaunchableAgent reports whether name — already canonical (NormalizeAgent
+// applied by the caller) — is an agent that `session create` will accept. It is
+// the shared allowlist for session-create validation and mirrors the agentArgv /
+// seedAgentDefaults switches. The generic "shell" agent is intentionally absent:
+// it remains a profile-only value (launchable via `safeslop run`, mapped by
+// agentArgv) but is not session-creatable — the explicit fish/zsh agents
+// supersede it. "claude-code" normalizes to "claude" before reaching here.
+func IsLaunchableAgent(name string) bool {
+	switch name {
+	case "claude", "pi", "fish", "zsh":
+		return true
+	}
+	return false
+}
+
 // virtualDir is an in-memory CUE package built from the embedded schema plus the
 // user's file via an overlay, so neither needs to live in a real CUE module.
 const virtualDir = "/__safeslop__"

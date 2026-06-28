@@ -284,3 +284,19 @@ func TestEnvTier(t *testing.T) {
 		t.Error("host tier must still carry a note (no isolation)")
 	}
 }
+
+func TestIsLaunchableAgent(t *testing.T) {
+	for _, a := range []string{"claude", "pi", "fish", "zsh"} {
+		if !IsLaunchableAgent(a) {
+			t.Errorf("IsLaunchableAgent(%q) = false, want true", a)
+		}
+	}
+	// "shell" is a profile-only value (handled by agentArgv) but not
+	// session-creatable; "claude-code" must be normalized to "claude" before this
+	// gate; everything else is unsupported.
+	for _, a := range []string{"shell", "claude-code", "cursor", "notanagent", ""} {
+		if IsLaunchableAgent(a) {
+			t.Errorf("IsLaunchableAgent(%q) = true, want false", a)
+		}
+	}
+}

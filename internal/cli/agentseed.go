@@ -19,7 +19,7 @@ func seedAgentDefaults(prof policy.Profile, ws string) error {
 	switch policy.NormalizeAgent(prof.Agent) {
 	case "claude":
 		return seedFixture(filepath.Join(ws, ".claude", "settings.json"), "agentfixtures/claude-code.settings.json")
-	case "pi", "shell", "":
+	case "pi", "shell", "fish", "zsh", "":
 		return nil
 	default:
 		return fmt.Errorf("unsupported agent %q", prof.Agent)

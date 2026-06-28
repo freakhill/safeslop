@@ -95,3 +95,23 @@ func TestAgentSeedSkipsShellSettings(t *testing.T) {
 		t.Fatalf("shell profile must not seed claude settings: %v", err)
 	}
 }
+
+func TestAgentSeedSkipsFishSettings(t *testing.T) {
+	ws := t.TempDir()
+	if err := seedAgentDefaults(policy.Profile{Agent: "fish"}, ws); err != nil {
+		t.Fatalf("fish seed should be a no-op: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(ws, ".claude", "settings.json")); !os.IsNotExist(err) {
+		t.Fatalf("fish profile must not seed claude settings: %v", err)
+	}
+}
+
+func TestAgentSeedSkipsZshSettings(t *testing.T) {
+	ws := t.TempDir()
+	if err := seedAgentDefaults(policy.Profile{Agent: "zsh"}, ws); err != nil {
+		t.Fatalf("zsh seed should be a no-op: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(ws, ".claude", "settings.json")); !os.IsNotExist(err) {
+		t.Fatalf("zsh profile must not seed claude settings: %v", err)
+	}
+}

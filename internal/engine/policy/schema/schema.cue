@@ -15,8 +15,10 @@ package safeslop
 #Environment: "container" | "vm" | "host"
 
 // What to launch. "claude-code" is accepted as a user-facing alias and
-// normalized to the canonical "claude" engine value after decode.
-#Agent: "claude" | "claude-code" | "shell" | "pi"
+// normalized to the canonical "claude" engine value after decode. fish/zsh are
+// first-class shell agents; the generic "shell" is a profile-only legacy value
+// (handled by `safeslop run` but not accepted by `session create`).
+#Agent: "claude" | "claude-code" | "shell" | "pi" | "fish" | "zsh"
 
 // Coarse egress policy. "deny" + environment:container is the egress-allowlisted
 // path (the per-domain allowlist is the container's job, specs/0001 §6.2);

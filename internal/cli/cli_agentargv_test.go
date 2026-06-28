@@ -93,3 +93,23 @@ func TestAgentArgvRejectsUnknownAgent(t *testing.T) {
 		t.Fatalf("agentArgv(cursor) error = %v, want unknown agent", err)
 	}
 }
+
+func TestAgentArgvAcceptsFish(t *testing.T) {
+	argv, err := agentArgv(policy.Profile{Agent: "fish"})
+	if err != nil {
+		t.Fatalf("agentArgv(fish): %v", err)
+	}
+	if len(argv) != 1 || argv[0] != "fish" {
+		t.Errorf("fish argv = %v, want [fish]", argv)
+	}
+}
+
+func TestAgentArgvAcceptsZsh(t *testing.T) {
+	argv, err := agentArgv(policy.Profile{Agent: "zsh"})
+	if err != nil {
+		t.Fatalf("agentArgv(zsh): %v", err)
+	}
+	if len(argv) != 1 || argv[0] != "zsh" {
+		t.Errorf("zsh argv = %v, want [zsh]", argv)
+	}
+}

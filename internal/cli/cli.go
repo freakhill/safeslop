@@ -367,7 +367,7 @@ func cmdSession() *cobra.Command {
 func cmdSessionCreate() *cobra.Command {
 	var agent, workspace, output, environment, network string
 	c := &cobra.Command{
-		Use:   "create --agent <pi|claude|claude-code> --environment <host|container|vm> --workspace <dir> --output json",
+		Use:   "create --agent <claude|pi|fish|zsh> --environment <host|container|vm> --workspace <dir> --output json",
 		Short: "Create a safeslop session record",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -375,7 +375,7 @@ func cmdSessionCreate() *cobra.Command {
 				return fmt.Errorf("session create requires --output json")
 			}
 			canonicalAgent := policy.NormalizeAgent(agent)
-			if canonicalAgent != "pi" && canonicalAgent != "claude" {
+			if !policy.IsLaunchableAgent(canonicalAgent) {
 				return emitContractError(jsoncontract.CodeAgentUnsupported, fmt.Sprintf("unsupported agent %q", agent), map[string]any{"agent": agent})
 			}
 			if workspace == "" {
@@ -418,7 +418,7 @@ func cmdSessionCreate() *cobra.Command {
 			return nil
 		},
 	}
-	c.Flags().StringVar(&agent, "agent", "", "agent to run: pi, claude, or claude-code")
+	c.Flags().StringVar(&agent, "agent", "", "agent to run: claude, pi, fish, or zsh")
 	c.Flags().StringVar(&workspace, "workspace", "", "workspace directory")
 	c.Flags().StringVar(&output, "output", "", "output format: json")
 	c.Flags().StringVar(&environment, "environment", "", "isolation environment (required): host, container, or vm")
@@ -1585,6 +1585,10 @@ func agentArgv(p policy.Profile) ([]string, error) {
 		return []string{"claude"}, nil
 	case "pi":
 		return []string{"pi"}, nil
+	case "fish":
+		return []string{"fish"}, nil
+	case "zsh":
+		return []string{"zsh"}, nil
 	case "shell":
 		// The host's $SHELL is an absolute host path (e.g. /bin/zsh, /opt/homebrew/bin/fish).
 		// That path is correct for host (the agent runs on the host) but does NOT exist
