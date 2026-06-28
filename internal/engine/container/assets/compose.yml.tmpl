@@ -18,8 +18,9 @@ services:
 {{end}}{{if .GitConfig}}      GIT_CONFIG_GLOBAL: {{.GitConfigPath}}
       GIT_TERMINAL_PROMPT: 0
 {{end}}{{if .GitSSHConfig}}      GIT_SSH_COMMAND: ssh -F /safeslop/runtime/.ssh/config.container
-{{end}}{{if .Term}}      TERM: {{.Term}}
-{{end}}    volumes:
+{{end}}      TERM: xterm-256color
+      COLORTERM: truecolor
+    volumes:
       - {{.Workspace}}:/workspace:rw
       - {{.StageDir}}:/safeslop/runtime:ro
     read_only: true

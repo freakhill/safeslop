@@ -43,6 +43,10 @@ func scpArgv(ip, src, dst string) []string {
 // container compose env, but pointed at the scp'd stage under the guest's ~/.safeslop-runtime.
 func remoteAgentCmd(agentArgv []string, proxyURL string, hasGitConfig bool, gitConfigName string, hasGitSSHConfig, hasKubeconfig bool) string {
 	var b strings.Builder
+	// Force a truecolor terminal in the VM guest: the agent TUIs (Ink/chalk) need TERM/COLORTERM to
+	// emit 24-bit color, and the ssh session would otherwise inherit whatever (if any) the remote
+	// login set. Never export LINES/COLUMNS — the PTY winsize is authoritative.
+	b.WriteString("export TERM=xterm-256color COLORTERM=truecolor; ")
 	if proxyURL != "" {
 		p := shellQuote(proxyURL)
 		b.WriteString("export HTTP_PROXY=" + p + " HTTPS_PROXY=" + p + " http_proxy=" + p + " https_proxy=" + p + "; ")

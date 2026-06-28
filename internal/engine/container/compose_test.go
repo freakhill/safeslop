@@ -10,7 +10,7 @@ import (
 )
 
 func TestComposeIsNetworkEnforcedAndLeakFree(t *testing.T) {
-	yml, err := renderCompose(composeParams{RuntimeDir: "/rt", Workspace: "/ws", StageDir: "/st", Term: "xterm", NpmConfig: true})
+	yml, err := renderCompose(composeParams{RuntimeDir: "/rt", Workspace: "/ws", StageDir: "/st", NpmConfig: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,5 +227,15 @@ func TestComposeUsesAgentImage(t *testing.T) {
 	}
 	if strings.Contains(yml, "agent-sandbox-tools:latest") {
 		t.Fatalf("stale hardcoded :latest agent image still present:\n%s", yml)
+	}
+}
+
+func TestComposeForcesTruecolorTerm(t *testing.T) {
+	yml, err := renderCompose(composeParams{RuntimeDir: "/r", Workspace: "/w", StageDir: "/r"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(yml, "TERM: xterm-256color") || !strings.Contains(yml, "COLORTERM: truecolor") {
+		t.Fatalf("compose must force a truecolor terminal unconditionally:\n%s", yml)
 	}
 }

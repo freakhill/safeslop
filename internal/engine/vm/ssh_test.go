@@ -26,8 +26,12 @@ func TestScpArgv(t *testing.T) {
 
 func TestRemoteAgentCmdSourcesSecretsAndEscapes(t *testing.T) {
 	cmd := remoteAgentCmd([]string{"claude", "--flag with space"}, "", false, "", false, false)
-	if !strings.Contains(cmd, ". ~/.safeslop-runtime/secrets.env") || !strings.HasPrefix(cmd, "set -a;") {
+	if !strings.Contains(cmd, ". ~/.safeslop-runtime/secrets.env") || !strings.Contains(cmd, "set -a;") {
 		t.Fatalf("missing secrets sourcing: %q", cmd)
+	}
+	// W2: a truecolor terminal is forced first, before any cred/secret setup.
+	if !strings.HasPrefix(cmd, "export TERM=xterm-256color COLORTERM=truecolor; ") {
+		t.Fatalf("vm remote cmd must export TERM/COLORTERM first: %q", cmd)
 	}
 	if !strings.Contains(cmd, `exec 'claude' '--flag with space'`) {
 		t.Fatalf("agent argv not quoted: %q", cmd)

@@ -20,10 +20,9 @@ type composeParams struct {
 	GitConfig     bool   // true when staged .gitconfig exists (GIT_CONFIG_GLOBAL -> bind-mount path)
 	GitConfigPath string // path to the in-boundary gitconfig, usually /safeslop/runtime/.gitconfig
 	GitSSHConfig  bool   // true when staged .ssh/config.container exists (GIT_SSH_COMMAND -> bind-mount path)
-	Term          string
-	NpmConfig     bool // true when a staged .npmrc exists
-	Kubeconfig    bool // true when a staged kubeconfig exists (KUBECONFIG -> bind-mount path)
-	OpenEgress    bool // true in network:allow -> agent also joins the egress bridge (real route + DNS)
+	NpmConfig     bool   // true when a staged .npmrc exists
+	Kubeconfig    bool   // true when a staged kubeconfig exists (KUBECONFIG -> bind-mount path)
+	OpenEgress    bool   // true in network:allow -> agent also joins the egress bridge (real route + DNS)
 	// InternalNet, when set, is the name of an externally pre-created `--internal` network the compose
 	// references instead of declaring `internal: true` inline. The lima/rootless-nerdctl backend MUST set
 	// it (compose's inline internal:true does not isolate egress there); the host docker backend leaves it
