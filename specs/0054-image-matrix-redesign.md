@@ -27,7 +27,7 @@ And the image surface is wrong for where the project went: the agent enum has a
 duplicated `claude`/`claude-code`, a generic `shell` that `session create`
 rejects (`cli.go:378` allows only `pi`/`claude`), no first-class `fish`/`zsh`, and
 the tools image bakes in three default-on Python agent frameworks
-(crewai/pydantic-ai/ag2 — the 3.68GB bulk) nobody in the claude/pi/fish/zsh world
+(crewai/pydantic-ai/ag2 — ~1GB of the 3.68GB image) nobody in the claude/pi/fish/zsh world
 needs.
 
 ## What we're building
@@ -85,7 +85,7 @@ the terminal is correct at every boundary.
   `{uv, pnpm, bunx, mise}` are build-arg toggles with BuildKit cache mounts.
 - **D9 — W0 byte-win is a flag flip, not deletion.** W0 flips
   `ENABLE_CREWAI/PYDANTICAI/AG2` defaults `true→false` (minimal, reversible; the
-  3.68GB drops out of the default build). The full removal of those ARG/RUN blocks
+  ~1GB of frameworks drops out — measured 3.68GB→2.68GB; the base's bulk waits for W4). The full removal of those ARG/RUN blocks
   is folded into W4's Dockerfile rewrite. (Refines the handoff, which listed
   "delete" under W0.)
 
@@ -116,7 +116,7 @@ Each wave is independently shippable and gated by `make check` + `make build`
 ### W0 — agent surface + free-bytes (quick-win starter)
 
 Goal: fix `AGENT_UNSUPPORTED` for shells, add `fish`/`zsh`, drop `claude-code`
-from the UI, and set up the 3.68GB byte-win (realized once W1 lets the image
+from the UI, and set up the framework byte-win (~1GB; realized once W1 lets the image
 rebuild).
 
 Status: implemented and verified on branch `image-matrix` (`make check` +
@@ -229,8 +229,11 @@ Goal: id-tagged, content-addressed images; correct skip; build lock. Bug B dies.
 
 Status: implemented and verified on branch `image-matrix` (`make check` + `make build`
 green; recipeID / agentImageTags / withBuildLock / double-checked ensureImage unit-tested;
-compose `AgentImage` threaded). NOT yet observed live: the real image rebuild / 3.68GB
-reclaim — needs a real `safeslop run` with docker (the W1 gate's optional live check).
+compose `AgentImage` threaded). VERIFIED LIVE (2026-06-28): a real build produces
+`local/safeslop-{base,tools}:<id>` and the tools image is **2.68GB**, down from the old
+**3.68GB** — i.e. **~1GB** saved by dropping the 3 frameworks (built clean through WARP).
+NB: the base is still 1.8GB (`node:22-bookworm`); the larger remaining win is W4's slim
+digest-pinned base.
 
 - [ ] **Add `recipeID` (content hash of build inputs)**
   FILE: `internal/engine/container/identity.go` (new)
@@ -283,8 +286,8 @@ reclaim — needs a real `safeslop run` with docker (the W1 gate's optional live
   VERIFY: `make check && make build`; then optionally
   `docker rmi local/agent-sandbox-tools:latest local/agent-sandbox:latest` and a
   real `safeslop run` to force a rebuild under the new tags.
-  EXPECTED: new `local/safeslop-tools:<id>` image is materially smaller than 3.68GB
-  (frameworks gone); a second run with no changes does **not** rebuild.
+  EXPECTED: new `local/safeslop-tools:<id>` measures **2.68GB** (down from 3.68GB; the 3
+  frameworks gone — ~1GB); a second run with no changes does **not** rebuild. (Measured.)
 
 Off-limits: terminal env (W2), labels/reap (W3), the Dockerfile rewrite (W4).
 
@@ -511,7 +514,7 @@ Goal: drive the matrix from the Emacs cockpit.
 - Build each wave in a fresh worktree off the latest main (`.worktrees/<wave>`),
   atomic scoped commits (`feat|refactor|fix|docs(0054): …`), `make check` +
   `make build` before declaring done.
-- W0→W1 ordering is load-bearing: W0 sets `ENABLE_*=false`, but the 3.68GB only
+- W0→W1 ordering is load-bearing: W0 sets `ENABLE_*=false`, but the ~1GB framework saving only
   leaves disk once W1 stops the stale-`:latest` skip and the image rebuilds under
   an id tag.
 - The two-copy asset-sync constraint applies to every Dockerfile/compose/allowlist
