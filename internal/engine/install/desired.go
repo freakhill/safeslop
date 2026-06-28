@@ -10,15 +10,15 @@ package install
 // and the daemon is Docker Desktop / OrbStack (GUI casks), with no single-artifact verified
 // installer to pin, so it stays a deliberate later slice.
 //
-// Checksums are read from each release's official checksum file (mise SHASUMS256.txt,
-// tart_<ver>_checksums.txt). Bump version+sha256+url together when pinning a newer release.
+// Checksums are read from each release's official checksum file (mise SHASUMS256.txt).
+// Bump version+sha256+url together when pinning a newer release.
 //
 // Upstream-signature pinning (Pin.Sig, specs/0012 §10.2) is built and tested (VerifyMinisign +
 // the Apply sig-chain tests) but NOT yet activated for these tools: mise publishes
 // SHASUMS256.txt.minisig but does not publish an authoritative minisign *public key* (its own
-// installer leaves "verify with minisign or gpg" as a TODO), and tart's releases ship only a
-// plain checksums file. Both therefore rely on the embedded-sha256 → notarized-binary trust chain
-// (still fail-closed). Add a Sig here as a one-line data edit once an authoritative pubkey exists.
+// installer leaves "verify with minisign or gpg" as a TODO). Both therefore rely on the
+// embedded-sha256 → notarized-binary trust chain (still fail-closed). Add a Sig here as a
+// one-line data edit once an authoritative pubkey exists.
 func DesiredState() []Pin {
 	return []Pin{
 		{
@@ -31,17 +31,8 @@ func DesiredState() []Pin {
 			Provenance: ProvenanceVendor, // matches mise's published SHASUMS256.txt
 		},
 		{
-			Name:       "tart",
-			Kind:       "runtime",
-			Format:     FormatAppTarball,
-			Version:    "2.32.1",
-			SHA256:     "8554ab4f7fc12afe52f9b7e3093a935673cbac737a83973d2db7a0683c814529",
-			URL:        "https://github.com/cirruslabs/tart/releases/download/2.32.1/tart.tar.gz",
-			Provenance: ProvenanceVendor, // matches tart's published checksums file
-		},
-		{
-			// limactl is the container-isolation-tier VM manager (the engine provider; specs/0043/0044), the
-			// sibling of tart in the base toolchain. It is a FormatToolTree, NOT a bare binary: limactl
+			// limactl is the container-isolation-tier VM manager (the engine provider; specs/0043/0044).
+			// It is a FormatToolTree, NOT a bare binary: limactl
 			// resolves its guest agent (share/lima/lima-guestagent.Linux-aarch64.gz) and the instance
 			// templates RELATIVE to its own path, so the binary alone cannot boot a VM (verified live
 			// 2026-06-22 — the bare binary fatals "template default.yaml not found"). The whole tarball tree

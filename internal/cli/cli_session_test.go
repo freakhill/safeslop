@@ -151,7 +151,7 @@ func TestSessionCreateRejectsUnsupportedAgentAsContract(t *testing.T) {
 	}
 }
 
-// fish/zsh are first-class launchable agents (specs/0054 W0): a session create
+// fish/zsh are first-class launchable agents (specs/0055 W0): a session create
 // that the old pi/claude-only allowlist would have rejected must now succeed.
 func TestSessionCreateAcceptsFishAgent(t *testing.T) {
 	ws := t.TempDir()
@@ -407,7 +407,7 @@ func TestSessionCreateEnvironmentOnlyOverride(t *testing.T) {
 
 	out, err := runRootForTest(t, ws, "session", "create",
 		"--agent", "claude", "--workspace", ws, "--output", "json",
-		"--environment", "vm",
+		"--environment", "host",
 	)
 	if err != nil {
 		t.Fatalf("session create: %v\nout=%s", err, out)
@@ -416,8 +416,8 @@ func TestSessionCreateEnvironmentOnlyOverride(t *testing.T) {
 	if !env.OK {
 		t.Fatalf("create returned error envelope: %+v", env.Errors)
 	}
-	if got := env.Data["environment"]; got != "vm" {
-		t.Fatalf("environment = %#v, want vm", got)
+	if got := env.Data["environment"]; got != "host" {
+		t.Fatalf("environment = %#v, want host", got)
 	}
 	if got := env.Data["network"]; got != "deny" {
 		t.Fatalf("network = %#v, want deny (default unchanged)", got)

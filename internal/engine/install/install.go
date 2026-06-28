@@ -44,7 +44,6 @@ func Status(ctx context.Context, version string) State {
 		},
 		Runtimes: []Tool{
 			probe(ctx, "docker", "--version"),
-			probe(ctx, "tart", "--version"),
 			probe(ctx, "bun", "--version"),
 			probe(ctx, "pnpm", "--version"),
 			probe(ctx, "claude", "--version"),

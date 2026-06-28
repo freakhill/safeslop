@@ -15,7 +15,7 @@ Before making changes, agents must read:
 
 - Keep command UX and safety defaults consistent across the `safeslop` Go CLI.
 - Treat network limiting as a first-class control; do not weaken defaults silently.
-- Preserve explicit host file-sharing boundaries for VM/container workflows.
+- Preserve explicit host file-sharing boundaries for container workflows.
 - Use comment best practices: why-focused, concise, linked to official references where needed.
 - New engine work goes in Go under `cmd/safeslop` and `internal/engine/*`.
 - Keep engine tests hermetic: no live network or credential APIs in unit tests.

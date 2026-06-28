@@ -38,7 +38,7 @@ func Lint(cfg *Config) []Warning {
 				Profile: n,
 				Code:    "egress-ignored",
 				Message: "sets egress domains but they are ignored — the egress allowlist is honored only on " +
-					"environment:container with network:deny (network:allow bypasses it; host is unrestricted; vm uses a proxy)",
+					"environment:container with network:deny (network:allow bypasses it; host is unrestricted)",
 			})
 		}
 	}

@@ -1,8 +1,13 @@
-# 0054 — Isolation-image matrix redesign
+# 0055 — Isolation-image matrix redesign
 
 Status: planned
-Branch: `image-matrix` (off `remove-sandbox-tier`, which carries specs/0053)
+Branch: `image-matrix`
 Supersedes the ad-hoc `local/agent-sandbox*:latest` image scheme.
+
+> **Substrate note (post-authoring):** the VM tier was removed in **specs/0057** —
+> this plan is now **container-only**. The matrix's `substrate` axis is just
+> `{container}`, **W5 (VM recipe identity) is dropped**, and any `vm`/Tart/VM-ssh
+> references below are obsolete historical context.
 
 ## Why
 
@@ -35,7 +40,7 @@ needs.
 A **parametrized matrix of minimalist, lazily-built images**:
 
 ```
-agent {claude, pi, fish, zsh}  ×  substrate {container, vm}  ×  tool-layers {uv, pnpm, bunx, mise}
+agent {claude, pi, fish, zsh}  ×  substrate {container}  ×  tool-layers {uv, pnpm, bunx, mise}
 ```
 
 Each cell is a *recipe*. A recipe has a content-hash **identity**; its image is
@@ -461,24 +466,6 @@ toggles + cache mounts. Realizes the full minimal-image design.
 
 ---
 
-### W5 — VM recipe identity
-
-Goal: VM substrate joins the matrix without baking per-recipe VMs.
-
-- [ ] **`provisionToolchain` carries a recipe marker**
-  FILE: `internal/engine/vm/vm.go` (`provisionToolchain`, line 181) +
-  `internal/engine/vm/launch.go` (call site line 44)
-  CHANGE: write a guest marker file keyed to the same `ID()`/recipe hash; skip
-  re-provision when the marker matches (idempotent). No per-recipe baked VM images.
-  VERIFY: `go test ./internal/engine/vm/ -run Provision -v`
-  EXPECTED: PASS.
-
-- [ ] **W5 gate**
-  VERIFY: `make check && make build`
-  EXPECTED: exit 0.
-
----
-
 ### W6 — front-end + chrome
 
 Goal: drive the matrix from the Emacs cockpit.
@@ -512,7 +499,7 @@ Goal: drive the matrix from the Emacs cockpit.
 ## Execution notes
 
 - Build each wave in a fresh worktree off the latest main (`.worktrees/<wave>`),
-  atomic scoped commits (`feat|refactor|fix|docs(0054): …`), `make check` +
+  atomic scoped commits (`feat|refactor|fix|docs(0055): …`), `make check` +
   `make build` before declaring done.
 - W0→W1 ordering is load-bearing: W0 sets `ENABLE_*=false`, but the ~1GB framework saving only
   leaves disk once W1 stops the stale-`:latest` skip and the image rebuilds under

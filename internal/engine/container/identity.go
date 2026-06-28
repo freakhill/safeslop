@@ -15,7 +15,7 @@ const (
 // sha256(dockerfile-bytes followed by each sorted "\nkey=value" build-arg). It is pure and
 // deterministic, so an unchanged recipe yields an unchanged tag — imageExists(<id-tag>) becomes a
 // CORRECT skip — while any change to the Dockerfile or a build-arg yields a new tag and forces a
-// rebuild. This is what kills the stale-":latest" rebuild-skip (specs/0054 Bug B / W1): the old
+// rebuild. This is what kills the stale-":latest" rebuild-skip (specs/0055 Bug B / W1): the old
 // code skipped a rebuild whenever the floating :latest tag existed, so an image went stale forever.
 func recipeID(dockerfile []byte, buildArgs map[string]string) string {
 	h := sha256.New()

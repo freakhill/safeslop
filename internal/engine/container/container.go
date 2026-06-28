@@ -66,7 +66,7 @@ func runEngine(ctx context.Context, eng runtime.Engine, args ...string) error {
 
 // buildImages builds the base then the tools image, each tagged by its content-hash recipe id
 // (local/safeslop-{base,tools}:<id>) so imageExists(<id-tag>) is a CORRECT skip — an unchanged
-// recipe is reused, a changed Dockerfile/build-arg yields a new tag and rebuilds (specs/0054 W1,
+// recipe is reused, a changed Dockerfile/build-arg yields a new tag and rebuilds (specs/0055 W1,
 // killing the stale-":latest" Bug B). dir is the build context.
 func buildImages(ctx context.Context, eng runtime.Engine, dir string) error {
 	if err := ensureDockerfiles(dir); err != nil {

@@ -53,8 +53,8 @@ type Store struct{ Dir string }
 func NewStore(dir string) Store { return Store{Dir: dir} }
 
 // Create records a new session. environment is required (specs/0053 removed the
-// default sandbox tier) and must be host, container, or vm; the CLI validates it
-// before calling. network defaults to deny (honored by container/vm).
+// default sandbox tier) and must be host or container; the CLI validates it
+// before calling. network defaults to deny (honored by container).
 func (s Store) Create(agent, environment, workspace string, now time.Time) (Session, error) {
 	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
 		return Session{}, err

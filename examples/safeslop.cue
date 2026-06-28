@@ -9,9 +9,8 @@ package safeslop
 //   safeslop trust             # approve this file's exact bytes (one-time)
 //   safeslop run review        # launch Claude Code in a container
 //
-// environment is required (specs/0053 removed the sandbox tier): host | container
-// | vm. Network-bound agents (claude, pi) belong in container or vm; host runs
-// them unconfined.
+// environment is required (specs/0053 removed the sandbox tier): host | container.
+// Network-bound agents (claude, pi) belong in container; host runs them unconfined.
 safeslop: {
 	version: 1
 	profiles: {

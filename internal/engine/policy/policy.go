@@ -233,8 +233,6 @@ func EnvTier(env string) (tier, note string) {
 		return "none", "no isolation boundary — the agent runs as you, with your full account"
 	case "container":
 		return "egress-allowlisted", "container + default-deny per-domain egress allowlist (SNI-trust): stops curl|sh + accidental beaconing, not exfil via an allowed domain; shared-kernel file isolation"
-	case "vm":
-		return "adversary-grade", "disposable hardware-virtualized VM: the strongest boundary, heaviest to run"
 	default: // "" / unknown — not a valid environment (specs/0053): treat as no boundary, never imply isolation
 		return "none", "unrecognized environment — no isolation boundary"
 	}

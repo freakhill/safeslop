@@ -81,10 +81,6 @@ func stageHTTPSPAT(stageDir, baseURL, hostName, sshPort, token string, repos []p
 	if err := os.WriteFile(filepath.Join(stageDir, ".gitconfig.container"), []byte(renderPATGitConfig(baseURL, hostName, sshPort, containerTokenPath, repos)), 0o600); err != nil {
 		return nil, err
 	}
-	vmTokenPath := "~/.safeslop-runtime/" + patTokenFile
-	if err := os.WriteFile(filepath.Join(stageDir, ".gitconfig.vm"), []byte(renderPATGitConfig(baseURL, hostName, sshPort, vmTokenPath, repos)), 0o600); err != nil {
-		return nil, err
-	}
 	return []string{"GIT_CONFIG_GLOBAL=" + gcPath, "GIT_TERMINAL_PROMPT=0"}, nil
 }
 

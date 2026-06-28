@@ -269,7 +269,6 @@ func TestEnvTier(t *testing.T) {
 		"host":      "none",
 		"":          "none", // environment is required (specs/0053); empty/unknown implies no boundary
 		"container": "egress-allowlisted",
-		"vm":        "adversary-grade",
 	}
 	for env, wantTier := range cases {
 		tier, note := EnvTier(env)

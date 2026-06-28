@@ -1,20 +1,24 @@
-# 0055 — Dev Containers (containers.dev) integration assessment
+# 0056 — Dev Containers (containers.dev) integration assessment
+
+> **Substrate note:** the VM tier was removed in **specs/0057**; safeslop is
+> container-only, so the container/VM substrate discussion below is moot (the
+> lockfile is simply container-scoped).
 
 Status: research note (ayoflo: expansion → cross-model research → source-grounded FLO).
-Evaluated against specs/0054 (image-matrix redesign).
+Evaluated against specs/0055 (image-matrix redesign).
 
-> **Status caveat (verified against the tree):** of 0054 only **W0** is built today.
+> **Status caveat (verified against the tree):** of 0055 only **W0** is built today.
 > `recipeID` (W1, planned in a not-yet-existing `internal/engine/container/identity.go`),
 > the `safeslop.managed`/`safeslop.session` **labels** (W3), and BuildKit
 > `--mount=type=cache` (W4) **do not exist yet** — the current `Dockerfile.agent`
 > still installs `uv` via the unpinned `curl … | sh` this note criticises. Every
-> hook below therefore targets a *planned* 0054 wave; none is a change to existing
+> hook below therefore targets a *planned* 0055 wave; none is a change to existing
 > code. Where the draft said "already", read "will, in W<n>".
 
 ## Verdict
 
 **Adopt-selectively, narrow — the valuable integration is conceptual, not
-wholesale.** Borrow the **lockfile idea** (it reinforces 0054's planned content-hash
+wholesale.** Borrow the **lockfile idea** (it reinforces 0055's planned content-hash
 recipe identity). **Reject** consuming/publishing Features, the devcontainer CLI,
 lifecycle hooks, dotfiles, and IDE/Codespaces interop — each fights safeslop's
 hermetic identity, hardened boundary, or the nerdctl/no-buildx engine seam. The
@@ -49,7 +53,7 @@ safeslop optimises a read-only, cap-dropped, default-deny boundary.
 
 | # | Axis | Verdict | Mechanism / reason |
 |---|------|---------|--------------------|
-| 1 | Consume Features as tool-layers | **REJECT** | `install.sh` typically fetches **unpinned** binaries at build (`devcontainer-lock.json` pins the Feature, not what it `curl`s) → breaks content-hash identity; needs network (fights WARP + forces OCI registries into the squid default-deny allowlist); untested on nerdctl/lima. A bespoke version/digest-pinned `RUN` + BuildKit cache (0054 W4) is hermetic and strictly better. (A hermetic-subset middle ground exists — see below — and is also rejected, for now.) |
+| 1 | Consume Features as tool-layers | **REJECT** | `install.sh` typically fetches **unpinned** binaries at build (`devcontainer-lock.json` pins the Feature, not what it `curl`s) → breaks content-hash identity; needs network (fights WARP + forces OCI registries into the squid default-deny allowlist); untested on nerdctl/lima. A bespoke version/digest-pinned `RUN` + BuildKit cache (0055 W4) is hermetic and strictly better. (A hermetic-subset middle ground exists — see below — and is also rejected, for now.) |
 | 2 | Ingest a repo's `devcontainer.json` (declarative fields only) | **OPTIONAL / LATER, gated** | Parse an **allowlisted** subset (`image`, filtered `containerEnv`) as recipe hints; **discard** `mounts`/`runArgs`/`*Command`/`dockerComposeFile`/dotfiles. safeslop's Dockerfile + compose + squid + security flags always win. |
 | 3 | devcontainer CLI as build/up engine | **REJECT** | Node.js + Docker-daemon coupling breaks the `runtime.Engine` seam; opaque Feature composition conflicts with the planned `recipeID` + `withBuildLock`. All three research lanes rejected it. |
 | 4 | Publish agents (claude/pi) as Features | **REJECT** | The Feature's `install.sh` would fetch the agent from a release URL → still needs egress, no offline-reproducibility win for the VPN audience. Distribution misfit. |
@@ -62,7 +66,7 @@ The stock `devcontainer-lock.json` pins only Feature artifact digests — for a
 project whose identity is the *whole* image that is a **misleading "locked"
 impression** (it ignores the base image and everything Features fetch). safeslop
 should implement its **own** lockfile (devcontainer-lock-*inspired*, not the same
-schema) keyed on the 0054 `recipeID`:
+schema) keyed on the 0055 `recipeID`:
 
 ```
 ./safeslop.lock.json          # repo root — NOT under .safeslop/ (see below)
@@ -71,7 +75,7 @@ schema) keyed on the 0054 `recipeID`:
   "agent": "claude", "substrate": "container",
   "base": "node:22-bookworm-slim@sha256:…",     # decoded provenance (already inside recipeID)
   "toolLayers": ["uv", "mise"],                  # the ENABLE_* toggles that were on
-  "miseVersion": "2026.6.11"                     # versions only where 0054 actually pins
+  "miseVersion": "2026.6.11"                     # versions only where 0055 actually pins
 }
 ```
 
@@ -93,7 +97,7 @@ is safe: `.gitignore:24`'s `/safeslop` matches only the built binary.)
 **Substrate scope (corrected):** this lockfile is **container-substrate today**.
 `recipeID(dockerfile, buildArgs)` is Dockerfile-shaped; the VM path has no analog —
 `provisionToolchain(ctx, ip, kind)` (`vm/vm.go:181`) keys on toolchain *kind*
-(mise/nix), carrying no comparable hash. 0054 D6/W5 only *gesture* at a future VM
+(mise/nix), carrying no comparable hash. 0055 D6/W5 only *gesture* at a future VM
 recipe marker. So VM serialisation is an **open question**, not a solved
 "substrate-neutral" property.
 
@@ -131,7 +135,7 @@ declarative fields and **discard** every constraint-violation vector:
 
 safeslop's boundary flags and squid egress are **never** sourced from the repo file.
 
-## Concrete hooks into 0054 (all target planned waves)
+## Concrete hooks into 0055 (all target planned waves)
 
 - **W1 (recipe identity).** When `identity.go`/`recipeID` land, add a `safeslop lock`
   path writing `./safeslop.lock.json` (schema above). ~small.
@@ -142,12 +146,12 @@ safeslop's boundary flags and squid egress are **never** sourced from the repo f
 - **Ingest (#2).** A separate, later `safeslop import-devcontainer` with the
   allowlist above; never the build engine.
 
-> **0054 defect found en route:** 0054 W2/W3 reference
+> **0055 defect found en route:** 0055 W2/W3 reference
 > `library/layer/container/compose.yml.tmpl`, which **does not exist** — the only
 > template is the embedded `internal/engine/container/assets/compose.yml.tmpl`
 > (library has `docker-compose.yml`, and the template is **not** in the Makefile
-> `SYNCED` set). 0054's compose hooks must target the embedded path directly. Fix in
-> 0054 before building W2/W3.
+> `SYNCED` set). 0055's compose hooks must target the embedded path directly. Fix in
+> 0055 before building W2/W3.
 
 ## What this is explicitly NOT
 

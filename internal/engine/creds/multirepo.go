@@ -57,14 +57,10 @@ func stageRepoSSH(stageDir, hostName, port string, knownHosts []byte, entries []
 	if err := os.WriteFile(cfgPath, []byte(renderAliasSSHConfig(hostName, port, khPath, entries, func(p string) string { return p })), 0o600); err != nil {
 		return nil, err
 	}
-	// Container/VM runs see the same staged tree at different paths; keep separate SSH configs so
-	// IdentityFile/UserKnownHostsFile point at the path that exists inside each boundary.
+	// Container runs see the same staged tree at a different path; keep a separate SSH config so
+	// IdentityFile/UserKnownHostsFile point at the path that exists inside the container.
 	containerKH := "/safeslop/runtime/.ssh/known_hosts"
 	if err := os.WriteFile(filepath.Join(sshDir, "config.container"), []byte(renderAliasSSHConfig(hostName, port, containerKH, entries, func(p string) string { return "/safeslop/runtime/.ssh/" + filepath.Base(p) })), 0o600); err != nil {
-		return nil, err
-	}
-	vmKH := "~/.safeslop-runtime/.ssh/known_hosts"
-	if err := os.WriteFile(filepath.Join(sshDir, "config.vm"), []byte(renderAliasSSHConfig(hostName, port, vmKH, entries, func(p string) string { return "~/.safeslop-runtime/.ssh/" + filepath.Base(p) })), 0o600); err != nil {
 		return nil, err
 	}
 

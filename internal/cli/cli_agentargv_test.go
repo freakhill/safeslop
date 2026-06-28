@@ -8,10 +8,10 @@ import (
 )
 
 // agent: "shell" must use the host's $SHELL for host (the agent runs on the host),
-// but a guest-resident shell for container/vm — the host path (e.g. /bin/zsh) does
+// but a guest-resident shell for container — the host path (e.g. /bin/zsh) does
 // not exist inside the image and exec would fail with "/bin/zsh: not found".
 func TestAgentArgvShellIsTierAware(t *testing.T) {
-	t.Setenv("SHELL", "/bin/zsh") // a host shell absent from the container/vm image
+	t.Setenv("SHELL", "/bin/zsh") // a host shell absent from the container image
 
 	cases := []struct {
 		env  string
@@ -19,7 +19,6 @@ func TestAgentArgvShellIsTierAware(t *testing.T) {
 	}{
 		{"host", "/bin/zsh"},
 		{"container", "bash"},
-		{"vm", "/bin/sh"},
 	}
 	for _, c := range cases {
 		argv, err := agentArgv(policy.Profile{Agent: "shell", Environment: c.env})

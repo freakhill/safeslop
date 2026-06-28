@@ -37,7 +37,6 @@ import (
 	"github.com/freakhill/safeslop/internal/engine/toolchain"
 	"github.com/freakhill/safeslop/internal/engine/trust"
 	"github.com/freakhill/safeslop/internal/engine/userconfig"
-	"github.com/freakhill/safeslop/internal/engine/vm"
 	"github.com/freakhill/safeslop/internal/jsoncontract"
 )
 
@@ -143,7 +142,7 @@ func cmdList() *cobra.Command {
 // doctorReport probes the external tools and isolation boundaries safeslop can use.
 // Extracted so it is testable and reusable (e.g. a future GUI / installer).
 func doctorReport() map[string]any {
-	tools := []string{"git", "gh", "docker", "op", "claude", "pi", "tart", "mise", "nix", "aws", "gcloud", "gke-gcloud-auth-plugin"}
+	tools := []string{"git", "gh", "docker", "op", "claude", "pi", "mise", "nix", "aws", "gcloud", "gke-gcloud-auth-plugin"}
 	report := map[string]any{}
 	for _, t := range tools {
 		p, err := osexec.LookPath(t)
@@ -151,7 +150,6 @@ func doctorReport() map[string]any {
 	}
 	report["1password-signedin"] = map[string]any{"present": secrets.OpSignedIn(context.Background()), "path": ""}
 	report["container-runtime"] = map[string]any{"present": container.Available(), "path": ""}
-	report["vm-runtime"] = map[string]any{"present": vm.Available(), "path": ""}
 	return report
 }
 
@@ -159,7 +157,7 @@ func doctorReport() map[string]any {
 // so the honest "what each boundary protects" framing is never implicit (ayo §10.5 H1).
 func doctorTiers() map[string]map[string]string {
 	out := map[string]map[string]string{}
-	for _, env := range []string{"host", "container", "vm"} {
+	for _, env := range []string{"host", "container"} {
 		tier, note := policy.EnvTier(env)
 		out[env] = map[string]string{"tier": tier, "note": note}
 	}
@@ -192,7 +190,7 @@ func cmdDoctor() *cobra.Command {
 				fmt.Printf("  %-14s %-4s %s\n", n, mark, m["path"])
 			}
 			fmt.Println("isolation tiers (what each environment actually protects):")
-			for _, env := range []string{"host", "container", "vm"} {
+			for _, env := range []string{"host", "container"} {
 				tier, note := policy.EnvTier(env)
 				fmt.Printf("  %-10s %-16s %s\n", env, tier, note)
 			}
@@ -284,9 +282,8 @@ func cmdRun() *cobra.Command {
 			code, err := runProfile(name, prof, argv, ws)
 			if err != nil {
 				// Surface the failure reason. runProfile returns code=1 on setup
-				// errors (e.g. a deny-network VM with no SAFESLOP_VM_PROXY_URL), so
-				// the old `&& code == 0` guard silently dropped them — a launch that
-				// failed with no diagnostic. cobra prints returned errors as "Error: …".
+				// errors, so the old `&& code == 0` guard silently dropped them — a
+				// launch that failed with no diagnostic. cobra prints returned errors as "Error: …".
 				return err
 			}
 			os.Exit(code)
@@ -367,7 +364,7 @@ func cmdSession() *cobra.Command {
 func cmdSessionCreate() *cobra.Command {
 	var agent, workspace, output, environment, network string
 	c := &cobra.Command{
-		Use:   "create --agent <claude|pi|fish|zsh> --environment <host|container|vm> --workspace <dir> --output json",
+		Use:   "create --agent <claude|pi|fish|zsh> --environment <host|container> --workspace <dir> --output json",
 		Short: "Create a safeslop session record",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -385,13 +382,13 @@ func cmdSessionCreate() *cobra.Command {
 				return emitContractError(jsoncontract.CodeInvalidArgument, "--workspace must name an existing directory", map[string]any{"workspace": workspace})
 			}
 			switch environment {
-			case "container", "vm", "host":
+			case "container", "host":
 			case "":
 				return emitContractError(jsoncontract.CodeInvalidArgument,
-					"--environment is required; must be one of: host, container, vm", nil)
+					"--environment is required; must be one of: host, container", nil)
 			default:
 				return emitContractError(jsoncontract.CodeInvalidArgument,
-					fmt.Sprintf("--environment %q is not valid; must be one of: host, container, vm", environment),
+					fmt.Sprintf("--environment %q is not valid; must be one of: host, container", environment),
 					map[string]any{"environment": environment})
 			}
 			if network != "" {
@@ -421,7 +418,7 @@ func cmdSessionCreate() *cobra.Command {
 	c.Flags().StringVar(&agent, "agent", "", "agent to run: claude, pi, fish, or zsh")
 	c.Flags().StringVar(&workspace, "workspace", "", "workspace directory")
 	c.Flags().StringVar(&output, "output", "", "output format: json")
-	c.Flags().StringVar(&environment, "environment", "", "isolation environment (required): host, container, or vm")
+	c.Flags().StringVar(&environment, "environment", "", "isolation environment (required): host or container")
 	c.Flags().StringVar(&network, "network", "", "network policy: deny or allow (overrides profile default)")
 	return c
 }
@@ -540,8 +537,8 @@ func cmdSessionRun() *cobra.Command {
 			}
 			// `session run` is an interactive attach: every boundary presents the
 			// agent under a controlling terminal (host via RunInTerminal,
-			// container via the RunInPTY tty bridge, vm via `ssh -t`), so without a
-			// usable PTY the session is undriveable on all four. Emacs drives this via
+			// container via the RunInPTY tty bridge), so without a usable PTY the
+			// session is undriveable. Emacs drives this via
 			// make-term, which connects the process to a pty; a no-tty invocation
 			// (cron, a pipe, a headless shell) gets the PTY_UNAVAILABLE contract error
 			// pointing at the JSONL status fallback, exits non-zero, and is *not*
@@ -914,11 +911,11 @@ func cmdTrust() *cobra.Command {
 func cmdDown() *cobra.Command {
 	return &cobra.Command{
 		Use:   "down",
-		Short: "Tear down the container stack (squid) and any disposable VM sessions",
+		Short: "Tear down the container stack (squid)",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			if !container.Available() && !vm.Available() {
-				return fmt.Errorf("nothing to tear down: neither docker nor tart is available (run: safeslop doctor)")
+			if !container.Available() {
+				return fmt.Errorf("nothing to tear down: docker is not available (run: safeslop doctor)")
 			}
 			if container.Available() {
 				dir, composeFile, err := container.ComposeForDown()
@@ -931,9 +928,6 @@ func cmdDown() *cobra.Command {
 				if err := container.Down(context.Background(), runtimepkg.HostDockerEngine{}, composeFile); err != nil {
 					return err
 				}
-			}
-			if vm.Available() {
-				_ = vm.DestroyAll(context.Background())
 			}
 			// Also reap the safeslop-managed lima container VM if one was provisioned (idempotent: a no-op
 			// when limactl is absent or no instance exists). Keeps `down` a complete teardown for the
@@ -1322,8 +1316,8 @@ func stageProfile(ctx context.Context, prof policy.Profile, stageDir string) (se
 		return nil, nil, err
 	}
 	// Cloud creds are short-lived (SSO role creds / ADC access token) and delivered as env vars
-	// through the secret channel, so they ride secrets.env (container) / the scp'd env (vm) and
-	// reach host children too. No revoke: decay-first.
+	// through the secret channel, so they ride secrets.env (container) and reach host children too.
+	// No revoke: decay-first.
 	awsEnv, err := creds.StageAWS(ctx, prof.Credentials, stageDir)
 	if err != nil {
 		return nil, nil, err
@@ -1368,7 +1362,7 @@ func runProfile(name string, prof policy.Profile, argv []string, ws string) (int
 	// SIGTERM (what `session stop` sends to this wrapper) and SIGHUP (terminal /
 	// Emacs-buffer close) cancel the run so the boundary is torn down and staged
 	// secrets are wiped via the deferred teardown in runProfileCtx, instead of
-	// the process dying with its defers unrun and leaving a live container/VM
+	// the process dying with its defers unrun and leaving a live container
 	// holding staged secrets (specs/0050 PR2, gap #2). SIGINT is deliberately
 	// NOT caught: interactive Ctrl-C must reach the agent (e.g. interrupt a
 	// generation), not tear the session down. runProfile is shared with
@@ -1382,10 +1376,10 @@ func runProfile(name string, prof policy.Profile, argv []string, ws string) (int
 
 // runIO optionally rebinds an agent's stdio. The zero value is the coupled path:
 // the agent inherits the wrapper's stdio (a tty under Emacs make-term). A detached
-// supervisor has no inherited terminal, so it passes a PTY slave it owns: host and
-// host runs the agent on that slave as its controlling terminal, and container
+// supervisor has no inherited terminal, so it passes a PTY slave it owns: host
+// runs the agent on that slave as its controlling terminal, and container
 // binds the `compose run` process's stdio to it so the container's tty bridges
-// back (specs/0051 D2). VM (`ssh -t`) is the remaining tier that still ignores it.
+// back (specs/0051 D2).
 type runIO struct {
 	Stdin  io.Reader
 	Stdout io.Writer
@@ -1397,10 +1391,6 @@ type runIO struct {
 // forwarded without standing up docker.
 var containerLaunch = container.Launch
 
-// vmLaunch is the vm-launch seam: the real vm.Launch in production, swappable in
-// tests to assert the detached supervisor's PTY is forwarded without booting a VM.
-var vmLaunch = vm.Launch
-
 func runProfileCtx(ctx context.Context, name string, prof policy.Profile, argv []string, ws string, stdio ...runIO) (int, error) {
 	var rio runIO
 	if len(stdio) > 0 {
@@ -1409,10 +1399,8 @@ func runProfileCtx(ctx context.Context, name string, prof policy.Profile, argv [
 	stageDir := filepath.Join(ws, ".safeslop", "runtime", name)
 	defer os.RemoveAll(stageDir) // wipe staged secrets/.npmrc regardless of outcome
 
-	// kube/ssh creds are staged as files in stageDir and delivered into the VM guest at
-	// ~/.safeslop-runtime (scp'd whole), with GIT_SSH_COMMAND/KUBECONFIG exported guest-side by
-	// remoteAgentCmd — the guest $HOME is resolved via ~ rather than assumed (specs/0010, 0011,
-	// 0039). The container path remains the reference implementation.
+	// kube/ssh creds are staged as files in stageDir and delivered via the /safeslop/runtime bind
+	// mount (container). GIT_SSH_COMMAND/KUBECONFIG are exported inside the boundary.
 	if err := seedAgentDefaults(prof, ws); err != nil {
 		return 1, err
 	}
@@ -1453,16 +1441,6 @@ func runProfileCtx(ctx context.Context, name string, prof policy.Profile, argv [
 		// container's tty bridges to the supervisor's PTY for attach. Coupled (rio zero)
 		// leaves stdio nil and container.Launch runs the user's terminal (specs/0051).
 		return containerLaunch(ctx, engexec.LaunchSpec{Argv: argv, Stdin: rio.Stdin, Stdout: rio.Stdout, Stderr: rio.Stderr}, ws, prof.Network, egress, secretEnv, stageDir)
-	case "vm":
-		// secrets ride secrets.env scp'd into the VM and sourced over ssh; the VM is destroyed on exit.
-		tk := ""
-		if prof.Toolchain != nil {
-			tk = prof.Toolchain.Kind
-		}
-		// A detached supervisor passes a PTY slave it owns (rio set); forward it so the
-		// agent's remote tty (ssh -t) bridges to the supervisor's PTY for attach. Coupled
-		// (rio zero) leaves stdio nil and ssh runs on the user's terminal (specs/0051).
-		return vmLaunch(ctx, engexec.LaunchSpec{Argv: argv, Stdin: rio.Stdin, Stdout: rio.Stdout, Stderr: rio.Stderr}, prof.Network, secretEnv, stageDir, name, tk)
 	default:
 		return 1, fmt.Errorf("unknown environment %q", prof.Environment)
 	}
@@ -1592,15 +1570,13 @@ func agentArgv(p policy.Profile) ([]string, error) {
 	case "shell":
 		// The host's $SHELL is an absolute host path (e.g. /bin/zsh, /opt/homebrew/bin/fish).
 		// That path is correct for host (the agent runs on the host) but does NOT exist
-		// inside a container or VM guest, where exec would fail ("/bin/zsh: not found"). For those
-		// tiers, name a shell guaranteed to exist in the image instead — resolved via the guest's
+		// inside a container, where exec would fail ("/bin/zsh: not found"). For container,
+		// name a shell guaranteed to exist in the image instead — resolved via the guest's
 		// PATH, not the host path.
 		switch p.Environment {
 		case "container":
 			// The agent image (node:22-bookworm + fish) always has bash.
 			return []string{"bash"}, nil
-		case "vm":
-			return []string{"/bin/sh"}, nil
 		default: // host
 			sh := os.Getenv("SHELL")
 			if sh == "" {
@@ -1616,7 +1592,7 @@ func agentArgv(p policy.Profile) ([]string, error) {
 // resolveHostBinary makes argv[0] an absolute path via the reconstructed host PATH, for the host
 // tier where the agent runs in the host process namespace. Under a Finder/launchd launch the
 // process PATH is stripped, so a bare "claude" would fail to exec; resolving it against the
-// host_discovery_env recovers the real location. Container/VM tiers resolve inside the guest and must
+// host_discovery_env recovers the real location. Container resolves inside the guest and must
 // NOT be passed through here. Uses the same rich-env-for-discovery path as detection (the host child
 // env firewall is childEnv, not this).
 func resolveHostBinary(argv []string) []string {

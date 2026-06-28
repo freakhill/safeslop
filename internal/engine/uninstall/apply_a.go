@@ -24,7 +24,7 @@ import (
 func (e *Engine) applyPathA(item Item, confirmSelfUpdated bool) (Result, error) {
 	res := Result{Tool: item.Tool, Kind: RemovePathA}
 
-	// Warn (don't block) if the tool is still running — esp. tart holding VMs.
+	// Warn (don't block) if the tool is still running.
 	for _, f := range item.Files {
 		if f.Symlink {
 			continue

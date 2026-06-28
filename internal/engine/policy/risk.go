@@ -70,11 +70,6 @@ func networkAxis(env, network string) RiskAxis {
 			return RiskAxis{"network", "open egress", false, "elevated"}
 		}
 		return RiskAxis{"network", "egress-allowlisted", true, "contained"}
-	case "vm":
-		if network == "allow" {
-			return RiskAxis{"network", "full VM network", false, "elevated"}
-		}
-		return RiskAxis{"network", "proxy-only", true, "contained"}
 	default: // unknown/invalid env — never imply a boundary (specs/0053)
 		return RiskAxis{"network", "unrestricted", false, "high"}
 	}
@@ -86,15 +81,13 @@ func filesAxis(env string) RiskAxis {
 		return RiskAxis{"files", "whole account", false, "high"}
 	case "container":
 		return RiskAxis{"files", "workspace-only", true, "contained"}
-	case "vm":
-		return RiskAxis{"files", "VM-only", true, "contained"}
 	default: // unknown/invalid env — never imply a boundary (specs/0053)
 		return RiskAxis{"files", "whole account", false, "high"}
 	}
 }
 
 // TechStack lists the underlying technologies a profile uses — the stack behind the tier label —
-// for the Launch tab's hover tooltip: which agent, which isolation mechanism (Docker+squid / Tart),
+// for the Launch tab's hover tooltip: which agent, which isolation mechanism (Docker+squid),
 // the network mechanism, plus any toolchain + credential providers.
 func TechStack(p Profile) []string {
 	s := []string{
@@ -135,8 +128,6 @@ func isolationTech(env string) string {
 		return "none — runs directly on macOS"
 	case "container":
 		return "Docker container + squid egress proxy"
-	case "vm":
-		return "Tart virtual machine"
 	default:
 		return "none — unknown environment"
 	}
@@ -151,11 +142,6 @@ func networkTech(env, network string) string {
 			return "open egress (bridge)"
 		}
 		return "squid egress allowlist"
-	case "vm":
-		if network == "allow" {
-			return "full VM network"
-		}
-		return "proxy egress"
 	default:
 		return "unrestricted"
 	}
@@ -194,11 +180,6 @@ func networkReach(env, network string) string {
 			return "OPEN egress — can reach the entire internet"
 		}
 		return "egress-allowlisted — only approved domains (github, npm, pypi, anthropic, …)"
-	case "vm":
-		if network == "allow" {
-			return "full VM network"
-		}
-		return "egress via the configured proxy only"
 	default: // unknown/invalid env (specs/0053)
 		return "unrestricted — assume the agent can reach anywhere"
 	}
@@ -210,8 +191,6 @@ func fileReach(env string) string {
 		return "your ENTIRE account — home, ~/.ssh, ~/.aws, every file you can touch"
 	case "container":
 		return "only the mounted workspace — no host files"
-	case "vm":
-		return "only what's copied into the disposable VM — no host files"
 	default: // unknown/invalid env (specs/0053)
 		return "unknown environment — assume your ENTIRE account is reachable"
 	}
@@ -252,8 +231,6 @@ func headline(env, network string) string {
 		return "File-isolated, but OPEN egress (can exfil)"
 	case env == "container":
 		return "Workspace-only files, egress limited to the allowlist"
-	case env == "vm":
-		return "Disposable VM — strongest isolation"
 	default: // unknown/invalid env (specs/0053)
 		return "Unknown environment — assume no isolation"
 	}
