@@ -295,6 +295,10 @@ Off-limits: terminal env (W2), labels/reap (W3), the Dockerfile rewrite (W4).
 Goal: 24-bit color + correct size at every boundary; no Finder/launchd
 `TERM`-stripping surprises.
 
+Status: implemented and verified on branch `image-matrix` (`make check` + `make build`
+green). Includes the Emacs eat adoption (below); separately + out-of-repo, eat was added
+to the operator's Doom config so the cockpit renders the agent TUIs in truecolor.
+
 - [ ] **Force TERM/COLORTERM in the container (drop the conditional)**
   FILE: `internal/engine/container/assets/compose.yml.tmpl` (lines 21-22; embedded-only, no sync)
   CHANGE: replace `{{if .Term}}      TERM: {{.Term}}\n{{end}}` with unconditional
@@ -333,12 +337,17 @@ Goal: 24-bit color + correct size at every boundary; no Finder/launchd
   VERIFY: `go build ./internal/engine/container/ && go test ./internal/engine/container/ -run Launch -v`
   EXPECTED: exit 0 / PASS.
 
-- [ ] **(Optional) Emacs `eat` terminal with `term` fallback**
-  FILE: `emacs/safeslop-session.el` (terminal open path)
-  CHANGE: `(require 'eat nil t)`; use `eat` with `eat-term-name "xterm-256color"`
-  when available, else fall back to `term`. Never export `LINES`/`COLUMNS`.
+- [ ] **Emacs `eat` terminal with `term` fallback** (built)
+  FILE: `emacs/safeslop-session.el` (`safeslop-session--make-terminal`)
+  CHANGE: a backend selector — `(require 'eat nil t)` lazily, and when `eat-exec` is
+  bound run the agent under `eat-mode`/`eat-exec` (dynamically binding
+  `eat-term-name` to "xterm-256color"); else the existing `make-term`/`term-mode`.
+  The PTY_UNAVAILABLE filter/sentinel wiring is unchanged. eat is OPTIONAL (NOT in
+  Package-Requires): absent (CI), the term branch runs so the existing term tests
+  (`derived-mode-p 'term-mode`) stay green. GOTCHA: eat's API is `eat-mode` +
+  `eat-exec` — there is **no** `eat-make`. Never export `LINES`/`COLUMNS`.
   VERIFY: `make test-emacs`
-  EXPECTED: `safeslop emacs ok`.
+  EXPECTED: all 60 ERT pass; the eat branch is verified live (eat absent in CI).
 
 - [ ] **W2 gate**
   VERIFY: `make check && make build`
