@@ -11,11 +11,6 @@ import (
 	"github.com/freakhill/safeslop/internal/engine/container/runtime"
 )
 
-const (
-	baseTag  = "local/agent-sandbox:latest"
-	toolsTag = "local/agent-sandbox-tools:latest"
-)
-
 // Reconcile reclaims state a crashed prior run may have left: staged dirs older than maxAge
 // carrying the .safeslop-stage marker (wiping any leftover secrets.env). Safe to call on every
 // run; idempotent. repo is the workspace root. Orphaned-squid reaping rides the Docker path
@@ -69,25 +64,52 @@ func runEngine(ctx context.Context, eng runtime.Engine, args ...string) error {
 	return c.Run()
 }
 
-// buildImages builds the base then the tools image (idempotent via image inspect), from dir as build
-// context. The tools Dockerfile's FROM local/agent-sandbox:latest is satisfied by the base build.
+// buildImages builds the base then the tools image, each tagged by its content-hash recipe id
+// (local/safeslop-{base,tools}:<id>) so imageExists(<id-tag>) is a CORRECT skip — an unchanged
+// recipe is reused, a changed Dockerfile/build-arg yields a new tag and rebuilds (specs/0055 W1,
+// killing the stale-":latest" Bug B). dir is the build context.
 func buildImages(ctx context.Context, eng runtime.Engine, dir string) error {
 	if err := ensureDockerfiles(dir); err != nil {
 		return err
 	}
-	if !imageExists(ctx, eng, baseTag) {
-		if err := runEngine(ctx, eng, "build", "-f", filepath.Join(dir, "Dockerfile.agent"), "-t", baseTag, dir); err != nil {
-			return fmt.Errorf("build base image: %w", err)
-		}
+	baseImg, toolsImg, toolsArgs, err := agentImageTags()
+	if err != nil {
+		return err
 	}
-	if !imageExists(ctx, eng, toolsTag) {
-		if err := runEngine(ctx, eng, "build", "-f", filepath.Join(dir, "Dockerfile.agent.tools"), "-t", toolsTag,
-			"--build-arg", "ENABLE_CLAUDE_CODE=true",
-			"--build-arg", "ENABLE_PI=true", dir); err != nil {
-			return fmt.Errorf("build tools image: %w", err)
-		}
+	if err := ensureImage(baseImg,
+		func() bool { return imageExists(ctx, eng, baseImg) },
+		func() error {
+			return runEngine(ctx, eng, "build", "-f", filepath.Join(dir, "Dockerfile.agent"), "-t", baseImg, dir)
+		}); err != nil {
+		return fmt.Errorf("build base image: %w", err)
+	}
+	if err := ensureImage(toolsImg,
+		func() bool { return imageExists(ctx, eng, toolsImg) },
+		func() error {
+			args := []string{"build", "-f", filepath.Join(dir, "Dockerfile.agent.tools"), "-t", toolsImg}
+			for _, kv := range toolsArgs {
+				args = append(args, "--build-arg", kv)
+			}
+			return runEngine(ctx, eng, append(args, dir)...)
+		}); err != nil {
+		return fmt.Errorf("build tools image: %w", err)
 	}
 	return nil
+}
+
+// ensureImage runs build() to create the image unless exists() already reports it present. The build
+// is serialized by a per-id flock with a double-check (exists() is re-tested once the lock is held),
+// so concurrent safeslop runs build a given recipe at most once.
+func ensureImage(id string, exists func() bool, build func() error) error {
+	if exists() {
+		return nil
+	}
+	return withBuildLock(id, func() error {
+		if exists() { // built by another run while we waited for the lock
+			return nil
+		}
+		return build()
+	})
 }
 
 // Up ensures images are built and the squid proxy is running for the given compose file.

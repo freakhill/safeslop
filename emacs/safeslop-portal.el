@@ -89,17 +89,12 @@ A single timer serves the one portal buffer (`safeslop-portal-buffer-name').")
 (defface safeslop-tier-container '((t :inherit success))
   "Face for the `container' environment: egress-allowlisted network control."
   :group 'safeslop)
-(defface safeslop-tier-vm '((t :inherit success :weight bold))
-  "Face for the `vm' environment: adversary-grade, the strongest boundary."
-  :group 'safeslop)
-
 (defconst safeslop-portal--env-tiers
   ;; Mirrors internal/engine/policy/policy.go EnvTier (tier label + honest note),
-  ;; ordered host < container < vm (least -> most isolated).  Keep in sync with
+  ;; ordered host < container (least -> most isolated).  Keep in sync with
   ;; EnvTier; doctor's data.tiers carries the authoritative copy at runtime.
   '(("host"      safeslop-tier-host      "none"               "no isolation boundary — the agent runs as you, with your full account")
-    ("container" safeslop-tier-container "egress-allowlisted" "container + default-deny per-domain egress allowlist: stops curl|sh + accidental beaconing, not exfil via an allowed domain")
-    ("vm"        safeslop-tier-vm        "adversary-grade"    "disposable hardware-virtualized VM: the strongest boundary, heaviest to run"))
+    ("container" safeslop-tier-container "egress-allowlisted" "container + default-deny per-domain egress allowlist: stops curl|sh + accidental beaconing, not exfil via an allowed domain"))
   "Per-environment (FACE TIER NOTE) used to colour and annotate the Env cell.")
 
 (defun safeslop-portal--env-face (env)
@@ -119,7 +114,7 @@ sole signal (specs/0031).  An unknown env renders plainly."
       env)))
 
 (defun safeslop-portal--tier-legend ()
-  "Return a one-line isolation-tier ramp legend (host most dangerous -> vm safest)."
+  "Return a one-line isolation-tier ramp legend (host most dangerous -> container safest)."
   (concat
    "tiers: "
    (mapconcat (lambda (row)

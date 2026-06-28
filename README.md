@@ -10,7 +10,7 @@ staged state down on exit.
 
 ## What it provides
 
-- **Honest isolation tiers**: `host`, `container`, and `vm`, with the active tier
+- **Honest isolation tiers**: `host` and `container`, with the active tier
   printed by `run`/`doctor`. `environment` is required — there is no default, so a
   profile always states its isolation explicitly.
 - **Fail-closed policy trust**: `safeslop run` refuses an unapproved or changed
@@ -68,7 +68,7 @@ safeslop session attach --session-id <id>
 safeslop session status --session-id <id> --output <json|jsonl>
 safeslop session stop --session-id <id> --revoke-credentials --output json
 safeslop doctor                     report available tools and isolation tiers
-safeslop down                       tear down container/VM sessions
+safeslop down                       tear down container sessions
 safeslop install                    inventory and install pinned toolchains/runtimes
 safeslop uninstall                  receipt-driven removal of installed tools
 safeslop launch <profile>           open a terminal running a profile
@@ -86,8 +86,8 @@ executing.
 
 `session stop` (and a terminal/buffer close) tears the boundary down rather than
 just killing the wrapper: the run receives `SIGTERM`/`SIGHUP`, which tears down
-the agent and runs the deferred cleanup — disposable VM destroyed, container
-removed, staged secrets wiped, ephemeral credentials revoked. Interactive
+the agent and runs the deferred cleanup — container removed, staged secrets
+wiped, ephemeral credentials revoked. Interactive
 `Ctrl-C` (`SIGINT`) is left for the agent and does not tear the session down.
 
 `session run` is an interactive attach and needs a controlling terminal — Emacs
@@ -133,7 +133,7 @@ safeslop: {
 	profiles: {
 		work: {
 			agent:       "claude"          // "claude" | "claude-code" | "pi"
-			environment: "container"       // "host" | "container" | "vm"  (required)
+			environment: "container"       // "host" | "container"  (required)
 			network:     "deny"            // "deny" | "allow"
 			workspace:   "."
 			egress:      [".internal.example.com"]
@@ -201,21 +201,9 @@ safeslop launches, only confined accidents).
 |---|---|---|
 | `host` | none | No isolation boundary; the agent runs as you. |
 | `container` | egress-allowlisted | Docker/Lima container plus proxy topology for per-domain egress control. |
-| `vm` | adversary-grade | Disposable Tart VM; strongest boundary and heaviest workflow. |
 
 Use `container` for routine agent sessions (network-bound agents belong here),
-`vm` for untrusted code, and `host` only when you accept no isolation.
-
-The `vm` tier reaches the disposable VM over SSH with the key its base image
-authorizes. Provide that key one of two ways: set `SAFESLOP_VM_SSH_KEY` to a private
-key file path, or set `SAFESLOP_VM_SSH_KEY_OP` to a 1Password reference and safeslop
-reads the key just-in-time (into a transient, wiped-on-exit file) so no key lives on
-disk. Request the OpenSSH format in the reference — op's default is PKCS#8, which ssh
-cannot use:
-
-```sh
-export SAFESLOP_VM_SSH_KEY_OP='op://homelab-infra/safeslop-base-vm/private key?ssh-format=openssh'
-```
+and `host` only when you accept no isolation.
 
 ## Credentials
 

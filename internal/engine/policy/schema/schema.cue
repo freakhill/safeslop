@@ -9,14 +9,15 @@ package safeslop
 // Where the agent runs (specs/0053 removed the macOS sandbox/Seatbelt tier):
 //   host      — no isolation boundary; runs as you
 //   container — Docker + egress allowlist (network-bound agents belong here)
-//   vm        — disposable Tart VM; the strongest boundary
 // Required — there is no default, so a profile must always state its isolation
 // explicitly (a security tool must never silently run weaker than intended).
-#Environment: "container" | "vm" | "host"
+#Environment: "container" | "host"
 
 // What to launch. "claude-code" is accepted as a user-facing alias and
-// normalized to the canonical "claude" engine value after decode.
-#Agent: "claude" | "claude-code" | "shell" | "pi"
+// normalized to the canonical "claude" engine value after decode. fish/zsh are
+// first-class shell agents; the generic "shell" is a profile-only legacy value
+// (handled by `safeslop run` but not accepted by `session create`).
+#Agent: "claude" | "claude-code" | "shell" | "pi" | "fish" | "zsh"
 
 // Coarse egress policy. "deny" + environment:container is the egress-allowlisted
 // path (the per-domain allowlist is the container's job, specs/0001 §6.2);
@@ -175,7 +176,7 @@ package safeslop
 	// Extra egress domains for environment:container with network:deny — unioned with the
 	// base allowlist + the agent's built-in providers (specs/0046). A leading dot
 	// (".example.com") is a subdomain suffix match; a bare host is exact. Ignored on
-	// network:allow and on host/vm.
+	// network:allow and on host.
 	egress?: [...string]
 	// Env var name -> secret ref; injected into the agent's environment at launch.
 	secrets?: {[string]: #SecretRef}

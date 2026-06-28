@@ -19,8 +19,8 @@ func TestProfilePresetsEnvelope(t *testing.T) {
 	if !ok {
 		t.Fatalf("data.presets is not an array: %#v", env.Data)
 	}
-	if len(presets) != 4 {
-		t.Fatalf("got %d presets, want 4", len(presets))
+	if len(presets) != 3 {
+		t.Fatalf("got %d presets, want 3", len(presets))
 	}
 	names := map[string]bool{}
 	for _, p := range presets {
@@ -33,7 +33,7 @@ func TestProfilePresetsEnvelope(t *testing.T) {
 			t.Fatalf("preset %v carries empty cue", m["name"])
 		}
 	}
-	for _, want := range []string{"claude-container-allowlist", "claude-vm-disposable"} {
+	for _, want := range []string{"claude-container-allowlist", "claude-host-unconfined"} {
 		if !names[want] {
 			t.Fatalf("missing preset %q in %v", want, names)
 		}

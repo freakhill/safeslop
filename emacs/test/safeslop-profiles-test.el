@@ -17,7 +17,7 @@
                (concat "{\"schema_version\":1,\"ok\":true,\"data\":{"
                        "\"path\":\"/ws/safeslop.cue\",\"profiles\":{"
                        "\"review\":{\"agent\":\"claude\",\"environment\":\"container\",\"network\":\"deny\"},"
-                       "\"yolo\":{\"agent\":\"pi\",\"environment\":\"vm\",\"network\":\"allow\"}}},"
+                       "\"yolo\":{\"agent\":\"pi\",\"environment\":\"host\",\"network\":\"allow\"}}},"
                        "\"warnings\":[],\"errors\":[]}")))
          (rows (safeslop-profiles--rows (safeslop-contract-data env))))
     (should (= (length rows) 2))
@@ -29,7 +29,7 @@
       (should (equal (aref (cadr review) 3) "deny"))
       (should (eq (get-text-property 0 'face (aref (cadr review) 2)) 'safeslop-tier-container)))
     (let ((yolo (assoc "yolo" rows)))
-      (should (eq (get-text-property 0 'face (aref (cadr yolo) 2)) 'safeslop-tier-vm)))))
+      (should (eq (get-text-property 0 'face (aref (cadr yolo) 2)) 'safeslop-tier-host)))))
 
 (ert-deftest safeslop-test-profiles-keymap ()
   (should (eq (lookup-key safeslop-profiles-mode-map (kbd "RET")) #'safeslop-profiles-edit))

@@ -240,7 +240,7 @@
   "Rows colour the Status cell by status and carry a PID column."
   (let ((envelope (safeslop-contract-parse-string
                    (concat "{\"schema_version\":1,\"ok\":true,\"data\":{\"sessions\":"
-                           "[{\"session_id\":\"sess-r\",\"agent\":\"claude\",\"environment\":\"vm\","
+                           "[{\"session_id\":\"sess-r\",\"agent\":\"claude\",\"environment\":\"container\","
                            "\"network\":\"deny\",\"status\":\"running\",\"pid\":4242,\"workspace\":\"/w\"},"
                            "{\"session_id\":\"sess-c\",\"agent\":\"pi\",\"environment\":\"host\","
                            "\"network\":\"deny\",\"status\":\"created\",\"workspace\":\"/w\"}]},"
@@ -297,24 +297,23 @@
 (ert-deftest safeslop-test-portal-env-face ()
   (should (eq (safeslop-portal--env-face "host") 'safeslop-tier-host))
   (should (eq (safeslop-portal--env-face "container") 'safeslop-tier-container))
-  (should (eq (safeslop-portal--env-face "vm") 'safeslop-tier-vm))
   (should (eq (safeslop-portal--env-face "") 'default))      ; empty -> no boundary implied (specs/0053)
   (should (eq (safeslop-portal--env-face "weird") 'default)))
 
 (ert-deftest safeslop-test-portal-env-cell ()
   "The Env cell keeps its text, colours by tier, and carries the honest note."
   (let ((host (safeslop-portal--env-cell "host"))
-        (vm (safeslop-portal--env-cell "vm")))
+        (container (safeslop-portal--env-cell "container")))
     (should (equal host "host"))            ; text preserved (equal ignores props)
     (should (eq (get-text-property 0 'face host) 'safeslop-tier-host))
     (should (get-text-property 0 'help-echo host))
     (should-not (eq (get-text-property 0 'face host)
-                    (get-text-property 0 'face vm)))))
+                    (get-text-property 0 'face container)))))
 
 (ert-deftest safeslop-test-portal-tier-legend ()
   (let ((legend (safeslop-portal--tier-legend)))
     (should (string-match-p "host=none" legend))
-    (should (string-match-p "vm=adversary-grade" legend))))
+    (should (string-match-p "container=egress-allowlisted" legend))))
 
 ;;; Post-create open affordance (specs/0052 #3) ------------------------------
 
@@ -338,7 +337,7 @@
     (safeslop-portal-mode)
     (setq tabulated-list-entries
           '(("sess-1" ["sess-1" "claude" "host" "deny" "running" "1" "now" "/ws"])
-            ("sess-2" ["sess-2" "pi" "vm" "allow" "created" "2" "now" "/ws"])))
+            ("sess-2" ["sess-2" "pi" "container" "allow" "created" "2" "now" "/ws"])))
     (tabulated-list-print)
     (should (safeslop-portal--goto-id "sess-2"))
     (should (equal (tabulated-list-get-id) "sess-2"))

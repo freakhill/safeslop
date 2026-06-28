@@ -69,6 +69,10 @@ func Supervise(ctx context.Context, store engsession.Store, id string, now func(
 	if err != nil {
 		return 1, err
 	}
+	// A freshly opened PTY slave is 0x0; give it a sane default so a detached agent that renders
+	// before any client attaches doesn't wrap at phantom 0/80 columns. The attach handler resizes it
+	// to the client's real winsize on connect (the pty.Setsize in the serve loop).
+	_ = pty.Setsize(ptmx, &pty.Winsize{Rows: 24, Cols: 80})
 
 	sockPath := store.SocketPath(id)               // fits sun_path; relocates to a short runtime dir if the state dir is too long
 	_ = os.MkdirAll(filepath.Dir(sockPath), 0o700) // ensure the bind dir exists (no-op when it already does)

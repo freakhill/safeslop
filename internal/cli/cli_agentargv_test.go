@@ -8,10 +8,10 @@ import (
 )
 
 // agent: "shell" must use the host's $SHELL for host (the agent runs on the host),
-// but a guest-resident shell for container/vm — the host path (e.g. /bin/zsh) does
+// but a guest-resident shell for container — the host path (e.g. /bin/zsh) does
 // not exist inside the image and exec would fail with "/bin/zsh: not found".
 func TestAgentArgvShellIsTierAware(t *testing.T) {
-	t.Setenv("SHELL", "/bin/zsh") // a host shell absent from the container/vm image
+	t.Setenv("SHELL", "/bin/zsh") // a host shell absent from the container image
 
 	cases := []struct {
 		env  string
@@ -19,7 +19,6 @@ func TestAgentArgvShellIsTierAware(t *testing.T) {
 	}{
 		{"host", "/bin/zsh"},
 		{"container", "bash"},
-		{"vm", "/bin/sh"},
 	}
 	for _, c := range cases {
 		argv, err := agentArgv(policy.Profile{Agent: "shell", Environment: c.env})
@@ -91,5 +90,25 @@ func TestAgentArgvRejectsUnknownAgent(t *testing.T) {
 	_, err := agentArgv(policy.Profile{Agent: "cursor"})
 	if err == nil || !strings.Contains(err.Error(), "unknown agent") {
 		t.Fatalf("agentArgv(cursor) error = %v, want unknown agent", err)
+	}
+}
+
+func TestAgentArgvAcceptsFish(t *testing.T) {
+	argv, err := agentArgv(policy.Profile{Agent: "fish"})
+	if err != nil {
+		t.Fatalf("agentArgv(fish): %v", err)
+	}
+	if len(argv) != 1 || argv[0] != "fish" {
+		t.Errorf("fish argv = %v, want [fish]", argv)
+	}
+}
+
+func TestAgentArgvAcceptsZsh(t *testing.T) {
+	argv, err := agentArgv(policy.Profile{Agent: "zsh"})
+	if err != nil {
+		t.Fatalf("agentArgv(zsh): %v", err)
+	}
+	if len(argv) != 1 || argv[0] != "zsh" {
+		t.Errorf("zsh argv = %v, want [zsh]", argv)
 	}
 }

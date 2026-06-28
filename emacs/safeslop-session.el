@@ -8,10 +8,11 @@
 
 ;;; Commentary:
 
-;; Session-facing Emacs commands.  Attach runs the agent under a built-in
-;; term-mode PTY; when the CLI reports the PTY_UNAVAILABLE contract error (no
-;; usable controlling terminal), attach switches to the read-only JSONL status
-;; fallback so the buffer that started the session stays useful (specs/0050 PR4).
+;; Session-facing Emacs commands.  Attach runs the agent under a terminal PTY: the
+;; eat terminal (pure-elisp, 24-bit truecolor) when available, else the built-in
+;; term-mode.  When the CLI reports the PTY_UNAVAILABLE contract error (no usable
+;; controlling terminal), attach switches to the read-only JSONL status fallback so
+;; the buffer that started the session stays useful (specs/0050 PR4).
 
 ;;; Code:
 
@@ -25,10 +26,15 @@
 (declare-function safeslop--call-json-async "safeslop" (args callback))
 (declare-function safeslop--show-envelope-buffer "safeslop" (name args envelope))
 (declare-function safeslop-portal--reveal-session "safeslop-portal" (id))
+;; Optional eat terminal API — loaded lazily in `safeslop-session--make-terminal'
+;; only when eat is installed; declared here so the byte-compiler stays quiet.
+(declare-function eat-mode "eat" ())
+(declare-function eat-exec "eat" (buffer name command startfile switches))
+(defvar eat-term-name)
 
 (defun safeslop-session--create-args (agent workspace &optional environment network)
   "Return exact argv for creating a session with AGENT in WORKSPACE.
-ENVIRONMENT (host|container|vm) and NETWORK (deny|allow), when a non-empty
+ENVIRONMENT (host|container) and NETWORK (deny|allow), when a non-empty
 string, are appended as `--environment'/`--network' arguments (specs/0074).
 ENVIRONMENT is required by the engine (specs/0053 removed the sandbox default);
 the interactive picker always supplies one.  These precede `--output json'."
@@ -43,7 +49,7 @@ the interactive picker always supplies one.  These precede `--output json'."
 ;;;###autoload
 (defun safeslop-session-new (&optional agent workspace callback environment network)
   "Create a safeslop session for AGENT in WORKSPACE and show the JSON envelope.
-ENVIRONMENT (host|container|vm) and NETWORK (deny|allow) set the session's
+ENVIRONMENT (host|container) and NETWORK (deny|allow) set the session's
 isolation/network for this run (specs/0074; environment is required, specs/0053);
 interactively they are prompted with container/deny preselected.  Runs
 asynchronously (session create may stage credentials, which can be slow), so
@@ -51,10 +57,10 @@ Emacs does not block.  CALLBACK, when given, is called with the envelope once it
 arrives (used by tests); it precedes ENVIRONMENT/NETWORK so existing callers and
 the security argv tests keep their three-argument form."
   (interactive
-   (list (completing-read "Agent: " '("claude" "claude-code" "pi") nil t nil nil "claude")
+   (list (completing-read "Agent: " '("claude" "pi" "fish" "zsh") nil t nil nil "claude")
          (read-directory-name "Workspace: " nil nil t)
          nil ; callback: interactive use shows the envelope buffer, no extra hook
-         (completing-read "Environment: " '("container" "vm" "host") nil t nil nil "container")
+         (completing-read "Environment: " '("container" "host") nil t nil nil "container")
          (completing-read "Network: " '("deny" "allow") nil t nil nil "deny")))
   (let ((args (safeslop-session--create-args (or agent "claude")
                                              (or workspace default-directory)
@@ -116,16 +122,35 @@ Idempotent per buffer via `safeslop-session--fallback-done'."
         (setq safeslop-session--fallback-done t)
         (safeslop-session-status-fallback session-id)))))
 
+(defun safeslop-session--make-terminal (name program argv)
+  "Create terminal buffer *NAME* running PROGRAM with ARGV; return the buffer.
+Prefer the eat terminal (pure-elisp, 24-bit color) when it can be loaded,
+advertising TERM=xterm-256color; otherwise fall back to the built-in term-mode.
+eat is an OPTIONAL dependency: with it absent (e.g. CI) the agent still runs under
+term-mode, so every caller and test of the term path is unaffected."
+  (if (and (require 'eat nil t) (fboundp 'eat-exec))
+      (let ((buf (get-buffer-create (concat "*" name "*"))))
+        (with-current-buffer buf
+          (eat-mode)
+          ;; Bind dynamically so eat advertises a universally-understood truecolor
+          ;; terminal even if the user never set `eat-term-name' themselves.
+          (let ((eat-term-name "xterm-256color"))
+            (eat-exec buf name program nil argv)))
+        buf)
+    (let ((buf (apply #'make-term name program nil argv)))
+      (with-current-buffer buf
+        (term-mode)
+        (term-char-mode))
+      buf)))
+
 (defun safeslop-session--launch-term (session-id argv)
-  "Launch ARGV for SESSION-ID under a built-in term-mode PTY; return the buffer.
-If the process reports the PTY_UNAVAILABLE contract error (no usable controlling
-terminal), switch to the read-only JSONL status fallback
-\(`safeslop-session-status-fallback')."
-  (let ((buf (apply #'make-term (concat "safeslop-" session-id)
-                    safeslop-program nil argv)))
-    (with-current-buffer buf
-      (term-mode)
-      (term-char-mode))
+  "Launch ARGV for SESSION-ID under a terminal PTY; return the buffer.
+Uses the eat terminal (24-bit truecolor) when available, else the built-in
+term-mode (see `safeslop-session--make-terminal').  If the process reports the
+PTY_UNAVAILABLE contract error (no usable controlling terminal), switch to the
+read-only JSONL status fallback (`safeslop-session-status-fallback')."
+  (let ((buf (safeslop-session--make-terminal
+              (concat "safeslop-" session-id) safeslop-program argv)))
     (let ((proc (get-buffer-process buf)))
       (when proc
         ;; Capture raw stdout ahead of term's renderer, then key on it when the

@@ -6,7 +6,7 @@ import "testing"
 // known-good starting points, so a broken one is worse than none.
 func TestPresetsAreValidAndDescribed(t *testing.T) {
 	ps := Presets()
-	if len(ps) < 4 {
+	if len(ps) < 3 {
 		t.Fatalf("expected several presets, got %d", len(ps))
 	}
 	for _, p := range ps {

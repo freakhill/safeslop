@@ -159,11 +159,15 @@ func provision(ctx context.Context, agentArgv []string, workspace, network strin
 	}
 	_, gitConfigErr := os.Stat(filepath.Join(stageDir, gitConfigName))
 	_, gitSSHConfigErr := os.Stat(filepath.Join(stageDir, ".ssh", "config.container"))
+	_, toolsImg, _, err := agentImageTags()
+	if err != nil {
+		return nil, "", nil, err
+	}
 	p := composeParams{
 		RuntimeDir:    stageDir,
 		Workspace:     workspace,
 		StageDir:      stageDir,
-		Term:          os.Getenv("TERM"),
+		AgentImage:    toolsImg,
 		NpmConfig:     npmErr == nil,
 		Kubeconfig:    kubeErr == nil,
 		GitConfig:     gitConfigErr == nil,
@@ -200,7 +204,7 @@ func Launch(ctx context.Context, spec exec.LaunchSpec, workspace, network string
 	// resize. The coupled path (no stdio) keeps RunInPTY, which owns the host pty and
 	// puts the user's real terminal in raw mode + forwards SIGWINCH (specs/0051).
 	if spec.Stdin != nil {
-		return exec.RunInTerminal(ctx, exec.LaunchSpec{Argv: argv, Stdin: spec.Stdin, Stdout: spec.Stdout, Stderr: spec.Stderr})
+		return exec.RunInTerminal(ctx, exec.LaunchSpec{Argv: argv, Stdin: spec.Stdin, Stdout: spec.Stdout, Stderr: spec.Stderr, ControllingTTY: true})
 	}
 	return exec.RunInPTY(ctx, exec.LaunchSpec{Argv: argv})
 }

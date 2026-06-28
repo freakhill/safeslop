@@ -108,3 +108,29 @@ func TestChildEnvFirewallDropsRichHostDiscoveryEnv(t *testing.T) {
 		}
 	}
 }
+
+// W2: the host-tier child must always get a truecolor terminal, even under a Finder/launchd launch
+// where the process env has no TERM. childEnv forces TERM/COLORTERM regardless of the host env.
+func TestChildEnvForcesTruecolorTerm(t *testing.T) {
+	restore := hostDiscoveryEnv
+	hostDiscoveryEnv = func() map[string]string { return nil }
+	defer func() { hostDiscoveryEnv = restore }()
+	t.Setenv("TERM", "")      // simulate the Finder/launchd strip
+	t.Setenv("COLORTERM", "") // ditto
+
+	env := childEnv(nil, nil)
+	has := func(s string) bool {
+		for _, e := range env {
+			if e == s {
+				return true
+			}
+		}
+		return false
+	}
+	if !has("TERM=xterm-256color") {
+		t.Errorf("childEnv must force TERM=xterm-256color even with no host TERM, got %v", env)
+	}
+	if !has("COLORTERM=truecolor") {
+		t.Errorf("childEnv must force COLORTERM=truecolor, got %v", env)
+	}
+}

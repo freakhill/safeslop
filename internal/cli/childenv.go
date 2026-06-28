@@ -66,6 +66,12 @@ func childEnv(secretEnv, pathEnv []string) []string {
 			carried[name] = val
 		}
 	}
+	// Force a truecolor terminal at the boundary: under a Finder/launchd launch TERM/COLORTERM are
+	// absent, yet the agent TUIs (Ink/chalk) need them to emit 24-bit color. Set unconditionally so
+	// the child always gets a correct terminal regardless of how safeslop was launched. Never set
+	// LINES/COLUMNS — the PTY winsize is authoritative.
+	carried["TERM"] = "xterm-256color"
+	carried["COLORTERM"] = "truecolor"
 	out := make([]string, 0, len(carried)+len(secretEnv)+len(pathEnv))
 	for name, val := range carried {
 		out = append(out, name+"="+val)

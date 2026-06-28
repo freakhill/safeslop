@@ -10,7 +10,7 @@ import (
 )
 
 func TestComposeIsNetworkEnforcedAndLeakFree(t *testing.T) {
-	yml, err := renderCompose(composeParams{RuntimeDir: "/rt", Workspace: "/ws", StageDir: "/st", Term: "xterm", NpmConfig: true})
+	yml, err := renderCompose(composeParams{RuntimeDir: "/rt", Workspace: "/ws", StageDir: "/st", NpmConfig: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,5 +214,28 @@ func TestComposeNoAgentSocketAndGitConfig(t *testing.T) {
 	}
 	if strings.Contains(without, "GIT_CONFIG_GLOBAL") || strings.Contains(without, "GIT_TERMINAL_PROMPT") || strings.Contains(without, "GIT_SSH_COMMAND") {
 		t.Fatalf("git config env must be absent when no staged .gitconfig exists:\n%s", without)
+	}
+}
+
+func TestComposeUsesAgentImage(t *testing.T) {
+	yml, err := renderCompose(composeParams{RuntimeDir: "/r", Workspace: "/w", StageDir: "/r", AgentImage: "local/safeslop-tools:deadbeef1234"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(yml, "image: local/safeslop-tools:deadbeef1234") {
+		t.Fatalf("agent image not threaded from composeParams.AgentImage:\n%s", yml)
+	}
+	if strings.Contains(yml, "agent-sandbox-tools:latest") {
+		t.Fatalf("stale hardcoded :latest agent image still present:\n%s", yml)
+	}
+}
+
+func TestComposeForcesTruecolorTerm(t *testing.T) {
+	yml, err := renderCompose(composeParams{RuntimeDir: "/r", Workspace: "/w", StageDir: "/r"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(yml, "TERM: xterm-256color") || !strings.Contains(yml, "COLORTERM: truecolor") {
+		t.Fatalf("compose must force a truecolor terminal unconditionally:\n%s", yml)
 	}
 }

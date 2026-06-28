@@ -14,7 +14,7 @@ CONTAINER_SRC := library/layer/container
 CONTAINER_DST := internal/engine/container/assets
 SYNCED        := allowlist.domains Dockerfile.agent Dockerfile.agent.tools
 
-.PHONY: build test test-emacs vet fmt fmtcheck check check-assets check-pivot-denylist sync-container-assets install install-emacs install-mcp dist clean test-integration
+.PHONY: build test test-emacs vet fmt fmtcheck check check-assets check-pivot-denylist sync-container-assets install install-emacs install-mcp dist clean
 
 ## Build the local binary (static — no cgo, immune to the WARP/uv install path).
 build:
@@ -58,13 +58,6 @@ check-pivot-denylist:
 	ci/pivot-denylist.sh
 
 check: check-assets check-pivot-denylist vet fmtcheck test test-emacs
-
-## Opt-in integration tests behind the `integration` build tag — currently the install->uninstall->install
-## idempotency proof on a real tart VM (specs/0041 task 6). NOT part of `check`: it boots a VM and does
-## real network installs. Needs tart on a darwin/arm64 host; self-skips when tart is absent. Wired as a
-## manual/cron Woodpecker pipeline (.woodpecker/integration.yml), never on every push.
-test-integration:
-	go test -tags integration -timeout 35m ./...
 
 install-emacs:
 	mkdir -p "$(HOME)/.local/share/safeslop/emacs"

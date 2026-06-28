@@ -19,7 +19,7 @@ import (
 // TestRunProfileCtxTeardownOnCancel proves that cancelling the run context (what
 // the SIGTERM handler in runProfile does, and what `session stop` triggers)
 // tears the agent down: the child process is killed and runProfileCtx returns,
-// so its deferred teardown (stage wipe, credential revoke, and for vm/container
+// so its deferred teardown (stage wipe, credential revoke, and for container
 // the boundary teardown) runs instead of being skipped by an abrupt signal
 // death (specs/0050 PR2, gap #2). Hermetic: host env + a stub shell agent.
 func TestRunProfileCtxTeardownOnCancel(t *testing.T) {
@@ -68,9 +68,9 @@ func TestRunProfileCtxTeardownOnCancel(t *testing.T) {
 // TestRunProfileCtxExitCodeFidelity locks the D4 contract's exit-code half: the
 // agent's exit code propagates verbatim through the boundary launcher and back
 // out of runProfileCtx, for every code (0 / 1 / 42), on the boundary that is
-// hermetically launchable (host via a real stub agent). Container/VM exit-code
+// hermetically launchable (host via a real stub agent). Container exit-code
 // propagation rides exec.RunInPTY/RunInTerminal (exec-layer tested) plus
-// docker/ssh, which forward the inner code — not unit-tested here.
+// docker, which forwards the inner code — not unit-tested here.
 func TestRunProfileCtxExitCodeFidelity(t *testing.T) {
 	for _, code := range []int{0, 1, 42} {
 		for _, env := range []string{"host"} {
@@ -129,41 +129,6 @@ func TestRunProfileCtxContainerForwardsSupervisorPTY(t *testing.T) {
 	}
 	if gotSpec.Stdout != &stdout || gotSpec.Stderr != &stderr {
 		t.Fatal("container spec did not forward the supervisor stdout/stderr")
-	}
-}
-
-// TestRunProfileCtxVMForwardsSupervisorPTY proves the detached vm path threads the
-// supervisor's PTY through to vm.Launch: runProfileCtx's vm branch must copy rio's
-// stdin/stdout/stderr into the LaunchSpec, so the local ssh process bridges the
-// agent's remote tty (ssh -t) to the supervisor socket for attach. Hermetic via the
-// vmLaunch seam — no tart boot.
-func TestRunProfileCtxVMForwardsSupervisorPTY(t *testing.T) {
-	ws := t.TempDir()
-	prof := policy.Profile{Agent: "shell", Environment: "vm", Network: "allow", Workspace: ws}
-	argv, err := agentArgv(prof)
-	if err != nil {
-		t.Fatalf("argv: %v", err)
-	}
-
-	var gotSpec engexec.LaunchSpec
-	old := vmLaunch
-	vmLaunch = func(_ context.Context, spec engexec.LaunchSpec, _ string, _ []string, _, _, _ string) (int, error) {
-		gotSpec = spec
-		return 0, nil
-	}
-	defer func() { vmLaunch = old }()
-
-	stdin := strings.NewReader("")
-	var stdout, stderr bytes.Buffer
-	rio := runIO{Stdin: stdin, Stdout: &stdout, Stderr: &stderr}
-	if _, err := runProfileCtx(context.Background(), "session-vm", prof, argv, ws, rio); err != nil {
-		t.Fatalf("runProfileCtx: %v", err)
-	}
-	if gotSpec.Stdin != stdin {
-		t.Fatalf("vm spec.Stdin = %v, want the supervisor PTY reader", gotSpec.Stdin)
-	}
-	if gotSpec.Stdout != &stdout || gotSpec.Stderr != &stderr {
-		t.Fatal("vm spec did not forward the supervisor stdout/stderr")
 	}
 }
 

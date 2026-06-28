@@ -1,10 +1,11 @@
-FROM local/agent-sandbox:latest
+ARG BASE=local/safeslop-base:latest
+FROM ${BASE}
 
 ARG ENABLE_CLAUDE_CODE=false
 ARG ENABLE_PI=false
-ARG ENABLE_CREWAI=true
-ARG ENABLE_PYDANTICAI=true
-ARG ENABLE_AG2=true
+ARG ENABLE_CREWAI=false
+ARG ENABLE_PYDANTICAI=false
+ARG ENABLE_AG2=false
 
 ARG CLAUDE_CODE_NPM_PACKAGE=@anthropic-ai/claude-code
 ARG CLAUDE_CODE_VERSION=2.1.121

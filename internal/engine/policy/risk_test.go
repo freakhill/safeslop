@@ -107,10 +107,6 @@ func TestTechStackListsUnderlyingTech(t *testing.T) {
 	if strings.Contains(j, "x/y/z") || strings.Contains(j, "CLAUDE_CODE_OAUTH_TOKEN") {
 		t.Errorf("secret ref/name leaked into tech stack:\n%s", j)
 	}
-	// vm uses Tart
-	if !strings.Contains(strings.Join(TechStack(Profile{Agent: "shell", Environment: "vm"}), " "), "Tart") {
-		t.Error("vm tech stack must mention Tart")
-	}
 }
 
 // TestAgentLabelAndTechStackPi locks specs/0045: the pi agent has a human label and surfaces
