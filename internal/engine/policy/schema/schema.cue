@@ -184,6 +184,13 @@ package safeslop
 	credentials?: #Credentials
 	// Optional pinned toolchain, provisioned into the chosen environment (SP5).
 	toolchain?: #Toolchain
+	// Build-time packages baked into the container image, from the curated catalog
+	// (specs/0058). `bundles` are named sets; `packages` are à la carte. Names are
+	// validated against the catalog by the engine (unknown => error); the agent's
+	// default bundle is always included so the agent can launch. Orthogonal to
+	// `toolchain` (a build-time bake vs a runtime version-manager).
+	bundles?:  [...string]
+	packages?: [...string]
 }
 
 #Slop: {
