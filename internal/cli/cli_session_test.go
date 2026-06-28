@@ -67,7 +67,7 @@ func TestSessionCreateGoldenMatchesEmittedEnvelope(t *testing.T) {
 		ID:          "sess-0123456789abcdef01234567",
 		Agent:       "claude",
 		Workspace:   "/workspace/project",
-		Environment: "sandbox",
+		Environment: "host",
 		Network:     "deny",
 		Status:      engsession.StatusCreated,
 		CreatedAt:   time.Date(2026, 6, 26, 0, 0, 0, 0, time.UTC),
@@ -91,7 +91,7 @@ func TestSessionCreateEmitsContractAndPersistsSafeDefaults(t *testing.T) {
 	state := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", state)
 
-	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--workspace", ws, "--output", "json")
+	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--workspace", ws, "--output", "json")
 	if err != nil {
 		t.Fatalf("session create: %v\nout=%s", err, out)
 	}
@@ -112,8 +112,8 @@ func TestSessionCreateEmitsContractAndPersistsSafeDefaults(t *testing.T) {
 	if got := env.Data["network"]; got != "deny" {
 		t.Fatalf("network default = %#v, want deny", got)
 	}
-	if got := env.Data["environment"]; got != "sandbox" {
-		t.Fatalf("environment default = %#v, want sandbox", got)
+	if got := env.Data["environment"]; got != "host" {
+		t.Fatalf("environment = %#v, want host", got)
 	}
 	if _, err := os.Stat(filepath.Join(state, "sessions", id+".json")); err != nil {
 		t.Fatalf("session state not persisted: %v", err)
@@ -124,7 +124,7 @@ func TestSessionCreateAcceptsClaudeCodeAlias(t *testing.T) {
 	ws := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
 
-	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude-code", "--workspace", ws, "--output", "json")
+	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude-code", "--environment", "host", "--workspace", ws, "--output", "json")
 	if err != nil {
 		t.Fatalf("session create claude-code: %v\nout=%s", err, out)
 	}
@@ -141,7 +141,7 @@ func TestSessionCreateRejectsUnsupportedAgentAsContract(t *testing.T) {
 	ws := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
 
-	out, err := runRootForTest(t, ws, "session", "create", "--agent", "shell", "--workspace", ws, "--output", "json")
+	out, err := runRootForTest(t, ws, "session", "create", "--agent", "shell", "--environment", "host", "--workspace", ws, "--output", "json")
 	if err == nil {
 		t.Fatalf("unsupported agent unexpectedly succeeded: %s", out)
 	}
@@ -155,7 +155,7 @@ func TestSessionStatusJSONLEmitsSingleLineContract(t *testing.T) {
 	ws := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
 
-	out, err := runRootForTest(t, ws, "session", "create", "--agent", "pi", "--workspace", ws, "--output", "json")
+	out, err := runRootForTest(t, ws, "session", "create", "--agent", "pi", "--environment", "host", "--workspace", ws, "--output", "json")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestSessionStopRevokesBeforeKillAndIsIdempotent(t *testing.T) {
 	sessionKillProcess = func(_ int) error { order = append(order, "kill"); return nil }
 	defer func() { sessionRevokeCredentials, sessionKillProcess = oldRevoke, oldKill }()
 
-	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--workspace", ws, "--output", "json")
+	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--workspace", ws, "--output", "json")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -222,7 +222,7 @@ func TestSessionStatusReportsReconciledState(t *testing.T) {
 	sessionProcessAlive = func(int) bool { return false } // run wrapper is gone
 	defer func() { sessionProcessAlive = oldAlive }()
 
-	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--workspace", ws, "--output", "json")
+	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--workspace", ws, "--output", "json")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -261,7 +261,7 @@ func TestSessionContractOutputDoesNotLeakSecretRefs(t *testing.T) {
 	ws := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
 	t.Setenv("ANTHROPIC_API_KEY", "super-secret-value")
-	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--workspace", ws, "--output", "json")
+	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--workspace", ws, "--output", "json")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -285,13 +285,9 @@ func newHostShellSessionForTest(t *testing.T, ws string) string {
 	t.Helper()
 	t.Setenv("SHELL", filepath.Join(t.TempDir(), "no-such-shell"))
 	store := sessionStore()
-	sess, err := store.Create("shell", ws, nowForTest(t))
+	sess, err := store.Create("shell", "host", ws, nowForTest(t))
 	if err != nil {
 		t.Fatalf("create session: %v", err)
-	}
-	sess.Environment = "host"
-	if err := store.Save(sess); err != nil {
-		t.Fatalf("save session: %v", err)
 	}
 	return sess.ID
 }
@@ -435,6 +431,47 @@ func TestSessionCreateRejectsInvalidEnvironment(t *testing.T) {
 	}
 }
 
+// TestSessionCreateRequiresEnvironment proves that omitting --environment is a
+// CodeInvalidArgument contract error (specs/0053: environment is required — there
+// is no default after the sandbox tier was removed).
+func TestSessionCreateRequiresEnvironment(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+
+	out, err := runRootForTest(t, ws, "session", "create",
+		"--agent", "claude", "--workspace", ws, "--output", "json",
+	)
+	if err == nil {
+		t.Fatalf("missing --environment unexpectedly succeeded: %s", out)
+	}
+	env := parseEnvelopeForTest(t, out)
+	if env.OK || len(env.Errors) == 0 {
+		t.Fatalf("expected error envelope, got: %+v", env)
+	}
+	if env.Errors[0].Code != jsoncontract.CodeInvalidArgument {
+		t.Fatalf("error code = %q, want %q", env.Errors[0].Code, jsoncontract.CodeInvalidArgument)
+	}
+}
+
+// TestSessionCreateRejectsSandboxEnvironment proves the removed sandbox tier is
+// rejected like any other unknown environment (specs/0053).
+func TestSessionCreateRejectsSandboxEnvironment(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+
+	out, err := runRootForTest(t, ws, "session", "create",
+		"--agent", "claude", "--workspace", ws, "--output", "json",
+		"--environment", "sandbox",
+	)
+	if err == nil {
+		t.Fatalf("--environment sandbox unexpectedly succeeded: %s", out)
+	}
+	env := parseEnvelopeForTest(t, out)
+	if env.OK || len(env.Errors) == 0 || env.Errors[0].Code != jsoncontract.CodeInvalidArgument {
+		t.Fatalf("expected CodeInvalidArgument error envelope, got: %+v", env)
+	}
+}
+
 // TestSessionCreateRejectsInvalidNetwork proves that an unrecognised --network
 // value is rejected with a CodeInvalidArgument contract error.
 func TestSessionCreateRejectsInvalidNetwork(t *testing.T) {
@@ -442,7 +479,7 @@ func TestSessionCreateRejectsInvalidNetwork(t *testing.T) {
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
 
 	out, err := runRootForTest(t, ws, "session", "create",
-		"--agent", "claude", "--workspace", ws, "--output", "json",
+		"--agent", "claude", "--environment", "host", "--workspace", ws, "--output", "json",
 		"--network", "open",
 	)
 	if err == nil {

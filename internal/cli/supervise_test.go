@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/freakhill/safeslop/internal/engine/sandbox"
 	engsession "github.com/freakhill/safeslop/internal/engine/session"
 	"github.com/freakhill/safeslop/internal/engine/session/wire"
 )
@@ -26,7 +25,7 @@ func newSupervisedStubSession(t *testing.T, script string) (engsession.Store, st
 
 // newSupervisedStubSessionIn is newSupervisedStubSession with an explicit state
 // dir (so a test can force the sun_path-overflow relocation branch with a long
-// one) and isolation environment (so a test can drive the sandbox launch path).
+// one) and isolation environment.
 func newSupervisedStubSessionIn(t *testing.T, script, stateDir, env string) (engsession.Store, string, string) {
 	t.Helper()
 	ws := t.TempDir()
@@ -37,13 +36,9 @@ func newSupervisedStubSessionIn(t *testing.T, script, stateDir, env string) (eng
 	}
 	t.Setenv("SHELL", stub)
 	store := sessionStore()
-	sess, err := store.Create("shell", ws, nowForTest(t))
+	sess, err := store.Create("shell", env, ws, nowForTest(t))
 	if err != nil {
 		t.Fatalf("create session: %v", err)
-	}
-	sess.Environment = env
-	if err := store.Save(sess); err != nil {
-		t.Fatalf("save session: %v", err)
 	}
 	return store, sess.ID, ws
 }
@@ -307,35 +302,6 @@ func TestSuperviseGivesHostAgentAControllingTerminal(t *testing.T) {
 	}
 	if !jsonlContains(data, "CTTY=yes") {
 		t.Fatalf("agent controlling-terminal probe never captured:\n%s", data)
-	}
-}
-
-// TestSuperviseGivesSandboxAgentAControllingTerminal is the sandbox sibling of the
-// host controlling-terminal test: a detached SANDBOX session launches the agent
-// (under sandbox-exec) with the supervisor PTY as its controlling terminal, so the
-// sandboxed agent can open /dev/tty. The /dev read and tty ioctls are already
-// permitted by the Seatbelt profile; this proves runProfileCtx's sandbox branch
-// requests the controlling terminal too (specs/0051 sandbox Setctty).
-func TestSuperviseGivesSandboxAgentAControllingTerminal(t *testing.T) {
-	if !sandbox.Available() {
-		t.Skip("sandbox-exec unavailable (not macOS)")
-	}
-	store, id, _ := newSupervisedStubSessionIn(t, "#!/bin/sh\nif : </dev/tty 2>/dev/null; then printf 'CTTY=yes\\n'; else printf 'CTTY=no\\n'; fi\nexit 0\n", shortStateDir(t), "sandbox")
-	jsonlPath := filepath.Join(store.Dir, id+".jsonl")
-
-	code, err := Supervise(context.Background(), store, id, time.Now)
-	if err != nil || code != 0 {
-		t.Fatalf("Supervise: code=%d err=%v", code, err)
-	}
-	data, err := os.ReadFile(jsonlPath)
-	if err != nil {
-		t.Fatalf("read jsonl: %v", err)
-	}
-	if jsonlContains(data, "CTTY=no") {
-		t.Fatalf("sandboxed agent reported no controlling terminal under the supervisor:\n%s", data)
-	}
-	if !jsonlContains(data, "CTTY=yes") {
-		t.Fatalf("sandboxed agent controlling-terminal probe never captured:\n%s", data)
 	}
 }
 

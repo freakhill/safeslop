@@ -22,8 +22,9 @@ Go. There is no external policy compiler required at runtime.
 - Put tests next to the code and keep them hermetic.
 - Do not call live forges, credential providers, registries, or cloud APIs from
   unit tests. Use fakes and local HTTP test servers.
-- Preserve safe defaults: `sandbox` + `network: "deny"` unless a policy opts into
-  more authority.
+- Preserve safe defaults: `network: "deny"` unless a policy opts into more
+  authority. `environment` is required (host/container/vm) — there is no default
+  tier (specs/0053).
 
 ## Docs, Skills, and Tests Sync Policy
 

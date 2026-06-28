@@ -7,9 +7,9 @@ import (
 	"github.com/freakhill/safeslop/internal/engine/policy"
 )
 
-// agent: "shell" must use the host's $SHELL for host/sandbox (the agent runs on the
-// host), but a guest-resident shell for container/vm — the host path (e.g. /bin/zsh)
-// does not exist inside the image and exec would fail with "/bin/zsh: not found".
+// agent: "shell" must use the host's $SHELL for host (the agent runs on the host),
+// but a guest-resident shell for container/vm — the host path (e.g. /bin/zsh) does
+// not exist inside the image and exec would fail with "/bin/zsh: not found".
 func TestAgentArgvShellIsTierAware(t *testing.T) {
 	t.Setenv("SHELL", "/bin/zsh") // a host shell absent from the container/vm image
 
@@ -18,7 +18,6 @@ func TestAgentArgvShellIsTierAware(t *testing.T) {
 		want string
 	}{
 		{"host", "/bin/zsh"},
-		{"sandbox", "/bin/zsh"},
 		{"container", "bash"},
 		{"vm", "/bin/sh"},
 	}

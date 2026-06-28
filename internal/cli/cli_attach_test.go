@@ -67,7 +67,7 @@ func TestAttachDoesNotMarkRunning(t *testing.T) {
 	ws := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
 	store := sessionStore()
-	sess, err := store.Create("claude", ws, nowForTest(t))
+	sess, err := store.Create("claude", "host", ws, nowForTest(t))
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}

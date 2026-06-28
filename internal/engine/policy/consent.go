@@ -9,7 +9,7 @@ import (
 // every sentence and sets every Expected, so the affirmed text can never drift from what actually runs
 // (single source of truth). Expected is the ground truth — is this statement TRUE of this host run?
 // TierOrigin records which tier the sentence actually describes: "host" for the true rows, and a more-
-// isolated tier ("sandbox"/"container"/"vm") for the false cross-tier decoys the user must reject.
+// isolated tier ("container"/"vm") for the false cross-tier decoys the user must reject.
 type ConsentStatement struct {
 	Text       string
 	Expected   bool
@@ -62,7 +62,7 @@ func hostTrueStatements() []ConsentStatement {
 // constructible — even for a maximum-permission host profile (no all-Yes degradation).
 func crossTierDecoys() []ConsentStatement {
 	return []ConsentStatement{
-		{Text: "This run is confined to the workspace and temp folders.", Expected: false, TierOrigin: "sandbox"},
+		{Text: "This run is confined to the workspace and temp folders.", Expected: false, TierOrigin: "container"},
 		{Text: "Files outside the project are invisible to this agent.", Expected: false, TierOrigin: "vm"},
 		{Text: "Network access is limited to an approved allow-list.", Expected: false, TierOrigin: "container"},
 		{Text: "This agent runs in a disposable, throwaway environment.", Expected: false, TierOrigin: "vm"},

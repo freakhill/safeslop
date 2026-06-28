@@ -11,9 +11,9 @@ safeslop: {
 	version: 1
 	profiles: risky: {
 		agent: "claude"
-		environment: "sandbox"
+		environment: "container"
 		network: "allow"
-		secrets: {ANTHROPIC_API_KEY: "env:ANTHROPIC_API_KEY"}
+		egress: ["evil.example.com"]
 	}
 }
 `
@@ -28,7 +28,7 @@ func TestValidateAndLintSurfacesWarning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("validateAndLint: %v", err)
 	}
-	if len(warns) != 1 || warns[0].Code != "sandbox-open-egress-with-creds" || warns[0].Profile != "risky" {
-		t.Fatalf("expected the exfil warning, got %+v", warns)
+	if len(warns) != 1 || warns[0].Code != "egress-ignored" || warns[0].Profile != "risky" {
+		t.Fatalf("expected the egress-ignored warning, got %+v", warns)
 	}
 }

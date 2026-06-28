@@ -181,7 +181,7 @@ func runKubeCmd(ctx context.Context, argv []string, hint string) ([]byte, error)
 // StageKube pre-mints a short-lived k8s bearer token on the host (aws eks get-token /
 // gke-gcloud-auth-plugin, using the host's SSO/ADC), resolves the cluster endpoint+CA,
 // and writes a scoped one-cluster kubeconfig (token inside, 0600) into stageDir. It
-// returns KUBECONFIG pointing at that file — the host path, correct for host/sandbox;
+// returns KUBECONFIG pointing at that file — the host path, correct for host;
 // the container path is set in the compose env (see container.Launch). No revoke: the
 // token decays and the stageDir wipe removes the file (decay-first).
 func StageKube(ctx context.Context, creds *policy.Credentials, stageDir string) ([]string, error) {

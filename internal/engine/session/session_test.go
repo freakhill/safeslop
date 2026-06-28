@@ -42,7 +42,7 @@ func TestSocketPathFitsSunPath(t *testing.T) {
 func TestStopSignalsSupervisorGroupAndRemovesSocket(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore(dir)
-	sess, err := store.Create("claude", t.TempDir(), testNow())
+	sess, err := store.Create("claude", "host", t.TempDir(), testNow())
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestStopSignalsSupervisorGroupAndRemovesSocket(t *testing.T) {
 
 func TestStopCoupledSignalsBarePID(t *testing.T) {
 	store := NewStore(t.TempDir())
-	sess, err := store.Create("claude", t.TempDir(), testNow())
+	sess, err := store.Create("claude", "host", t.TempDir(), testNow())
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestStopCoupledSignalsBarePID(t *testing.T) {
 func TestReconcileRemovesStaleSocket(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore(dir)
-	sess, err := store.Create("claude", t.TempDir(), testNow())
+	sess, err := store.Create("claude", "host", t.TempDir(), testNow())
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestReconcileRemovesStaleSocket(t *testing.T) {
 
 func TestStoreStopRevokesBeforeKillAndIsIdempotent(t *testing.T) {
 	store := NewStore(t.TempDir())
-	sess, err := store.Create("claude", t.TempDir(), testNow())
+	sess, err := store.Create("claude", "host", t.TempDir(), testNow())
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestReconcileIsIdempotentOnStopped(t *testing.T) {
 
 func TestGetReconciledPersistsDeadTransition(t *testing.T) {
 	store := NewStore(t.TempDir())
-	sess, err := store.Create("claude", t.TempDir(), testNow())
+	sess, err := store.Create("claude", "host", t.TempDir(), testNow())
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -221,14 +221,14 @@ func TestGetReconciledPersistsDeadTransition(t *testing.T) {
 
 func TestListReconciledCorrectsDeadSessions(t *testing.T) {
 	store := NewStore(t.TempDir())
-	dead, err := store.Create("claude", t.TempDir(), testNow())
+	dead, err := store.Create("claude", "host", t.TempDir(), testNow())
 	if err != nil {
 		t.Fatalf("create dead: %v", err)
 	}
 	if _, err := store.MarkRunning(dead.ID, 4242, testNow()); err != nil {
 		t.Fatalf("mark running: %v", err)
 	}
-	created, err := store.Create("pi", t.TempDir(), testNow())
+	created, err := store.Create("pi", "host", t.TempDir(), testNow())
 	if err != nil {
 		t.Fatalf("create created: %v", err)
 	}
@@ -251,7 +251,7 @@ func TestListReconciledCorrectsDeadSessions(t *testing.T) {
 
 func TestStoreStopCanRevokeAlreadyStoppedUnrevokedSession(t *testing.T) {
 	store := NewStore(t.TempDir())
-	sess, err := store.Create("pi", t.TempDir(), testNow())
+	sess, err := store.Create("pi", "host", t.TempDir(), testNow())
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}

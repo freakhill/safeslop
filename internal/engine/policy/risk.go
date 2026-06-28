@@ -20,9 +20,6 @@ type Risk struct {
 // caveat — concrete consequences, so the user confronts the actual blast radius.
 func RiskSummary(p Profile) Risk {
 	env := p.Environment
-	if env == "" {
-		env = "sandbox"
-	}
 	_, note := EnvTier(env)
 
 	lines := []string{
@@ -61,9 +58,6 @@ type RiskAxis struct {
 // that need loud surfacing on the compact Launch row.
 func RiskAxes(p Profile) []RiskAxis {
 	env := p.Environment
-	if env == "" {
-		env = "sandbox"
-	}
 	return []RiskAxis{networkAxis(env, p.Network), filesAxis(env)}
 }
 
@@ -81,11 +75,8 @@ func networkAxis(env, network string) RiskAxis {
 			return RiskAxis{"network", "full VM network", false, "elevated"}
 		}
 		return RiskAxis{"network", "proxy-only", true, "contained"}
-	default: // sandbox
-		if network == "allow" {
-			return RiskAxis{"network", "open egress", false, "elevated"}
-		}
-		return RiskAxis{"network", "offline", true, "contained"}
+	default: // unknown/invalid env — never imply a boundary (specs/0053)
+		return RiskAxis{"network", "unrestricted", false, "high"}
 	}
 }
 
@@ -97,14 +88,14 @@ func filesAxis(env string) RiskAxis {
 		return RiskAxis{"files", "workspace-only", true, "contained"}
 	case "vm":
 		return RiskAxis{"files", "VM-only", true, "contained"}
-	default: // sandbox
-		return RiskAxis{"files", "workspace + temp", true, "contained"}
+	default: // unknown/invalid env — never imply a boundary (specs/0053)
+		return RiskAxis{"files", "whole account", false, "high"}
 	}
 }
 
 // TechStack lists the underlying technologies a profile uses — the stack behind the tier label —
-// for the Launch tab's hover tooltip: which agent, which isolation mechanism (Seatbelt / Docker+squid
-// / Tart), the network mechanism, plus any toolchain + credential providers.
+// for the Launch tab's hover tooltip: which agent, which isolation mechanism (Docker+squid / Tart),
+// the network mechanism, plus any toolchain + credential providers.
 func TechStack(p Profile) []string {
 	s := []string{
 		"Agent: " + agentLabel(p.Agent),
@@ -147,7 +138,7 @@ func isolationTech(env string) string {
 	case "vm":
 		return "Tart virtual machine"
 	default:
-		return "macOS Seatbelt (sandbox-exec)"
+		return "none — unknown environment"
 	}
 }
 
@@ -166,10 +157,7 @@ func networkTech(env, network string) string {
 		}
 		return "proxy egress"
 	default:
-		if network == "allow" {
-			return "Seatbelt: network allowed"
-		}
-		return "Seatbelt: network denied"
+		return "unrestricted"
 	}
 }
 
@@ -211,11 +199,8 @@ func networkReach(env, network string) string {
 			return "full VM network"
 		}
 		return "egress via the configured proxy only"
-	default: // sandbox
-		if network == "allow" {
-			return "OPEN — outbound connections to anywhere"
-		}
-		return "denied — offline"
+	default: // unknown/invalid env (specs/0053)
+		return "unrestricted — assume the agent can reach anywhere"
 	}
 }
 
@@ -227,8 +212,8 @@ func fileReach(env string) string {
 		return "only the mounted workspace — no host files"
 	case "vm":
 		return "only what's copied into the disposable VM — no host files"
-	default: // sandbox
-		return "reads system + toolchain; reads/writes only the workspace + temp dirs"
+	default: // unknown/invalid env (specs/0053)
+		return "unknown environment — assume your ENTIRE account is reachable"
 	}
 }
 
@@ -263,16 +248,14 @@ func headline(env, network string) string {
 	switch {
 	case env == "host":
 		return "Runs as you — no isolation, full account + network"
-	case network == "allow" && env == "sandbox":
-		return "Workspace-confined files, but OPEN network (can exfil)"
 	case network == "allow":
 		return "File-isolated, but OPEN egress (can exfil)"
 	case env == "container":
 		return "Workspace-only files, egress limited to the allowlist"
 	case env == "vm":
 		return "Disposable VM — strongest isolation"
-	default: // sandbox deny
-		return "Workspace-confined files, offline"
+	default: // unknown/invalid env (specs/0053)
+		return "Unknown environment — assume no isolation"
 	}
 }
 

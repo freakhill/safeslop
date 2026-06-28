@@ -14,7 +14,6 @@ import (
 
 	engexec "github.com/freakhill/safeslop/internal/engine/exec"
 	"github.com/freakhill/safeslop/internal/engine/policy"
-	"github.com/freakhill/safeslop/internal/engine/sandbox"
 )
 
 // TestRunProfileCtxTeardownOnCancel proves that cancelling the run context (what
@@ -68,17 +67,14 @@ func TestRunProfileCtxTeardownOnCancel(t *testing.T) {
 
 // TestRunProfileCtxExitCodeFidelity locks the D4 contract's exit-code half: the
 // agent's exit code propagates verbatim through the boundary launcher and back
-// out of runProfileCtx, for every code (0 / 1 / 42), on the boundaries that are
-// hermetically launchable (host + sandbox via a real stub agent). Container/VM
-// exit-code propagation rides exec.RunInPTY/RunInTerminal (exec-layer tested)
-// plus docker/ssh, which forward the inner code — not unit-tested here.
+// out of runProfileCtx, for every code (0 / 1 / 42), on the boundary that is
+// hermetically launchable (host via a real stub agent). Container/VM exit-code
+// propagation rides exec.RunInPTY/RunInTerminal (exec-layer tested) plus
+// docker/ssh, which forward the inner code — not unit-tested here.
 func TestRunProfileCtxExitCodeFidelity(t *testing.T) {
 	for _, code := range []int{0, 1, 42} {
-		for _, env := range []string{"host", "sandbox"} {
+		for _, env := range []string{"host"} {
 			t.Run(fmt.Sprintf("%s-%d", env, code), func(t *testing.T) {
-				if env == "sandbox" && !sandbox.Available() {
-					t.Skip("sandbox-exec unavailable")
-				}
 				ws := t.TempDir()
 				stub := filepath.Join(ws, "exiter")
 				if err := os.WriteFile(stub, []byte(fmt.Sprintf("#!/bin/sh\nexit %d\n", code)), 0o755); err != nil {

@@ -69,7 +69,6 @@ Do not use `--repo` for this repo's Forgejo PR creation flow.
 - `internal/engine/policy/` — CUE loading, schema, lint/risk/pinning checks.
 - `internal/engine/container/` — container session materialization and compose assets.
 - `internal/engine/vm/` — disposable VM launch and remote command assembly.
-- `internal/engine/sandbox/` — macOS Seatbelt profile generation and launch.
 - `internal/engine/install/` and `internal/engine/uninstall/` — receipt-driven tool install lifecycle.
 
 ## Safety notes
@@ -79,5 +78,6 @@ Do not use `--repo` for this repo's Forgejo PR creation flow.
 - Keep host ambient credentials out of child environments; profile-declared
   secrets/credentials are the only authority that should cross boundaries.
 - Keep tests hermetic. Fake external tools and APIs.
-- Preserve honest isolation labels: host, sandbox, container, VM each have
-  different security properties.
+- Preserve honest isolation labels: host, container, VM each have
+  different security properties. (The macOS Seatbelt `sandbox` tier was removed in
+  specs/0053 — `environment` is required, with no default.)

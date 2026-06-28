@@ -19,7 +19,7 @@ func TestRunDetachRecordsSupervisorPIDAndReturns(t *testing.T) {
 	ws := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", shortStateDir(t))
 	store := sessionStore()
-	sess, err := store.Create("claude", ws, nowForTest(t))
+	sess, err := store.Create("claude", "host", ws, nowForTest(t))
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestRunDetachWaitsForSocketBeforeSuccess(t *testing.T) {
 	ws := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", shortStateDir(t))
 	store := sessionStore()
-	sess, err := store.Create("claude", ws, nowForTest(t))
+	sess, err := store.Create("claude", "host", ws, nowForTest(t))
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}

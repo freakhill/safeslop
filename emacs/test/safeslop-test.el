@@ -108,7 +108,7 @@
   (let* ((envelope (safeslop-contract-parse-string
                     (concat "{\"schema_version\":1,\"ok\":true,\"data\":{\"sessions\":"
                             "[{\"session_id\":\"sess-abc123\",\"agent\":\"claude\","
-                            "\"environment\":\"sandbox\",\"network\":\"deny\","
+                            "\"environment\":\"container\",\"network\":\"deny\","
                             "\"status\":\"running\",\"workspace\":\"/tmp/ws\"}]},"
                             "\"warnings\":[],\"errors\":[]}")))
          (rows (safeslop-portal--rows (safeslop-portal--sessions-from envelope)))
@@ -117,7 +117,7 @@
     (should (= (length rows) 1))
     (should (equal (car row) "sess-abc123"))
     (should (equal (aref cols 1) "claude"))
-    (should (equal (aref cols 2) "sandbox"))
+    (should (equal (aref cols 2) "container"))
     (should (equal (aref cols 3) "deny"))
     (should (equal (aref cols 4) "running"))))
 
@@ -242,7 +242,7 @@
                    (concat "{\"schema_version\":1,\"ok\":true,\"data\":{\"sessions\":"
                            "[{\"session_id\":\"sess-r\",\"agent\":\"claude\",\"environment\":\"vm\","
                            "\"network\":\"deny\",\"status\":\"running\",\"pid\":4242,\"workspace\":\"/w\"},"
-                           "{\"session_id\":\"sess-c\",\"agent\":\"pi\",\"environment\":\"sandbox\","
+                           "{\"session_id\":\"sess-c\",\"agent\":\"pi\",\"environment\":\"host\","
                            "\"network\":\"deny\",\"status\":\"created\",\"workspace\":\"/w\"}]},"
                            "\"warnings\":[],\"errors\":[]}"))))
     (let* ((rows (safeslop-portal--rows (safeslop-portal--sessions-from envelope)))
@@ -296,8 +296,9 @@
 
 (ert-deftest safeslop-test-portal-env-face ()
   (should (eq (safeslop-portal--env-face "host") 'safeslop-tier-host))
+  (should (eq (safeslop-portal--env-face "container") 'safeslop-tier-container))
   (should (eq (safeslop-portal--env-face "vm") 'safeslop-tier-vm))
-  (should (eq (safeslop-portal--env-face "") 'safeslop-tier-sandbox))
+  (should (eq (safeslop-portal--env-face "") 'default))      ; empty -> no boundary implied (specs/0053)
   (should (eq (safeslop-portal--env-face "weird") 'default)))
 
 (ert-deftest safeslop-test-portal-env-cell ()
@@ -336,7 +337,7 @@
   (with-temp-buffer
     (safeslop-portal-mode)
     (setq tabulated-list-entries
-          '(("sess-1" ["sess-1" "claude" "sandbox" "deny" "running" "1" "now" "/ws"])
+          '(("sess-1" ["sess-1" "claude" "host" "deny" "running" "1" "now" "/ws"])
             ("sess-2" ["sess-2" "pi" "vm" "allow" "created" "2" "now" "/ws"])))
     (tabulated-list-print)
     (should (safeslop-portal--goto-id "sess-2"))

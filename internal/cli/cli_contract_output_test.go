@@ -32,7 +32,7 @@ func TestValidateJSONEmitsContractEnvelope(t *testing.T) {
 
 safeslop: profiles: default: {
 	agent: "claude"
-	environment: "sandbox"
+	environment: "container"
 	network: "deny"
 }
 `), 0o600); err != nil {
@@ -61,9 +61,9 @@ func TestValidateWarningJSONUsesContractWarningShape(t *testing.T) {
 
 safeslop: profiles: default: {
 	agent: "claude"
-	environment: "sandbox"
+	environment: "host"
 	network: "allow"
-	secrets: ANTHROPIC_API_KEY: "env:ANTHROPIC_API_KEY"
+	egress: ["example.com"]
 }
 `), 0o600); err != nil {
 		t.Fatalf("write policy: %v", err)

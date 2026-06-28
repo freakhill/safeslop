@@ -4,7 +4,7 @@ import "testing"
 
 func TestDoctorTiers(t *testing.T) {
 	tiers := doctorTiers()
-	for _, env := range []string{"host", "sandbox", "container", "vm"} {
+	for _, env := range []string{"host", "container", "vm"} {
 		row, ok := tiers[env]
 		if !ok {
 			t.Fatalf("doctorTiers missing %q", env)
@@ -13,7 +13,11 @@ func TestDoctorTiers(t *testing.T) {
 			t.Fatalf("doctorTiers[%q] incomplete: %+v", env, row)
 		}
 	}
-	if tiers["sandbox"]["tier"] != "mistake-guard" {
-		t.Fatalf("sandbox tier = %q, want mistake-guard", tiers["sandbox"]["tier"])
+	// The removed sandbox tier must not reappear (specs/0053).
+	if _, ok := tiers["sandbox"]; ok {
+		t.Fatalf("doctorTiers still lists the removed sandbox tier: %+v", tiers)
+	}
+	if tiers["container"]["tier"] != "egress-allowlisted" {
+		t.Fatalf("container tier = %q, want egress-allowlisted", tiers["container"]["tier"])
 	}
 }

@@ -65,7 +65,7 @@ func TestDetachedGoldenMatchesEmittedEnvelope(t *testing.T) {
 		ID:          "sess-0123456789abcdef01234567",
 		Agent:       "claude",
 		Workspace:   "/workspace/project",
-		Environment: "sandbox",
+		Environment: "host",
 		Network:     "deny",
 		Status:      engsession.StatusRunning,
 		CreatedAt:   time.Date(2026, 6, 26, 0, 0, 0, 0, time.UTC),

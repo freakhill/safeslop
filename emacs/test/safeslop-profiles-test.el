@@ -16,7 +16,7 @@
   (let* ((env (safeslop-contract-parse-string
                (concat "{\"schema_version\":1,\"ok\":true,\"data\":{"
                        "\"path\":\"/ws/safeslop.cue\",\"profiles\":{"
-                       "\"review\":{\"agent\":\"claude\",\"environment\":\"sandbox\",\"network\":\"deny\"},"
+                       "\"review\":{\"agent\":\"claude\",\"environment\":\"container\",\"network\":\"deny\"},"
                        "\"yolo\":{\"agent\":\"pi\",\"environment\":\"vm\",\"network\":\"allow\"}}},"
                        "\"warnings\":[],\"errors\":[]}")))
          (rows (safeslop-profiles--rows (safeslop-contract-data env))))
@@ -25,9 +25,9 @@
       (should review)
       (should (equal (aref (cadr review) 0) "review"))
       (should (equal (aref (cadr review) 1) "claude"))
-      (should (equal (aref (cadr review) 2) "sandbox")) ; env-cell text; equal ignores face
+      (should (equal (aref (cadr review) 2) "container")) ; env-cell text; equal ignores face
       (should (equal (aref (cadr review) 3) "deny"))
-      (should (eq (get-text-property 0 'face (aref (cadr review) 2)) 'safeslop-tier-sandbox)))
+      (should (eq (get-text-property 0 'face (aref (cadr review) 2)) 'safeslop-tier-container)))
     (let ((yolo (assoc "yolo" rows)))
       (should (eq (get-text-property 0 'face (aref (cadr yolo) 2)) 'safeslop-tier-vm)))))
 

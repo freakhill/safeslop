@@ -10,8 +10,8 @@
 // SECURITY — the two-environment firewall. The reconstructed env is RICH: a login shell exports
 // AWS_*, ANTHROPIC_API_KEY, GITHUB_TOKEN, SSH_AUTH_SOCK, etc. This package's output is for HOST-SIDE
 // DISCOVERY AND BINARY RESOLUTION ONLY (LookPath, resolving an absolute binary to spawn). It must
-// NEVER be handed wholesale to a sandboxed child: the cli.childEnv allowlist remains the sole gate
-// into the sandbox. The only value safe to carry across is PATH (location, not authority) — and even
+// NEVER be handed wholesale to an isolated child: the cli.childEnv allowlist remains the sole gate
+// into the child env. The only value safe to carry across is PATH (location, not authority) — and even
 // that is sanitized here first (DYLD_*/LD_PRELOAD stripped; non-absolute / world-writable / `..`
 // PATH entries rejected) so a poisoned dotfile can't turn host binary resolution into host RCE.
 package hostenv

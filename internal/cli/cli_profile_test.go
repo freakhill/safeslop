@@ -19,8 +19,8 @@ func TestProfilePresetsEnvelope(t *testing.T) {
 	if !ok {
 		t.Fatalf("data.presets is not an array: %#v", env.Data)
 	}
-	if len(presets) != 6 {
-		t.Fatalf("got %d presets, want 6", len(presets))
+	if len(presets) != 4 {
+		t.Fatalf("got %d presets, want 4", len(presets))
 	}
 	names := map[string]bool{}
 	for _, p := range presets {
@@ -33,7 +33,7 @@ func TestProfilePresetsEnvelope(t *testing.T) {
 			t.Fatalf("preset %v carries empty cue", m["name"])
 		}
 	}
-	for _, want := range []string{"claude-sandbox-offline", "claude-vm-disposable"} {
+	for _, want := range []string{"claude-container-allowlist", "claude-vm-disposable"} {
 		if !names[want] {
 			t.Fatalf("missing preset %q in %v", want, names)
 		}
@@ -42,7 +42,7 @@ func TestProfilePresetsEnvelope(t *testing.T) {
 
 func TestProfileListEnvelope(t *testing.T) {
 	dir := t.TempDir()
-	cue := "package safeslop\n\nsafeslop: {\n\tversion: 1\n\tprofiles: {\n\t\treview: {agent: \"claude\", environment: \"sandbox\", network: \"deny\"}\n\t}\n}\n"
+	cue := "package safeslop\n\nsafeslop: {\n\tversion: 1\n\tprofiles: {\n\t\treview: {agent: \"claude\", environment: \"container\", network: \"deny\"}\n\t}\n}\n"
 	if err := os.WriteFile(filepath.Join(dir, "safeslop.cue"), []byte(cue), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestProfileListEnvelope(t *testing.T) {
 	if !ok {
 		t.Fatalf("profile 'review' missing: %#v", profiles)
 	}
-	if review["agent"] != "claude" || review["environment"] != "sandbox" || review["network"] != "deny" {
+	if review["agent"] != "claude" || review["environment"] != "container" || review["network"] != "deny" {
 		t.Fatalf("review profile fields wrong: %#v", review)
 	}
 }
