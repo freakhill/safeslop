@@ -53,7 +53,7 @@ directory is (repo root, a git worktree, or anywhere else)."
         (insert (json-serialize route-map))))
     (with-temp-file fake
       (insert "#!/usr/bin/env python3\n"
-              "import json, pathlib, sys\n"
+              "import json, pathlib, sys, time\n"
               "routes = json.loads(pathlib.Path(" (prin1-to-string routes-file) ").read_text())\n"
               "log = pathlib.Path(" (prin1-to-string log) ")\n"
               "key = json.dumps(sys.argv[1:], separators=(',', ':'))\n"
@@ -63,8 +63,11 @@ directory is (repo root, a git worktree, or anywhere else)."
               "if route is None:\n"
               "    sys.stderr.write('unregistered argv: ' + key + '\\n')\n"
               "    sys.exit(97)\n"
-              "sys.stdout.write(route.get('stdout', ''))\n"
               "sys.stderr.write(route.get('stderr', ''))\n"
+              "sys.stderr.flush()\n"
+              "time.sleep(float(route.get('sleep', 0)))\n"
+              "sys.stdout.write(route.get('stdout', ''))\n"
+              "sys.stdout.flush()\n"
               "sys.exit(int(route.get('exit', 0)))\n"))
     (set-file-modes fake #o755)
     fake))
@@ -276,6 +279,57 @@ envelope via the callback, never a crash."
 (ert-deftest safeslop-test-session-profile-args ()
   (should (equal (safeslop-session--create-profile-args "review")
                  '("session" "create" "--profile" "review" "--output" "json"))))
+
+(ert-deftest safeslop-test-session-profile-create-progress-buffer ()
+  "Profile-backed creation shows a live progress buffer while the CLI is still running."
+  (let* ((argv '("session" "create" "--profile" "review" "--output" "json"))
+         (routes `((,(safeslop-test--json-key argv) .
+                   ((stderr . "building local/safeslop-tools:abc123def456\n")
+                    (sleep . 0.2)
+                    (stdout . "{\"schema_version\":1,\"ok\":true,\"data\":{\"session_id\":\"sess-profile\"},\"warnings\":[],\"errors\":[]}")
+                    (exit . 0))))))
+    (when (get-buffer safeslop-session-progress-buffer-name)
+      (kill-buffer safeslop-session-progress-buffer-name))
+    (safeslop-test--with-fake-cli routes
+      (let (done envelope)
+        (safeslop-session-new-from-profile
+         "review" (lambda (env) (setq envelope env done t)))
+        (with-timeout (5 (error "progress buffer did not receive build output"))
+          (while (not (and (get-buffer safeslop-session-progress-buffer-name)
+                           (with-current-buffer safeslop-session-progress-buffer-name
+                             (string-match-p "building local/safeslop-tools" (buffer-string)))))
+            (accept-process-output nil 0.05)))
+        (with-current-buffer safeslop-session-progress-buffer-name
+          (should (derived-mode-p 'safeslop-progress-mode))
+          (let ((s (buffer-string)))
+            (should (string-match-p "session create --profile review" s))
+            (should (string-match-p "building local/safeslop-tools:abc123def456" s))
+            (should (string-match-p "running" s))))
+        (with-timeout (5 (error "session create did not finish"))
+          (while (not done)
+            (accept-process-output nil 0.05)))
+        (should (safeslop-contract-ok-p envelope))
+        (with-current-buffer safeslop-session-progress-buffer-name
+          (should (string-match-p "finished successfully (exit 0)" (buffer-string))))))))
+
+(ert-deftest safeslop-test-session-profile-progress-reports-nonzero-exit ()
+  "A failed profile-backed create reports the exit status in the progress buffer."
+  (let* ((argv '("session" "create" "--profile" "bad" "--output" "json"))
+         (routes `((,(safeslop-test--json-key argv) .
+                   ((stderr . "build failed\n")
+                    (stdout . "{\"schema_version\":1,\"ok\":false,\"data\":{},\"warnings\":[],\"errors\":[{\"code\":\"INVALID_ARGUMENT\",\"message\":\"bad profile\",\"retryable\":false}]}")
+                    (exit . 2))))))
+    (when (get-buffer safeslop-session-progress-buffer-name)
+      (kill-buffer safeslop-session-progress-buffer-name))
+    (safeslop-test--with-fake-cli routes
+      (let ((envelope (safeslop-test--await
+                       (lambda (cb) (safeslop-session-new-from-profile "bad" cb)))))
+        (should-not (safeslop-contract-ok-p envelope))
+        (should (equal (safeslop-contract-first-error-code envelope) "INVALID_ARGUMENT"))
+        (with-current-buffer safeslop-session-progress-buffer-name
+          (let ((s (buffer-string)))
+            (should (string-match-p "build failed" s))
+            (should (string-match-p "failed (exit 2)" s))))))))
 
 (ert-deftest safeslop-test-session-attach-uses-term-pty-exact-argv ()
   (let* ((argv '("session" "run" "--session-id" "sess-term"))

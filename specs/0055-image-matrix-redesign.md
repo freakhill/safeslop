@@ -483,12 +483,15 @@ Goal: drive the matrix from the Emacs cockpit.
   VERIFY: `make test-emacs`
   EXPECTED: ok.
 
-- [ ] **Async build-progress buffer**
+- [x] **Async build-progress buffer**
   FILE: `emacs/safeslop-session.el`
   CHANGE: reuse the `make-process` async pattern from `safeslop-install.el` to
   stream a (slow) lazy build into a progress buffer.
   VERIFY: `make test-emacs`
   EXPECTED: ok.
+  DONE (2026-06-29, branch `iw5-build-progress`): profile-backed session creation
+  opens `*safeslop session progress*`, streams stderr build logs live, and appends
+  final exit status while stdout remains the JSON contract envelope.
 
 - [ ] **W6 gate**
   VERIFY: `make check && make build`

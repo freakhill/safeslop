@@ -194,7 +194,9 @@ set and dry-run image `recipeID` without building. `safeslop lock [profile]
 `safeslop session create --profile <name> --output json` creates an Emacs-visible
 session from an existing `safeslop.cue` profile: it uses the profile's agent,
 environment, network, and workspace, resolves its catalog package set, and includes
-`recipeID`/`image` metadata for the portal Recipe/Image columns. The ad-hoc
+`recipeID`/`image` metadata for the portal Recipe/Image columns. In Emacs, this
+profile-backed path opens `*safeslop session progress*` so slow first-use image
+build logs stream live and end with the subprocess exit status. The ad-hoc
 `--agent` form remains available for one-off sessions.
 
 ### Trust model

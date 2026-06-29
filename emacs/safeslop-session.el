@@ -24,6 +24,9 @@
 (defvar safeslop-last-error)
 (declare-function safeslop--call-json "safeslop" (args))
 (declare-function safeslop--call-json-async "safeslop" (args callback))
+(declare-function safeslop--debug "safeslop" (&rest event))
+(declare-function safeslop--error-envelope "safeslop" (code message))
+(declare-function safeslop--finish-envelope "safeslop" (stdout status))
 (declare-function safeslop--show-envelope-buffer "safeslop" (name args envelope))
 (declare-function safeslop-portal--reveal-session "safeslop-portal" (id))
 ;; Optional eat terminal API — loaded lazily in `safeslop-session--make-terminal'
@@ -70,6 +73,84 @@ raw argv shape."
       (message "safeslop: no profiles available; using ad-hoc session prompts")
       nil)))
 
+(defconst safeslop-session-progress-buffer-name "*safeslop session progress*"
+  "Buffer name for profile-backed session creation progress.")
+
+(define-derived-mode safeslop-progress-mode text-mode "safeslop-progress"
+  "Major mode for live safeslop progress output buffers."
+  (setq-local truncate-lines t))
+
+(defun safeslop-session--progress-buffer (args)
+  "Create, initialize, display, and return the progress buffer for ARGS."
+  (let ((buf (get-buffer-create safeslop-session-progress-buffer-name)))
+    (with-current-buffer buf
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (safeslop-progress-mode)
+        (insert (format "$ %s %s\n\n" safeslop-program (string-join args " ")))
+        (insert "status: running\n\n")))
+    (display-buffer buf)
+    buf))
+
+(defun safeslop-session--progress-finish (buf status)
+  "Append final process STATUS to progress BUF when it is still live."
+  (when (buffer-live-p buf)
+    (with-current-buffer buf
+      (let ((inhibit-read-only t))
+        (goto-char (point-max))
+        (unless (bolp) (insert "\n"))
+        (insert (if (equal status 0)
+                    (format "\nsafeslop: finished successfully (exit %s)\n" status)
+                  (format "\nsafeslop: failed (exit %s)\n" status)))))))
+
+(defun safeslop-session--call-json-async-with-progress (args callback)
+  "Run safeslop ARGS asynchronously with stderr mirrored to a progress buffer.
+Stdout stays reserved for the final JSON contract envelope; stderr is user-visible
+progress for slow lazy profile image builds.  CALLBACK receives the parsed
+envelope, exactly like `safeslop--call-json-async'."
+  (safeslop--debug :event 'call :argv (string-join args " "))
+  (let ((stdout-buf (generate-new-buffer " *safeslop-session-json*"))
+        (progress-buf (safeslop-session--progress-buffer args)))
+    (condition-case err
+        (make-process
+         :name "safeslop-session-create"
+         :buffer stdout-buf
+         :stderr progress-buf
+         :command (cons safeslop-program args)
+         :connection-type 'pipe
+         :noquery t
+         :sentinel
+         (lambda (proc _event)
+           (unless (process-live-p proc)
+             (let ((stdout (if (buffer-live-p stdout-buf)
+                               (with-current-buffer stdout-buf (buffer-string))
+                             ""))
+                   (status (process-exit-status proc)))
+               (when (buffer-live-p stdout-buf) (kill-buffer stdout-buf))
+               (safeslop-session--progress-finish progress-buf status)
+               (funcall callback (safeslop--finish-envelope stdout status))))))
+      (error
+       (when (buffer-live-p stdout-buf) (kill-buffer stdout-buf))
+       (let ((msg (format "could not run `%s': %s — is it installed? Run `make install'."
+                          safeslop-program (error-message-string err))))
+         (setq safeslop-last-error msg)
+         (when (buffer-live-p progress-buf)
+           (with-current-buffer progress-buf
+             (let ((inhibit-read-only t))
+               (goto-char (point-max))
+               (insert (format "\nsafeslop: %s\n" msg)))))
+         (safeslop--debug :event 'result :status -1 :ok "nil" :error "client-spawn")
+         (funcall callback (safeslop--error-envelope "CLIENT_SPAWN" msg))
+         nil)))))
+
+(defun safeslop-session--create-async (args profile-p callback)
+  "Run session-create ARGS and pass the resulting envelope to CALLBACK.
+PROFILE-P enables the visible progress buffer path because profile-backed
+container sessions may need a slow lazy first image build."
+  (if profile-p
+      (safeslop-session--call-json-async-with-progress args callback)
+    (safeslop--call-json-async args callback)))
+
 (defun safeslop-session--handle-create-result (args callback envelope)
   "Render session-create ENVELOPE for ARGS, reveal it, and run CALLBACK."
   (safeslop--show-envelope-buffer "*safeslop session*" args envelope)
@@ -105,13 +186,14 @@ those flags for compatibility tests.  CALLBACK, when given, receives the envelop
              (completing-read "Environment: " '("container" "host") nil t nil nil "container")
              (completing-read "Network: " '("deny" "allow") nil t nil nil "deny")
              nil))))
-  (let ((args (if (and (stringp profile) (not (string-empty-p profile)))
-                  (safeslop-session--create-profile-args profile)
-                (safeslop-session--create-args (or agent "claude")
-                                               (or workspace default-directory)
-                                               environment network))))
-    (safeslop--call-json-async
-     args
+  (let* ((profile-p (and (stringp profile) (not (string-empty-p profile))))
+         (args (if profile-p
+                   (safeslop-session--create-profile-args profile)
+                 (safeslop-session--create-args (or agent "claude")
+                                                (or workspace default-directory)
+                                                environment network))))
+    (safeslop-session--create-async
+     args profile-p
      (lambda (envelope)
        (safeslop-session--handle-create-result args callback envelope)))))
 
@@ -124,8 +206,8 @@ This is the noninteractive/testable profile-picker bridge used by
   (unless (and (stringp profile) (not (string-empty-p profile)))
     (user-error "No profile selected"))
   (let ((args (safeslop-session--create-profile-args profile)))
-    (safeslop--call-json-async
-     args
+    (safeslop-session--create-async
+     args t
      (lambda (envelope)
        (safeslop-session--handle-create-result args callback envelope)))))
 
