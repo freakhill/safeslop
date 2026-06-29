@@ -68,7 +68,7 @@ func newRoot() *cobra.Command {
 		SilenceErrors: true,
 	}
 	root.PersistentFlags().BoolVar(&jsonOut, "json", false, "emit machine-readable JSON output")
-	root.AddCommand(cmdValidate(), cmdList(), cmdDoctor(), cmdRun(), cmdSession(), cmdTrust(), cmdDown(), cmdLaunch(), cmdCatalog(), cmdProfile(), cmdInstall(), cmdUninstall())
+	root.AddCommand(cmdValidate(), cmdList(), cmdDoctor(), cmdRun(), cmdSession(), cmdTrust(), cmdDown(), cmdLaunch(), cmdCatalog(), cmdProfile(), cmdLock(), cmdInstall(), cmdUninstall())
 	return root
 }
 
@@ -938,6 +938,91 @@ func cmdDown() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+type lockfile struct {
+	RecipeID string            `json:"recipeID"`
+	Agent    string            `json:"agent"`
+	Base     string            `json:"base"`
+	Bundles  []string          `json:"bundles,omitempty"`
+	Packages []string          `json:"packages"`
+	Versions map[string]string `json:"versions"`
+}
+
+func cmdLock() *cobra.Command {
+	var output string
+	c := &cobra.Command{
+		Use:   "lock [profile] --output json",
+		Short: "Write safeslop.lock.json for a profile's resolved image recipe",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			if output != "json" {
+				return fmt.Errorf("lock requires --output json")
+			}
+			path, err := findConfig("")
+			if err != nil {
+				return err
+			}
+			cfg, err := policy.Load(path)
+			if err != nil {
+				return err
+			}
+			name, prof, err := selectProfile(cfg, arg0(args))
+			if err != nil {
+				return err
+			}
+			resolved, err := policy.Resolve(prof)
+			if err != nil {
+				return err
+			}
+			recipe, err := container.ResolveRecipe(resolved.IdentitySet)
+			if err != nil {
+				return err
+			}
+			lf, err := buildLockfile(prof, resolved, recipe)
+			if err != nil {
+				return err
+			}
+			b, err := json.MarshalIndent(lf, "", "  ")
+			if err != nil {
+				return err
+			}
+			b = append(b, '\n')
+			lockPath := filepath.Join(filepath.Dir(path), "safeslop.lock.json")
+			if err := os.WriteFile(lockPath, b, 0o644); err != nil {
+				return fmt.Errorf("write %s: %w", lockPath, err)
+			}
+			emitContract(jsoncontract.OK(map[string]any{
+				"path":     lockPath,
+				"profile":  name,
+				"recipeID": lf.RecipeID,
+				"lock":     lf,
+			}))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&output, "output", "", "output format: json")
+	return c
+}
+
+func buildLockfile(prof policy.Profile, resolved *policy.Resolved, recipe *container.Recipe) (*lockfile, error) {
+	versions := make(map[string]string, len(resolved.IdentitySet))
+	cat := policy.DefaultCatalog()
+	for _, name := range resolved.IdentitySet {
+		p, ok := cat.Lookup(name)
+		if !ok {
+			return nil, fmt.Errorf("lock: resolved package %q is not in the catalog", name)
+		}
+		versions[name] = p.Version
+	}
+	return &lockfile{
+		RecipeID: recipe.RecipeID,
+		Agent:    policy.NormalizeAgent(prof.Agent),
+		Base:     recipe.SourceBaseImage,
+		Bundles:  append([]string(nil), prof.Bundles...),
+		Packages: append([]string(nil), resolved.IdentitySet...),
+		Versions: versions,
+	}, nil
 }
 
 func cmdCatalog() *cobra.Command {
