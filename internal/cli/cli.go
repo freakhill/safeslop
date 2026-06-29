@@ -68,7 +68,7 @@ func newRoot() *cobra.Command {
 		SilenceErrors: true,
 	}
 	root.PersistentFlags().BoolVar(&jsonOut, "json", false, "emit machine-readable JSON output")
-	root.AddCommand(cmdValidate(), cmdList(), cmdDoctor(), cmdRun(), cmdSession(), cmdTrust(), cmdDown(), cmdLaunch(), cmdProfile(), cmdInstall(), cmdUninstall())
+	root.AddCommand(cmdValidate(), cmdList(), cmdDoctor(), cmdRun(), cmdSession(), cmdTrust(), cmdDown(), cmdLaunch(), cmdCatalog(), cmdProfile(), cmdInstall(), cmdUninstall())
 	return root
 }
 
@@ -940,9 +940,39 @@ func cmdDown() *cobra.Command {
 	}
 }
 
-// cmdProfile groups the enveloped, read-only policy surfaces the Emacs profiles view consumes
-// (specs/0052 E2/E3). Authoring stays CUE-canonical (the Emacs surface edits safeslop.cue directly);
-// these commands only list what exists and expose the embedded preset library as a starting point.
+func cmdCatalog() *cobra.Command {
+	c := &cobra.Command{Use: "catalog", Short: "Inspect the curated package catalog"}
+	c.AddCommand(cmdCatalogList())
+	return c
+}
+
+func cmdCatalogList() *cobra.Command {
+	var output string
+	var bundles bool
+	c := &cobra.Command{
+		Use:   "list [--bundles] --output json",
+		Short: "List catalog packages or bundles (enveloped JSON contract)",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if output != "json" {
+				return fmt.Errorf("catalog list requires --output json")
+			}
+			cat := policy.DefaultCatalog()
+			if bundles {
+				emitContract(jsoncontract.OK(map[string]any{"bundles": cat.Bundles()}))
+				return nil
+			}
+			emitContract(jsoncontract.OK(map[string]any{"packages": cat.Packages()}))
+			return nil
+		},
+	}
+	c.Flags().BoolVar(&bundles, "bundles", false, "list bundles instead of packages")
+	c.Flags().StringVar(&output, "output", "", "output format: json")
+	return c
+}
+
+// cmdProfile groups the enveloped policy surfaces the Emacs profiles view consumes
+// (specs/0052 E2/E3, specs/0058 IW3).
 func cmdProfile() *cobra.Command {
 	c := &cobra.Command{Use: "profile", Short: "Inspect safeslop.cue profiles and the preset library"}
 	c.AddCommand(cmdProfileList(), cmdProfilePresets())
