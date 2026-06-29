@@ -64,22 +64,34 @@ func runEngine(ctx context.Context, eng runtime.Engine, args ...string) error {
 	return c.Run()
 }
 
+// runBuild runs an image build with BuildKit forced on (DOCKER_BUILDKIT=1). The agent
+// Dockerfile uses BuildKit-only features (`--mount=type=cache`, the `# syntax=`
+// directive); modern docker defaults to BuildKit but older daemons fall back to the
+// legacy builder, which would fail on those, so we set it explicitly (specs/0058 N1).
+// nerdctl always builds via BuildKit, so the extra env is harmless there.
+func runBuild(ctx context.Context, eng runtime.Engine, args ...string) error {
+	c := eng.Command(ctx, args...)
+	c.Stdout, c.Stderr = os.Stdout, os.Stderr
+	c.Env = append(os.Environ(), "DOCKER_BUILDKIT=1")
+	return c.Run()
+}
+
 // buildImages builds the base then the tools image, each tagged by its content-hash recipe id
 // (local/safeslop-{base,tools}:<id>) so imageExists(<id-tag>) is a CORRECT skip — an unchanged
 // recipe is reused, a changed Dockerfile/build-arg yields a new tag and rebuilds (specs/0055 W1,
 // killing the stale-":latest" Bug B). dir is the build context.
-func buildImages(ctx context.Context, eng runtime.Engine, dir string) error {
+func buildImages(ctx context.Context, eng runtime.Engine, dir string, enabled []string) error {
 	if err := ensureDockerfiles(dir); err != nil {
 		return err
 	}
-	baseImg, toolsImg, toolsArgs, err := agentImageTags()
+	baseImg, toolsImg, toolsArgs, err := agentImageTags(enabled)
 	if err != nil {
 		return err
 	}
 	if err := ensureImage(baseImg,
 		func() bool { return imageExists(ctx, eng, baseImg) },
 		func() error {
-			return runEngine(ctx, eng, "build", "-f", filepath.Join(dir, "Dockerfile.agent"), "-t", baseImg, dir)
+			return runBuild(ctx, eng, "build", "-f", filepath.Join(dir, "Dockerfile.agent"), "-t", baseImg, dir)
 		}); err != nil {
 		return fmt.Errorf("build base image: %w", err)
 	}
@@ -90,7 +102,7 @@ func buildImages(ctx context.Context, eng runtime.Engine, dir string) error {
 			for _, kv := range toolsArgs {
 				args = append(args, "--build-arg", kv)
 			}
-			return runEngine(ctx, eng, append(args, dir)...)
+			return runBuild(ctx, eng, append(args, dir)...)
 		}); err != nil {
 		return fmt.Errorf("build tools image: %w", err)
 	}
@@ -112,9 +124,10 @@ func ensureImage(id string, exists func() bool, build func() error) error {
 	})
 }
 
-// Up ensures images are built and the squid proxy is running for the given compose file.
-func Up(ctx context.Context, eng runtime.Engine, dir, composeFile string) error {
-	if err := buildImages(ctx, eng, dir); err != nil {
+// Up ensures images are built (for the profile's resolved package set, enabled) and the
+// squid proxy is running for the given compose file.
+func Up(ctx context.Context, eng runtime.Engine, dir, composeFile string, enabled []string) error {
+	if err := buildImages(ctx, eng, dir, enabled); err != nil {
 		return err
 	}
 	return runEngine(ctx, eng, "compose", "-f", composeFile, "up", "-d", "proxy")

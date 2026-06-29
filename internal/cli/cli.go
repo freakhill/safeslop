@@ -1435,12 +1435,21 @@ func runProfileCtx(ctx context.Context, name string, prof policy.Profile, argv [
 	case "container":
 		// secrets go in secrets.env (sourced by the entrypoint); .npmrc and kubeconfig
 		// are staged in stageDir and reached via the /safeslop/runtime bind mount.
-		// egress = the agent's built-in providers + the profile's egress: list (specs/0046).
-		egress := append(append([]string{}, policy.AgentEgress(prof.Agent)...), prof.Egress...)
+		// Resolve the profile's catalog package set (specs/0058): its identity set selects
+		// the agent image (which tools get baked), and its runtime egress is UNIONed into
+		// the squid allowlist (union-only; never relaxes default-deny).
+		resolved, err := policy.Resolve(prof)
+		if err != nil {
+			return 1, fmt.Errorf("resolve packages for profile %q: %w", name, err)
+		}
+		// egress = the agent's built-in providers + the resolved packages' runtimeEgress +
+		// the profile's egress: list (specs/0046 + 0058 N2).
+		egress := append(append([]string{}, policy.AgentEgress(prof.Agent)...), resolved.RuntimeEgress...)
+		egress = append(egress, prof.Egress...)
 		// A detached supervisor passes a PTY slave it owns (rio set); forward it so the
 		// container's tty bridges to the supervisor's PTY for attach. Coupled (rio zero)
 		// leaves stdio nil and container.Launch runs the user's terminal (specs/0051).
-		return containerLaunch(ctx, engexec.LaunchSpec{Argv: argv, Stdin: rio.Stdin, Stdout: rio.Stdout, Stderr: rio.Stderr}, ws, prof.Network, egress, secretEnv, stageDir)
+		return containerLaunch(ctx, engexec.LaunchSpec{Argv: argv, Stdin: rio.Stdin, Stdout: rio.Stdout, Stderr: rio.Stderr}, ws, prof.Network, egress, secretEnv, stageDir, resolved.IdentitySet)
 	default:
 		return 1, fmt.Errorf("unknown environment %q", prof.Environment)
 	}

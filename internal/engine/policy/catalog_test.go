@@ -21,9 +21,44 @@ func TestDefaultCatalogBinaryDigestsPendingIW2(t *testing.T) {
 	}
 	for _, name := range pending {
 		p, ok := DefaultCatalog().pkgIdx[name]
-		if !ok || p.Kind != KindBinary || p.SHA256 != sha256Unresolved {
-			t.Errorf("BuildReady returned %q which is not a sentinel binary", name)
+		if !ok || p.Kind != KindBinary {
+			t.Errorf("BuildReady returned %q which is not a binary", name)
+			continue
 		}
+		// at least one build arch must still carry the sentinel
+		sentinel := false
+		for _, a := range buildArches {
+			if p.SHA256[a] == sha256Unresolved {
+				sentinel = true
+			}
+		}
+		if !sentinel {
+			t.Errorf("BuildReady returned %q which has no sentinel digest", name)
+		}
+		if name == "node" {
+			t.Errorf("node has real digests in IW2; it must not be BuildReady-pending")
+		}
+	}
+}
+
+// node's per-arch digests are the real, verified values (IW2): present, 64-hex, and
+// not the sentinel. Guards against a silent regression to placeholder digests.
+func TestNodeDigestsResolved(t *testing.T) {
+	p, ok := DefaultCatalog().Lookup("node")
+	if !ok || p.Kind != KindBinary {
+		t.Fatal("node must be a binary catalog package")
+	}
+	if p.Version != "22.23.1" {
+		t.Errorf("node version = %q, want 22.23.1", p.Version)
+	}
+	for _, a := range buildArches {
+		d := p.SHA256[a]
+		if !isHex64(d) || d == sha256Unresolved {
+			t.Errorf("node %s digest = %q, want a real 64-hex sha256", a, d)
+		}
+	}
+	if DefaultCatalog().PackagePending("node") {
+		t.Error("node must not be PackagePending (digests are resolved)")
 	}
 }
 
@@ -56,7 +91,7 @@ func TestDefaultBundle(t *testing.T) {
 }
 
 func TestValidateCatchesMalformedCatalogs(t *testing.T) {
-	good := sha256Unresolved // a structurally valid 64-hex
+	good := unresolvedSHA() // a structurally valid per-arch 64-hex map
 	cases := []struct {
 		name     string
 		pkgs     []Package
@@ -68,7 +103,9 @@ func TestValidateCatchesMalformedCatalogs(t *testing.T) {
 		{"empty-name", []Package{{Name: "", Kind: KindApt, Version: "1"}}, nil, nil, "empty name"},
 		{"bad-kind", []Package{{Name: "a", Kind: "script", Version: "1"}}, nil, nil, "invalid kind"},
 		{"no-version", []Package{{Name: "a", Kind: KindApt}}, nil, nil, "no pinned version"},
-		{"binary-no-sha", []Package{{Name: "a", Kind: KindBinary, Version: "1"}}, nil, nil, "needs a 64-hex sha256"},
+		{"binary-no-sha", []Package{{Name: "a", Kind: KindBinary, Version: "1"}}, nil, nil, "missing a"},
+		{"binary-bad-hex", []Package{{Name: "a", Kind: KindBinary, Version: "1", SHA256: map[string]string{"amd64": "zz", "arm64": "zz"}}}, nil, nil, "needs a 64-hex"},
+		{"binary-one-arch-only", []Package{{Name: "a", Kind: KindBinary, Version: "1", SHA256: map[string]string{"amd64": sha256Unresolved}}}, nil, nil, "missing a"},
 		{"requires-unknown", []Package{{Name: "a", Kind: KindApt, Version: "1", Requires: []string{"ghost"}}}, nil, nil, "requires unknown package"},
 		{"conflict-unknown", []Package{{Name: "a", Kind: KindApt, Version: "1", Conflicts: []string{"ghost"}}}, nil, nil, "conflicts with unknown package"},
 		{"over-wide-egress", []Package{{Name: "a", Kind: KindApt, Version: "1", RuntimeEgress: []string{"*"}}}, nil, nil, "over-wide egress"},
