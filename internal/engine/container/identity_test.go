@@ -7,17 +7,17 @@ import (
 
 func TestRecipeIDDeterministicAndSensitive(t *testing.T) {
 	df := []byte("FROM base\nRUN x")
-	a := recipeID(df, map[string]string{"K": "1", "Z": "2"})
-	if b := recipeID(df, map[string]string{"Z": "2", "K": "1"}); a != b {
+	a := RecipeID(df, map[string]string{"K": "1", "Z": "2"})
+	if b := RecipeID(df, map[string]string{"Z": "2", "K": "1"}); a != b {
 		t.Fatalf("recipeID must be build-arg-order-independent: %s vs %s", a, b)
 	}
 	if len(a) != 12 {
 		t.Fatalf("recipeID must be 12 hex chars, got %q (len %d)", a, len(a))
 	}
-	if recipeID(df, map[string]string{"K": "1"}) == a {
+	if RecipeID(df, map[string]string{"K": "1"}) == a {
 		t.Fatal("changing the build-arg set must change the id")
 	}
-	if recipeID([]byte("FROM other"), nil) == recipeID([]byte("FROM base"), nil) {
+	if RecipeID([]byte("FROM other"), nil) == RecipeID([]byte("FROM base"), nil) {
 		t.Fatal("changing the Dockerfile must change the id")
 	}
 }

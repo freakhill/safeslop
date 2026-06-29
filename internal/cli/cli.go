@@ -974,8 +974,8 @@ func cmdCatalogList() *cobra.Command {
 // cmdProfile groups the enveloped policy surfaces the Emacs profiles view consumes
 // (specs/0052 E2/E3, specs/0058 IW3).
 func cmdProfile() *cobra.Command {
-	c := &cobra.Command{Use: "profile", Short: "Inspect safeslop.cue profiles and the preset library"}
-	c.AddCommand(cmdProfileList(), cmdProfilePresets())
+	c := &cobra.Command{Use: "profile", Short: "Inspect and author safeslop.cue profiles"}
+	c.AddCommand(cmdProfileList(), cmdProfilePresets(), cmdProfileShow(), cmdProfileCreate())
 	return c
 }
 
@@ -1021,6 +1021,163 @@ func cmdProfilePresets() *cobra.Command {
 	}
 	c.Flags().StringVar(&output, "output", "", "output format: json")
 	return c
+}
+
+func cmdProfileShow() *cobra.Command {
+	var output string
+	c := &cobra.Command{
+		Use:   "show <name> [safeslop.cue] --output json",
+		Short: "Show a profile with its resolved catalog packages and image recipe",
+		Args:  cobra.RangeArgs(1, 2),
+		RunE: func(_ *cobra.Command, args []string) error {
+			if output != "json" {
+				return fmt.Errorf("profile show requires --output json")
+			}
+			path, err := findConfig(argAt(args, 1))
+			if err != nil {
+				return err
+			}
+			cfg, err := policy.Load(path)
+			if err != nil {
+				return err
+			}
+			prof, ok := cfg.Profiles[args[0]]
+			if !ok {
+				return fmt.Errorf("no profile %q in safeslop.cue", args[0])
+			}
+			data, err := profileResolvedData(path, args[0], prof)
+			if err != nil {
+				return err
+			}
+			emitContract(jsoncontract.OK(data))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&output, "output", "", "output format: json")
+	return c
+}
+
+func cmdProfileCreate() *cobra.Command {
+	var name, agent, environment, workspace, network, output string
+	var bundles, packages []string
+	var noDefaultBundle bool
+	c := &cobra.Command{
+		Use:   "create --name N --agent A --environment E [--bundle B ...] [--package P ...] --output json",
+		Short: "Create or update a safeslop.cue profile",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if output != "json" {
+				return fmt.Errorf("profile create requires --output json")
+			}
+			if name == "" || agent == "" || environment == "" {
+				return fmt.Errorf("profile create requires --name, --agent, and --environment")
+			}
+			if network == "" {
+				network = "deny"
+			}
+			path, cfg, err := loadOrNewConfigForCreate()
+			if err != nil {
+				return err
+			}
+			prof := policy.Profile{
+				Agent:       policy.NormalizeAgent(agent),
+				Environment: environment,
+				Workspace:   workspace,
+				Network:     network,
+				Bundles:     append([]string(nil), bundles...),
+				Packages:    append([]string(nil), packages...),
+				BareAgent:   noDefaultBundle,
+			}
+			if _, err := policy.Resolve(prof); err != nil {
+				return err
+			}
+			cfg.Profiles[name] = prof
+			rendered, err := renderConfigCUE(cfg)
+			if err != nil {
+				return err
+			}
+			if _, err := policy.LoadBytes(rendered); err != nil {
+				return fmt.Errorf("rendered safeslop.cue did not validate; not writing: %w", err)
+			}
+			if err := os.WriteFile(path, rendered, 0o644); err != nil {
+				return fmt.Errorf("write %s: %w", path, err)
+			}
+			loaded, err := policy.Load(path)
+			if err != nil {
+				return err
+			}
+			data, err := profileResolvedData(path, name, loaded.Profiles[name])
+			if err != nil {
+				return err
+			}
+			data["created"] = true
+			emitContract(jsoncontract.OK(data))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&name, "name", "", "profile name")
+	c.Flags().StringVar(&agent, "agent", "", "agent: claude, claude-code, pi, fish, zsh, or shell")
+	c.Flags().StringVar(&environment, "environment", "", "isolation environment: host or container")
+	c.Flags().StringArrayVar(&bundles, "bundle", nil, "catalog bundle to include (repeatable)")
+	c.Flags().StringArrayVar(&packages, "package", nil, "catalog package to include (repeatable)")
+	c.Flags().StringVar(&workspace, "workspace", "", "workspace directory")
+	c.Flags().StringVar(&network, "network", "deny", "network policy: deny or allow")
+	c.Flags().BoolVar(&noDefaultBundle, "no-default-bundle", false, "do not include the agent's default package bundle")
+	c.Flags().StringVar(&output, "output", "", "output format: json")
+	return c
+}
+
+func loadOrNewConfigForCreate() (string, *policy.Config, error) {
+	path, err := findConfig("")
+	if err != nil {
+		wd, werr := os.Getwd()
+		if werr != nil {
+			return "", nil, werr
+		}
+		path = filepath.Join(wd, "safeslop.cue")
+		return path, &policy.Config{Version: 1, Profiles: map[string]policy.Profile{}}, nil
+	}
+	cfg, err := policy.Load(path)
+	if err != nil {
+		return "", nil, err
+	}
+	if cfg.Profiles == nil {
+		cfg.Profiles = map[string]policy.Profile{}
+	}
+	if cfg.Version == 0 {
+		cfg.Version = 1
+	}
+	return path, cfg, nil
+}
+
+func renderConfigCUE(cfg *policy.Config) ([]byte, error) {
+	b, err := json.MarshalIndent(cfg, "", "\t")
+	if err != nil {
+		return nil, err
+	}
+	return append([]byte("package safeslop\n\nsafeslop: "), append(b, '\n')...), nil
+}
+
+func profileResolvedData(path, name string, prof policy.Profile) (map[string]any, error) {
+	resolved, err := policy.Resolve(prof)
+	if err != nil {
+		return nil, err
+	}
+	recipe, err := container.ResolveRecipe(resolved.IdentitySet)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"path":      path,
+		"name":      name,
+		"profile":   prof,
+		"resolved":  resolved,
+		"recipeID":  recipe.RecipeID,
+		"image":     recipe.AgentImage,
+		"base":      recipe.SourceBaseImage,
+		"baseImage": recipe.BaseImage,
+		"recipe":    recipe,
+	}, nil
 }
 
 func cmdInstall() *cobra.Command {
@@ -1543,6 +1700,13 @@ func lintWarnings(ws []policy.Warning) []jsoncontract.Message {
 func arg0(args []string) string {
 	if len(args) > 0 {
 		return args[0]
+	}
+	return ""
+}
+
+func argAt(args []string, i int) string {
+	if len(args) > i {
+		return args[i]
 	}
 	return ""
 }
