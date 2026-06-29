@@ -13,7 +13,6 @@ import (
 
 	"github.com/creack/pty"
 
-	"github.com/freakhill/safeslop/internal/engine/policy"
 	engsession "github.com/freakhill/safeslop/internal/engine/session"
 	"github.com/freakhill/safeslop/internal/engine/session/wire"
 )
@@ -53,7 +52,7 @@ func Supervise(ctx context.Context, store engsession.Store, id string, now func(
 	if err != nil {
 		return 1, err
 	}
-	prof := policy.Profile{Agent: sess.Agent, Environment: sess.Environment, Network: sess.Network, Workspace: sess.Workspace}
+	prof := sessionProfile(sess)
 	argv, err := agentArgv(prof)
 	if err != nil {
 		return 1, err

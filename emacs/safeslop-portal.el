@@ -145,6 +145,30 @@ sole signal (specs/0031).  An unknown env renders plainly."
                                       (encode-time (iso8601-parse ts)))))
         (error "—")))))
 
+(defun safeslop-portal--list-field (sess path)
+  "Return list value from SESS at nested symbol PATH, accepting vectors too."
+  (let ((value sess))
+    (dolist (key path)
+      (setq value (and (listp value) (alist-get key value))))
+    (cond ((vectorp value) (append value nil))
+          ((listp value) value)
+          (t nil))))
+
+(defun safeslop-portal--recipe-cell (sess)
+  "Return SESS's resolved package identity as a compact Recipe cell."
+  (let ((ids (safeslop-portal--list-field sess '(resolved identitySet))))
+    (if ids
+        (mapconcat #'identity ids ",")
+      "—")))
+
+(defun safeslop-portal--image-cell (sess)
+  "Return SESS's recipeID/image tag as a compact Image cell."
+  (let ((recipe-id (safeslop-portal--field sess 'recipeID))
+        (image (safeslop-portal--field sess 'image)))
+    (cond ((not (string-empty-p recipe-id)) recipe-id)
+          ((string-match ":\\([^:]+\\)\\'" image) (match-string 1 image))
+          (t "—"))))
+
 (defun safeslop-portal--sessions-from (envelope)
   "Return the parsed sessions (a list of alists) from a `session list' ENVELOPE.
 On a failed list (e.g. a stale binary), surface the error in the echo area so the
@@ -169,6 +193,8 @@ Pure: SESSIONS is already-fetched data, so the row builder never blocks on I/O."
                      (safeslop-portal--status-cell (safeslop-portal--field sess 'status))
                      (safeslop-portal--pid sess)
                      (safeslop-portal--age sess)
+                     (safeslop-portal--recipe-cell sess)
+                     (safeslop-portal--image-cell sess)
                      (abbreviate-file-name (safeslop-portal--field sess 'workspace))))))
    (sort (copy-sequence sessions)
          (lambda (a b)
@@ -369,6 +395,8 @@ A nil or non-positive interval leaves the portal static (manual `g' only)."
          ("Status" 10 nil)
          ("PID" 7 nil)
          ("Age" 6 nil)
+         ("Recipe" 24 nil)
+         ("Image" 13 nil)
          ("Workspace" 32 nil)])
   (setq tabulated-list-padding 1)
   (tabulated-list-init-header)

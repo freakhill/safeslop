@@ -33,54 +33,101 @@
 (defvar eat-term-name)
 
 (defun safeslop-session--create-args (agent workspace &optional environment network)
-  "Return exact argv for creating a session with AGENT in WORKSPACE.
-ENVIRONMENT (host|container) and NETWORK (deny|allow), when a non-empty
-string, are appended as `--environment'/`--network' arguments (specs/0074).
-ENVIRONMENT is required by the engine (specs/0053 removed the sandbox default);
-the interactive picker always supplies one.  These precede `--output json'."
-  (append
-   (list "session" "create" "--agent" agent "--workspace" (expand-file-name workspace))
-   (when (and (stringp environment) (not (string-empty-p environment)))
-     (list "--environment" environment))
-   (when (and (stringp network) (not (string-empty-p network)))
-     (list "--network" network))
-   (list "--output" "json")))
+  "Return exact argv for creating an ad-hoc session with AGENT in WORKSPACE.
+ENVIRONMENT (host|container) and NETWORK (deny|allow) default to container/deny
+when nil, because the engine requires an explicit environment (specs/0053).  An
+explicit empty string omits that flag for legacy/test callers that need to assert
+raw argv shape."
+  (let ((environment (if (null environment) "container" environment))
+        (network (if (null network) "deny" network)))
+    (append
+     (list "session" "create" "--agent" agent "--workspace" (expand-file-name workspace))
+     (when (and (stringp environment) (not (string-empty-p environment)))
+       (list "--environment" environment))
+     (when (and (stringp network) (not (string-empty-p network)))
+       (list "--network" network))
+     (list "--output" "json"))))
+
+(defun safeslop-session--create-profile-args (profile)
+  "Return exact argv for creating a session from existing PROFILE."
+  (list "session" "create" "--profile" profile "--output" "json"))
+
+(defun safeslop-session--profile-names (data)
+  "Return sorted profile names from `profile list' DATA."
+  (sort (mapcar (lambda (entry) (symbol-name (car entry)))
+                (alist-get 'profiles data))
+        #'string<))
+
+(defun safeslop-session--read-profile-choice ()
+  "Prompt for a profile name, or return nil for ad-hoc creation."
+  (let* ((env (safeslop--call-json '("profile" "list" "--output" "json")))
+         (profiles (and (safeslop-contract-ok-p env)
+                        (safeslop-session--profile-names (safeslop-contract-data env))))
+         (ad-hoc "<ad hoc>"))
+    (if profiles
+        (let ((pick (completing-read "Profile: " (cons ad-hoc profiles) nil t nil nil ad-hoc)))
+          (unless (equal pick ad-hoc) pick))
+      (message "safeslop: no profiles available; using ad-hoc session prompts")
+      nil)))
+
+(defun safeslop-session--handle-create-result (args callback envelope)
+  "Render session-create ENVELOPE for ARGS, reveal it, and run CALLBACK."
+  (safeslop--show-envelope-buffer "*safeslop session*" args envelope)
+  (let ((id (and (safeslop-contract-ok-p envelope)
+                 (alist-get 'session_id (safeslop-contract-data envelope)))))
+    ;; Reveal the new session in a live portal (the create is async, so a plain
+    ;; portal refresh would race it), and — only when driven interactively (no
+    ;; test CALLBACK) — offer to open it right away so "created" leads straight
+    ;; to an obvious access path (specs/0052 #3).
+    (when id
+      (when (fboundp 'safeslop-portal--reveal-session)
+        (safeslop-portal--reveal-session id))
+      (when (null callback)
+        (safeslop-session--offer-open id))))
+  (when callback (funcall callback envelope)))
 
 ;;;###autoload
-(defun safeslop-session-new (&optional agent workspace callback environment network)
-  "Create a safeslop session for AGENT in WORKSPACE and show the JSON envelope.
-ENVIRONMENT (host|container) and NETWORK (deny|allow) set the session's
-isolation/network for this run (specs/0074; environment is required, specs/0053);
-interactively they are prompted with container/deny preselected.  Runs
-asynchronously (session create may stage credentials, which can be slow), so
-Emacs does not block.  CALLBACK, when given, is called with the envelope once it
-arrives (used by tests); it precedes ENVIRONMENT/NETWORK so existing callers and
-the security argv tests keep their three-argument form."
+(defun safeslop-session-new (&optional agent workspace callback environment network profile)
+  "Create a safeslop session and show the JSON envelope.
+Interactively, first offer an existing PROFILE from `safeslop profile list'; if a
+profile is chosen, `session create --profile' creates the session from the stored
+policy.  Choosing `<ad hoc>' falls back to AGENT/WORKSPACE/ENVIRONMENT/NETWORK
+prompts.  Noninteractive callers can pass AGENT/WORKSPACE as before; nil
+ENVIRONMENT/NETWORK default to container/deny, while explicit empty strings omit
+those flags for compatibility tests.  CALLBACK, when given, receives the envelope."
   (interactive
-   (list (completing-read "Agent: " '("claude" "pi" "fish" "zsh") nil t nil nil "claude")
-         (read-directory-name "Workspace: " nil nil t)
-         nil ; callback: interactive use shows the envelope buffer, no extra hook
-         (completing-read "Environment: " '("container" "host") nil t nil nil "container")
-         (completing-read "Network: " '("deny" "allow") nil t nil nil "deny")))
-  (let ((args (safeslop-session--create-args (or agent "claude")
-                                             (or workspace default-directory)
-                                             environment network)))
+   (let ((profile (safeslop-session--read-profile-choice)))
+     (if profile
+         (list nil nil nil nil nil profile)
+       (list (completing-read "Agent: " '("claude" "pi" "fish" "zsh") nil t nil nil "claude")
+             (read-directory-name "Workspace: " nil nil t)
+             nil ; callback: interactive use shows the envelope buffer, no extra hook
+             (completing-read "Environment: " '("container" "host") nil t nil nil "container")
+             (completing-read "Network: " '("deny" "allow") nil t nil nil "deny")
+             nil))))
+  (let ((args (if (and (stringp profile) (not (string-empty-p profile)))
+                  (safeslop-session--create-profile-args profile)
+                (safeslop-session--create-args (or agent "claude")
+                                               (or workspace default-directory)
+                                               environment network))))
     (safeslop--call-json-async
      args
      (lambda (envelope)
-       (safeslop--show-envelope-buffer "*safeslop session*" args envelope)
-       (let ((id (and (safeslop-contract-ok-p envelope)
-                      (alist-get 'session_id (safeslop-contract-data envelope)))))
-         ;; Reveal the new session in a live portal (the create is async, so a
-         ;; plain portal refresh would race it), and — only when driven
-         ;; interactively (no test CALLBACK) — offer to open it right away so
-         ;; "created" leads straight to an obvious access path (specs/0052 #3).
-         (when id
-           (when (fboundp 'safeslop-portal--reveal-session)
-             (safeslop-portal--reveal-session id))
-           (when (null callback)
-             (safeslop-session--offer-open id))))
-       (when callback (funcall callback envelope))))))
+       (safeslop-session--handle-create-result args callback envelope)))))
+
+;;;###autoload
+(defun safeslop-session-new-from-profile (profile &optional callback)
+  "Create a safeslop session from existing PROFILE.
+This is the noninteractive/testable profile-picker bridge used by
+`safeslop-session-new'."
+  (interactive (list (safeslop-session--read-profile-choice)))
+  (unless (and (stringp profile) (not (string-empty-p profile)))
+    (user-error "No profile selected"))
+  (let ((args (safeslop-session--create-profile-args profile)))
+    (safeslop--call-json-async
+     args
+     (lambda (envelope)
+       (safeslop-session--handle-create-result args callback envelope)))))
 
 (defun safeslop-session--offer-open (id)
   "Offer to open (attach) the freshly created session ID right now."

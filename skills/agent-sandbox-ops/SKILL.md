@@ -26,7 +26,8 @@ file transfer between host and sandboxed runtimes.
 - `safeslop lock [profile] --output json` — write repo-root `safeslop.lock.json` for the selected profile's recipe identity.
 - `safeslop trust` — approve a policy's exact bytes for launch.
 - `safeslop run <profile>` — launch a trusted profile.
-- `safeslop session create --agent <pi|claude|claude-code> --environment <host|container|vm> --workspace <dir> --output json` — create an Emacs-visible session record (`--environment` is required).
+- `safeslop session create --profile <name> --output json` — create an Emacs-visible session from an existing profile; the record includes resolved recipe/image metadata for the portal.
+- `safeslop session create --agent <claude|pi|fish|zsh> --environment <host|container> --workspace <dir> --output json` — create an ad-hoc Emacs-visible session record (`--environment` is required). `claude-code` remains accepted as a compatibility alias for `claude` but is not advertised in new UI/docs.
 - `safeslop session run --session-id <id> [--detach]` — run the session agent under safeslop isolation. Coupled (default) needs a controlling terminal (Emacs supplies one via `make-term`); with no usable TTY it emits the `PTY_UNAVAILABLE` contract error and the caller switches to the `--output jsonl` status monitor. `--detach` instead launches a per-session supervisor that owns the agent + its PTY, serves it over a per-session unix socket, and returns immediately (the buffer is freed).
 - `safeslop session attach --session-id <id>` — rejoin a detached session's agent over its socket under a controlling terminal, exiting with the agent's code; one active attach at a time. No usable TTY emits `PTY_UNAVAILABLE`.
 - `safeslop session status --session-id <id> --output <json|jsonl>` — inspect or monitor session state; a running detached session also reports its `socket`.
@@ -53,6 +54,7 @@ safeslop catalog list --bundles --output json
 safeslop profile create --name review --agent claude --environment container --network deny --output json
 safeslop profile show review --output json
 safeslop lock review --output json
+safeslop session create --profile review --output json
 safeslop validate
 safeslop list
 safeslop run review --dry-run

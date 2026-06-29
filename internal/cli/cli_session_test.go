@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/freakhill/safeslop/internal/engine/policy"
 	engsession "github.com/freakhill/safeslop/internal/engine/session"
 	"github.com/freakhill/safeslop/internal/jsoncontract"
 )
@@ -134,6 +135,148 @@ func TestSessionCreateAcceptsClaudeCodeAlias(t *testing.T) {
 	}
 	if got := env.Data["agent"]; got != "claude" {
 		t.Fatalf("agent = %#v, want canonical claude", got)
+	}
+}
+
+func TestSessionCreateFromProfileResolvesRecipeMetadata(t *testing.T) {
+	ws := t.TempDir()
+	state := t.TempDir()
+	project := filepath.Join(ws, "project")
+	if err := os.Mkdir(project, 0o755); err != nil {
+		t.Fatalf("mkdir project workspace: %v", err)
+	}
+	t.Setenv("SAFESLOP_STATE_DIR", state)
+	cue := `package safeslop
+
+safeslop: {
+	version: 1
+	profiles: {
+		review: {
+			agent: "pi"
+			environment: "container"
+			network: "deny"
+			workspace: "project"
+		}
+	}
+}
+`
+	if err := os.WriteFile(filepath.Join(ws, "safeslop.cue"), []byte(cue), 0o644); err != nil {
+		t.Fatalf("write safeslop.cue: %v", err)
+	}
+
+	out, err := runRootForTest(t, ws, "session", "create", "--profile", "review", "--output", "json")
+	if err != nil {
+		t.Fatalf("session create --profile: %v\nout=%s", err, out)
+	}
+	env := parseEnvelopeForTest(t, out)
+	if !env.OK {
+		t.Fatalf("create returned error envelope: %+v", env.Errors)
+	}
+	if got := env.Data["profile"]; got != "review" {
+		t.Fatalf("profile = %#v, want review", got)
+	}
+	if got := env.Data["agent"]; got != "pi" {
+		t.Fatalf("agent = %#v, want pi", got)
+	}
+	if got := env.Data["environment"]; got != "container" {
+		t.Fatalf("environment = %#v, want container", got)
+	}
+	if got := env.Data["network"]; got != "deny" {
+		t.Fatalf("network = %#v, want deny", got)
+	}
+	wantWorkspace, err := filepath.EvalSymlinks(project)
+	if err != nil {
+		t.Fatalf("canonicalize workspace: %v", err)
+	}
+	if got := env.Data["workspace"]; got != wantWorkspace {
+		t.Fatalf("workspace = %#v, want %q", got, wantWorkspace)
+	}
+	recipeID, ok := env.Data["recipeID"].(string)
+	if !ok || len(recipeID) != 12 {
+		t.Fatalf("recipeID = %#v, want 12-char string", env.Data["recipeID"])
+	}
+	image, ok := env.Data["image"].(string)
+	if !ok || !strings.HasSuffix(image, ":"+recipeID) {
+		t.Fatalf("image = %#v, want tag ending in recipeID %q", env.Data["image"], recipeID)
+	}
+	resolved, ok := env.Data["resolved"].(map[string]any)
+	if !ok {
+		t.Fatalf("resolved metadata missing: %#v", env.Data["resolved"])
+	}
+	idsAny, ok := resolved["identitySet"].([]any)
+	if !ok {
+		t.Fatalf("resolved.identitySet missing: %#v", resolved)
+	}
+	ids := make([]string, 0, len(idsAny))
+	for _, id := range idsAny {
+		ids = append(ids, id.(string))
+	}
+	if got, want := strings.Join(ids, ","), "node,pi"; got != want {
+		t.Fatalf("resolved.identitySet = %s, want %s", got, want)
+	}
+
+	id := env.Data["session_id"].(string)
+	storedBytes, err := os.ReadFile(filepath.Join(state, "sessions", id+".json"))
+	if err != nil {
+		t.Fatalf("read stored session: %v", err)
+	}
+	var stored map[string]any
+	if err := json.Unmarshal(storedBytes, &stored); err != nil {
+		t.Fatalf("decode stored session: %v", err)
+	}
+	if stored["profile"] != "review" || stored["recipeID"] != recipeID || stored["image"] != image {
+		t.Fatalf("stored profile recipe metadata = %#v", stored)
+	}
+
+	storedSession, err := sessionStore().Get(id)
+	if err != nil {
+		t.Fatalf("load stored session: %v", err)
+	}
+	runProfile := sessionProfile(storedSession)
+	if !runProfile.BareAgent || strings.Join(runProfile.Packages, ",") != "node,pi" {
+		t.Fatalf("sessionProfile packages = %v bare=%v, want exact resolved package identity", runProfile.Packages, runProfile.BareAgent)
+	}
+	if rerunResolved, err := policy.Resolve(runProfile); err != nil || strings.Join(rerunResolved.IdentitySet, ",") != "node,pi" {
+		t.Fatalf("sessionProfile re-resolve = %+v err=%v, want node,pi only", rerunResolved, err)
+	}
+
+	out, err = runRootForTest(t, ws, "session", "status", "--session-id", id, "--output", "json")
+	if err != nil {
+		t.Fatalf("session status: %v\nout=%s", err, out)
+	}
+	statusEnv := parseEnvelopeForTest(t, out)
+	if !statusEnv.OK || statusEnv.Data["profile"] != "review" || statusEnv.Data["recipeID"] != recipeID || statusEnv.Data["image"] != image {
+		t.Fatalf("status metadata did not round-trip: %+v", statusEnv)
+	}
+}
+
+func TestSessionCreateFromProfileAcceptsShellAgent(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+	cue := `package safeslop
+
+safeslop: {
+	version: 1
+	profiles: {
+		dev: {
+			agent: "shell"
+			environment: "host"
+			network: "deny"
+		}
+	}
+}
+`
+	if err := os.WriteFile(filepath.Join(ws, "safeslop.cue"), []byte(cue), 0o644); err != nil {
+		t.Fatalf("write safeslop.cue: %v", err)
+	}
+
+	out, err := runRootForTest(t, ws, "session", "create", "--profile", "dev", "--output", "json")
+	if err != nil {
+		t.Fatalf("session create --profile shell: %v\nout=%s", err, out)
+	}
+	env := parseEnvelopeForTest(t, out)
+	if !env.OK || env.Data["profile"] != "dev" || env.Data["agent"] != "shell" {
+		t.Fatalf("shell profile create envelope = %+v", env)
 	}
 }
 

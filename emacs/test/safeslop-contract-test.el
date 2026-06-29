@@ -166,7 +166,8 @@ envelope via the callback, never a crash."
 
 (ert-deftest safeslop-test-session-new-claude-code-exact-argv ()
   (let* ((workspace (safeslop-test--repo-root))
-         (argv (list "session" "create" "--agent" "claude" "--workspace" workspace "--output" "json"))
+         (argv (list "session" "create" "--agent" "claude" "--workspace" workspace
+                     "--environment" "container" "--network" "deny" "--output" "json"))
          (routes `((,(safeslop-test--json-key argv) .
                    ((stdout . ,(safeslop-test--fixture "ok-session-create.golden.json"))
                     (exit . 0))))))
@@ -176,7 +177,8 @@ envelope via the callback, never a crash."
 
 (ert-deftest safeslop-test-session-new-claude-code-alias-exact-argv ()
   (let* ((workspace (safeslop-test--repo-root))
-         (argv (list "session" "create" "--agent" "claude-code" "--workspace" workspace "--output" "json"))
+         (argv (list "session" "create" "--agent" "claude-code" "--workspace" workspace
+                     "--environment" "container" "--network" "deny" "--output" "json"))
          (routes `((,(safeslop-test--json-key argv) .
                    ((stdout . ,(safeslop-test--fixture "ok-session-create.golden.json"))
                     (exit . 0))))))
@@ -186,7 +188,8 @@ envelope via the callback, never a crash."
 
 (ert-deftest safeslop-test-session-new-pi-exact-argv ()
   (let* ((workspace (safeslop-test--repo-root))
-         (argv (list "session" "create" "--agent" "pi" "--workspace" workspace "--output" "json"))
+         (argv (list "session" "create" "--agent" "pi" "--workspace" workspace
+                     "--environment" "container" "--network" "deny" "--output" "json"))
          (routes `((,(safeslop-test--json-key argv) .
                    ((stdout . ,(safeslop-test--fixture "ok-session-create.golden.json"))
                     (exit . 0))))))
@@ -223,7 +226,8 @@ envelope via the callback, never a crash."
 
 (ert-deftest safeslop-test-unsupported-agent-error-code ()
   (let* ((workspace (safeslop-test--repo-root))
-         (argv (list "session" "create" "--agent" "cursor" "--workspace" workspace "--output" "json"))
+         (argv (list "session" "create" "--agent" "cursor" "--workspace" workspace
+                     "--environment" "container" "--network" "deny" "--output" "json"))
          (routes `((,(safeslop-test--json-key argv) .
                    ((stdout . ,(safeslop-test--fixture "error-agent-unsupported.golden.json"))
                     (exit . 2))))))
@@ -246,7 +250,8 @@ envelope via the callback, never a crash."
   (let* ((tmp (make-temp-file "safeslop a;b $(touch pwn)" t))
          (workspace (expand-file-name tmp))
          (pwn (expand-file-name "pwn" (file-name-directory (directory-file-name workspace))))
-         (argv (list "session" "create" "--agent" "claude" "--workspace" workspace "--output" "json"))
+         (argv (list "session" "create" "--agent" "claude" "--workspace" workspace
+                     "--environment" "container" "--network" "deny" "--output" "json"))
          (routes `((,(safeslop-test--json-key argv) .
                    ((stdout . ,(safeslop-test--fixture "ok-session-create.golden.json"))
                     (exit . 0))))))
@@ -256,6 +261,21 @@ envelope via the callback, never a crash."
           (should-not (file-exists-p pwn))
           (should (equal (safeslop-test--argv-log-lines) (list (safeslop-test--json-key argv)))))
       (delete-directory tmp t))))
+
+(ert-deftest safeslop-test-session-new-from-profile-exact-argv ()
+  (let* ((argv '("session" "create" "--profile" "review" "--output" "json"))
+         (routes `((,(safeslop-test--json-key argv) .
+                   ((stdout . "{\"schema_version\":1,\"ok\":true,\"data\":{\"session_id\":\"sess-profile\",\"profile\":\"review\",\"agent\":\"pi\",\"environment\":\"container\",\"network\":\"deny\",\"workspace\":\"/workspace/project\",\"status\":\"created\",\"created_at\":\"2026-06-26T00:00:00Z\",\"updated_at\":\"2026-06-26T00:00:00Z\",\"credentials_revoked\":false,\"recipeID\":\"abc123def456\",\"image\":\"local/safeslop-tools:abc123def456\"},\"warnings\":[],\"errors\":[]}")
+                    (exit . 0))))))
+    (safeslop-test--with-fake-cli routes
+      (let ((envelope (safeslop-test--await
+                       (lambda (cb) (safeslop-session-new-from-profile "review" cb)))))
+        (should (safeslop-contract-ok-p envelope))
+        (should (equal (safeslop-test--argv-log-lines) (list (safeslop-test--json-key argv))))))))
+
+(ert-deftest safeslop-test-session-profile-args ()
+  (should (equal (safeslop-session--create-profile-args "review")
+                 '("session" "create" "--profile" "review" "--output" "json"))))
 
 (ert-deftest safeslop-test-session-attach-uses-term-pty-exact-argv ()
   (let* ((argv '("session" "run" "--session-id" "sess-term"))

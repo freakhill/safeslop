@@ -14,6 +14,7 @@
                 safeslop-session-status
                 safeslop-session-stop
                 safeslop-session-reattach
+                safeslop-session-new-from-profile
                 safeslop-switch-to-session-buffer
                 safeslop-show-last-error
                 safeslop-help))
@@ -109,7 +110,9 @@
                     (concat "{\"schema_version\":1,\"ok\":true,\"data\":{\"sessions\":"
                             "[{\"session_id\":\"sess-abc123\",\"agent\":\"claude\","
                             "\"environment\":\"container\",\"network\":\"deny\","
-                            "\"status\":\"running\",\"workspace\":\"/tmp/ws\"}]},"
+                            "\"status\":\"running\",\"workspace\":\"/tmp/ws\","
+                            "\"recipeID\":\"abc123def456\",\"image\":\"local/safeslop-tools:abc123def456\","
+                            "\"resolved\":{\"identitySet\":[\"claude-code\",\"node\",\"pnpm\"]}}]},"
                             "\"warnings\":[],\"errors\":[]}")))
          (rows (safeslop-portal--rows (safeslop-portal--sessions-from envelope)))
          (row (car rows))
@@ -119,7 +122,9 @@
     (should (equal (aref cols 1) "claude"))
     (should (equal (aref cols 2) "container"))
     (should (equal (aref cols 3) "deny"))
-    (should (equal (aref cols 4) "running"))))
+    (should (equal (aref cols 4) "running"))
+    (should (equal (aref cols 7) "claude-code,node,pnpm"))
+    (should (equal (aref cols 8) "abc123def456"))))
 
 (ert-deftest safeslop-test-scalar-json-sentinels ()
   (should (equal (safeslop--scalar t) "true"))
@@ -253,6 +258,14 @@
       (should (equal (aref (cadr running) 5) "4242"))
       (should (equal (aref (cadr created) 5) "—")))))
 
+(ert-deftest safeslop-test-portal-recipe-and-image-cells ()
+  "Recipe lists resolved packages; Image shows the recipeID tag."
+  (let ((sess '((recipeID . "abc123def456")
+                (image . "local/safeslop-tools:abc123def456")
+                (resolved . ((identitySet . ["node" "pi" "pnpm"]))))))
+    (should (equal (safeslop-portal--recipe-cell sess) "node,pi,pnpm"))
+    (should (equal (safeslop-portal--image-cell sess) "abc123def456"))))
+
 ;;; Portal Age column --------------------------------------------------------
 
 (ert-deftest safeslop-test-portal-humanize-age ()
@@ -336,8 +349,8 @@
   (with-temp-buffer
     (safeslop-portal-mode)
     (setq tabulated-list-entries
-          '(("sess-1" ["sess-1" "claude" "host" "deny" "running" "1" "now" "/ws"])
-            ("sess-2" ["sess-2" "pi" "container" "allow" "created" "2" "now" "/ws"])))
+          '(("sess-1" ["sess-1" "claude" "host" "deny" "running" "1" "now" "—" "—" "/ws"])
+            ("sess-2" ["sess-2" "pi" "container" "allow" "created" "2" "now" "—" "—" "/ws"])))
     (tabulated-list-print)
     (should (safeslop-portal--goto-id "sess-2"))
     (should (equal (tabulated-list-get-id) "sess-2"))

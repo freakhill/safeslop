@@ -11,21 +11,25 @@
 ;; The Profiles surface: a tabulated-list view of the profiles defined in the
 ;; active safeslop.cue, over `safeslop profile list --output json'.  Authoring
 ;; stays CUE-canonical (specs/0029): editing opens the safeslop.cue itself and
-;; validates on save; creating scaffolds from a preset (`profile presets'); and
-;; deleting is guided (open the file at the block, remove it, re-validate) rather
-;; than a fragile machine rewrite of the guard.  All calls are async (specs/0052
-;; #7).  The Env column reuses the portal's isolation-tier colouring.
+;; validates on save; creating goes through the structured `profile create' CLI
+;; (specs/0058 IW4) rather than handwritten snippets; and deleting is guided
+;; (open the file at the block, remove it, re-validate) rather than a fragile
+;; machine rewrite of the guard.  All slow calls are async (specs/0052 #7).  The
+;; Env column reuses the portal's isolation-tier colouring.
 
 ;;; Code:
 
 (require 'subr-x)
+(require 'cl-lib)
 (require 'tabulated-list)
 (require 'safeslop-contract)
 (require 'safeslop-surface)
 (require 'safeslop-portal) ; for `safeslop-portal--env-cell' (shared tier colouring)
 
 (defvar safeslop-program)
+(declare-function safeslop--call-json "safeslop" (args))
 (declare-function safeslop--call-json-async "safeslop" (args callback))
+(declare-function safeslop--show-envelope-buffer "safeslop" (name args envelope))
 (declare-function safeslop-policy-check-file "safeslop" (file &optional callback))
 (declare-function safeslop-debug-log "safeslop" ())
 
@@ -35,6 +39,70 @@
 (defvar-local safeslop-profiles--config-path nil
   "Path to the safeslop.cue backing this buffer, from the last `profile list'.
 Edit/validate/delete act on this file; nil until a config is found.")
+
+(defconst safeslop-profiles--agents '("claude" "pi" "fish" "zsh" "shell")
+  "Profile-create agent choices surfaced in Emacs.
+`claude-code' stays a CLI compatibility alias but is intentionally not a UI
+choice; the UI presents the canonical `claude' engine name.")
+
+(defconst safeslop-profiles--environments '("container" "host")
+  "Profile-create environment choices; container remains the safe default.")
+
+(defconst safeslop-profiles--networks '("deny" "allow")
+  "Profile-create network choices; deny remains the safe default.")
+
+(defun safeslop-profiles--nonempty-list (values)
+  "Return VALUES without empty strings or nils."
+  (delq nil (mapcar (lambda (v)
+                      (when (and (stringp v) (not (string-empty-p v))) v))
+                    values)))
+
+(defun safeslop-profiles--catalog-names (data field)
+  "Return catalog entry names from DATA under FIELD (`bundles' or `packages')."
+  (mapcar (lambda (entry) (alist-get 'name entry))
+          (alist-get field data)))
+
+(defun safeslop-profiles--catalog-choice-list (field &optional bundles)
+  "Synchronously fetch catalog FIELD names for an interactive picker.
+BUNDLES non-nil calls `catalog list --bundles`; otherwise package entries are
+listed.  The catalog is in-tree/local and intentionally fast; the actual profile
+create write remains asynchronous."
+  (let* ((args (append '("catalog" "list")
+                       (when bundles '("--bundles"))
+                       '("--output" "json")))
+         (env (safeslop--call-json args)))
+    (if (safeslop-contract-ok-p env)
+        (safeslop-profiles--catalog-names (safeslop-contract-data env) field)
+      (message "safeslop: could not list catalog %s: %s"
+               field
+               (or (alist-get 'message (car (safeslop-contract-errors env)))
+                   "catalog list failed"))
+      nil)))
+
+(defun safeslop-profiles--read-multiple (prompt choices)
+  "Read zero or more CHOICES with PROMPT, normalizing the empty selection to nil."
+  (safeslop-profiles--nonempty-list
+   (completing-read-multiple prompt choices nil nil)))
+
+(defun safeslop-profiles--repeat-flags (flag values)
+  "Return repeated FLAG argv entries for VALUES."
+  (apply #'append (mapcar (lambda (v) (list flag v)) values)))
+
+(defun safeslop-profiles--create-args
+    (name agent environment bundles packages network workspace &optional no-default-bundle)
+  "Return exact argv for `safeslop profile create' from the structured UI fields."
+  (append (list "profile" "create"
+                "--name" name
+                "--agent" agent
+                "--environment" environment)
+          (safeslop-profiles--repeat-flags "--bundle" (or bundles nil))
+          (safeslop-profiles--repeat-flags "--package" (or packages nil))
+          (when (and (stringp workspace) (not (string-empty-p workspace)))
+            (list "--workspace" workspace))
+          (when (and (stringp network) (not (string-empty-p network)))
+            (list "--network" network))
+          (when no-default-bundle (list "--no-default-bundle"))
+          (list "--output" "json")))
 
 (defun safeslop-profiles--rows (data)
   "Build tabulated rows from `profile list' DATA (a profiles name->fields map).
@@ -52,7 +120,7 @@ same on both surfaces."
    (alist-get 'profiles data)))
 
 (defconst safeslop-profiles--key-hints
-  '(("RET" . "edit") ("n" . "new") ("v" . "validate") ("d" . "delete")
+  '(("RET" . "edit") ("n" . "create") ("v" . "validate") ("d" . "delete")
     ("g" . "refresh") ("L" . "debug") ("?" . "help") ("q" . "quit"))
   "Key/action pairs shown in the profiles surface's in-buffer legend.")
 
@@ -72,7 +140,7 @@ same on both surfaces."
 (defun safeslop-profiles--render (&optional keep-point)
   "Asynchronously fetch the profile list, then fill the current surface buffer.
 On a missing safeslop.cue the table is empty and the echo area says so; `n' still
-works to scaffold one.  Stores the config path for the edit/validate/delete keys."
+works to create one.  Stores the config path for the edit/validate/delete keys."
   (let ((buf (current-buffer)))
     (safeslop--call-json-async
      '("profile" "list" "--output" "json")
@@ -86,7 +154,7 @@ works to scaffold one.  Stores the config path for the edit/validate/delete keys
              (setq tabulated-list-entries nil)
              (message "safeslop profiles: %s"
                       (or (alist-get 'message (car (safeslop-contract-errors envelope)))
-                          "no safeslop.cue found — press `n' to scaffold one from a preset")))
+                          "no safeslop.cue found — press `n' to create one")))
            (tabulated-list-print keep-point)
            (let ((inhibit-read-only t))
              (save-excursion
@@ -153,39 +221,61 @@ D5).  The save is re-validated."
       (beginning-of-line))
     (message "Remove the `%s' profile block here, then save to re-validate" name)))
 
-(defun safeslop-profiles-new ()
-  "Scaffold a new safeslop.cue from a preset, open it for editing, and validate.
-Lists the embedded presets via `profile presets', writes the chosen one to a
-path you pick, then opens it (CUE is canonical — you tune it from there)."
-  (interactive)
-  (safeslop--call-json-async
-   '("profile" "presets" "--output" "json")
-   (lambda (env)
-     (if (not (safeslop-contract-ok-p env))
-         (message "safeslop: could not list presets")
-       (let* ((presets (alist-get 'presets (safeslop-contract-data env)))
-              (choices (mapcar (lambda (p)
-                                 (cons (format "%s — %s"
-                                               (alist-get 'name p)
-                                               (alist-get 'description p))
-                                       p))
-                               presets))
-              (pick (completing-read "Preset: " choices nil t))
-              (preset (cdr (assoc pick choices)))
-              (cue (alist-get 'cue preset))
-              (dest (read-file-name "Write safeslop.cue to: " nil "safeslop.cue")))
-         (when (or (not (file-exists-p dest))
-                   (yes-or-no-p (format "%s exists — overwrite? " dest)))
-           (with-temp-file dest (insert cue))
-           (safeslop-profiles--open-config dest)
-           (safeslop-profiles--validate-quietly dest)
-           (message "Scaffolded %s from a preset — tune it, then save to re-validate" dest)))))))
+;;;###autoload
+(defun safeslop-profiles-create
+    (&optional name agent environment bundles packages network workspace callback no-default-bundle)
+  "Create or update a profile through `safeslop profile create'.
+Interactively, prompt for NAME, AGENT, ENVIRONMENT, BUNDLES, PACKAGES, NETWORK,
+and WORKSPACE; then write via the CLI and refresh any live profiles surface.
+CALLBACK, when given, receives the resulting JSON contract envelope.  The old
+preset scaffold is intentionally replaced by this structured flow (specs/0058
+N5), while CUE remains the stored source of truth."
+  (interactive
+   (let* ((name (read-string "Profile name: "))
+          (agent (completing-read "Agent: " safeslop-profiles--agents nil t nil nil "claude"))
+          (environment (completing-read "Environment: " safeslop-profiles--environments nil t nil nil "container"))
+          (bundle-choices (safeslop-profiles--catalog-choice-list 'bundles t))
+          (bundles (safeslop-profiles--read-multiple "Bundles (comma-separated, optional): " bundle-choices))
+          (package-choices (safeslop-profiles--catalog-choice-list 'packages nil))
+          (packages (safeslop-profiles--read-multiple "Packages (comma-separated, optional): " package-choices))
+          (network (completing-read "Network: " safeslop-profiles--networks nil t nil nil "deny"))
+          (workspace (read-directory-name "Workspace (empty for engine default): " nil nil nil nil))
+          (workspace (if (string-empty-p workspace) "" (abbreviate-file-name (expand-file-name workspace))))
+          (no-default-bundle (and (member agent '("claude" "pi"))
+                                  (y-or-n-p "Opt out of the agent's default package bundle? "))))
+     (list name agent environment bundles packages network workspace nil no-default-bundle)))
+  (let ((args (safeslop-profiles--create-args
+               (or name "")
+               (or agent "claude")
+               (or environment "container")
+               bundles packages
+               (or network "deny")
+               (or workspace "")
+               no-default-bundle)))
+    (safeslop--call-json-async
+     args
+     (lambda (env)
+       (safeslop--show-envelope-buffer "*safeslop profile create*" args env)
+       (if (safeslop-contract-ok-p env)
+           (progn
+             (message "safeslop: profile `%s' saved" (alist-get 'name (safeslop-contract-data env)))
+             (let ((buf (get-buffer safeslop-profiles-buffer-name)))
+               (when buf
+                 (with-current-buffer buf
+                   (safeslop-profiles--render t)))))
+         (message "safeslop: profile create failed: %s"
+                  (or (alist-get 'message (car (safeslop-contract-errors env)))
+                      "unknown error")))
+       (when callback (funcall callback env))))))
+
+(defalias 'safeslop-profiles-new #'safeslop-profiles-create
+  "Compatibility alias for `safeslop-profiles-create'.")
 
 (defvar safeslop-profiles-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "RET") #'safeslop-profiles-edit)
     (define-key map (kbd "e")   #'safeslop-profiles-edit)
-    (define-key map (kbd "n")   #'safeslop-profiles-new)
+    (define-key map (kbd "n")   #'safeslop-profiles-create)
     (define-key map (kbd "v")   #'safeslop-profiles-validate)
     (define-key map (kbd "d")   #'safeslop-profiles-delete)
     (define-key map (kbd "g")   #'safeslop-profiles-refresh)
@@ -210,7 +300,7 @@ path you pick, then opens it (CUE is canonical — you tune it from there)."
 ;;;###autoload
 (defun safeslop-profiles ()
   "Open the safeslop profiles surface: the profiles in your safeslop.cue.
-Keys: RET/e edit, n new-from-preset, v validate, d delete (guided), g refresh;
+Keys: RET/e edit, n create, v validate, d delete (guided), g refresh;
 P/I/F switch surface, [/] cycle."
   (interactive)
   (let ((buf (get-buffer-create safeslop-profiles-buffer-name)))

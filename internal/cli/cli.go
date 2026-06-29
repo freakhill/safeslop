@@ -362,14 +362,26 @@ func cmdSession() *cobra.Command {
 }
 
 func cmdSessionCreate() *cobra.Command {
-	var agent, workspace, output, environment, network string
+	var agent, workspace, output, environment, network, profile string
 	c := &cobra.Command{
-		Use:   "create --agent <claude|pi|fish|zsh> --environment <host|container> --workspace <dir> --output json",
+		Use:   "create (--profile <name> | --agent <claude|pi|fish|zsh> --environment <host|container> --workspace <dir>) --output json",
 		Short: "Create a safeslop session record",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if output != "json" {
 				return fmt.Errorf("session create requires --output json")
+			}
+			store := sessionStore()
+			if profile != "" {
+				if agent != "" || workspace != "" || environment != "" || network != "" {
+					return emitContractError(jsoncontract.CodeInvalidArgument, "--profile cannot be combined with --agent, --environment, --workspace, or --network", nil)
+				}
+				sess, err := createSessionFromProfile(store, profile)
+				if err != nil {
+					return err
+				}
+				emitContract(jsoncontract.OK(sessionData(sess)))
+				return nil
 			}
 			canonicalAgent := policy.NormalizeAgent(agent)
 			if !policy.IsLaunchableAgent(canonicalAgent) {
@@ -400,7 +412,6 @@ func cmdSessionCreate() *cobra.Command {
 						map[string]any{"network": network})
 				}
 			}
-			store := sessionStore()
 			sess, err := store.Create(canonicalAgent, environment, workspace, time.Now())
 			if err != nil {
 				return emitContractError(jsoncontract.CodeIOError, "create session", map[string]any{"error": err.Error()})
@@ -415,12 +426,82 @@ func cmdSessionCreate() *cobra.Command {
 			return nil
 		},
 	}
+	c.Flags().StringVar(&profile, "profile", "", "profile name from safeslop.cue")
 	c.Flags().StringVar(&agent, "agent", "", "agent to run: claude, pi, fish, or zsh")
 	c.Flags().StringVar(&workspace, "workspace", "", "workspace directory")
 	c.Flags().StringVar(&output, "output", "", "output format: json")
 	c.Flags().StringVar(&environment, "environment", "", "isolation environment (required): host or container")
 	c.Flags().StringVar(&network, "network", "", "network policy: deny or allow (overrides profile default)")
 	return c
+}
+
+func createSessionFromProfile(store engsession.Store, profile string) (engsession.Session, error) {
+	path, err := findConfig("")
+	if err != nil {
+		return engsession.Session{}, emitContractError(jsoncontract.CodeNotFound, "safeslop.cue not found", map[string]any{"error": err.Error()})
+	}
+	cfg, err := policy.Load(path)
+	if err != nil {
+		return engsession.Session{}, emitContractError(jsoncontract.CodeSchemaViolation, "load safeslop.cue", map[string]any{"path": path, "error": err.Error()})
+	}
+	prof, ok := cfg.Profiles[profile]
+	if !ok {
+		return engsession.Session{}, emitContractError(jsoncontract.CodeNotFound, fmt.Sprintf("no profile %q in safeslop.cue", profile), map[string]any{"profile": profile, "path": path})
+	}
+	resolved, err := policy.Resolve(prof)
+	if err != nil {
+		return engsession.Session{}, emitContractError(jsoncontract.CodeInvalidArgument, "resolve profile packages", map[string]any{"profile": profile, "error": err.Error()})
+	}
+	recipe, err := container.ResolveRecipe(resolved.IdentitySet)
+	if err != nil {
+		return engsession.Session{}, emitContractError(jsoncontract.CodeInvalidArgument, "resolve profile image recipe", map[string]any{"profile": profile, "error": err.Error()})
+	}
+	workspace := prof.Workspace
+	if workspace == "" {
+		workspace, _ = os.Getwd()
+	} else if !filepath.IsAbs(workspace) {
+		workspace = filepath.Join(filepath.Dir(path), workspace)
+	}
+	if fi, err := os.Stat(workspace); err != nil || !fi.IsDir() {
+		return engsession.Session{}, emitContractError(jsoncontract.CodeInvalidArgument, "profile workspace must name an existing directory", map[string]any{"profile": profile, "workspace": workspace})
+	}
+	agent := policy.NormalizeAgent(prof.Agent)
+	if !policy.IsLaunchableAgent(agent) && agent != "shell" {
+		return engsession.Session{}, emitContractError(jsoncontract.CodeAgentUnsupported, fmt.Sprintf("unsupported agent %q", prof.Agent), map[string]any{"agent": prof.Agent, "profile": profile})
+	}
+	sess, err := store.Create(agent, prof.Environment, workspace, time.Now())
+	if err != nil {
+		return engsession.Session{}, emitContractError(jsoncontract.CodeIOError, "create session", map[string]any{"error": err.Error()})
+	}
+	sess.Profile = profile
+	sess.Network = prof.Network
+	sess.RecipeID = recipe.RecipeID
+	sess.Image = recipe.AgentImage
+	sess.Resolved = resolvedMetadata(resolved)
+	if err := store.Save(sess); err != nil {
+		return engsession.Session{}, emitContractError(jsoncontract.CodeIOError, "save session", map[string]any{"error": err.Error()})
+	}
+	return sess, nil
+}
+
+func resolvedMetadata(resolved *policy.Resolved) *engsession.ResolvedMetadata {
+	if resolved == nil {
+		return nil
+	}
+	return &engsession.ResolvedMetadata{
+		Packages:      append([]string(nil), resolved.Packages...),
+		IdentitySet:   append([]string(nil), resolved.IdentitySet...),
+		RuntimeEgress: append([]string(nil), resolved.RuntimeEgress...),
+	}
+}
+
+func sessionProfile(sess engsession.Session) policy.Profile {
+	prof := policy.Profile{Agent: sess.Agent, Environment: sess.Environment, Network: sess.Network, Workspace: sess.Workspace}
+	if sess.Resolved != nil {
+		prof.Packages = append([]string(nil), sess.Resolved.IdentitySet...)
+		prof.BareAgent = true
+	}
+	return prof
 }
 
 func cmdSessionList() *cobra.Command {
@@ -530,7 +611,7 @@ func cmdSessionRun() *cobra.Command {
 				// D1, PR3).
 				return runDetach(store, id)
 			}
-			prof := policy.Profile{Agent: sess.Agent, Environment: sess.Environment, Network: sess.Network, Workspace: sess.Workspace}
+			prof := sessionProfile(sess)
 			argv, err := agentArgv(prof)
 			if err != nil {
 				return err
@@ -791,6 +872,18 @@ func sessionData(sess engsession.Session) map[string]any {
 		"created_at":          sess.CreatedAt.Format(time.RFC3339Nano),
 		"updated_at":          sess.UpdatedAt.Format(time.RFC3339Nano),
 		"credentials_revoked": sess.CredentialsRevoked,
+	}
+	if sess.Profile != "" {
+		out["profile"] = sess.Profile
+	}
+	if sess.RecipeID != "" {
+		out["recipeID"] = sess.RecipeID
+	}
+	if sess.Image != "" {
+		out["image"] = sess.Image
+	}
+	if sess.Resolved != nil {
+		out["resolved"] = sess.Resolved
 	}
 	if !sess.StartedAt.IsZero() {
 		out["started_at"] = sess.StartedAt.Format(time.RFC3339Nano)

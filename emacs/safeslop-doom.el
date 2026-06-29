@@ -44,7 +44,7 @@
 (declare-function safeslop-install-dry-run "safeslop-install" ())
 (declare-function safeslop-install-rollback "safeslop-install" ())
 (declare-function safeslop-profiles-edit "safeslop-profiles" ())
-(declare-function safeslop-profiles-new "safeslop-profiles" ())
+(declare-function safeslop-profiles-create "safeslop-profiles" ())
 (declare-function safeslop-profiles-validate "safeslop-profiles" ())
 (declare-function safeslop-profiles-delete "safeslop-profiles" ())
 (declare-function safeslop-profiles-refresh "safeslop-profiles" ())
@@ -106,7 +106,7 @@
   (evil-define-key 'normal safeslop-profiles-mode-map
     (kbd "RET") #'safeslop-profiles-edit
     (kbd "e")   #'safeslop-profiles-edit
-    (kbd "n")   #'safeslop-profiles-new
+    (kbd "n")   #'safeslop-profiles-create
     (kbd "v")   #'safeslop-profiles-validate
     (kbd "d")   #'safeslop-profiles-delete
     (kbd "g")   #'safeslop-profiles-refresh

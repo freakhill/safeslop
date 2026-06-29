@@ -66,7 +66,8 @@ safeslop profile show <name> --output json         profile + resolved packages +
 safeslop lock [profile] --output json              write repo-root safeslop.lock.json
 safeslop trust [safeslop.cue]       approve this policy's exact bytes
 safeslop run <profile> [--dry-run]  launch a trusted profile
-safeslop session create --agent <pi|claude|claude-code> --workspace <dir> --output json
+safeslop session create --profile <name> --output json
+safeslop session create --agent <claude|pi|fish|zsh> --environment <host|container> --workspace <dir> --output json
 safeslop session run --session-id <id> [--detach]
 safeslop session attach --session-id <id>
 safeslop session status --session-id <id> --output <json|jsonl>
@@ -189,6 +190,12 @@ normalized to the canonical `claude` engine value, so it launches the same
 json` to inspect available entries; `profile show` reports the resolved package
 set and dry-run image `recipeID` without building. `safeslop lock [profile]
 --output json` writes the repo-root `safeslop.lock.json` for review/commit.
+
+`safeslop session create --profile <name> --output json` creates an Emacs-visible
+session from an existing `safeslop.cue` profile: it uses the profile's agent,
+environment, network, and workspace, resolves its catalog package set, and includes
+`recipeID`/`image` metadata for the portal Recipe/Image columns. The ad-hoc
+`--agent` form remains available for one-off sessions.
 
 ### Trust model
 

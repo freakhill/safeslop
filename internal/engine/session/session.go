@@ -23,25 +23,39 @@ const (
 
 var ErrNotFound = errors.New("session not found")
 
+// ResolvedMetadata snapshots the non-secret package resolution that selected a
+// profile-backed session's image. It is stored with the session so status/list can
+// keep portal Recipe/Image columns stable even after the session leaves the
+// creating command's process.
+type ResolvedMetadata struct {
+	Packages      []string `json:"packages,omitempty"`
+	IdentitySet   []string `json:"identitySet,omitempty"`
+	RuntimeEgress []string `json:"runtimeEgress,omitempty"`
+}
+
 // Session is the durable, non-secret state for an Emacs-visible session. Do not
 // add staged credential values or resolved secret material here; the JSONL status
 // path serializes this object for clients.
 type Session struct {
-	ID                 string    `json:"session_id"`
-	Agent              string    `json:"agent"`
-	Workspace          string    `json:"workspace"`
-	Environment        string    `json:"environment"`
-	Network            string    `json:"network"`
-	Status             string    `json:"status"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
-	StartedAt          time.Time `json:"started_at,omitempty"`
-	StoppedAt          time.Time `json:"stopped_at,omitempty"`
-	RevokedAt          time.Time `json:"revoked_at,omitempty"`
-	CredentialsRevoked bool      `json:"credentials_revoked"`
-	PID                int       `json:"pid,omitempty"`
-	ExitCode           *int      `json:"exit_code,omitempty"`
-	LastError          string    `json:"last_error,omitempty"`
+	ID                 string            `json:"session_id"`
+	Profile            string            `json:"profile,omitempty"`
+	Agent              string            `json:"agent"`
+	Workspace          string            `json:"workspace"`
+	Environment        string            `json:"environment"`
+	Network            string            `json:"network"`
+	RecipeID           string            `json:"recipeID,omitempty"`
+	Image              string            `json:"image,omitempty"`
+	Resolved           *ResolvedMetadata `json:"resolved,omitempty"`
+	Status             string            `json:"status"`
+	CreatedAt          time.Time         `json:"created_at"`
+	UpdatedAt          time.Time         `json:"updated_at"`
+	StartedAt          time.Time         `json:"started_at,omitempty"`
+	StoppedAt          time.Time         `json:"stopped_at,omitempty"`
+	RevokedAt          time.Time         `json:"revoked_at,omitempty"`
+	CredentialsRevoked bool              `json:"credentials_revoked"`
+	PID                int               `json:"pid,omitempty"`
+	ExitCode           *int              `json:"exit_code,omitempty"`
+	LastError          string            `json:"last_error,omitempty"`
 	// Detached marks a session whose recorded PID is a detached supervisor that
 	// leads its own process group, so `stop` signals the group, not a bare PID
 	// (specs/0051 D4). Internal routing state; not surfaced in the JSON envelope.
