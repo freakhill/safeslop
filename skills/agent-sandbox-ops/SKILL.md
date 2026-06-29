@@ -20,6 +20,10 @@ file transfer between host and sandboxed runtimes.
 
 - `safeslop validate` — validate a policy against the embedded schema.
 - `safeslop list` — list available profiles.
+- `safeslop catalog list [--bundles] --output json` — list curated package catalog entries/bundles for profile creation UIs.
+- `safeslop profile create --name N --agent A --environment E [--bundle B] [--package P] --output json` — create or update a `safeslop.cue` profile.
+- `safeslop profile show <name> --output json` — inspect a profile with resolved package set and dry-run image recipe.
+- `safeslop lock [profile] --output json` — write repo-root `safeslop.lock.json` for the selected profile's recipe identity.
 - `safeslop trust` — approve a policy's exact bytes for launch.
 - `safeslop run <profile>` — launch a trusted profile.
 - `safeslop session create --agent <pi|claude|claude-code> --environment <host|container|vm> --workspace <dir> --output json` — create an Emacs-visible session record (`--environment` is required).
@@ -42,9 +46,13 @@ file transfer between host and sandboxed runtimes.
 
 ## Common workflows
 
-### Inspect a profile
+### Create and inspect a profile
 
 ```bash
+safeslop catalog list --bundles --output json
+safeslop profile create --name review --agent claude --environment container --network deny --output json
+safeslop profile show review --output json
+safeslop lock review --output json
 safeslop validate
 safeslop list
 safeslop run review --dry-run

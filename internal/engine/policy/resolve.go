@@ -29,17 +29,19 @@ func Resolve(p Profile) (*Resolved, error) { return DefaultCatalog().Resolve(p) 
 // Resolve expands the profile's agent-default bundle + declared bundles + à-la-carte
 // packages into the requires-closure, rejecting unknown names, conflicts, and
 // requires-cycles, and returns the topological install order, the sorted identity set,
-// and the unioned runtime egress (specs/0058 N0). The agent default bundle is always
-// included so the agent can launch (the --no-default-bundle opt-out is a later wave).
+// and the unioned runtime egress (specs/0058 N0). The agent default bundle is included
+// unless BareAgent explicitly opts out.
 func (c *Catalog) Resolve(p Profile) (*Resolved, error) {
 	// 1. seed names: agent default bundle + declared bundles + à-la-carte packages.
 	var seed []string
-	if bn := c.DefaultBundle(p.Agent); bn != "" {
-		b, ok := c.bndIdx[bn]
-		if !ok {
-			return nil, fmt.Errorf("resolve: agent %q default bundle %q missing from catalog", p.Agent, bn)
+	if !p.BareAgent {
+		if bn := c.DefaultBundle(p.Agent); bn != "" {
+			b, ok := c.bndIdx[bn]
+			if !ok {
+				return nil, fmt.Errorf("resolve: agent %q default bundle %q missing from catalog", p.Agent, bn)
+			}
+			seed = append(seed, b.Packages...)
 		}
-		seed = append(seed, b.Packages...)
 	}
 	for _, bn := range p.Bundles {
 		b, ok := c.bndIdx[bn]

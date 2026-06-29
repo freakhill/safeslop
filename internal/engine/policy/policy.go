@@ -142,9 +142,12 @@ type Profile struct {
 	// Bundles and Packages select build-time packages from the curated catalog
 	// (specs/0058): Bundles are named sets, Packages are à la carte. Resolved by
 	// policy.Resolve against the catalog (unknown names error); the agent's default
-	// bundle is always included so the agent can launch.
+	// bundle is included unless BareAgent explicitly opts out.
 	Bundles  []string `json:"bundles,omitempty"`
 	Packages []string `json:"packages,omitempty"`
+	// BareAgent honors `profile create --no-default-bundle`: launch exactly the
+	// declared bundles/packages, even for agents that normally imply a bundle.
+	BareAgent bool `json:"bareAgent,omitempty"`
 }
 
 // Config is the decoded top-level `safeslop:` value from safeslop.cue.

@@ -26,13 +26,13 @@ var iw2BuildablePackages = map[string]bool{
 	"pnpm":        true,
 }
 
-// recipeID is the content-hash identity of a build: the first 12 hex chars of
+// RecipeID is the content-hash identity of a build: the first 12 hex chars of
 // sha256(dockerfile-bytes followed by each sorted "\nkey=value" build-arg). It is pure and
 // deterministic, so an unchanged recipe yields an unchanged tag — imageExists(<id-tag>) becomes a
 // CORRECT skip — while any change to the Dockerfile or a build-arg yields a new tag and forces a
 // rebuild. This is what kills the stale-":latest" rebuild-skip (specs/0055 Bug B / W1): the old
 // code skipped a rebuild whenever the floating :latest tag existed, so an image went stale forever.
-func recipeID(dockerfile []byte, buildArgs map[string]string) string {
+func RecipeID(dockerfile []byte, buildArgs map[string]string) string {
 	h := sha256.New()
 	h.Write(dockerfile)
 	keys := make([]string, 0, len(buildArgs))
@@ -97,28 +97,55 @@ func toolsBuildArgs(baseImg string, enabled []string) (map[string]string, error)
 // change yields a new agent id (an agent image built on a stale base or stale package pin is itself
 // stale). enabled is the resolver's identity set (sorted); a different profile's package set yields a
 // different agent image — replacing the old hardcoded ENABLE_CLAUDE_CODE/PI=true (specs/0058 N1).
+// Recipe describes the dry-run image identity that profile show/lock can compute
+// without invoking a container engine or network. It mirrors agentImageTags.
+type Recipe struct {
+	BaseImage       string            `json:"baseImage"`
+	AgentImage      string            `json:"agentImage"`
+	RecipeID        string            `json:"recipeID"`
+	SourceBaseImage string            `json:"sourceBaseImage"`
+	BuildArgs       map[string]string `json:"buildArgs,omitempty"`
+}
+
 func agentImageTags(enabled []string) (baseImg, toolsImg string, toolsArgs []string, err error) {
-	baseDockerfile, err := readAsset("Dockerfile.agent")
+	recipe, err := ResolveRecipe(enabled)
 	if err != nil {
 		return "", "", nil, err
 	}
-	toolsDockerfile, err := readAsset("Dockerfile.agent.tools")
-	if err != nil {
-		return "", "", nil, err
-	}
-	baseImg = baseImageRepo + ":" + recipeID(baseDockerfile, nil)
-	buildArgs, err := toolsBuildArgs(baseImg, enabled)
-	if err != nil {
-		return "", "", nil, err
-	}
-	toolsImg = toolsImageRepo + ":" + recipeID(toolsDockerfile, buildArgs)
-	keys := make([]string, 0, len(buildArgs))
-	for k := range buildArgs {
+	keys := make([]string, 0, len(recipe.BuildArgs))
+	for k := range recipe.BuildArgs {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		toolsArgs = append(toolsArgs, k+"="+buildArgs[k])
+		toolsArgs = append(toolsArgs, k+"="+recipe.BuildArgs[k])
 	}
-	return baseImg, toolsImg, toolsArgs, nil
+	return recipe.BaseImage, recipe.AgentImage, toolsArgs, nil
+}
+
+// ResolveRecipe computes the content-addressed base + agent image tags for a resolved
+// package identity set, without building. It is the shared dry-run core for build,
+// profile show, and safeslop.lock.json.
+func ResolveRecipe(enabled []string) (*Recipe, error) {
+	baseDockerfile, err := readAsset("Dockerfile.agent")
+	if err != nil {
+		return nil, err
+	}
+	toolsDockerfile, err := readAsset("Dockerfile.agent.tools")
+	if err != nil {
+		return nil, err
+	}
+	baseImg := baseImageRepo + ":" + RecipeID(baseDockerfile, nil)
+	buildArgs, err := toolsBuildArgs(baseImg, enabled)
+	if err != nil {
+		return nil, err
+	}
+	toolsID := RecipeID(toolsDockerfile, buildArgs)
+	return &Recipe{
+		BaseImage:       baseImg,
+		AgentImage:      toolsImageRepo + ":" + toolsID,
+		RecipeID:        toolsID,
+		SourceBaseImage: GoldenBaseSourceImage,
+		BuildArgs:       buildArgs,
+	}, nil
 }

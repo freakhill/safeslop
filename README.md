@@ -59,7 +59,11 @@ safeslop doctor
 ```text
 safeslop validate [safeslop.cue]    check against the embedded schema
 safeslop list [safeslop.cue]        list profiles and resolved tiers
-safeslop profile list|presets --output json   profiles + preset library as the JSON contract
+safeslop catalog list [--bundles] --output json   curated package catalog for UIs
+safeslop profile list|presets --output json       profiles + preset library as the JSON contract
+safeslop profile create --name N --agent A --environment E [--bundle B] [--package P] --output json
+safeslop profile show <name> --output json         profile + resolved packages + image recipe
+safeslop lock [profile] --output json              write repo-root safeslop.lock.json
 safeslop trust [safeslop.cue]       approve this policy's exact bytes
 safeslop run <profile> [--dry-run]  launch a trusted profile
 safeslop session create --agent <pi|claude|claude-code> --workspace <dir> --output json
@@ -132,10 +136,12 @@ safeslop: {
 	version: 1
 	profiles: {
 		work: {
-			agent:       "claude"          // "claude" | "claude-code" | "pi"
+			agent:       "claude"          // "claude" | "claude-code" | "pi" | "fish" | "zsh"
 			environment: "container"       // "host" | "container"  (required)
 			network:     "deny"            // "deny" | "allow"
 			workspace:   "."
+			bundles:     ["base-tools"]
+			packages:    ["pnpm"]
 			egress:      [".internal.example.com"]
 
 			secrets: {
@@ -177,6 +183,12 @@ safeslop: {
 `agent: "claude-code"` is accepted as a user-facing alias for Claude Code and is
 normalized to the canonical `claude` engine value, so it launches the same
 `claude` binary and is reported as `claude` in status output.
+
+`bundles` and `packages` select build-time packages from the curated catalog. Use
+`safeslop catalog list --output json` or `safeslop catalog list --bundles --output
+json` to inspect available entries; `profile show` reports the resolved package
+set and dry-run image `recipeID` without building. `safeslop lock [profile]
+--output json` writes the repo-root `safeslop.lock.json` for review/commit.
 
 ### Trust model
 
