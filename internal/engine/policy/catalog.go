@@ -35,14 +35,33 @@ const (
 // never ship a fake-real digest (specs/0058 N2 honesty).
 const sha256Unresolved = "0000000000000000000000000000000000000000000000000000000000000000"
 
+// buildArches are the dpkg --print-architecture names safeslop builds agent images
+// for. A `binary` package must pin a sha256 per arch (its release tarball/binary is
+// multi-arch): the parametrized Dockerfile selects by `dpkg --print-architecture` and
+// verifies against the matching digest, so one image recipe builds correctly on both.
+var buildArches = []string{"amd64", "arm64"}
+
+// unresolvedSHA is the per-arch sentinel map for binary entries whose real digests are
+// still owed. BuildReady reports any package still carrying it (the build path refuses).
+func unresolvedSHA() map[string]string {
+	m := make(map[string]string, len(buildArches))
+	for _, a := range buildArches {
+		m[a] = sha256Unresolved
+	}
+	return m
+}
+
 // Package is one curated, safeslop-owned, pinned build-time install unit.
 type Package struct {
-	Name      string      `json:"name"`                // catalog key, e.g. "node", "claude-code"
-	Kind      PackageKind `json:"kind"`                //
-	Version   string      `json:"version"`             // PINNED — never a floating tag
-	SHA256    string      `json:"sha256,omitempty"`    // required (64-hex) for kind "binary"
-	Requires  []string    `json:"requires,omitempty"`  // other package names pulled into the closure
-	Conflicts []string    `json:"conflicts,omitempty"` // packages that must not be co-enabled
+	Name    string      `json:"name"`    // catalog key, e.g. "node", "claude-code"
+	Kind    PackageKind `json:"kind"`    //
+	Version string      `json:"version"` // PINNED — never a floating tag
+	// SHA256 is the per-arch content digest, keyed by dpkg --print-architecture name
+	// ("amd64", "arm64"). REQUIRED for kind "binary" — one 64-hex digest per build arch,
+	// because release binaries are multi-arch (specs/0058 N1/N2).
+	SHA256    map[string]string `json:"sha256,omitempty"`
+	Requires  []string          `json:"requires,omitempty"`  // other package names pulled into the closure
+	Conflicts []string          `json:"conflicts,omitempty"` // packages that must not be co-enabled
 	// BuildFetch lists domains the BUILD fetches from. Provenance/audit only — NOT
 	// enforced (the build does not traverse squid); a seed for a future build-proxy
 	// (specs/0058 N2).
@@ -65,25 +84,30 @@ type Bundle struct {
 // the IW2-resolved sentinel for now (see sha256Unresolved). Keep entries sorted by
 // name for readability.
 var catalogPackages = []Package{
-	{Name: "bun", Kind: KindBinary, Version: "1.1.38", SHA256: sha256Unresolved,
+	{Name: "bun", Kind: KindBinary, Version: "1.1.38", SHA256: unresolvedSHA(),
 		BuildFetch: []string{"github.com"}}, // provides bunx
 	{Name: "claude-code", Kind: KindNpm, Version: "2.1.121", Requires: []string{"node"},
 		BuildFetch: []string{"registry.npmjs.org"}, RuntimeEgress: []string{".anthropic.com"}},
-	{Name: "fd", Kind: KindBinary, Version: "10.2.0", SHA256: sha256Unresolved,
+	{Name: "fd", Kind: KindBinary, Version: "10.2.0", SHA256: unresolvedSHA(),
 		BuildFetch: []string{"github.com"}},
-	{Name: "mise", Kind: KindBinary, Version: "2026.6.11", SHA256: sha256Unresolved,
+	{Name: "mise", Kind: KindBinary, Version: "2026.6.11", SHA256: unresolvedSHA(),
 		BuildFetch: []string{"github.com"}},
-	{Name: "node", Kind: KindBinary, Version: "22.17.0", SHA256: sha256Unresolved,
-		BuildFetch: []string{"nodejs.org"}}, // provides npm
+	// node — official multi-arch tarball, sha256-verified per arch (digests from
+	// nodejs.org/dist/v22.23.1/SHASUMS256.txt; amd64 == the x64 tarball). Provides npm,
+	// which claude-code/pi/pnpm require.
+	{Name: "node", Kind: KindBinary, Version: "22.23.1", SHA256: map[string]string{
+		"amd64": "9749e988f437343b7fa832c69ded82a312e41a03116d766797ac14f6f9eee578",
+		"arm64": "0294e8b915ab75f92c7513d2fcb830ae06e10684e6c603e99a87dbf8835389c1",
+	}, BuildFetch: []string{"nodejs.org"}},
 	{Name: "pi", Kind: KindNpm, Version: "0.80.2", Requires: []string{"node"},
 		BuildFetch: []string{"registry.npmjs.org"}},
 	{Name: "pnpm", Kind: KindNpm, Version: "9.15.0", Requires: []string{"node"},
 		BuildFetch: []string{"registry.npmjs.org"}},
 	{Name: "python3", Kind: KindApt, Version: "3.11",
 		BuildFetch: []string{"deb.debian.org", "snapshot.debian.org"}},
-	{Name: "ripgrep", Kind: KindBinary, Version: "14.1.1", SHA256: sha256Unresolved,
+	{Name: "ripgrep", Kind: KindBinary, Version: "14.1.1", SHA256: unresolvedSHA(),
 		BuildFetch: []string{"github.com"}},
-	{Name: "uv", Kind: KindBinary, Version: "0.5.11", SHA256: sha256Unresolved,
+	{Name: "uv", Kind: KindBinary, Version: "0.5.11", SHA256: unresolvedSHA(),
 		BuildFetch: []string{"astral.sh", "github.com"}},
 }
 
@@ -158,6 +182,10 @@ func (c *Catalog) Bundles() []Bundle {
 // DefaultBundle returns the bundle name implied by selecting agent, or "" if none.
 func (c *Catalog) DefaultBundle(agent string) string { return c.defaults[NormalizeAgent(agent)] }
 
+// Lookup returns the catalog package named name (the build path reads its pinned
+// version + per-arch digests to emit deterministic build args).
+func (c *Catalog) Lookup(name string) (Package, bool) { p, ok := c.pkgIdx[name]; return p, ok }
+
 // Validate checks that the catalog is internally consistent: unique names, valid
 // kinds, pinned versions, binary digests present, requires/conflicts/bundle/default
 // targets resolvable, no requires-cycle, and non-degenerate egress globs. It is the
@@ -180,8 +208,16 @@ func (c *Catalog) Validate() error {
 		if p.Version == "" {
 			return fmt.Errorf("catalog: package %q has no pinned version", p.Name)
 		}
-		if p.Kind == KindBinary && !isHex64(p.SHA256) {
-			return fmt.Errorf("catalog: binary package %q needs a 64-hex sha256 (got %q)", p.Name, p.SHA256)
+		if p.Kind == KindBinary {
+			for _, a := range buildArches {
+				digest, ok := p.SHA256[a]
+				if !ok {
+					return fmt.Errorf("catalog: binary package %q is missing a %s sha256", p.Name, a)
+				}
+				if !isHex64(digest) {
+					return fmt.Errorf("catalog: binary package %q needs a 64-hex %s sha256 (got %q)", p.Name, a, digest)
+				}
+			}
 		}
 		for _, r := range p.Requires {
 			if _, ok := c.pkgIdx[r]; !ok {
@@ -226,13 +262,49 @@ func (c *Catalog) Validate() error {
 	return nil
 }
 
-// BuildReady reports the binary packages whose digest is still the IW2 sentinel. The
-// build path (IW2) must refuse to build while this is non-empty; IW1 only models them.
+// BuildReady reports the binary packages whose digest is still the IW2 sentinel for
+// any build arch. The build path must refuse to build a package while it is pending —
+// callers gate on it (specs/0058 N2 honesty: never build against an unpinned binary).
 func (c *Catalog) BuildReady() []string {
 	var pending []string
 	for _, p := range c.pkgs {
-		if p.Kind == KindBinary && p.SHA256 == sha256Unresolved {
-			pending = append(pending, p.Name)
+		if p.Kind != KindBinary {
+			continue
+		}
+		for _, a := range buildArches {
+			if p.SHA256[a] == sha256Unresolved {
+				pending = append(pending, p.Name)
+				break
+			}
+		}
+	}
+	sort.Strings(pending)
+	return pending
+}
+
+// PackagePending reports whether package name is a binary still carrying the sentinel
+// digest for some build arch (so its image must not be built). Unknown names are not
+// pending. Used by the build path to gate the resolved set (specs/0058 N2).
+func (c *Catalog) PackagePending(name string) bool {
+	p, ok := c.pkgIdx[name]
+	if !ok || p.Kind != KindBinary {
+		return false
+	}
+	for _, a := range buildArches {
+		if p.SHA256[a] == sha256Unresolved {
+			return true
+		}
+	}
+	return false
+}
+
+// BuildReadyFor reports the binary packages within names (a resolved set) that are
+// still pending real digests — the build path's gate for a specific profile.
+func (c *Catalog) BuildReadyFor(names []string) []string {
+	var pending []string
+	for _, n := range names {
+		if c.PackagePending(n) {
+			pending = append(pending, n)
 		}
 	}
 	sort.Strings(pending)

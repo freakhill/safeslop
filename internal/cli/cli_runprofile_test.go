@@ -112,7 +112,7 @@ func TestRunProfileCtxContainerForwardsSupervisorPTY(t *testing.T) {
 
 	var gotSpec engexec.LaunchSpec
 	old := containerLaunch
-	containerLaunch = func(_ context.Context, spec engexec.LaunchSpec, _, _ string, _, _ []string, _ string) (int, error) {
+	containerLaunch = func(_ context.Context, spec engexec.LaunchSpec, _, _ string, _, _ []string, _ string, _ []string) (int, error) {
 		gotSpec = spec
 		return 0, nil
 	}

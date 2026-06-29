@@ -13,7 +13,7 @@ import (
 
 func TestLaunchRejectsWhenUnavailable(t *testing.T) {
 	t.Setenv("PATH", "")
-	_, err := Launch(context.Background(), exec.LaunchSpec{Argv: []string{"fish"}}, t.TempDir(), "deny", nil, nil, t.TempDir())
+	_, err := Launch(context.Background(), exec.LaunchSpec{Argv: []string{"fish"}}, t.TempDir(), "deny", nil, nil, t.TempDir(), nil)
 	if err == nil {
 		t.Fatal("expected error when docker unavailable")
 	}

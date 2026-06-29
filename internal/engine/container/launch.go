@@ -99,7 +99,7 @@ func composeAllowlist(base []byte, extra []string) []byte {
 // interactive argv that runs the agent (`docker compose run --rm agent <argv>`) plus the compose
 // file path (for teardown).
 // secretEnv is written to secrets.env and sourced by the entrypoint.
-func provision(ctx context.Context, agentArgv []string, workspace, network string, egress []string, secretEnv []string, stageDir string) (argv []string, composeFile string, eng runtime.Engine, err error) {
+func provision(ctx context.Context, agentArgv []string, workspace, network string, egress []string, secretEnv []string, stageDir string, enabled []string) (argv []string, composeFile string, eng runtime.Engine, err error) {
 	if len(agentArgv) == 0 {
 		return nil, "", nil, exec.ErrNoArgv
 	}
@@ -159,7 +159,7 @@ func provision(ctx context.Context, agentArgv []string, workspace, network strin
 	}
 	_, gitConfigErr := os.Stat(filepath.Join(stageDir, gitConfigName))
 	_, gitSSHConfigErr := os.Stat(filepath.Join(stageDir, ".ssh", "config.container"))
-	_, toolsImg, _, err := agentImageTags()
+	_, toolsImg, _, err := agentImageTags(enabled)
 	if err != nil {
 		return nil, "", nil, err
 	}
@@ -181,7 +181,7 @@ func provision(ctx context.Context, agentArgv []string, workspace, network strin
 	if err != nil {
 		return nil, "", nil, err
 	}
-	if err := Up(ctx, eng, stageDir, composeFile); err != nil {
+	if err := Up(ctx, eng, stageDir, composeFile, enabled); err != nil {
 		return nil, "", nil, err
 	}
 	return composeRunArgv(eng, composeFile, agentArgv), composeFile, eng, nil
@@ -192,8 +192,10 @@ func provision(ctx context.Context, agentArgv []string, workspace, network strin
 // of host `ps` and `docker inspect`. stageDir is the host .safeslop/runtime/<profile> dir (already
 // holds .npmrc when pnpm creds were staged); it is bind-mounted ro at /safeslop/runtime and wiped
 // on exit by the caller. The agent runs interactively through a PTY (design §6.2).
-func Launch(ctx context.Context, spec exec.LaunchSpec, workspace, network string, egress []string, secretEnv []string, stageDir string) (int, error) {
-	argv, _, _, err := provision(ctx, spec.Argv, workspace, network, egress, secretEnv, stageDir)
+// enabled is the profile's resolved package identity set (specs/0058): it selects the agent
+// image (ENABLE_<pkg> build args) so a profile gets exactly the tools it declared.
+func Launch(ctx context.Context, spec exec.LaunchSpec, workspace, network string, egress []string, secretEnv []string, stageDir string, enabled []string) (int, error) {
+	argv, _, _, err := provision(ctx, spec.Argv, workspace, network, egress, secretEnv, stageDir, enabled)
 	if err != nil {
 		return 1, err
 	}
