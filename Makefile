@@ -14,7 +14,7 @@ CONTAINER_SRC := library/layer/container
 CONTAINER_DST := internal/engine/container/assets
 SYNCED        := allowlist.domains Dockerfile.agent Dockerfile.agent.tools
 
-.PHONY: build test test-emacs vet fmt fmtcheck check check-assets check-pivot-denylist sync-container-assets install install-emacs install-mcp dist clean
+.PHONY: build test test-emacs vet fmt fmtcheck check check-assets check-catalog-sync check-pivot-denylist sync-container-assets render-catalog install install-emacs install-mcp dist clean
 
 ## Build the local binary (static — no cgo, immune to the WARP/uv install path).
 build:
@@ -53,11 +53,24 @@ check-assets:
 	@diff -q $(CONTAINER_SRC)/agent-tools.env.example $(CONTAINER_DST)/agent-tools.env >/dev/null || { \
 	  echo "drift: agent-tools.env (run 'make sync-container-assets')"; exit 1; }
 
+## Render the authored catalog.cue into the embedded catalog.json (specs/0059 W2).
+## In-process cuelang (no external `cue` binary); validates against schema/catalog.cue.
+render-catalog:
+	go run ./internal/engine/policy/cmd/rendercatalog
+
+## Fail CI if catalog.cue and the committed catalog.json have drifted (mirrors
+## check-assets): the embedded artifact must always be the render of the source.
+check-catalog-sync:
+	@tmp=$$(mktemp); \
+	go run ./internal/engine/policy/cmd/rendercatalog $$tmp >/dev/null 2>&1 || { echo "render failed"; rm -f $$tmp; exit 1; }; \
+	diff -q internal/engine/policy/catalog.json $$tmp >/dev/null || { echo "drift: catalog.json (run 'make render-catalog')"; rm -f $$tmp; exit 1; }; \
+	rm -f $$tmp
+
 ## The full local gate, mirrored by .github/workflows/go.yml.
 check-pivot-denylist:
 	ci/pivot-denylist.sh
 
-check: check-assets check-pivot-denylist vet fmtcheck test test-emacs
+check: check-assets check-catalog-sync check-pivot-denylist vet fmtcheck test test-emacs
 
 install-emacs:
 	mkdir -p "$(HOME)/.local/share/safeslop/emacs"
