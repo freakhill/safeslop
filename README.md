@@ -202,6 +202,29 @@ json` to inspect available entries; `profile show` reports the resolved package
 set and dry-run image `recipeID` without building. `safeslop lock [profile]
 --output json` writes the repo-root `safeslop.lock.json` for review/commit.
 
+The curated bundles (`catalog list --bundles`) cover common toolchains. Declaring a
+bundle pulls in its packages' `requires`-closure in topological install order and
+unions each package's runtime egress into the squid allowlist (never relaxing
+default-deny):
+
+| bundle | packages | for |
+|---|---|---|
+| `base-tools` | ripgrep, fd, bat, eza, fzf, zoxide | everyday CLI ergonomics |
+| `claude` | node, claude-code | the `claude` agent (its default) |
+| `go` | go | Go toolchain (module proxy + checksum DB egress) |
+| `node` | node, pnpm, bun | JS/TS work |
+| `personal` | CLI ergonomics + node/python/go/rust toolchains + hyperfine/tokei/sccache | daily-driver multi-language set |
+| `pi` | node, pi | the `pi` agent (its default) |
+| `python` | python3, uv, ruff | Python work |
+| `rust` | rust + cargo-nextest/audit/deny/expand/make/watch + sccache | Rust toolchain + cargo subcommands |
+| `rust-embedded` | rust, cargo-binutils, flip-link | no_std / embedded targets |
+| `web` | node, pnpm, typescript, vite, eslint, prettier, web-ext | JS/TS web development |
+
+Catalog packages and bundles are safeslop-owned, version- and (for `binary` kinds)
+per-arch sha256-pinned; extending the catalog is a code edit + review, which is the
+supply-chain review boundary. The package-version selection and bump policy that
+governs which pin lands is canonized in `specs/research/2026-06-30-version-policy-flo.md`.
+
 `safeslop session create --profile <name> --output json` creates an Emacs-visible
 session from an existing `safeslop.cue` profile: it uses the profile's agent,
 environment, network, and workspace, resolves its catalog package set, and includes
@@ -209,6 +232,36 @@ environment, network, and workspace, resolves its catalog package set, and inclu
 profile-backed path opens `*safeslop session progress*` so slow first-use image
 build logs stream live and end with the subprocess exit status. The ad-hoc
 `--agent` form remains available for one-off sessions.
+
+### Starter profiles (presets)
+
+safeslop ships a small library of known-good starting points so you don't write a
+`safeslop.cue` from scratch. List them as the JSON contract:
+
+```bash
+safeslop profile presets --output json
+```
+
+Each preset is a complete, validated `safeslop.cue` with a one-line description:
+
+| preset | what it gives you |
+|---|---|
+| `claude-container-allowlist` | Claude Code in a container, default-allowlist egress (the safe default). |
+| `claude-subscription-container` | Same, but authenticated with your Claude **subscription** token (not an API key). |
+| `claude-host-unconfined` | Claude Code on the host — **no isolation**; convenient, not contained. |
+| `pi-container-allowlist` | The `pi` agent in a container, default-allowlist egress. |
+| `shell-container` | A plain `fish` shell in a container — a sandboxed shell, no coding agent. |
+
+The Emacs Profiles surface (`C-c s F`) is a list of your `safeslop.cue` profiles
+with ergonomic CRUD keys: `RET`/`i` inspect a profile's resolved packages, egress,
+and image recipe (read-only, no file edit); `e` opens the CUE file jumped to that
+profile's block; `n` creates one with structured prompts (the name is validated and
+overwriting an existing profile is confirmed); `c` clones the row at point (only a
+new name is required); `d` guides deletion (pick the target, confirm, then remove
+the block by hand); `S` sorts; `g` refreshes. Creating is backed by the
+catalog/bundle lists and routes through `profile create`, while CUE stays the stored
+source of truth. This repo also dogfoods a checked-in `safeslop.cue` with `default`,
+`pi`, and `shell` profiles so the Profiles surface has useful local rows immediately.
 
 ### Trust model
 
