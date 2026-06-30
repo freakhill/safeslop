@@ -19,23 +19,45 @@ func TestProfilePresetsEnvelope(t *testing.T) {
 	if !ok {
 		t.Fatalf("data.presets is not an array: %#v", env.Data)
 	}
-	if len(presets) != 3 {
-		t.Fatalf("got %d presets, want 3", len(presets))
+	if len(presets) != 5 {
+		t.Fatalf("got %d presets, want 5", len(presets))
 	}
-	names := map[string]bool{}
+	seen := map[string]bool{}
+	var names []string
 	for _, p := range presets {
 		m, ok := p.(map[string]any)
 		if !ok {
 			t.Fatalf("preset entry is not an object: %#v", p)
 		}
-		names[m["name"].(string)] = true
+		name, ok := m["name"].(string)
+		if !ok || name == "" {
+			t.Fatalf("preset carries empty/non-string name: %#v", m)
+		}
+		if seen[name] {
+			t.Fatalf("duplicate preset name %q", name)
+		}
+		seen[name] = true
+		names = append(names, name)
 		if m["cue"] == "" {
 			t.Fatalf("preset %v carries empty cue", m["name"])
 		}
+		if m["description"] == "" {
+			t.Fatalf("preset %v carries empty description", m["name"])
+		}
 	}
-	for _, want := range []string{"claude-container-allowlist", "claude-host-unconfined"} {
-		if !names[want] {
-			t.Fatalf("missing preset %q in %v", want, names)
+	wantNames := []string{
+		"claude-container-allowlist",
+		"claude-host-unconfined",
+		"claude-subscription-container",
+		"pi-container-allowlist",
+		"shell-container",
+	}
+	if len(names) != len(wantNames) {
+		t.Fatalf("got names %v, want %v", names, wantNames)
+	}
+	for i, want := range wantNames {
+		if names[i] != want {
+			t.Fatalf("preset names/order = %v, want %v", names, wantNames)
 		}
 	}
 }
