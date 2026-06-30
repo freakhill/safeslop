@@ -146,3 +146,101 @@ safeslop: profiles: dev: {agent: "claude", environment: "container", bundles: ["
 		t.Errorf("Resolve(dev): %v", err)
 	}
 }
+
+// The rust bundle pulls in the rust toolchain plus cargo subcommands, each of which
+// `Requires: ["rust"]`. The closure must install rust BEFORE every cargo-* (topological
+// order) and union rust's runtime egress (.crates.io, static.rust-lang.org) into the
+// squid allowlist — without relaxing default-deny elsewhere.
+func TestResolveRustBundle(t *testing.T) {
+	r, err := Resolve(Profile{Agent: "fish", Environment: "container", Bundles: []string{"rust"}})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if want := []string{
+		"cargo-audit", "cargo-deny", "cargo-expand", "cargo-make",
+		"cargo-nextest", "cargo-watch", "rust", "sccache",
+	}; !reflect.DeepEqual(r.IdentitySet, want) {
+		t.Errorf("IdentitySet = %v, want %v", r.IdentitySet, want)
+	}
+	// rust must precede every cargo-* in install order (it is their requires-target).
+	rustAt := indexOf(r.Packages, "rust")
+	if rustAt < 0 {
+		t.Fatalf("rust missing from install order %v", r.Packages)
+	}
+	for _, cargo := range []string{"cargo-nextest", "cargo-audit", "cargo-deny", "cargo-expand", "cargo-make", "cargo-watch"} {
+		if i := indexOf(r.Packages, cargo); i < 0 || i < rustAt {
+			t.Errorf("%q must install after rust; order = %v", cargo, r.Packages)
+		}
+	}
+	if want := []string{".crates.io", "static.rust-lang.org"}; !reflect.DeepEqual(r.RuntimeEgress, want) {
+		t.Errorf("RuntimeEgress = %v, want %v", r.RuntimeEgress, want)
+	}
+}
+
+// The web bundle is a node-rooted closure: every JS/TS tool Requires node, so node
+// installs first and the identity set dedupes to the bundle's seven names. None of the
+// JS dev tools declare runtime egress, so the union is empty (default-deny untouched).
+func TestResolveWebBundle(t *testing.T) {
+	r, err := Resolve(Profile{Agent: "fish", Environment: "container", Bundles: []string{"web"}})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if want := []string{"eslint", "node", "pnpm", "prettier", "typescript", "vite", "web-ext"}; !reflect.DeepEqual(r.IdentitySet, want) {
+		t.Errorf("IdentitySet = %v, want %v", r.IdentitySet, want)
+	}
+	if indexOf(r.Packages, "node") != 0 {
+		t.Errorf("node must install first (required by every other web tool); order = %v", r.Packages)
+	}
+	if len(r.RuntimeEgress) != 0 {
+		t.Errorf("web tools declare no runtime egress; got %v", r.RuntimeEgress)
+	}
+}
+
+// The go bundle is a single self-contained toolchain whose runtime egress (module
+// proxy + checksum DB) must union into the allowlist as scoped exact hosts.
+func TestResolveGoBundleEgress(t *testing.T) {
+	r, err := Resolve(Profile{Agent: "fish", Environment: "container", Bundles: []string{"go"}})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if want := []string{"go"}; !reflect.DeepEqual(r.Packages, want) {
+		t.Errorf("Packages = %v, want %v", r.Packages, want)
+	}
+	if want := []string{"proxy.golang.org", "sum.golang.org"}; !reflect.DeepEqual(r.RuntimeEgress, want) {
+		t.Errorf("RuntimeEgress = %v, want %v", r.RuntimeEgress, want)
+	}
+}
+
+// The personal bundle is the large daily-driver set spanning four language ecosystems.
+// Its identity set must dedupe to exactly its declared names (pnpm requires node, both
+// listed); node must precede pnpm; and the egress union is just go+rust (the only two
+// language runtimes that fetch at runtime).
+func TestResolvePersonalBundle(t *testing.T) {
+	r, err := Resolve(Profile{Agent: "fish", Environment: "container", Bundles: []string{"personal"}})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if want := []string{
+		"bat", "eza", "fd", "fzf", "go", "hyperfine", "node", "pnpm",
+		"python3", "ripgrep", "ruff", "rust", "sccache", "tokei", "uv", "yq", "zoxide",
+	}; !reflect.DeepEqual(r.IdentitySet, want) {
+		t.Errorf("IdentitySet = %v, want %v", r.IdentitySet, want)
+	}
+	if nodeAt, pnpmAt := indexOf(r.Packages, "node"), indexOf(r.Packages, "pnpm"); nodeAt < 0 || pnpmAt < 0 || pnpmAt < nodeAt {
+		t.Errorf("pnpm must install after node (pnpm requires node); order = %v", r.Packages)
+	}
+	if want := []string{".crates.io", "proxy.golang.org", "static.rust-lang.org", "sum.golang.org"}; !reflect.DeepEqual(r.RuntimeEgress, want) {
+		t.Errorf("RuntimeEgress = %v, want %v", r.RuntimeEgress, want)
+	}
+}
+
+// indexOf returns the index of s in xs, or -1. Used by the bundle-closure tests above
+// for topological-order assertions without importing sort.
+func indexOf(xs []string, s string) int {
+	for i, x := range xs {
+		if x == s {
+			return i
+		}
+	}
+	return -1
+}

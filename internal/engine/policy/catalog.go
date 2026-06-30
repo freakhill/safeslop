@@ -82,19 +82,56 @@ type Bundle struct {
 
 // catalogPackages is the v1 curated catalog. Versions are pinned; binary digests are
 // the IW2-resolved sentinel for now (see sha256Unresolved). Keep entries sorted by
-// name for readability.
+// name for readability. runtimeEgress is declared ONLY where the package's core
+// runtime function is a network fetch that cannot be served from baked artifacts —
+// scoped FQDNs/subdomains, never over-wide (specs/0058 N2: union-only, never relaxes
+// default-deny). Pure CLI tools and offline-capable runtimes carry none.
 var catalogPackages = []Package{
+	{Name: "bat", Kind: KindBinary, Version: "0.25.0", SHA256: unresolvedSHA(),
+		BuildFetch: []string{"github.com"}},
 	{Name: "bun", Kind: KindBinary, Version: "1.1.38", SHA256: unresolvedSHA(),
 		BuildFetch: []string{"github.com"}}, // provides bunx
+	// cargo-* subcommands all require the rust toolchain; their closure always pulls
+	// rust in, so the rust ecosystem egress unions into any profile that uses one.
+	{Name: "cargo-audit", Kind: KindBinary, Version: "0.21.2", SHA256: unresolvedSHA(),
+		Requires: []string{"rust"}, BuildFetch: []string{"github.com"}},
+	{Name: "cargo-binutils", Kind: KindBinary, Version: "0.3.6", SHA256: unresolvedSHA(),
+		Requires: []string{"rust"}, BuildFetch: []string{"github.com"}},
+	{Name: "cargo-deny", Kind: KindBinary, Version: "0.18.2", SHA256: unresolvedSHA(),
+		Requires: []string{"rust"}, BuildFetch: []string{"github.com"}},
+	{Name: "cargo-expand", Kind: KindBinary, Version: "1.0.110", SHA256: unresolvedSHA(),
+		Requires: []string{"rust"}, BuildFetch: []string{"github.com"}},
+	{Name: "cargo-make", Kind: KindBinary, Version: "0.37.26", SHA256: unresolvedSHA(),
+		Requires: []string{"rust"}, BuildFetch: []string{"github.com"}},
+	{Name: "cargo-nextest", Kind: KindBinary, Version: "0.9.98", SHA256: unresolvedSHA(),
+		Requires: []string{"rust"}, BuildFetch: []string{"github.com"}},
+	{Name: "cargo-watch", Kind: KindBinary, Version: "8.5.4", SHA256: unresolvedSHA(),
+		Requires: []string{"rust"}, BuildFetch: []string{"github.com"}},
 	{Name: "claude-code", Kind: KindNpm, Version: "2.1.121", Requires: []string{"node"},
 		BuildFetch: []string{"registry.npmjs.org"}, RuntimeEgress: []string{".anthropic.com"}},
+	{Name: "eza", Kind: KindBinary, Version: "0.21.1", SHA256: unresolvedSHA(),
+		BuildFetch: []string{"github.com"}},
+	{Name: "eslint", Kind: KindNpm, Version: "9.22.0", Requires: []string{"node"},
+		BuildFetch: []string{"registry.npmjs.org"}},
 	{Name: "fd", Kind: KindBinary, Version: "10.2.0", SHA256: unresolvedSHA(),
+		BuildFetch: []string{"github.com"}},
+	{Name: "flip-link", Kind: KindBinary, Version: "0.1.12", SHA256: unresolvedSHA(),
+		Requires: []string{"rust"}, BuildFetch: []string{"github.com"}},
+	{Name: "fzf", Kind: KindBinary, Version: "0.59.0", SHA256: unresolvedSHA(),
+		BuildFetch: []string{"github.com"}},
+	// go — the Go toolchain. `go get`/`go build` fetch modules through the module
+	// proxy + checksum DB; both are scoped exact hosts (specs/0058 N2).
+	{Name: "go", Kind: KindBinary, Version: "1.26.0", SHA256: unresolvedSHA(),
+		BuildFetch:    []string{"go.dev"},
+		RuntimeEgress: []string{"proxy.golang.org", "sum.golang.org"}},
+	{Name: "hyperfine", Kind: KindBinary, Version: "1.19.0", SHA256: unresolvedSHA(),
 		BuildFetch: []string{"github.com"}},
 	{Name: "mise", Kind: KindBinary, Version: "2026.6.11", SHA256: unresolvedSHA(),
 		BuildFetch: []string{"github.com"}},
 	// node — official multi-arch tarball, sha256-verified per arch (digests from
 	// nodejs.org/dist/v22.23.1/SHASUMS256.txt; amd64 == the x64 tarball). Provides npm,
-	// which claude-code/pi/pnpm require.
+	// which claude-code/pi/pnpm and the JS/TS dev tools (eslint, prettier, typescript,
+	// vite, web-ext) require.
 	{Name: "node", Kind: KindBinary, Version: "22.23.1", SHA256: map[string]string{
 		"amd64": "9749e988f437343b7fa832c69ded82a312e41a03116d766797ac14f6f9eee578",
 		"arm64": "0294e8b915ab75f92c7513d2fcb830ae06e10684e6c603e99a87dbf8835389c1",
@@ -103,22 +140,64 @@ var catalogPackages = []Package{
 		BuildFetch: []string{"registry.npmjs.org"}},
 	{Name: "pnpm", Kind: KindNpm, Version: "9.15.0", Requires: []string{"node"},
 		BuildFetch: []string{"registry.npmjs.org"}},
+	{Name: "prettier", Kind: KindNpm, Version: "3.5.3", Requires: []string{"node"},
+		BuildFetch: []string{"registry.npmjs.org"}},
 	{Name: "python3", Kind: KindApt, Version: "3.11",
 		BuildFetch: []string{"deb.debian.org", "snapshot.debian.org"}},
 	{Name: "ripgrep", Kind: KindBinary, Version: "14.1.1", SHA256: unresolvedSHA(),
 		BuildFetch: []string{"github.com"}},
+	{Name: "ruff", Kind: KindBinary, Version: "0.11.0", SHA256: unresolvedSHA(),
+		BuildFetch: []string{"astral.sh", "github.com"}},
+	// rust — the rustc+cargo toolchain tarball. cargo fetches crates + the sparse index
+	// from *.crates.io and toolchain artifacts from static.rust-lang.org; the leading
+	// dot covers index/static (specs/0058 N2).
+	{Name: "rust", Kind: KindBinary, Version: "1.96.0", SHA256: unresolvedSHA(),
+		BuildFetch:    []string{"static.rust-lang.org"},
+		RuntimeEgress: []string{".crates.io", "static.rust-lang.org"}},
+	{Name: "rustup", Kind: KindBinary, Version: "1.28.0", SHA256: unresolvedSHA(),
+		BuildFetch: []string{"static.rust-lang.org"}},
+	{Name: "sccache", Kind: KindBinary, Version: "0.10.0", SHA256: unresolvedSHA(),
+		BuildFetch: []string{"github.com"}},
+	{Name: "tokei", Kind: KindBinary, Version: "13.0.0", SHA256: unresolvedSHA(),
+		BuildFetch: []string{"github.com"}},
+	{Name: "typescript", Kind: KindNpm, Version: "5.8.2", Requires: []string{"node"},
+		BuildFetch: []string{"registry.npmjs.org"}},
 	{Name: "uv", Kind: KindBinary, Version: "0.5.11", SHA256: unresolvedSHA(),
 		BuildFetch: []string{"astral.sh", "github.com"}},
+	{Name: "vite", Kind: KindNpm, Version: "6.3.5", Requires: []string{"node"},
+		BuildFetch: []string{"registry.npmjs.org"}},
+	{Name: "web-ext", Kind: KindNpm, Version: "8.5.0", Requires: []string{"node"},
+		BuildFetch: []string{"registry.npmjs.org"}},
+	{Name: "yq", Kind: KindBinary, Version: "4.45.4", SHA256: unresolvedSHA(),
+		BuildFetch: []string{"github.com"}},
+	{Name: "zoxide", Kind: KindBinary, Version: "0.9.8", SHA256: unresolvedSHA(),
+		BuildFetch: []string{"github.com"}},
 }
 
 // catalogBundles is the v1 set of premade bundles. `jq` is omitted from base-tools
-// because it ships in the golden base floor (specs/0058 N1).
+// because it ships in the golden base floor (specs/0058 N1). Keep entries sorted by
+// name for readability.
 var catalogBundles = []Bundle{
-	{Name: "base-tools", Description: "ripgrep + fd search tools", Packages: []string{"ripgrep", "fd"}},
-	{Name: "claude", Description: "Claude Code (Anthropic) + Node runtime", Packages: []string{"node", "claude-code"}},
-	{Name: "node", Description: "Node.js + pnpm + bun for JS/TS work", Packages: []string{"node", "pnpm", "bun"}},
-	{Name: "pi", Description: "pi coding agent + Node runtime", Packages: []string{"node", "pi"}},
-	{Name: "python", Description: "Python 3 + uv", Packages: []string{"python3", "uv"}},
+	{Name: "base-tools", Description: "everyday CLI ergonomics: ripgrep, fd, bat, eza, fzf, zoxide",
+		Packages: []string{"ripgrep", "fd", "bat", "eza", "fzf", "zoxide"}},
+	{Name: "claude", Description: "Claude Code (Anthropic) + Node runtime",
+		Packages: []string{"node", "claude-code"}},
+	{Name: "go", Description: "Go toolchain (compiler + module proxy egress)",
+		Packages: []string{"go"}},
+	{Name: "node", Description: "Node.js + pnpm + bun for JS/TS work",
+		Packages: []string{"node", "pnpm", "bun"}},
+	{Name: "personal", Description: "daily-driver multi-language set: CLI ergonomics + Node/Python/Go/Rust toolchains",
+		Packages: []string{"ripgrep", "fd", "bat", "eza", "fzf", "zoxide", "yq", "node", "pnpm", "python3", "uv", "ruff", "go", "rust", "hyperfine", "tokei", "sccache"}},
+	{Name: "pi", Description: "pi coding agent + Node runtime",
+		Packages: []string{"node", "pi"}},
+	{Name: "python", Description: "Python 3 + uv + ruff (linter/formatter)",
+		Packages: []string{"python3", "uv", "ruff"}},
+	{Name: "rust", Description: "Rust toolchain + common cargo subcommands",
+		Packages: []string{"rust", "cargo-nextest", "cargo-audit", "cargo-deny", "cargo-expand", "cargo-make", "cargo-watch", "sccache"}},
+	{Name: "rust-embedded", Description: "Rust for no_std / embedded targets (cargo-binutils, flip-link)",
+		Packages: []string{"rust", "cargo-binutils", "flip-link"}},
+	{Name: "web", Description: "JS/TS web development: TypeScript, Vite, ESLint, Prettier, web-ext",
+		Packages: []string{"node", "pnpm", "typescript", "vite", "eslint", "prettier", "web-ext"}},
 }
 
 // agentDefaultBundle maps an agent to the bundle implied by selecting it, so that

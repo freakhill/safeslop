@@ -149,3 +149,70 @@ func TestEgressTooWide(t *testing.T) {
 		}
 	}
 }
+
+// The catalog expansion (web/Rust/Go/personal) added packages across all four kinds
+// with requires-edges and scoped runtime egress. This pins the load-bearing shape so a
+// silent edit (dropping a Requires, widening an egress) fails the gate. Versions/digests
+// are intentionally NOT asserted here — those move on bumps; shape does not.
+func TestCatalogExpansionPackageShape(t *testing.T) {
+	c := DefaultCatalog()
+	cases := []struct {
+		name   string
+		kind   PackageKind
+		req    []string
+		egress []string
+	}{
+		{"cargo-nextest", KindBinary, []string{"rust"}, nil},
+		{"flip-link", KindBinary, []string{"rust"}, nil},
+		{"rust", KindBinary, nil, []string{".crates.io", "static.rust-lang.org"}},
+		{"go", KindBinary, nil, []string{"proxy.golang.org", "sum.golang.org"}},
+		{"eslint", KindNpm, []string{"node"}, nil},
+		{"web-ext", KindNpm, []string{"node"}, nil},
+		{"prettier", KindNpm, []string{"node"}, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p, ok := c.Lookup(tc.name)
+			if !ok {
+				t.Fatalf("missing catalog package %q", tc.name)
+			}
+			if p.Kind != tc.kind {
+				t.Errorf("%q kind = %q, want %q", tc.name, p.Kind, tc.kind)
+			}
+			if !reflectEq(p.Requires, tc.req) {
+				t.Errorf("%q requires = %v, want %v", tc.name, p.Requires, tc.req)
+			}
+			if !reflectEq(p.RuntimeEgress, tc.egress) {
+				t.Errorf("%q runtimeEgress = %v, want %v", tc.name, p.RuntimeEgress, tc.egress)
+			}
+		})
+	}
+}
+
+// Canon guard (specs/research/2026-06-30-version-policy-flo.md): every catalog egress
+// entry must be a scoped FQDN/subdomain — never `*` or a single label. A regression
+// here means a package silently opened default-deny wider than reviewed.
+func TestCatalogEgressIsScoped(t *testing.T) {
+	for _, p := range DefaultCatalog().Packages() {
+		for _, d := range append(append([]string(nil), p.BuildFetch...), p.RuntimeEgress...) {
+			if egressTooWide(d) {
+				t.Errorf("package %q has over-wide egress domain %q (catalog must carry scoped FQDNs only)", p.Name, d)
+			}
+		}
+	}
+}
+
+// reflectEq compares two string slices for order-sensitive equality without pulling
+// reflect into this file (the resolve tests use reflect.DeepEqual; here a tiny helper
+// keeps the catalog test self-contained).
+func reflectEq(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
