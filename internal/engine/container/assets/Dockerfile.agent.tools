@@ -13,6 +13,8 @@
 ARG BASE=local/safeslop-base:latest
 FROM ${BASE}
 
+LABEL safeslop.managed="true"
+
 # Installs write to /usr/local (root); the base image's default user is the unprivileged
 # `agent`. Switch to root for the build, then drop back to agent at the end.
 USER root

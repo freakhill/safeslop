@@ -16,6 +16,7 @@ type composeParams struct {
 	RuntimeDir    string
 	Workspace     string
 	StageDir      string
+	SessionID     string // stable label value for record-independent reap (session id, or profile name for direct run)
 	AgentImage    string // content-addressed agent image tag (local/safeslop-tools:<id>) -> compose image:
 	GitConfig     bool   // true when staged .gitconfig exists (GIT_CONFIG_GLOBAL -> bind-mount path)
 	GitConfigPath string // path to the in-boundary gitconfig, usually /safeslop/runtime/.gitconfig

@@ -367,14 +367,16 @@ to the operator's Doom config so the cockpit renders the agent TUIs in truecolor
 
 Goal: record-independent teardown via labels; a real `safeslop gc`.
 
-- [ ] **Label compose services for reap**
+- [x] **Label compose services for reap**
   FILE: `internal/engine/container/assets/compose.yml.tmpl` (proxy + agent services; embedded-only, no sync)
   CHANGE: add `labels:` with `safeslop.session: "{{.SessionID}}"` +
-  `safeslop.managed: "true"` to both services; add `SessionID` to composeParams.
-  VERIFY: `grep -c 'safeslop.session' internal/engine/container/assets/compose.yml.tmpl | grep -q 2`
+  `safeslop.managed: "true"` to both services and per-run host-created networks;
+  add `SessionID` to composeParams. The Lima global external internal network remains
+  backend-owned, not per-session-labelled.
+  VERIFY: `grep -c 'safeslop.session' internal/engine/container/assets/compose.yml.tmpl | grep -q 4`
   EXPECTED: exit 0.
 
-- [ ] **Add `container.ReapBySession`**
+- [x] **Add `container.ReapBySession`**
   FILE: `internal/engine/container/container.go`
   CHANGE: `func ReapBySession(ctx, eng runtime.Engine, sessionID string) error` —
   `ps -aq --filter label=safeslop.session=<id>`, then `rm -f` the ids (no-op on
@@ -383,14 +385,14 @@ Goal: record-independent teardown via labels; a real `safeslop gc`.
   the argv)
   EXPECTED: PASS.
 
-- [ ] **Add `Session.Backend`**
+- [x] **Add `Session.Backend`**
   FILE: `internal/engine/session/session.go` (`Session` struct, line 29)
   CHANGE: add `Backend string` (`"system"`|`"lima"`, additive; default `"system"`
   on create). Round-trips through `store.go` JSON automatically.
   VERIFY: `go test ./internal/engine/session/ -v`
   EXPECTED: PASS.
 
-- [ ] **Call `ReapBySession` on Stop / reconcile-dead / Down**
+- [x] **Call `ReapBySession` on Stop / reconcile-dead / Down**
   FILE: `internal/engine/session/session.go` (`Stop` line 248; `reconcile` callers
   220/237) + `internal/cli/cli.go` Down path
   CHANGE: on `Stop` and when reconcile finds the PID dead, reap by session id via
@@ -399,7 +401,7 @@ Goal: record-independent teardown via labels; a real `safeslop gc`.
   VERIFY: `go test ./internal/engine/session/ -run 'Stop|Reconcile' -v`
   EXPECTED: PASS.
 
-- [ ] **Startup sweep of managed orphans**
+- [x] **Startup sweep of managed orphans**
   FILE: `internal/cli/cli.go` (run/up entry)
   CHANGE: on run, sweep containers labelled `safeslop.managed=true` whose
   `safeslop.session` has no live record (reap the record-less ones — the Bug A
@@ -407,16 +409,16 @@ Goal: record-independent teardown via labels; a real `safeslop gc`.
   VERIFY: `go test ./internal/cli/ -run Sweep -v`
   EXPECTED: PASS.
 
-- [ ] **Add `safeslop gc`**
+- [x] **Add `safeslop gc`**
   FILE: `internal/cli/cli.go` (new `cmdGc`) + `library/layer/container/*` LABEL
-  CHANGE: add `LABEL safeslop.managed=true` to the Dockerfiles (so prune --filter
-  works; sync). `gc [--until <age>] [--keep <N>]` →
-  `image prune -f --filter label=safeslop.managed=true --filter until=<age>`, then
-  keep only the N most-recent managed images (LRU via `image ls` CreatedAt).
+  CHANGE: add `LABEL safeslop.managed=true` to the Dockerfiles (so managed images
+  are discoverable; sync). `gc [--until <age>] [--keep <N>]` lists managed images,
+  protects profile/lock/live-session anchors, then removes only the unreferenced
+  remainder (LRU via `image ls` CreatedAt; `--until` and `--keep` apply after anchors).
   VERIFY: `./safeslop gc --help` and `go test ./internal/cli/ -run Gc -v`
   EXPECTED: command exists; PASS.
 
-- [ ] **W3 gate**
+- [x] **W3 gate**
   VERIFY: `make check && make build`
   EXPECTED: exit 0.
 

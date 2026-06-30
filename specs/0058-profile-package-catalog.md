@@ -8,7 +8,7 @@ Supersedes **0055 W4** (minimal images + the narrow `#Tool` enum) and **0055 W6*
 Builds on `main` @ `9494fb7` (merged PR #83), which already carries **0055 W0–W2**
 (agent surface, recipe identity, terminal correctness) and the **VM-tier removal**
 (0057). Adopts the lockfile from **0056**.
-Leaves intact **0055 W3** (reap + GC, Bug A) — still unbuilt, carried here with one
+Leaves intact **0055 W3** (reap + GC, Bug A), now implemented after IW4 with the
 added GC contract (§N6).
 
 ## Why
@@ -332,12 +332,12 @@ No `image-matrix` prerequisite — it **already landed** (PR #83, `main` @ `9494
 - **IW3 — lockfile + CLI (N3, N4).** `safeslop.lock.json` + `safeslop lock`;
   `profile create` / `profile show` / `catalog list`.
 - **IW4 — Emacs create-UI + picker + portal columns (N5).** Absorbs 0055 W6.
-- **(carried) 0055 W3 — reap + GC (Bug A), with an added contract.** Independent of
-  IW1–IW4. **GC must be profile-anchored** (review S4/DeepSeek): never reap an image
+- **(done) 0055 W3 — reap + GC (Bug A), with an added contract.** Independent of
+  IW1–IW4. **GC is profile-anchored** (review S4/DeepSeek): it never reaps an image
   that is (a) the current `recipeID` of any successfully-resolving profile, (b)
   referenced by a committed `safeslop.lock.json`, or (c) attached to a live session;
   `keep-N`/`until` applies only to the unreferenced remainder. The per-package-set
-  image cardinality this design introduces makes that contract **non-optional**, not
+  image cardinality this design introduces made that contract **non-optional**, not
   a minor carry-over.
 
 ## Invariants (carried from 0053 / 0055 / 0056 / 0057)

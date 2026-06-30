@@ -93,6 +93,16 @@ func TestLaunchRegistered(t *testing.T) {
 	}
 }
 
+func TestGcCommandRegistered(t *testing.T) {
+	root := newRoot()
+	for _, c := range root.Commands() {
+		if c.Name() == "gc" {
+			return
+		}
+	}
+	t.Fatal("safeslop gc command missing")
+}
+
 func TestLaunchProfileRejectsBadName(t *testing.T) {
 	_, err := launchProfile("bad; rm -rf ~", "")
 	if err == nil || !strings.Contains(err.Error(), "invalid profile") {

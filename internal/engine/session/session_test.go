@@ -56,7 +56,7 @@ func TestStopSignalsSupervisorGroupAndRemovesSocket(t *testing.T) {
 
 	var killedWith int
 	killer := func(target int) error { killedWith = target; return nil }
-	if _, err := store.Stop(sess.ID, false, testNow(), func(Session) error { return nil }, killer); err != nil {
+	if _, err := store.Stop(sess.ID, false, testNow(), func(Session) error { return nil }, killer, nil); err != nil {
 		t.Fatalf("stop: %v", err)
 	}
 	if killedWith != -4242 {
@@ -78,7 +78,7 @@ func TestStopCoupledSignalsBarePID(t *testing.T) {
 	}
 	var killedWith int
 	if _, err := store.Stop(sess.ID, false, testNow(), func(Session) error { return nil },
-		func(target int) error { killedWith = target; return nil }); err != nil {
+		func(target int) error { killedWith = target; return nil }, nil); err != nil {
 		t.Fatalf("stop: %v", err)
 	}
 	if killedWith != 4242 {
@@ -126,11 +126,12 @@ func TestStoreStopRevokesBeforeKillAndIsIdempotent(t *testing.T) {
 	var order []string
 	revoke := func(Session) error { order = append(order, "revoke"); return nil }
 	kill := func(int) error { order = append(order, "kill"); return nil }
-	stopped, err := store.Stop(sess.ID, true, testNow(), revoke, kill)
+	reap := func(Session) error { order = append(order, "reap"); return nil }
+	stopped, err := store.Stop(sess.ID, true, testNow(), revoke, kill, reap)
 	if err != nil {
 		t.Fatalf("stop: %v", err)
 	}
-	if got, want := strings.Join(order, ","), "revoke,kill"; got != want {
+	if got, want := strings.Join(order, ","), "revoke,kill,reap"; got != want {
 		t.Fatalf("order = %s, want %s", got, want)
 	}
 	if stopped.Status != StatusStopped || !stopped.CredentialsRevoked {
@@ -138,11 +139,29 @@ func TestStoreStopRevokesBeforeKillAndIsIdempotent(t *testing.T) {
 	}
 
 	order = nil
-	if _, err := store.Stop(sess.ID, true, testNow(), revoke, kill); err != nil {
+	if _, err := store.Stop(sess.ID, true, testNow(), revoke, kill, reap); err != nil {
 		t.Fatalf("second stop: %v", err)
 	}
 	if len(order) != 0 {
 		t.Fatalf("second stop should be no-op, got %v", order)
+	}
+}
+
+func TestCreateDefaultsBackendSystem(t *testing.T) {
+	store := NewStore(t.TempDir())
+	sess, err := store.Create("claude", "container", t.TempDir(), testNow())
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if sess.Backend != "system" {
+		t.Fatalf("backend = %q, want system", sess.Backend)
+	}
+	stored, err := store.Get(sess.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if stored.Backend != "system" {
+		t.Fatalf("stored backend = %q, want system", stored.Backend)
 	}
 }
 
@@ -266,7 +285,7 @@ func TestStoreStopCanRevokeAlreadyStoppedUnrevokedSession(t *testing.T) {
 	}, func(int) error {
 		order = append(order, "kill")
 		return nil
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("stop: %v", err)
 	}

@@ -1,12 +1,18 @@
 services:
   proxy:
     image: ubuntu/squid:5.2-22.04_beta
+    labels:
+      safeslop.session: "{{.SessionID}}"
+      safeslop.managed: "true"
     volumes:
       - {{.RuntimeDir}}/squid.conf:/etc/squid/squid.conf:ro
       - {{.RuntimeDir}}/allowlist.domains:/etc/squid/allowlist.domains:ro
     networks: [internal, egress]
   agent:
     image: {{.AgentImage}}
+    labels:
+      safeslop.session: "{{.SessionID}}"
+      safeslop.managed: "true"
     working_dir: /workspace
     entrypoint: ["/bin/sh", "/safeslop/runtime/entrypoint.sh"]
     environment:
@@ -45,5 +51,11 @@ networks:
     external: true
     name: {{.InternalNet}}
 {{else}}    internal: true
+    labels:
+      safeslop.session: "{{.SessionID}}"
+      safeslop.managed: "true"
 {{end}}  egress:
+    labels:
+      safeslop.session: "{{.SessionID}}"
+      safeslop.managed: "true"
     driver: bridge
