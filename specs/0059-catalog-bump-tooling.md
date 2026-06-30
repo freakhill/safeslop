@@ -42,20 +42,30 @@ staleness, or manage bundles — every bump is a hand-edit with no guardrails.
 
 ## Pinned contracts (design decisions — do not re-litigate during execution)
 
-**D1 — catalog storage migrates to an embedded JSON file (the one new fork).**
-Today the catalog is a hand-written Go literal (`var catalogPackages = []Package{…}`)
-in `catalog.go`, with valuable inline provenance comments. A bump tool cannot robustly
-"mutate" a compiled-in Go literal without fragile AST surgery on every bump. Decision:
-the source of truth becomes `internal/engine/policy/catalog.json`, embedded via
-`go:embed` and loaded by `DefaultCatalog()`; provenance comments become a structured
-per-package `Note` field (machine-readable, rendered in plan sheets — strictly better
-than comments). The `Package`/`Catalog`/`Validate`/`Resolve`/`DefaultCatalog` **API and
-behaviour are unchanged** (DefaultCatalog returns the same Catalog; all existing tests
-stay green), so this is a reversible storage refactor, not a contract change. The
-supply-chain boundary is unchanged: editing `catalog.json` is still a code edit + review
-in the PR. (Considered + rejected: AST surgery on `catalog.go` — fiddly every bump,
-comment-preservation fragile; plan-sheet-only with manual apply — loses the "mutate"
-value the canon requires.)
+**D1 — catalog storage migrates to an authored `catalog.cue` that renders to an embedded
+`catalog.json` (the one new fork; user-directed refinement).** Today the catalog is a
+hand-written Go literal (`var catalogPackages = []Package{…}`) in `catalog.go`. A bump
+tool cannot robustly mutate a compiled-in Go literal without fragile AST surgery every
+bump, and a pure-JSON source would diverge from the repo's everything-is-CUE convention
+(`safeslop.cue`, `schema/schema.cue`, `presets/*.cue`). Decision: the source of truth is
+`internal/engine/policy/catalog.cue` — authored CUE, validated against a
+`#Catalog`/`#Package`/`#Bundle` schema (added to `schema/catalog.cue`), with provenance
+as a structured `note:` field per entry. A render step (`make render-catalog`, backed by
+the `cuelang.org/go` already in `go.mod`) compiles it to
+`internal/engine/policy/catalog.json`, which is committed and `go:embed`-ed; a
+`make check` sync check (mirroring the existing `check-assets` pattern) fails CI on
+catalog.cue↔catalog.json drift. `DefaultCatalog()` loads the embedded JSON, so the
+catalog stays off the hot CUE-eval path and runtime behaviour is unchanged. `bump`/`add`
+(W4) decode → mutate structs → re-emit BOTH `catalog.cue` (deterministic, via the cue lib)
+and `catalog.json`; both files move in lockstep, giving lockfile-clean diffs.
+Provenance comments become a structured `Note` field (rendered in plan sheets — strictly
+better than free-form comments). The `Package`/`Catalog`/`Validate`/`Resolve`/
+`DefaultCatalog` **API and behaviour are unchanged** (all existing tests stay green), so
+this is a reversible storage refactor, not a contract change; the supply-chain boundary
+is unchanged (editing `catalog.cue` is still a reviewed code edit). (Considered +
+rejected: AST surgery on `catalog.go`; pure-JSON source — diverges from repo CUE
+convention; plan-sheet-only with manual apply — loses the "mutate" value the canon
+requires.)
 
 **D2 — live fetch behind a `Fetcher` seam; hermetic tests inject fixtures.**
 ```go
