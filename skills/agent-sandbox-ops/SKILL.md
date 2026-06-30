@@ -61,6 +61,11 @@ safeslop list
 safeslop run review --dry-run
 ```
 
+In Emacs, `C-c s F` opens the Profiles surface. Use `RET`/`i` to inspect a
+profile's resolved packages/egress/recipe, `e` to edit the CUE at that profile's
+block, `n` to create, `c` to clone, `d` for guided manual deletion, `S` to sort,
+and `g` to refresh.
+
 ### Trust and launch
 
 ```bash

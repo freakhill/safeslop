@@ -16,6 +16,24 @@
 ;; (open the file at the block, remove it, re-validate) rather than a fragile
 ;; machine rewrite of the guard.  All slow calls are async (specs/0052 #7).  The
 ;; Env column reuses the portal's isolation-tier colouring.
+;;
+;; Ergonomics (CRUD), following mature Emacs list UIs (package.el, magit, dired,
+;; ibuffer):
+;;   - RET / i  inspect: a read-only detail view rendered from `profile show'
+;;     (resolved packages, egress, recipe/image/base) — the safe primary action.
+;;   - e        edit: open the CUE file, jumping to the profile's block.
+;;   - n        create: a prompt chain that validates the name up front and
+;;     confirms before clobbering an existing profile (the CLI is create-OR-
+;;     update); on success point lands on the new row.
+;;   - c        clone: prefill create from the row's full `profile show' data,
+;;     so a variant is one keystroke plus a new name.
+;;   - d        delete: completing-read the target (default: row at point),
+;;     confirm with a one-line summary, then open the file anchored at the block
+;;     and fail loudly if it cannot be found.
+;;   - S        sort columns; the empty state is persistent in-buffer guidance.
+;; Navigation to a profile in the CUE file anchors to the field-opening brace
+;; (`name: {'), not a loose word search that would also hit comments, string
+;; values, or bundle names.
 
 ;;; Code:
 
@@ -50,6 +68,12 @@ choice; the UI presents the canonical `claude' engine name.")
 
 (defconst safeslop-profiles--networks '("deny" "allow")
   "Profile-create network choices; deny remains the safe default.")
+
+(defconst safeslop-profiles--name-regexp "\\`[A-Za-z_][A-Za-z0-9_-]*\\'"
+  "Regexp a profile name must match to be offered to the CLI.
+A leading letter/underscore then letters, digits, underscores, or hyphens.  The
+CLI re-validates the rendered CUE, so this is the early, friendly gate (a wrong
+name is caught before the rest of the prompt chain), not the only one.")
 
 (defun safeslop-profiles--nonempty-list (values)
   "Return VALUES without empty strings or nils."
@@ -119,9 +143,197 @@ same on both surfaces."
                      (or (alist-get 'network p) "")))))
    (alist-get 'profiles data)))
 
+;;; ---- pure CRUD helpers (unit-tested) -------------------------------------
+
+(defun safeslop-profiles--valid-name-p (name)
+  "Return non-nil when NAME is an acceptable profile name (see name-regexp)."
+  (and (stringp name)
+       (string-match-p safeslop-profiles--name-regexp name)))
+
+(defun safeslop-profiles--names ()
+  "Return the names of the profiles currently listed in this buffer."
+  (mapcar #'car tabulated-list-entries))
+
+(defun safeslop-profiles--join (values)
+  "Render VALUES (a list of strings) as a comma list, or \"(none)\" if empty."
+  (if (and values (listp values))
+      (mapconcat #'identity values ", ")
+    "(none)"))
+
+(defun safeslop-profiles--row-summary (name)
+  "Return a one-line \"agent, env, net\" summary for listed profile NAME, or nil."
+  (let ((entry (assoc name tabulated-list-entries)))
+    (when entry
+      (let ((v (cadr entry)))
+        (format "%s, %s, %s"
+                (aref v 1)
+                (substring-no-properties (aref v 2))
+                (aref v 3))))))
+
+(defun safeslop-profiles--show-args (name)
+  "Return argv for `profile show' of NAME, pinned to this buffer's config when known.
+The list surface may be opened from one directory and revisited after
+`default-directory' changes, so detail/clone operations must address the same
+safeslop.cue that `profile list' loaded, not whatever the current cwd happens to
+contain."
+  (append (list "profile" "show" name)
+          (when safeslop-profiles--config-path (list safeslop-profiles--config-path))
+          (list "--output" "json")))
+
+(defun safeslop-profiles--copy-name (name existing)
+  "Return a non-conflicting clone name for NAME given EXISTING names."
+  (let ((candidate (concat name "-copy"))
+        (n 2))
+    (while (member candidate existing)
+      (setq candidate (format "%s-copy-%d" name n))
+      (setq n (1+ n)))
+    candidate))
+
+(defun safeslop-profiles--normalize-workspace (workspace)
+  "Normalize a create prompt WORKSPACE value.
+The empty string means \"omit --workspace\" (engine default). A literal `.' is
+kept as `.' because it is the common repo-root policy spelling; other non-empty
+paths are expanded/abbreviated for stable CUE output."
+  (let ((workspace (string-trim (or workspace ""))))
+    (cond ((string-empty-p workspace) "")
+          ((string= workspace ".") ".")
+          (t (abbreviate-file-name (expand-file-name workspace))))))
+
+(defun safeslop-profiles--read-workspace ()
+  "Read the optional workspace field, allowing a true empty response."
+  (safeslop-profiles--normalize-workspace
+   (read-string "Workspace (empty for engine default, . for repo root): " nil nil "")))
+
+(defun safeslop-profiles--block-anchor-regexp (name)
+  "Return a regexp matching a line that opens profile NAME's CUE block.
+Matches `name: {' or `\"name\": {' at the start of a line (any indent). Callers
+scope the search to the `profiles' field first, so a same-named top-level block,
+comment, string value, or bundle entry is not mistaken for the profile."
+  (concat "^[ \t]*\"?" (regexp-quote name) "\"?[ \t]*:[ \t]*{"))
+
+(defun safeslop-profiles--cue-path-prefix-regexp ()
+  "Return a regexp for CUE field prefixes before `profiles'.
+This allows compact forms like `safeslop: profiles:' while refusing comment or
+free-text lines such as `// profiles:' as structural anchors."
+  "^[ \t]*\\(?:\"?[A-Za-z_][A-Za-z0-9_-]*\"?[ \t]*:[ \t]*\\)*")
+
+(defun safeslop-profiles--profiles-anchor-regexp ()
+  "Return a regexp matching a structural CUE `profiles:' field."
+  (concat (safeslop-profiles--cue-path-prefix-regexp) "\"?profiles\"?[ \t]*:"))
+
+(defun safeslop-profiles--inline-profile-anchor-regexp (name)
+  "Return a regexp for compact CUE like `profiles: NAME: { ... }'."
+  (concat (safeslop-profiles--profiles-anchor-regexp)
+          "[^\n]*\\(\"?" (regexp-quote name) "\"?[ \t]*:[ \t]*{\\)"))
+
+(defun safeslop-profiles--goto-profile-block (name)
+  "Move point to the line opening profile NAME's CUE block; return non-nil if found.
+The search is scoped to the `profiles' field (including compact one-line CUE)
+before matching NAME, avoiding the old loose-word failure mode that could jump to
+a top-level or nested same-named block outside the profile map."
+  (goto-char (point-min))
+  (or
+   (when (re-search-forward (safeslop-profiles--inline-profile-anchor-regexp name) nil t)
+     (goto-char (match-beginning 1))
+     t)
+   (progn
+     ;; A failed buffer-wide inline search can leave point after the `profiles'
+     ;; block; reset before the block-scoped multi-line search.
+     (goto-char (point-min))
+     (when (re-search-forward (safeslop-profiles--profiles-anchor-regexp) nil t)
+       (when (re-search-forward (safeslop-profiles--block-anchor-regexp name) nil t)
+         (beginning-of-line)
+         (back-to-indentation)
+         t)))))
+
+(defun safeslop-profiles--goto-name (name)
+  "Move point to the list row whose id is NAME; return non-nil if found."
+  (goto-char (point-min))
+  (let ((found nil))
+    (while (and (not found) (not (eobp)))
+      (if (equal (tabulated-list-get-id) name)
+          (setq found t)
+        (forward-line 1)))
+    found))
+
+(defun safeslop-profiles--inspect-format (data)
+  "Format `profile show' DATA as a human-readable inspection string."
+  (let* ((name (alist-get 'name data))
+         (prof (alist-get 'profile data))
+         (resolved (alist-get 'resolved data))
+         (ws (alist-get 'workspace prof)))
+    (mapconcat
+     #'identity
+     (delq nil
+           (list
+            (format "Profile:     %s" (or name ""))
+            (format "Agent:       %s" (or (alist-get 'agent prof) ""))
+            (format "Environment: %s" (or (alist-get 'environment prof) ""))
+            (format "Network:     %s" (or (alist-get 'network prof) "deny"))
+            (when (and (stringp ws) (not (string-empty-p ws)))
+              (format "Workspace:   %s" ws))
+            (format "Bundles:     %s" (safeslop-profiles--join (alist-get 'bundles prof)))
+            (format "Packages:    %s" (safeslop-profiles--join (alist-get 'packages prof)))
+            (format "Resolved:    %s" (safeslop-profiles--join (alist-get 'identitySet resolved)))
+            (format "Egress:      %s" (safeslop-profiles--join (alist-get 'runtimeEgress resolved)))
+            (when (alist-get 'recipeID data) (format "Recipe:      %s" (alist-get 'recipeID data)))
+            (when (alist-get 'image data) (format "Image:       %s" (alist-get 'image data)))
+            (when (alist-get 'base data) (format "Base:        %s" (alist-get 'base data)))))
+     "\n")))
+
+(defun safeslop-profiles--read-name (existing &optional default)
+  "Read a new profile name, validating syntax and confirming overwrite.
+EXISTING is the list of names already defined; choosing one of them prompts to
+confirm the create-or-update overwrite.  DEFAULT, when given, is offered as the
+initial value (used by clone)."
+  (let ((name nil))
+    (while (not name)
+      (let ((candidate (string-trim
+                        (read-string
+                         (if default
+                             (format "Profile name (default %s): " default)
+                           "Profile name: ")
+                         nil nil default))))
+        (cond
+         ((string-empty-p candidate)
+          (message "Profile name must not be empty") (sit-for 1))
+         ((not (safeslop-profiles--valid-name-p candidate))
+          (message "Invalid name %S: start with a letter/underscore, then letters/digits/_/-"
+                   candidate)
+          (sit-for 1.5))
+         ((and (member candidate existing)
+               (not (yes-or-no-p (format "Profile %S already exists; overwrite it? "
+                                         candidate))))
+          nil) ; loop and read again
+         (t (setq name candidate)))))
+    name))
+
+(defun safeslop-profiles--create-summary
+    (verb name agent environment bundles packages network workspace no-default-bundle)
+  "Return a one-line summary for confirming a profile create/update."
+  (format "%s profile `%s' (%s, %s, %s; bundles=%s; packages=%s%s%s)? "
+          verb name agent environment network
+          (safeslop-profiles--join bundles)
+          (safeslop-profiles--join packages)
+          (if (and (stringp workspace) (not (string-empty-p workspace)))
+              (format "; workspace=%s" workspace)
+            "")
+          (if no-default-bundle "; no default agent bundle" "")))
+
+(defun safeslop-profiles--confirm-create
+    (existing name agent environment bundles packages network workspace no-default-bundle)
+  "Ask for final confirmation before the async profile create/update write."
+  (yes-or-no-p
+   (safeslop-profiles--create-summary
+    (if (member name existing) "Update" "Create")
+    name agent environment bundles packages network workspace no-default-bundle)))
+
+;;; ---- rendering -----------------------------------------------------------
+
 (defconst safeslop-profiles--key-hints
-  '(("RET" . "edit") ("n" . "create") ("v" . "validate") ("d" . "delete")
-    ("g" . "refresh") ("L" . "debug") ("?" . "help") ("q" . "quit"))
+  '(("RET" . "inspect") ("e" . "edit") ("n" . "create") ("c" . "clone")
+    ("v" . "validate") ("d" . "delete") ("S" . "sort") ("g" . "refresh")
+    ("?" . "help") ("q" . "quit"))
   "Key/action pairs shown in the profiles surface's in-buffer legend.")
 
 (defun safeslop-profiles--legend ()
@@ -132,15 +344,28 @@ same on both surfaces."
                      safeslop-profiles--key-hints "  ")
           "\n\n"))
 
+(defun safeslop-profiles--empty-state ()
+  "Return persistent in-buffer guidance shown when no profiles are listed.
+Unlike an echo-area message (wiped by the next keystroke), this stays visible."
+  (concat (propertize "No profiles yet" 'face 'shadow)
+          " — press "
+          (propertize "n" 'face 'help-key-binding)
+          " to create one, or "
+          (propertize "g" 'face 'help-key-binding)
+          " to refresh.\n"))
+
 (defun safeslop-profiles--header ()
   "Return the profiles header block: surface tab strip then shortcut legend."
   (concat (safeslop-surface--tab-strip 'profiles)
           (safeslop-profiles--legend)))
 
-(defun safeslop-profiles--render (&optional keep-point)
+(defun safeslop-profiles--render (&optional keep-point then)
   "Asynchronously fetch the profile list, then fill the current surface buffer.
-On a missing safeslop.cue the table is empty and the echo area says so; `n' still
-works to create one.  Stores the config path for the edit/validate/delete keys."
+On a missing safeslop.cue the table shows a persistent empty-state hint; `n'
+still works to create one.  Stores the config path for the edit/validate/delete
+keys.  KEEP-POINT preserves point across the redraw; THEN, when given, is a
+nullary function called in the buffer after the redraw (used to land point on a
+freshly created profile)."
   (let ((buf (current-buffer)))
     (safeslop--call-json-async
      '("profile" "list" "--output" "json")
@@ -151,6 +376,7 @@ works to create one.  Stores the config path for the edit/validate/delete keys."
                (let ((data (safeslop-contract-data envelope)))
                  (setq safeslop-profiles--config-path (alist-get 'path data))
                  (setq tabulated-list-entries (safeslop-profiles--rows data)))
+             (setq safeslop-profiles--config-path nil)
              (setq tabulated-list-entries nil)
              (message "safeslop profiles: %s"
                       (or (alist-get 'message (car (safeslop-contract-errors envelope)))
@@ -159,11 +385,14 @@ works to create one.  Stores the config path for the edit/validate/delete keys."
            (let ((inhibit-read-only t))
              (save-excursion
                (goto-char (point-min))
-               (insert (safeslop-profiles--header))))
+               (insert (safeslop-profiles--header))
+               (when (null tabulated-list-entries)
+                 (insert (safeslop-profiles--empty-state)))))
            (unless keep-point
              (goto-char (point-min))
              (while (and (not (tabulated-list-get-id)) (not (eobp)))
-               (forward-line 1)))))))))
+               (forward-line 1)))
+           (when then (funcall then))))))))
 
 (defun safeslop-profiles-refresh ()
   "Re-fetch the profile list and redraw, keeping point on its profile."
@@ -197,41 +426,100 @@ works to create one.  Stores the config path for the edit/validate/delete keys."
       (safeslop-policy-check-file safeslop-profiles--config-path)
     (user-error "No safeslop.cue known; refresh, or scaffold one with `n'")))
 
-(defun safeslop-profiles-edit ()
-  "Open the active safeslop.cue for editing; saves are quietly re-validated.
-CUE bytes are the source of truth (specs/0029), so editing is direct."
+;;; ---- read (inspect) ------------------------------------------------------
+
+(defun safeslop-profiles--show-inspect (name data)
+  "Render `profile show' DATA for NAME in a read-only detail buffer."
+  (let ((buf (get-buffer-create (format "*safeslop profile %s*" name))))
+    (with-current-buffer buf
+      (special-mode) ; read-only; q quits
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert (safeslop-profiles--inspect-format data))
+        (goto-char (point-min))))
+    (pop-to-buffer buf)
+    buf))
+
+(defun safeslop-profiles-inspect ()
+  "Show resolved details for the profile at point in a read-only buffer.
+This is the safe primary action (RET): it renders `profile show' — agent,
+environment, network, workspace, resolved packages, unioned egress, and the
+dry-run recipe/image/base — without touching the CUE file."
   (interactive)
-  (let ((path safeslop-profiles--config-path))
+  (let ((name (tabulated-list-get-id)))
+    (unless name (user-error "No profile on this line"))
+    (safeslop--call-json-async
+     (safeslop-profiles--show-args name)
+     (lambda (env)
+       (if (safeslop-contract-ok-p env)
+           (safeslop-profiles--show-inspect name (safeslop-contract-data env))
+         (message "safeslop: profile show failed: %s"
+                  (or (alist-get 'message (car (safeslop-contract-errors env)))
+                      "unknown error")))))))
+
+;;; ---- update (edit) -------------------------------------------------------
+
+(defun safeslop-profiles-edit ()
+  "Open the active safeslop.cue for editing, jumping to the profile at point.
+CUE bytes are the source of truth (specs/0029), so editing is direct; saves are
+quietly re-validated."
+  (interactive)
+  (let ((path safeslop-profiles--config-path)
+        (name (tabulated-list-get-id)))
     (unless path (user-error "No safeslop.cue known; scaffold one with `n'"))
     (safeslop-profiles--open-config path)
-    (message "Editing %s — saves re-validate; `C-c s F' returns to the profiles list" path)))
+    (if (and name (safeslop-profiles--goto-profile-block name))
+        (message "Editing `%s' in %s — saves re-validate; `C-c s F' returns to the list"
+                 name (file-name-nondirectory path))
+      (message "Editing %s — saves re-validate; `C-c s F' returns to the profiles list"
+               path))))
+
+;;; ---- delete --------------------------------------------------------------
 
 (defun safeslop-profiles-delete ()
-  "Open the safeslop.cue at the profile at point for guided removal.
-Deletion is a guided manual edit, not a machine rewrite of the guard: removing
-a CUE block by hand keeps the policy honest and avoids corrupting it (specs/0052
-D5).  The save is re-validated."
+  "Guide removal of a profile from the safeslop.cue (specs/0052 D5).
+Deletion is a guided manual edit, not a machine rewrite of the guard: the target
+is chosen with completion (defaulting to the profile at point), confirmed with a
+one-line summary, and the file is opened anchored at the profile's block.  If the
+block cannot be found, this fails loudly rather than silently doing nothing.  The
+save is re-validated."
   (interactive)
-  (let ((name (tabulated-list-get-id))
-        (path safeslop-profiles--config-path))
-    (unless (and name path) (user-error "No profile/config on this line"))
-    (safeslop-profiles--open-config path)
-    (goto-char (point-min))
-    (when (re-search-forward (concat "\\_<" (regexp-quote name) "\\_>") nil t)
-      (beginning-of-line))
-    (message "Remove the `%s' profile block here, then save to re-validate" name)))
+  (let ((path safeslop-profiles--config-path)
+        (names (safeslop-profiles--names))
+        (at-point (tabulated-list-get-id)))
+    (unless path (user-error "No safeslop.cue known; refresh, or scaffold one with `n'"))
+    (unless names (user-error "No profiles to delete"))
+    (let* ((name (completing-read
+                  (if at-point
+                      (format "Delete profile (default %s): " at-point)
+                    "Delete profile: ")
+                  names nil t nil nil at-point))
+           (summary (safeslop-profiles--row-summary name)))
+      (when (yes-or-no-p (format "Open %s to remove profile `%s'%s? "
+                                 (file-name-nondirectory path)
+                                 name
+                                 (if summary (format " [%s]" summary) "")))
+        (safeslop-profiles--open-config path)
+        (if (safeslop-profiles--goto-profile-block name)
+            (message "Remove the `%s' profile block here, then save to re-validate" name)
+          (user-error "Could not find the `%s' block in %s — it may already be gone; review the file"
+                      name (file-name-nondirectory path)))))))
+
+;;; ---- create / clone ------------------------------------------------------
 
 ;;;###autoload
 (defun safeslop-profiles-create
     (&optional name agent environment bundles packages network workspace callback no-default-bundle)
   "Create or update a profile through `safeslop profile create'.
-Interactively, prompt for NAME, AGENT, ENVIRONMENT, BUNDLES, PACKAGES, NETWORK,
-and WORKSPACE; then write via the CLI and refresh any live profiles surface.
-CALLBACK, when given, receives the resulting JSON contract envelope.  The old
-preset scaffold is intentionally replaced by this structured flow (specs/0058
+Interactively, prompt for NAME (validated; overwriting an existing profile is
+confirmed), AGENT, ENVIRONMENT, BUNDLES, PACKAGES, NETWORK, and WORKSPACE; then
+write via the CLI and refresh any live profiles surface, landing point on the new
+row.  CALLBACK, when given, receives the resulting JSON contract envelope.  The
+old preset scaffold is intentionally replaced by this structured flow (specs/0058
 N5), while CUE remains the stored source of truth."
   (interactive
-   (let* ((name (read-string "Profile name: "))
+   (let* ((existing (safeslop-profiles--names))
+          (name (safeslop-profiles--read-name existing))
           (agent (completing-read "Agent: " safeslop-profiles--agents nil t nil nil "claude"))
           (environment (completing-read "Environment: " safeslop-profiles--environments nil t nil nil "container"))
           (bundle-choices (safeslop-profiles--catalog-choice-list 'bundles t))
@@ -239,10 +527,12 @@ N5), while CUE remains the stored source of truth."
           (package-choices (safeslop-profiles--catalog-choice-list 'packages nil))
           (packages (safeslop-profiles--read-multiple "Packages (comma-separated, optional): " package-choices))
           (network (completing-read "Network: " safeslop-profiles--networks nil t nil nil "deny"))
-          (workspace (read-directory-name "Workspace (empty for engine default): " nil nil nil nil))
-          (workspace (if (string-empty-p workspace) "" (abbreviate-file-name (expand-file-name workspace))))
+          (workspace (safeslop-profiles--read-workspace))
           (no-default-bundle (and (member agent '("claude" "pi"))
                                   (y-or-n-p "Opt out of the agent's default package bundle? "))))
+     (unless (safeslop-profiles--confirm-create
+              existing name agent environment bundles packages network workspace no-default-bundle)
+       (user-error "Profile create cancelled"))
      (list name agent environment bundles packages network workspace nil no-default-bundle)))
   (let ((args (safeslop-profiles--create-args
                (or name "")
@@ -257,12 +547,13 @@ N5), while CUE remains the stored source of truth."
      (lambda (env)
        (safeslop--show-envelope-buffer "*safeslop profile create*" args env)
        (if (safeslop-contract-ok-p env)
-           (progn
-             (message "safeslop: profile `%s' saved" (alist-get 'name (safeslop-contract-data env)))
+           (let ((saved (alist-get 'name (safeslop-contract-data env))))
+             (message "safeslop: profile `%s' saved" saved)
              (let ((buf (get-buffer safeslop-profiles-buffer-name)))
                (when buf
                  (with-current-buffer buf
-                   (safeslop-profiles--render t)))))
+                   (safeslop-profiles--render
+                    t (lambda () (safeslop-profiles--goto-name saved)))))))
          (message "safeslop: profile create failed: %s"
                   (or (alist-get 'message (car (safeslop-contract-errors env)))
                       "unknown error")))
@@ -271,13 +562,49 @@ N5), while CUE remains the stored source of truth."
 (defalias 'safeslop-profiles-new #'safeslop-profiles-create
   "Compatibility alias for `safeslop-profiles-create'.")
 
+(defun safeslop-profiles-clone ()
+  "Clone the profile at point: prefill create from its full `profile show' data.
+Only the new name is prompted (defaulting to NAME-copy); agent, environment,
+network, workspace, bundles, packages, and the bare-agent opt-out are copied from
+the source, so a variant is one keystroke plus a name.  The write still goes
+through `profile create'."
+  (interactive)
+  (let ((name (tabulated-list-get-id))
+        (existing (safeslop-profiles--names)))
+    (unless name (user-error "No profile on this line"))
+    (safeslop--call-json-async
+     (safeslop-profiles--show-args name)
+     (lambda (env)
+       (if (not (safeslop-contract-ok-p env))
+           (message "safeslop: could not read `%s' to clone: %s" name
+                    (or (alist-get 'message (car (safeslop-contract-errors env)))
+                        "profile show failed"))
+         (let* ((prof (alist-get 'profile (safeslop-contract-data env)))
+                (newname (safeslop-profiles--read-name
+                          existing (safeslop-profiles--copy-name name existing)))
+                (agent (or (alist-get 'agent prof) "claude"))
+                (environment (or (alist-get 'environment prof) "container"))
+                (bundles (alist-get 'bundles prof))
+                (packages (alist-get 'packages prof))
+                (network (or (alist-get 'network prof) "deny"))
+                (workspace (or (alist-get 'workspace prof) ""))
+                (bare-agent (eq (alist-get 'bareAgent prof) t)))
+           (unless (safeslop-profiles--confirm-create
+                    existing newname agent environment bundles packages network workspace bare-agent)
+             (user-error "Profile clone cancelled"))
+           (safeslop-profiles-create
+            newname agent environment bundles packages network workspace nil bare-agent)))))))
+
 (defvar safeslop-profiles-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "RET") #'safeslop-profiles-edit)
+    (define-key map (kbd "RET") #'safeslop-profiles-inspect)
+    (define-key map (kbd "i")   #'safeslop-profiles-inspect)
     (define-key map (kbd "e")   #'safeslop-profiles-edit)
     (define-key map (kbd "n")   #'safeslop-profiles-create)
+    (define-key map (kbd "c")   #'safeslop-profiles-clone)
     (define-key map (kbd "v")   #'safeslop-profiles-validate)
     (define-key map (kbd "d")   #'safeslop-profiles-delete)
+    (define-key map (kbd "S")   #'tabulated-list-sort)
     (define-key map (kbd "g")   #'safeslop-profiles-refresh)
     (define-key map (kbd "L")   #'safeslop-debug-log)
     (define-key map (kbd "?")   #'describe-mode)
@@ -290,18 +617,18 @@ N5), while CUE remains the stored source of truth."
   "Major mode for the safeslop profiles (policy) surface.
 \\{safeslop-profiles-mode-map}"
   (setq tabulated-list-format
-        [("Profile" 20 nil)
-         ("Agent" 12 nil)
-         ("Env" 11 nil)
-         ("Net" 6 nil)])
+        [("Profile" 20 t)
+         ("Agent" 12 t)
+         ("Env" 11 t)
+         ("Net" 6 t)])
   (setq tabulated-list-padding 1)
   (tabulated-list-init-header))
 
 ;;;###autoload
 (defun safeslop-profiles ()
   "Open the safeslop profiles surface: the profiles in your safeslop.cue.
-Keys: RET/e edit, n create, v validate, d delete (guided), g refresh;
-P/I/F switch surface, [/] cycle."
+Keys: RET/i inspect, e edit, n create, c clone, v validate, d delete (guided),
+S sort, g refresh; P/I/F switch surface, [/] cycle."
   (interactive)
   (let ((buf (get-buffer-create safeslop-profiles-buffer-name)))
     (with-current-buffer buf

@@ -11,6 +11,8 @@
   (should (fboundp 'safeslop-profiles-mode))
   (should (fboundp 'safeslop-profiles-create))
   (should (fboundp 'safeslop-profiles-new)) ; compatibility alias
+  (should (fboundp 'safeslop-profiles-clone))
+  (should (fboundp 'safeslop-profiles-inspect))
   (should (fboundp 'safeslop-profiles-delete)))
 
 (ert-deftest safeslop-test-profiles-rows-from-list ()
@@ -34,13 +36,145 @@
       (should (eq (get-text-property 0 'face (aref (cadr yolo) 2)) 'safeslop-tier-host)))))
 
 (ert-deftest safeslop-test-profiles-keymap ()
-  (should (eq (lookup-key safeslop-profiles-mode-map (kbd "RET")) #'safeslop-profiles-edit))
+  ;; RET is the safe primary action (inspect); editing the CUE file is `e'.
+  (should (eq (lookup-key safeslop-profiles-mode-map (kbd "RET")) #'safeslop-profiles-inspect))
+  (should (eq (lookup-key safeslop-profiles-mode-map (kbd "i")) #'safeslop-profiles-inspect))
+  (should (eq (lookup-key safeslop-profiles-mode-map (kbd "e")) #'safeslop-profiles-edit))
   (should (eq (lookup-key safeslop-profiles-mode-map (kbd "n")) #'safeslop-profiles-create))
+  (should (eq (lookup-key safeslop-profiles-mode-map (kbd "c")) #'safeslop-profiles-clone))
   (should (eq (lookup-key safeslop-profiles-mode-map (kbd "v")) #'safeslop-profiles-validate))
   (should (eq (lookup-key safeslop-profiles-mode-map (kbd "d")) #'safeslop-profiles-delete))
+  (should (eq (lookup-key safeslop-profiles-mode-map (kbd "S")) #'tabulated-list-sort))
   ;; inherited surface switch keys
   (should (eq (lookup-key safeslop-profiles-mode-map (kbd "P")) #'safeslop-portal))
   (should (eq (lookup-key safeslop-profiles-mode-map (kbd "I")) #'safeslop-install)))
+
+(ert-deftest safeslop-test-profiles-valid-name-p ()
+  "Name validation accepts CUE-ish identifiers and rejects empty/space/leading-digit."
+  (should (safeslop-profiles--valid-name-p "review"))
+  (should (safeslop-profiles--valid-name-p "review-strict_2"))
+  (should (safeslop-profiles--valid-name-p "_scratch"))
+  (should-not (safeslop-profiles--valid-name-p ""))
+  (should-not (safeslop-profiles--valid-name-p "2fast"))
+  (should-not (safeslop-profiles--valid-name-p "has space"))
+  (should-not (safeslop-profiles--valid-name-p "weird!")))
+
+(ert-deftest safeslop-test-profiles-show-args-use-known-config-path ()
+  "Inspect/clone use the listed safeslop.cue even after cwd changes."
+  (with-temp-buffer
+    (safeslop-profiles-mode)
+    (setq safeslop-profiles--config-path "/repo/safeslop.cue")
+    (should (equal (safeslop-profiles--show-args "review")
+                   '("profile" "show" "review" "/repo/safeslop.cue" "--output" "json"))))
+  (with-temp-buffer
+    (safeslop-profiles-mode)
+    (setq safeslop-profiles--config-path nil)
+    (should (equal (safeslop-profiles--show-args "review")
+                   '("profile" "show" "review" "--output" "json")))))
+
+(ert-deftest safeslop-test-profiles-copy-name-avoids-existing-clones ()
+  "Clone defaults advance to a free NAME-copy-N instead of prompting overwrite first."
+  (should (equal (safeslop-profiles--copy-name "review" '("review")) "review-copy"))
+  (should (equal (safeslop-profiles--copy-name "review" '("review" "review-copy")) "review-copy-2"))
+  (should (equal (safeslop-profiles--copy-name "review" '("review" "review-copy" "review-copy-2"))
+                 "review-copy-3")))
+
+(ert-deftest safeslop-test-profiles-normalize-workspace-allows-empty ()
+  "Workspace prompt can really omit --workspace, while `.' stays the repo-root spelling."
+  (should (equal (safeslop-profiles--normalize-workspace "") ""))
+  (should (equal (safeslop-profiles--normalize-workspace "   ") ""))
+  (should (equal (safeslop-profiles--normalize-workspace ".") ".")))
+
+(ert-deftest safeslop-test-profiles-create-summary-labels-create-vs-update ()
+  "Final confirmation says whether the UI is creating or updating before the CLI upsert."
+  (cl-letf (((symbol-function 'yes-or-no-p)
+             (lambda (prompt)
+               (should (string-match-p "Update profile `review'" prompt))
+               (should (string-match-p "workspace=\." prompt))
+               t)))
+    (should (safeslop-profiles--confirm-create
+             '("review") "review" "claude" "container" '("web") '("pnpm") "deny" "." nil))))
+
+(ert-deftest safeslop-test-profiles-block-anchor-regexp ()
+  "The block anchor matches the field-opening brace, not loose word hits."
+  (let ((re (safeslop-profiles--block-anchor-regexp "review")))
+    (should (string-match-p re "\treview: {"))
+    (should (string-match-p re "  \"review\": {"))
+    ;; a comment, a string value, and a bundle name that merely contain the word
+    ;; must NOT be mistaken for the block opener.
+    (should-not (string-match-p re "// review is the default profile"))
+    (should-not (string-match-p re "\tbundles: [\"review\"]"))
+    (should-not (string-match-p re "\tworkspace: \"review\""))))
+
+(ert-deftest safeslop-test-profiles-goto-profile-block ()
+  "`--goto-profile-block' scopes navigation to the profiles field and fails when absent."
+  (with-temp-buffer
+    (insert "package safeslop\n\n"
+            "review: {not: \"a profile\"}\n\n"
+            "safeslop: profiles: {\n"
+            "\t// review comes first\n"
+            "\treview: {agent: \"claude\", bundles: [\"reviewers\"]}\n"
+            "\tyolo: {agent: \"pi\"}\n}\n")
+    (should (safeslop-profiles--goto-profile-block "review"))
+    (should (string-match-p "review: {agent" (buffer-substring (point) (line-end-position))))
+    (should (safeslop-profiles--goto-profile-block "yolo"))
+    (should (string-match-p "yolo: {" (buffer-substring (point) (line-end-position))))
+    (should-not (safeslop-profiles--goto-profile-block "ghost")))
+  (with-temp-buffer
+    (insert "package safeslop\nsafeslop: profiles: review: {agent: \"claude\"}\n")
+    (should (safeslop-profiles--goto-profile-block "review"))
+    (should (looking-at-p "review: {"))))
+
+(ert-deftest safeslop-test-profiles-inspect-format ()
+  "The inspect formatter renders resolved packages, egress, and recipe lines."
+  (let* ((env (safeslop-contract-parse-string
+               (concat "{\"schema_version\":1,\"ok\":true,\"data\":{"
+                       "\"name\":\"review\","
+                       "\"profile\":{\"agent\":\"claude\",\"environment\":\"container\","
+                       "\"network\":\"deny\",\"workspace\":\".\",\"bundles\":[\"node\"],\"packages\":[\"pnpm\"]},"
+                       "\"resolved\":{\"identitySet\":[\"claude-code\",\"node\",\"pnpm\"],"
+                       "\"runtimeEgress\":[\".anthropic.com\"]},"
+                       "\"recipeID\":\"abcdef012345\",\"image\":\"local/safeslop-tools:abcdef012345\","
+                       "\"base\":\"debian:bookworm-slim@sha256:dead\"},"
+                       "\"warnings\":[],\"errors\":[]}")))
+         (text (safeslop-profiles--inspect-format (safeslop-contract-data env))))
+    (should (string-match-p "Agent:       claude" text))
+    (should (string-match-p "Resolved:    claude-code, node, pnpm" text))
+    (should (string-match-p "Egress:      .anthropic.com" text))
+    (should (string-match-p "Recipe:      abcdef012345" text))
+    (should (string-match-p "Base:        debian:bookworm-slim@sha256:dead" text))))
+
+(ert-deftest safeslop-test-profiles-clone-prefills-create-from-show ()
+  "Clone reads the row's full `profile show' data and calls create with it."
+  (let (create-args)
+    (cl-letf (((symbol-function 'tabulated-list-get-id) (lambda () "review"))
+              ((symbol-function 'safeslop-profiles--names) (lambda () '("review" "review-copy")))
+              ((symbol-function 'safeslop-profiles--read-name)
+               (lambda (_existing &optional default) (or default "review-copy-2")))
+              ((symbol-function 'safeslop--call-json-async)
+               (lambda (args cb)
+                 (should (equal args '("profile" "show" "review" "/repo/safeslop.cue" "--output" "json")))
+                 (funcall cb (safeslop-contract-parse-string
+                              (concat "{\"schema_version\":1,\"ok\":true,\"data\":{"
+                                      "\"profile\":{\"agent\":\"pi\",\"environment\":\"container\","
+                                      "\"network\":\"allow\",\"workspace\":\".\",\"bundles\":[\"node\"],"
+                                      "\"packages\":[\"pnpm\"],\"bareAgent\":true}},"
+                                      "\"warnings\":[],\"errors\":[]}")))))
+              ((symbol-function 'safeslop-profiles--confirm-create)
+               (lambda (&rest _) t))
+              ((symbol-function 'safeslop-profiles-create)
+               (lambda (&rest args) (setq create-args args))))
+      (with-temp-buffer
+        (safeslop-profiles-mode)
+        (setq safeslop-profiles--config-path "/repo/safeslop.cue")
+        (safeslop-profiles-clone))
+      (should (equal (nth 0 create-args) "review-copy-2"))
+      (should (equal (nth 1 create-args) "pi"))         ; agent copied
+      (should (equal (nth 2 create-args) "container"))  ; environment copied
+      (should (equal (nth 3 create-args) '("node")))    ; bundles copied
+      (should (equal (nth 4 create-args) '("pnpm")))    ; packages copied
+      (should (equal (nth 5 create-args) "allow"))      ; network copied
+      (should (eq (nth 8 create-args) t)))))            ; bareAgent copied
 
 (ert-deftest safeslop-test-profiles-catalog-names ()
   "Catalog envelopes feed bundle/package multi-select candidates by name."
