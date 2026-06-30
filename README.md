@@ -73,7 +73,8 @@ safeslop session attach --session-id <id>
 safeslop session status --session-id <id> --output <json|jsonl>
 safeslop session stop --session-id <id> --revoke-credentials --output json
 safeslop doctor                     report available tools and isolation tiers
-safeslop down                       tear down container sessions
+safeslop down                       tear down safeslop-managed container stacks
+safeslop gc [--until <age>] [--keep <N>]   remove unreferenced safeslop-managed images
 safeslop install                    inventory and install pinned toolchains/runtimes
 safeslop uninstall                  receipt-driven removal of installed tools
 safeslop launch <profile>           open a terminal running a profile
@@ -87,13 +88,16 @@ jsonl` for a line-delimited monitor stream.
 `session status` and `session list` reconcile liveness: a session still marked
 `running` whose run process is gone (crash, kill, host sleep) is reported — and
 persisted — as `stopped`, so status never lies about a session that is no longer
-executing.
+executing. Container sessions are additionally reaped by their
+`safeslop.session=<id>` labels during stop/reconcile, so teardown does not depend
+on a still-readable session record.
 
 `session stop` (and a terminal/buffer close) tears the boundary down rather than
-just killing the wrapper: the run receives `SIGTERM`/`SIGHUP`, which tears down
-the agent and runs the deferred cleanup — container removed, staged secrets
-wiped, ephemeral credentials revoked. Interactive
-`Ctrl-C` (`SIGINT`) is left for the agent and does not tear the session down.
+just killing the wrapper: credentials are revoked before process termination when
+`--revoke-credentials` is requested, the run receives `SIGTERM`/`SIGHUP`, and the
+labelled container boundary is reaped; staged secrets are wiped by run teardown
+or the reap path. Interactive `Ctrl-C` (`SIGINT`) is left for the agent and does
+not tear the session down.
 
 `session run` is an interactive attach and needs a controlling terminal — Emacs
 supplies one via `make-term`. Invoked without a usable TTY (a pipe, cron, a
@@ -125,6 +129,13 @@ Detaching is a deliberate trade-off: a detached agent holds its staged secrets
 where a coupled run bounds them to the buffer's lifetime. `stop
 --revoke-credentials` still revokes before the kill, and liveness reconcile plus
 the stale-resource sweep bound the leak if the supervisor dies uncleanly.
+
+`safeslop down` removes safeslop-managed host-container stacks by label. Container
+startup also sweeps managed, record-less orphan boundaries on the host Docker
+backend. `safeslop gc` only removes safeslop-managed images after protecting the
+current image recipe for resolving profiles, the repo `safeslop.lock.json`, and
+running session image references; `--until` and `--keep` apply only to the
+unreferenced remainder.
 
 ## `safeslop.cue` reference
 

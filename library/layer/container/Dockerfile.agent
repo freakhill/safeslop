@@ -9,6 +9,8 @@
 # multi-arch index for debian:bookworm-slim, verified 2026-06-29.
 FROM debian:bookworm-slim@sha256:60eac759739651111db372c07be67863818726f754804b8707c90979bda511df
 
+LABEL safeslop.managed="true"
+
 ENV DEBIAN_FRONTEND=noninteractive
 
 # apt is pinned to a snapshot.debian.org timestamp so the floor's TRANSITIVE deps are

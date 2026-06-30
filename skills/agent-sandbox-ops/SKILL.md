@@ -33,7 +33,8 @@ file transfer between host and sandboxed runtimes.
 - `safeslop session status --session-id <id> --output <json|jsonl>` — inspect or monitor session state; a running detached session also reports its `socket`.
 - `safeslop session stop --session-id <id> --revoke-credentials --output json` — stop idempotently, revoking ephemeral credentials before terminating the process (a detached supervisor's whole process group), and removing the socket.
 - `safeslop doctor` — report available tools and isolation tiers.
-- `safeslop down` — tear down container/VM sessions.
+- `safeslop down` — tear down safeslop-managed host-container stacks by label (the Lima VM backend is torn down through its own runtime path).
+- `safeslop gc [--until <age>] [--keep <N>]` — remove only unreferenced safeslop-managed images; current resolving profiles, the repo lockfile, and live sessions anchor images.
 
 ## Default policy
 
@@ -99,7 +100,8 @@ rely on broad host mounts.
 - Keep network allowlists narrow and documented.
 - Prefer read-only credentials; use write credentials only for explicit workflows.
 - Verify `safeslop doctor` output before depending on a tier.
-- Run `safeslop down` to clean up container/VM sessions after interrupted work.
+- Run `safeslop down` to clean up safeslop-managed host-container stacks after interrupted work.
+- Run `safeslop gc --keep 2` only when you want to reclaim unreferenced managed images; it preserves profile/lock/live-session anchors.
 
 ## Verification
 

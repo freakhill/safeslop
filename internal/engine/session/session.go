@@ -43,6 +43,7 @@ type Session struct {
 	Workspace          string            `json:"workspace"`
 	Environment        string            `json:"environment"`
 	Network            string            `json:"network"`
+	Backend            string            `json:"backend"`
 	RecipeID           string            `json:"recipeID,omitempty"`
 	Image              string            `json:"image,omitempty"`
 	Resolved           *ResolvedMetadata `json:"resolved,omitempty"`
@@ -87,6 +88,7 @@ func (s Store) Create(agent, environment, workspace string, now time.Time) (Sess
 		Workspace:   abs,
 		Environment: environment,
 		Network:     "deny",
+		Backend:     "system",
 		Status:      StatusCreated,
 		CreatedAt:   now.UTC(),
 		UpdatedAt:   now.UTC(),
@@ -226,12 +228,19 @@ func reconcile(sess Session, now time.Time, isAlive func(int) bool) (Session, bo
 
 // GetReconciled is Get plus a liveness pass: a session marked running whose PID
 // is dead is persisted and returned as stopped, so status never lies.
-func (s Store) GetReconciled(id string, now time.Time, isAlive func(int) bool) (Session, error) {
+func (s Store) GetReconciled(id string, now time.Time, isAlive func(int) bool, reap ...func(Session) error) (Session, error) {
 	sess, err := s.Get(id)
 	if err != nil {
 		return Session{}, err
 	}
 	if fixed, changed := reconcile(sess, now, isAlive); changed {
+		for _, fn := range reap {
+			if fn != nil {
+				if err := fn(sess); err != nil {
+					return Session{}, err
+				}
+			}
+		}
 		if err := s.Save(fixed); err != nil {
 			return Session{}, err
 		}
@@ -242,13 +251,20 @@ func (s Store) GetReconciled(id string, now time.Time, isAlive func(int) bool) (
 }
 
 // ListReconciled is List with the same per-session liveness pass as GetReconciled.
-func (s Store) ListReconciled(now time.Time, isAlive func(int) bool) ([]Session, error) {
+func (s Store) ListReconciled(now time.Time, isAlive func(int) bool, reap ...func(Session) error) ([]Session, error) {
 	sessions, err := s.List()
 	if err != nil {
 		return nil, err
 	}
 	for i, sess := range sessions {
 		if fixed, changed := reconcile(sess, now, isAlive); changed {
+			for _, fn := range reap {
+				if fn != nil {
+					if err := fn(sess); err != nil {
+						return nil, err
+					}
+				}
+			}
 			if err := s.Save(fixed); err != nil {
 				return nil, err
 			}
@@ -259,7 +275,7 @@ func (s Store) ListReconciled(now time.Time, isAlive func(int) bool) ([]Session,
 	return sessions, nil
 }
 
-func (s Store) Stop(id string, revoke bool, now time.Time, revokeCredentials func(Session) error, killProcess func(int) error) (Session, error) {
+func (s Store) Stop(id string, revoke bool, now time.Time, revokeCredentials func(Session) error, killProcess func(int) error, reap ...func(Session) error) (Session, error) {
 	sess, err := s.Get(id)
 	if err != nil {
 		return Session{}, err
@@ -296,6 +312,13 @@ func (s Store) Stop(id string, revoke bool, now time.Time, revokeCredentials fun
 		}
 	}
 	_ = os.Remove(s.SocketPath(id)) // remove the per-session socket regardless (D4); no-op when coupled
+	for _, fn := range reap {
+		if fn != nil {
+			if err := fn(sess); err != nil {
+				return Session{}, err
+			}
+		}
+	}
 	sess.Status = StatusStopped
 	sess.PID = 0
 	sess.StoppedAt = now.UTC()

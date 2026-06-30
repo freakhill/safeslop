@@ -99,7 +99,7 @@ func composeAllowlist(base []byte, extra []string) []byte {
 // interactive argv that runs the agent (`docker compose run --rm agent <argv>`) plus the compose
 // file path (for teardown).
 // secretEnv is written to secrets.env and sourced by the entrypoint.
-func provision(ctx context.Context, agentArgv []string, workspace, network string, egress []string, secretEnv []string, stageDir string, enabled []string) (argv []string, composeFile string, eng runtime.Engine, err error) {
+func provision(ctx context.Context, sessionID string, agentArgv []string, workspace, network string, egress []string, secretEnv []string, stageDir string, enabled []string) (argv []string, composeFile string, eng runtime.Engine, err error) {
 	if len(agentArgv) == 0 {
 		return nil, "", nil, exec.ErrNoArgv
 	}
@@ -167,6 +167,7 @@ func provision(ctx context.Context, agentArgv []string, workspace, network strin
 		RuntimeDir:    stageDir,
 		Workspace:     workspace,
 		StageDir:      stageDir,
+		SessionID:     sessionID,
 		AgentImage:    toolsImg,
 		NpmConfig:     npmErr == nil,
 		Kubeconfig:    kubeErr == nil,
@@ -195,7 +196,7 @@ func provision(ctx context.Context, agentArgv []string, workspace, network strin
 // enabled is the profile's resolved package identity set (specs/0058): it selects the agent
 // image (ENABLE_<pkg> build args) so a profile gets exactly the tools it declared.
 func Launch(ctx context.Context, spec exec.LaunchSpec, workspace, network string, egress []string, secretEnv []string, stageDir string, enabled []string) (int, error) {
-	argv, _, _, err := provision(ctx, spec.Argv, workspace, network, egress, secretEnv, stageDir, enabled)
+	argv, _, _, err := provision(ctx, SessionIDFromStageDir(stageDir), spec.Argv, workspace, network, egress, secretEnv, stageDir, enabled)
 	if err != nil {
 		return 1, err
 	}
@@ -219,7 +220,7 @@ func ComposeForDown() (dir, composeFile string, err error) {
 	if err != nil {
 		return "", "", err
 	}
-	cf, err := materializeRun(composeParams{RuntimeDir: dir, Workspace: "/", StageDir: dir}, false)
+	cf, err := materializeRun(composeParams{RuntimeDir: dir, Workspace: "/", StageDir: dir, SessionID: "down"}, false)
 	if err != nil {
 		return "", "", err
 	}

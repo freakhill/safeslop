@@ -68,7 +68,7 @@ func newRoot() *cobra.Command {
 		SilenceErrors: true,
 	}
 	root.PersistentFlags().BoolVar(&jsonOut, "json", false, "emit machine-readable JSON output")
-	root.AddCommand(cmdValidate(), cmdList(), cmdDoctor(), cmdRun(), cmdSession(), cmdTrust(), cmdDown(), cmdLaunch(), cmdCatalog(), cmdProfile(), cmdLock(), cmdInstall(), cmdUninstall())
+	root.AddCommand(cmdValidate(), cmdList(), cmdDoctor(), cmdRun(), cmdSession(), cmdTrust(), cmdDown(), cmdGC(), cmdLaunch(), cmdCatalog(), cmdProfile(), cmdLock(), cmdInstall(), cmdUninstall())
 	return root
 }
 
@@ -279,6 +279,11 @@ func cmdRun() *cobra.Command {
 			if err := enforceTrust(path, trustFlag); err != nil {
 				return err
 			}
+			if prof.Environment == "container" {
+				if err := sweepManagedOrphans(context.Background()); err != nil {
+					return err
+				}
+			}
 			code, err := runProfile(name, prof, argv, ws)
 			if err != nil {
 				// Surface the failure reason. runProfile returns code=1 on setup
@@ -354,6 +359,73 @@ var sessionKillProcess = func(target int) error {
 // status/list can reconcile a session whose run wrapper died without recording
 // an exit. Overridable in tests.
 var sessionProcessAlive = engsession.ProcessAlive
+
+func sessionReapBoundary(sess engsession.Session) error {
+	if sess.Environment != "container" {
+		return nil
+	}
+	return container.ReapBySession(context.Background(), engineForSession(sess), sess.ID)
+}
+
+func selectedContainerBackendName() string {
+	if os.Getenv("SAFESLOP_CONTAINER_BACKEND") == "lima" {
+		return "lima"
+	}
+	return "system"
+}
+
+func recordSessionBackend(store engsession.Store, sess engsession.Session) (engsession.Session, error) {
+	if sess.Environment != "container" {
+		return sess, nil
+	}
+	changed := false
+	backend := selectedContainerBackendName()
+	if sess.Backend != backend {
+		sess.Backend = backend
+		changed = true
+	}
+	if sess.Image == "" || sess.RecipeID == "" {
+		resolved, err := policy.Resolve(sessionProfile(sess))
+		if err != nil {
+			return engsession.Session{}, err
+		}
+		recipe, err := container.ResolveRecipe(resolved.IdentitySet)
+		if err != nil {
+			return engsession.Session{}, err
+		}
+		sess.RecipeID = recipe.RecipeID
+		sess.Image = recipe.AgentImage
+		sess.Resolved = resolvedMetadata(resolved)
+		changed = true
+	}
+	if !changed {
+		return sess, nil
+	}
+	sess.UpdatedAt = time.Now().UTC()
+	return sess, store.Save(sess)
+}
+
+func engineForSession(sess engsession.Session) runtimepkg.Engine {
+	if sess.Backend == "lima" {
+		if dirs, err := install.DefaultDirs(); err == nil {
+			return runtimepkg.LimaNerdctlEngine{Limactl: filepath.Join(dirs.BinDir, "limactl"), Instance: "safeslop", UID: os.Getuid(), LimaHome: filepath.Join(runtimepkg.NewLimaBackend(dirs).StateDir(), "home")}
+		}
+	}
+	return runtimepkg.HostDockerEngine{}
+}
+
+func sweepManagedOrphans(ctx context.Context) error {
+	// The startup sweep is for ambient host docker. The lima backend needs consent/Ensure before an
+	// engine exists, so do not accidentally block an explicit lima run by probing host docker here.
+	if os.Getenv("SAFESLOP_CONTAINER_BACKEND") == "lima" || !container.Available() {
+		return nil
+	}
+	live, err := container.LiveSessions(sessionStore().Dir)
+	if err != nil {
+		return err
+	}
+	return container.SweepManagedOrphans(ctx, runtimepkg.HostDockerEngine{}, live)
+}
 
 func cmdSession() *cobra.Command {
 	c := &cobra.Command{Use: "session", Short: "Manage Emacs-visible safeslop sessions"}
@@ -514,7 +586,7 @@ func cmdSessionList() *cobra.Command {
 			if output != "json" {
 				return fmt.Errorf("session list requires --output json")
 			}
-			sessions, err := sessionStore().ListReconciled(time.Now(), sessionProcessAlive)
+			sessions, err := sessionStore().ListReconciled(time.Now(), sessionProcessAlive, sessionReapBoundary)
 			if err != nil {
 				return emitContractError(jsoncontract.CodeIOError, "list sessions", map[string]any{"error": err.Error()})
 			}
@@ -540,7 +612,7 @@ func cmdSessionStatus() *cobra.Command {
 			if output != "json" && output != "jsonl" {
 				return fmt.Errorf("session status requires --output json or jsonl")
 			}
-			sess, err := sessionStore().GetReconciled(id, time.Now(), sessionProcessAlive)
+			sess, err := sessionStore().GetReconciled(id, time.Now(), sessionProcessAlive, sessionReapBoundary)
 			if err != nil {
 				if errors.Is(err, engsession.ErrNotFound) {
 					return emitContractError(jsoncontract.CodeSessionNotFound, "session not found", map[string]any{"session_id": id})
@@ -572,7 +644,7 @@ func cmdSessionStop() *cobra.Command {
 			if output != "json" {
 				return fmt.Errorf("session stop requires --output json")
 			}
-			sess, err := sessionStore().Stop(id, revoke, time.Now(), sessionRevokeCredentials, sessionKillProcess)
+			sess, err := sessionStore().Stop(id, revoke, time.Now(), sessionRevokeCredentials, sessionKillProcess, sessionReapBoundary)
 			if err != nil {
 				if errors.Is(err, engsession.ErrNotFound) {
 					return emitContractError(jsoncontract.CodeSessionNotFound, "session not found", map[string]any{"session_id": id})
@@ -599,6 +671,10 @@ func cmdSessionRun() *cobra.Command {
 		RunE: func(_ *cobra.Command, _ []string) error {
 			store := sessionStore()
 			sess, err := store.Get(id)
+			if err != nil {
+				return err
+			}
+			sess, err = recordSessionBackend(store, sess)
 			if err != nil {
 				return err
 			}
@@ -692,6 +768,11 @@ var launchSupervisor = func(id string) (int, error) {
 // supervisor and emits a contract error, leaving the session not-running so no
 // phantom is left for liveness/reconcile or `session stop` (specs/0051 Q1).
 func runDetach(store engsession.Store, id string) error {
+	if sess, err := store.Get(id); err == nil {
+		if _, err := recordSessionBackend(store, sess); err != nil {
+			return err
+		}
+	}
 	pid, err := launchSupervisor(id)
 	if err != nil {
 		return emitContractError(jsoncontract.CodeIOError, "launch session supervisor", map[string]any{"error": err.Error()})
@@ -999,38 +1080,79 @@ func cmdTrust() *cobra.Command {
 	}
 }
 
-// ---- down ----
+// ---- down / gc ----
 
 func cmdDown() *cobra.Command {
 	return &cobra.Command{
 		Use:   "down",
-		Short: "Tear down the container stack (squid)",
+		Short: "Tear down safeslop-managed container stacks",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			if !container.Available() {
-				return fmt.Errorf("nothing to tear down: docker is not available (run: safeslop doctor)")
-			}
+			ctx := context.Background()
 			if container.Available() {
 				dir, composeFile, err := container.ComposeForDown()
 				if err != nil {
 					return err
 				}
 				defer os.RemoveAll(dir)
-				// `safeslop down` targets the ambient host docker (the lima VM is torn down per-run by its
-				// own backend Teardown); the engine seam defaults to the host docker engine here.
-				if err := container.Down(context.Background(), runtimepkg.HostDockerEngine{}, composeFile); err != nil {
+				// `safeslop down` targets the ambient host docker; the lima VM itself is torn down below.
+				eng := runtimepkg.HostDockerEngine{}
+				if err := container.Down(ctx, eng, composeFile); err != nil {
+					return err
+				}
+				if err := container.ReapManaged(ctx, eng); err != nil {
 					return err
 				}
 			}
 			// Also reap the safeslop-managed lima container VM if one was provisioned (idempotent: a no-op
-			// when limactl is absent or no instance exists). Keeps `down` a complete teardown for the
-			// opt-in lima backend.
+			// when limactl is absent or no instance exists). This still runs on hosts without ambient Docker.
 			if dirs, derr := install.DefaultDirs(); derr == nil {
-				_ = runtimepkg.NewLimaBackend(dirs).Teardown(context.Background())
+				if err := runtimepkg.NewLimaBackend(dirs).Teardown(ctx); err != nil {
+					return err
+				}
 			}
 			return nil
 		},
 	}
+}
+
+func cmdGC() *cobra.Command {
+	var until, keepRaw string
+	c := &cobra.Command{
+		Use:   "gc [--until <age>] [--keep <N>]",
+		Short: "Garbage-collect unreferenced safeslop-managed images",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if !container.Available() {
+				return fmt.Errorf("cannot gc: docker is not available (run: safeslop doctor)")
+			}
+			keep, err := container.ParseKeep(keepRaw)
+			if err != nil {
+				return err
+			}
+			policyPath, _ := findConfig("")
+			removed, err := container.GCImages(context.Background(), runtimepkg.HostDockerEngine{}, container.GCOptions{Until: until, Keep: keep}, container.DefaultProtection(policyPath, sessionStore().Dir))
+			if err != nil {
+				return err
+			}
+			if jsonOut {
+				emitContract(jsoncontract.OK(map[string]any{"removed": removed}))
+				return nil
+			}
+			if len(removed) == 0 {
+				fmt.Println("removed 0 images")
+				return nil
+			}
+			fmt.Printf("removed %d image(s):\n", len(removed))
+			for _, ref := range removed {
+				fmt.Printf("  %s\n", ref)
+			}
+			return nil
+		},
+	}
+	c.Flags().StringVar(&until, "until", "", "only consider managed images older than this engine age filter (for example 24h)")
+	c.Flags().StringVar(&keepRaw, "keep", "", "keep the N most-recent unreferenced managed images")
+	return c
 }
 
 type lockfile struct {

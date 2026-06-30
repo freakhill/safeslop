@@ -230,6 +230,19 @@ func TestComposeUsesAgentImage(t *testing.T) {
 	}
 }
 
+func TestComposeLabelsServicesForRecordIndependentReap(t *testing.T) {
+	yml, err := renderCompose(composeParams{RuntimeDir: "/r", Workspace: "/w", StageDir: "/r", SessionID: "sess-deadbeef"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(yml, `safeslop.session: "sess-deadbeef"`); n != 4 {
+		t.Fatalf("services and host-created networks must carry the session label, got %d labels:\n%s", n, yml)
+	}
+	if n := strings.Count(yml, `safeslop.managed: "true"`); n != 4 {
+		t.Fatalf("services and host-created networks must carry the managed label, got %d labels:\n%s", n, yml)
+	}
+}
+
 func TestComposeForcesTruecolorTerm(t *testing.T) {
 	yml, err := renderCompose(composeParams{RuntimeDir: "/r", Workspace: "/w", StageDir: "/r"})
 	if err != nil {
