@@ -67,9 +67,12 @@ OFF-LIMITS:
   the header re-insert, and restores scroll+cursor; portal auto-refresh skips a
   tick on `input-pending-p` / in-flight fetch; add `x` remove and `X` prune
   (with running-refusal + confirmation), `safeslop-session-remove/prune`, and
-  sync Doom/Evil bindings.
+  sync Doom/Evil bindings. Portal row actions (`k`, `D`, `x`, `X`) use quiet
+  session callbacks so success refreshes the portal in place instead of popping a
+  JSON result buffer over the operator's dashboard.
   VERIFY: `make test-emacs`
-  EXPECTED: 99 ERT pass; portal remove/prune + refresh-preserves-view tests pass.
+  EXPECTED: 100 ERT pass; portal remove/prune + refresh-preserves-view +
+  no-result-popup tests pass.
 
 - [x] Task 5 — Docs sync + full verification
   FILE: `README.md`, `emacs/README.md`, `skills/agent-sandbox-ops/SKILL.md`

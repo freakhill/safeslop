@@ -338,14 +338,17 @@ JSONL status fallback (`safeslop-session-status-fallback')."
   (safeslop-session--launch-term session-id (safeslop-session--run-args session-id)))
 
 ;;;###autoload
-(defun safeslop-session-run-detached (&optional session-id callback)
-  "Start SESSION-ID under a detached supervisor, asynchronously."
-  (interactive (list (safeslop-session--read-id "Run detached: ")))
+(defun safeslop-session-run-detached (&optional session-id callback quiet)
+  "Start SESSION-ID under a detached supervisor, asynchronously.
+When QUIET is non-nil, do not pop the JSON envelope buffer; this is used by the
+portal so row actions refresh in place instead of stealing the operator window."
+  (interactive (list (safeslop-session--read-id "Run detached: ") nil nil))
   (let ((args (safeslop-session--run-detached-args session-id)))
     (safeslop--call-json-async
      args
      (lambda (envelope)
-       (safeslop--show-envelope-buffer "*safeslop session detach*" args envelope)
+       (unless quiet
+         (safeslop--show-envelope-buffer "*safeslop session detach*" args envelope))
        (when (and (null callback) (safeslop-contract-ok-p envelope)
                   (y-or-n-p (format "Detached. Reattach to %s now? " session-id)))
          (safeslop-session-reattach session-id))
@@ -376,10 +379,12 @@ CALLBACK, when given, is called with the envelope once it arrives (used by tests
        (when callback (funcall callback envelope))))))
 
 ;;;###autoload
-(defun safeslop-session-stop (&optional session-id callback)
+(defun safeslop-session-stop (&optional session-id callback quiet)
   "Stop SESSION-ID, revoking credentials, asynchronously, and show the envelope.
 Credential revocation can take a moment, so the call is async and never blocks
-Emacs.  CALLBACK, when given, is called with the envelope once it arrives (tests)."
+Emacs.  CALLBACK, when given, is called with the envelope once it arrives (tests).
+When QUIET is non-nil, do not pop the JSON envelope buffer; this is used by the
+portal so row actions refresh in place instead of stealing the operator window."
   (interactive
    (let ((id (safeslop-session--read-id "Stop session: ")))
      (unless (yes-or-no-p (format "Stop %s? This revokes staged credentials and tears down the boundary. " id))
@@ -389,7 +394,8 @@ Emacs.  CALLBACK, when given, is called with the envelope once it arrives (tests
     (safeslop--call-json-async
      args
      (lambda (envelope)
-       (safeslop--show-envelope-buffer "*safeslop session stop*" args envelope)
+       (unless quiet
+         (safeslop--show-envelope-buffer "*safeslop session stop*" args envelope))
        (when callback (funcall callback envelope))))))
 
 (defun safeslop-session--remove-args (session-id)
@@ -401,33 +407,39 @@ Emacs.  CALLBACK, when given, is called with the envelope once it arrives (tests
   (list "session" "prune" "--output" "json"))
 
 ;;;###autoload
-(defun safeslop-session-remove (&optional session-id callback)
+(defun safeslop-session-remove (&optional session-id callback quiet)
   "Remove SESSION-ID's record, asynchronously, and show the envelope.
 This clears a stopped/created session out of the list (the portal exposes it as
 `x').  The CLI refuses a running session and revokes any still-live staged
 credentials before deleting the record.  CALLBACK, when given, receives the
-envelope once it arrives (used by the portal to refresh, and by tests)."
-  (interactive (list (safeslop-session--read-id "Remove session: ") nil))
+envelope once it arrives (used by the portal to refresh, and by tests).  When
+QUIET is non-nil, do not pop the JSON envelope buffer; this is used by the portal
+so row actions refresh in place instead of stealing the operator window."
+  (interactive (list (safeslop-session--read-id "Remove session: ") nil nil))
   (let ((args (safeslop-session--remove-args session-id)))
     (safeslop--call-json-async
      args
      (lambda (envelope)
-       (safeslop--show-envelope-buffer "*safeslop session rm*" args envelope)
+       (unless quiet
+         (safeslop--show-envelope-buffer "*safeslop session rm*" args envelope))
        (when callback (funcall callback envelope))))))
 
 ;;;###autoload
-(defun safeslop-session-prune (&optional callback)
+(defun safeslop-session-prune (&optional callback quiet)
   "Remove all stopped session records, asynchronously, and show the envelope.
 Running and created sessions are left untouched; a crashed session (marked
 running but whose process is gone) is reconciled to stopped and pruned in the
 same pass.  CALLBACK, when given, receives the envelope once it arrives (used by
-the portal to refresh, and by tests)."
+the portal to refresh, and by tests).  When QUIET is non-nil, do not pop the JSON
+envelope buffer; this is used by the portal so row actions refresh in place
+instead of stealing the operator window."
   (interactive)
   (let ((args (safeslop-session--prune-args)))
     (safeslop--call-json-async
      args
      (lambda (envelope)
-       (safeslop--show-envelope-buffer "*safeslop session prune*" args envelope)
+       (unless quiet
+         (safeslop--show-envelope-buffer "*safeslop session prune*" args envelope))
        (when callback (funcall callback envelope))))))
 
 ;;;###autoload
