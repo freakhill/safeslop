@@ -60,6 +60,12 @@ safeslop doctor
 safeslop validate [safeslop.cue]    check against the embedded schema
 safeslop list [safeslop.cue]        list profiles and resolved tiers
 safeslop catalog list [--bundles] --output json   curated package catalog for UIs
+safeslop catalog bump <pkg> --to V [--security]   bump a pin: resolve all-arch digests, enforce the policy, write a plan sheet
+safeslop catalog propose-version <pkg>            list upstream candidates + would-be digests + blast radius (read-only)
+safeslop catalog add <pkg> --kind K --version V   add a pinned entry (channel ban + full validate)
+safeslop catalog audit                           report staleness, yanked/unmaintained advisories, suggested lane (read-only)
+safeslop bundle add|remove <name> <pkg>...       mutate bundle membership (re-validates references)
+safeslop bundle list --output json               curated bundles for UIs
 safeslop profile list|presets --output json       profiles + preset library as the JSON contract
 safeslop profile create --name N --agent A --environment E [--bundle B] [--package P] --output json
 safeslop profile show <name> --output json         profile + resolved packages + image recipe
@@ -224,6 +230,31 @@ Catalog packages and bundles are safeslop-owned, version- and (for `binary` kind
 per-arch sha256-pinned; extending the catalog is a code edit + review, which is the
 supply-chain review boundary. The package-version selection and bump policy that
 governs which pin lands is canonized in `specs/research/2026-06-30-version-policy-flo.md`.
+
+### Catalog version tooling
+
+The catalog source of truth is the authored `internal/engine/policy/catalog.cue`, rendered
+to an embedded `catalog.json` (`make render-catalog`; a `make check` sync gate fails on
+drift). `catalog bump`/`add` and `bundle add`/`remove` mutate it: they load the catalog,
+run the engine, and re-emit **both** `catalog.cue` and `catalog.json` in lockstep, then
+print a reviewable plan sheet. Run them from the repo root (or pass `--catalog-dir`):
+
+```text
+safeslop catalog bump ripgrep --to 14.2.0         # resolve all-arch digests, enforce LAWs, write + plan sheet
+safeslop catalog bump ripgrep --to 14.2.0 --security   # waive the soak window only (never a LAW)
+safeslop catalog propose-version ripgrep          # newest-first upstream candidates + would-be shas + blast radius
+safeslop catalog add mytool --kind binary --version 1.0.0 --sha256 amd64=… --sha256 arm64=…
+safeslop catalog audit                           # versions-behind, yanked/unmaintained, suggested lane
+safeslop bundle add personal jq                  # add a package to a bundle (re-validates)
+```
+
+Every bump enforces the four hard LAWs: **A** atomic all-arch real digest (no
+`sha256Unresolved` survives), **B** stable channel only (rejects rc/beta/nightly/…),
+**C** apt bumps coordinate the Debian-snapshot timestamp, **D** one version per name —
+plus the monotonic floor (never roll back) and a SemVer-aware soak window (`--security`
+waives soak, never a LAW). Non-semver kinds (apt, calver) return candidates flagged
+`requires-human-confirm`. Live fetch is hermetic in tests (a fixture seam); production
+uses `net/http`. Add `--output json` for the enveloped machine contract.
 
 `safeslop session create --profile <name> --output json` creates an Emacs-visible
 session from an existing `safeslop.cue` profile: it uses the profile's agent,

@@ -1,6 +1,6 @@
 # 0059 — Catalog version tooling (bump / propose-version / add / audit + bundle CRUD)
 
-Status: planned (design note + executable plan).
+Status: DONE — catalog bump/propose-version/add/audit + bundle add/remove/list shipped; make check + make build green.
 Branch: `0059-catalog-bump-tooling` · Worktree: `.worktrees/0059-catalog-bump-tooling/`.
 Implements the policy canonized in `specs/research/2026-06-30-version-policy-flo.md`.
 Builds on the expanded catalog from `feat(policy): expand catalog packages & bundles`

@@ -21,6 +21,12 @@ file transfer between host and sandboxed runtimes.
 - `safeslop validate` — validate a policy against the embedded schema.
 - `safeslop list` — list available profiles.
 - `safeslop catalog list [--bundles] --output json` — list curated package catalog entries/bundles for profile creation UIs.
+- `safeslop catalog bump <pkg> --to V [--security]` — bump a pin: resolve all-arch digests, enforce the version policy (LAW-A/B/C/D + monotonic floor + soak), write `catalog.cue`+`catalog.json`, print a plan sheet. `--security` waives the soak window only, never a LAW.
+- `safeslop catalog propose-version <pkg>` — list upstream candidates newest-first with would-be digests + blast radius (read-only).
+- `safeslop catalog add <pkg> --kind K --version V [--sha256 arch=hex]...` — add a pinned entry (channel ban + full validate).
+- `safeslop catalog audit` — report staleness (versions-behind), yanked/unmaintained advisories, suggested lane (read-only).
+- `safeslop bundle add|remove <name> <pkg>...` — mutate bundle membership, re-validating references.
+- `safeslop bundle list --output json` — list curated bundles.
 - `safeslop profile create --name N --agent A --environment E [--bundle B] [--package P] --output json` — create or update a `safeslop.cue` profile.
 - `safeslop profile show <name> --output json` — inspect a profile with resolved package set and dry-run image recipe.
 - `safeslop lock [profile] --output json` — write repo-root `safeslop.lock.json` for the selected profile's recipe identity.
@@ -65,6 +71,29 @@ In Emacs, `C-c s F` opens the Profiles surface. Use `RET`/`i` to inspect a
 profile's resolved packages/egress/recipe, `e` to edit the CUE at that profile's
 block, `n` to create, `c` to clone, `d` for guided manual deletion, `S` to sort,
 and `g` to refresh.
+
+### Maintain the catalog (bump / propose / add / audit)
+
+The catalog source of truth is `internal/engine/policy/catalog.cue` (rendered to embedded
+`catalog.json`; `make check` fails on drift). `bump`/`add` and `bundle add`/`remove`
+re-emit **both** files in lockstep and print a reviewable plan sheet. Run from the repo
+root (or pass `--catalog-dir`); add `--output json` for the machine contract.
+
+```bash
+safeslop catalog propose-version ripgrep          # survey candidates first (read-only)
+safeslop catalog bump ripgrep --to 14.2.0          # enforce LAWs, write cue+json, plan sheet
+safeslop catalog bump ripgrep --to 2.0.0 --security   # CVE lane: waives soak, never a LAW
+safeslop catalog audit                            # staleness + advisory lanes
+safeslop catalog add mytool --kind binary --version 1.0.0 --sha256 amd64=$(…) --sha256 arm64=$(…)
+safeslop bundle add personal jq                   # re-validates the bundle
+make check                                        # proves cue↔json sync, vet, tests
+```
+
+Bumps enforce: **A** atomic all-arch real digest, **B** stable channel only,
+**C** apt coordinates the Debian-snapshot timestamp, **D** one version per name — plus
+the monotonic floor and a SemVer-aware soak window. Non-semver kinds (apt/calver) are
+flagged `requires-human-confirm`. The policy is canonized in
+`specs/research/2026-06-30-version-policy-flo.md`.
 
 ### Trust and launch
 
