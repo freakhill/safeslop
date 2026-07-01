@@ -72,11 +72,13 @@ While the portal is displayed, it **auto-refreshes** every
 Each in-place redraw preserves every showing window's scroll position and keeps
 point on the same session — an automatic or manual refresh never scrolls the
 window or jumps the cursor to the top (so the row action keys always act on the
-row you are looking at).  A tick is skipped while a prompt is open, while you have
-keystrokes pending, or while a previous fetch is still in flight, so refreshes
-never fight your input or pile up.  The header shows whether polling is on or
-paused; polling only runs `safeslop session list`, never an agent action.  Debug
-lines from polling are labelled `event=poll`.
+row you are looking at).  Portal row actions that mutate session state (`k`, `D`,
+`x`, `X`) refresh the portal in place on success instead of popping a JSON result
+buffer over the dashboard.  A tick is skipped while a prompt is open, while you
+have keystrokes pending, or while a previous fetch is still in flight, so
+refreshes never fight your input or pile up.  The header shows whether polling is
+on or paused; polling only runs `safeslop session list`, never an agent action.
+Debug lines from polling are labelled `event=poll`.
 
 ## Profiles
 

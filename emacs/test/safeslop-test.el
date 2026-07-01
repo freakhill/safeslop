@@ -485,7 +485,7 @@ fix."
                (lambda () '((session_id . "sess-dead") (status . "stopped"))))
               ((symbol-function 'yes-or-no-p) (lambda (&rest _) t))
               ((symbol-function 'safeslop-session-remove)
-               (lambda (id &optional _cb) (setq removed-id id))))
+               (lambda (id &optional _cb _quiet) (setq removed-id id))))
       (safeslop-portal-remove)
       (should (equal removed-id "sess-dead")))))
 
@@ -505,9 +505,47 @@ fix."
   (let (pruned)
     (cl-letf (((symbol-function 'yes-or-no-p) (lambda (&rest _) t))
               ((symbol-function 'safeslop-session-prune)
-               (lambda (&optional _cb) (setq pruned t))))
+               (lambda (&optional _cb _quiet) (setq pruned t))))
       (safeslop-portal-prune)
       (should pruned))))
+
+(ert-deftest safeslop-test-portal-actions-refresh-in-place-without-result-popup ()
+  "Portal row actions should not steal the operator's window with result buffers.
+They run async, report failure in-place, and refresh the portal in place on success;
+the standalone `safeslop-session-*' commands may still show their envelope buffers."
+  (let ((ok (safeslop-contract-parse-string
+             "{\"schema_version\":1,\"ok\":true,\"data\":{\"removed\":[\"sess-dead\"]},\"warnings\":[],\"errors\":[]}"))
+        calls refreshes shown messages)
+    (cl-labels ((run (form)
+                  (setq calls nil refreshes 0 shown 0 messages nil)
+                  (cl-letf (((symbol-function 'safeslop-portal--session-at-point)
+                             (lambda () '((session_id . "sess-dead") (status . "stopped"))))
+                            ((symbol-function 'yes-or-no-p) (lambda (&rest _) t))
+                            ((symbol-function 'safeslop--call-json-async)
+                             (lambda (args cb) (push args calls) (funcall cb ok)))
+                            ((symbol-function 'safeslop--show-envelope-buffer)
+                             (lambda (&rest _) (setq shown (1+ shown))))
+                            ((symbol-function 'safeslop-portal-refresh)
+                             (lambda () (setq refreshes (1+ refreshes))))
+                            ((symbol-function 'message)
+                             (lambda (fmt &rest args) (push (apply #'format fmt args) messages))))
+                    (eval form))))
+      (run '(safeslop-portal-remove))
+      (should (equal (car calls) '("session" "rm" "--session-id" "sess-dead" "--output" "json")))
+      (should (= refreshes 1))
+      (should (= shown 0))
+      (run '(safeslop-portal-prune))
+      (should (equal (car calls) '("session" "prune" "--output" "json")))
+      (should (= refreshes 1))
+      (should (= shown 0))
+      (run '(safeslop-portal-stop))
+      (should (equal (car calls) '("session" "stop" "--session-id" "sess-dead" "--revoke-credentials" "--output" "json")))
+      (should (= refreshes 1))
+      (should (= shown 0))
+      (run '(safeslop-portal-run-detached))
+      (should (equal (car calls) '("session" "run" "--session-id" "sess-dead" "--detach")))
+      (should (= refreshes 1))
+      (should (= shown 0)))))
 
 ;;; Cursor-jump fix: in-place refresh preserves window scroll + point --------
 

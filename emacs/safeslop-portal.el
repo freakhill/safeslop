@@ -32,10 +32,10 @@
 (declare-function safeslop-session-attach "safeslop-session" (&optional session-id))
 (declare-function safeslop-session-reattach "safeslop-session" (&optional session-id))
 (declare-function safeslop-session-status "safeslop-session" (&optional session-id))
-(declare-function safeslop-session-stop "safeslop-session" (&optional session-id callback))
-(declare-function safeslop-session-remove "safeslop-session" (&optional session-id callback))
-(declare-function safeslop-session-prune "safeslop-session" (&optional callback))
-(declare-function safeslop-session-run-detached "safeslop-session" (&optional session-id callback))
+(declare-function safeslop-session-stop "safeslop-session" (&optional session-id callback quiet))
+(declare-function safeslop-session-remove "safeslop-session" (&optional session-id callback quiet))
+(declare-function safeslop-session-prune "safeslop-session" (&optional callback quiet))
+(declare-function safeslop-session-run-detached "safeslop-session" (&optional session-id callback quiet))
 (declare-function safeslop-session-detail "safeslop-session" (&optional session-id data))
 (declare-function safeslop-profiles "safeslop-profiles" ())
 (declare-function safeslop-profiles--render "safeslop-profiles" (&optional keep-point then))
@@ -319,7 +319,7 @@ Pure: SESSIONS is already-fetched data, so the row builder never blocks on I/O."
     (when (yes-or-no-p
            (format "Run %s detached? It survives this Emacs buffer and KEEPS staged credentials until stop/revoke. "
                    (safeslop-portal--short-id id)))
-      (safeslop-session-run-detached id (lambda (_env) (safeslop-portal-refresh))))))
+      (safeslop-session-run-detached id (lambda (_env) (safeslop-portal-refresh)) t))))
 
 (defun safeslop-portal-follow-profile ()
   "Switch to Profiles and land on this session's backing profile when present."
@@ -345,7 +345,8 @@ Pure: SESSIONS is already-fetched data, so the row builder never blocks on I/O."
             (if (safeslop-contract-ok-p env)
                 (safeslop-portal-refresh)
               (message "safeslop: stop failed: %s"
-                       (safeslop-surface--error-message env "stop failed"))))))))
+                       (safeslop-surface--error-message env "stop failed"))))
+       t))))
 
 (defun safeslop-portal-new ()
   "Create a new session.
@@ -497,7 +498,8 @@ credentials before deleting, so a removal never orphans secrets."
             (if (safeslop-contract-ok-p env)
                 (safeslop-portal-refresh)
               (message "safeslop: remove failed: %s"
-                       (safeslop-surface--error-message env "remove failed"))))))))
+                       (safeslop-surface--error-message env "remove failed"))))
+       t))))
 
 (defun safeslop-portal-prune ()
   "Remove ALL stopped sessions at once (clear every dead-session corpse).
@@ -513,7 +515,8 @@ Credentials are revoked before each record is deleted."
              (message "safeslop: pruned %d stopped session%s" n (if (= n 1) "" "s"))
              (safeslop-portal-refresh))
          (message "safeslop: prune failed: %s"
-                  (safeslop-surface--error-message env "prune failed")))))))
+                  (safeslop-surface--error-message env "prune failed"))))
+     t)))
 
 (defun safeslop-portal--cancel-timer ()
   "Cancel the portal auto-refresh timer if one is running."
