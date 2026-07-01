@@ -23,6 +23,12 @@ const (
 
 var ErrNotFound = errors.New("session not found")
 
+// ErrSessionRunning is returned by Remove when the target session is still
+// running. A running session must be stopped first (which tears down the
+// boundary and can revoke credentials); removing its record out from under a
+// live boundary would orphan the process and its staged credentials.
+var ErrSessionRunning = errors.New("session is running")
+
 // ResolvedMetadata snapshots the non-secret package resolution that selected a
 // profile-backed session's image. It is stored with the session so status/list can
 // keep portal Recipe/Image columns stable even after the session leaves the
@@ -324,6 +330,66 @@ func (s Store) Stop(id string, revoke bool, now time.Time, revokeCredentials fun
 	sess.StoppedAt = now.UTC()
 	sess.UpdatedAt = now.UTC()
 	return sess, s.Save(sess)
+}
+
+// Remove permanently deletes a non-running session record so the operator can
+// clear stopped/created "corpses" out of the list (the Emacs portal exposes this
+// as `x`). It refuses a running session (ErrSessionRunning): stop it first. For
+// any session whose credentials were never revoked, revokeCredentials is invoked
+// before the record is deleted, so a removal can never orphan staged credentials
+// on disk (AGENTS.md: staged credentials are wiped on exit) — once the record is
+// gone there is no later handle to revoke them. reap tears down any residual
+// boundary (idempotent for an already-stopped session). The per-session socket
+// is swept too. Returns the removed session so callers can report what went.
+func (s Store) Remove(id string, revokeCredentials func(Session) error, reap ...func(Session) error) (Session, error) {
+	sess, err := s.Get(id)
+	if err != nil {
+		return Session{}, err
+	}
+	if sess.Status == StatusRunning {
+		return Session{}, ErrSessionRunning
+	}
+	if !sess.CredentialsRevoked && revokeCredentials != nil {
+		if err := revokeCredentials(sess); err != nil {
+			return Session{}, err
+		}
+	}
+	for _, fn := range reap {
+		if fn != nil {
+			if err := fn(sess); err != nil {
+				return Session{}, err
+			}
+		}
+	}
+	_ = os.Remove(s.SocketPath(id)) // sweep any residual per-session socket
+	if err := os.Remove(s.path(id)); err != nil && !os.IsNotExist(err) {
+		return Session{}, err
+	}
+	return sess, nil
+}
+
+// PruneStopped removes every stopped session record (the "failed corpses"),
+// leaving created and running sessions untouched, and returns the ids removed in
+// listing order. Each removal goes through Remove, so still-live credentials are
+// revoked before deletion. Callers that want a crashed session (marked running
+// but whose process is gone) pruned too should ListReconciled first: that
+// persists the reconciled `stopped` status this scan then matches.
+func (s Store) PruneStopped(revokeCredentials func(Session) error, reap ...func(Session) error) ([]string, error) {
+	sessions, err := s.List()
+	if err != nil {
+		return nil, err
+	}
+	removed := make([]string, 0, len(sessions))
+	for _, sess := range sessions {
+		if sess.Status != StatusStopped {
+			continue
+		}
+		if _, err := s.Remove(sess.ID, revokeCredentials, reap...); err != nil {
+			return removed, err
+		}
+		removed = append(removed, sess.ID)
+	}
+	return removed, nil
 }
 
 func (s Store) path(id string) string { return filepath.Join(s.Dir, id+".json") }

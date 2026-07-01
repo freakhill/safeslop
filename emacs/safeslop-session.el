@@ -392,6 +392,44 @@ Emacs.  CALLBACK, when given, is called with the envelope once it arrives (tests
        (safeslop--show-envelope-buffer "*safeslop session stop*" args envelope)
        (when callback (funcall callback envelope))))))
 
+(defun safeslop-session--remove-args (session-id)
+  "Return exact argv for removing SESSION-ID's record."
+  (list "session" "rm" "--session-id" session-id "--output" "json"))
+
+(defun safeslop-session--prune-args ()
+  "Return exact argv for pruning all stopped session records."
+  (list "session" "prune" "--output" "json"))
+
+;;;###autoload
+(defun safeslop-session-remove (&optional session-id callback)
+  "Remove SESSION-ID's record, asynchronously, and show the envelope.
+This clears a stopped/created session out of the list (the portal exposes it as
+`x').  The CLI refuses a running session and revokes any still-live staged
+credentials before deleting the record.  CALLBACK, when given, receives the
+envelope once it arrives (used by the portal to refresh, and by tests)."
+  (interactive (list (safeslop-session--read-id "Remove session: ") nil))
+  (let ((args (safeslop-session--remove-args session-id)))
+    (safeslop--call-json-async
+     args
+     (lambda (envelope)
+       (safeslop--show-envelope-buffer "*safeslop session rm*" args envelope)
+       (when callback (funcall callback envelope))))))
+
+;;;###autoload
+(defun safeslop-session-prune (&optional callback)
+  "Remove all stopped session records, asynchronously, and show the envelope.
+Running and created sessions are left untouched; a crashed session (marked
+running but whose process is gone) is reconciled to stopped and pruned in the
+same pass.  CALLBACK, when given, receives the envelope once it arrives (used by
+the portal to refresh, and by tests)."
+  (interactive)
+  (let ((args (safeslop-session--prune-args)))
+    (safeslop--call-json-async
+     args
+     (lambda (envelope)
+       (safeslop--show-envelope-buffer "*safeslop session prune*" args envelope)
+       (when callback (funcall callback envelope))))))
+
 ;;;###autoload
 (defun safeslop-session-reattach (&optional session-id)
   "Reattach to SESSION-ID's detached supervisor over its socket, under a built-in

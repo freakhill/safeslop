@@ -78,6 +78,8 @@ safeslop session run --session-id <id> [--detach]
 safeslop session attach --session-id <id>
 safeslop session status --session-id <id> --output <json|jsonl>
 safeslop session stop --session-id <id> --revoke-credentials --output json
+safeslop session rm --session-id <id> --output json        remove one stopped session record
+safeslop session prune --output json                       remove all stopped session records
 safeslop doctor                     report available tools and isolation tiers
 safeslop down                       tear down safeslop-managed container stacks
 safeslop gc [--until <age>] [--keep <N>]   remove unreferenced safeslop-managed images
@@ -135,6 +137,16 @@ Detaching is a deliberate trade-off: a detached agent holds its staged secrets
 where a coupled run bounds them to the buffer's lifetime. `stop
 --revoke-credentials` still revokes before the kill, and liveness reconcile plus
 the stale-resource sweep bound the leak if the supervisor dies uncleanly.
+
+An exited session stays listed as `stopped` (with its exit code and last error)
+rather than vanishing, so its outcome is inspectable. `session rm --session-id
+<id>` removes one such record and `session prune` removes every stopped record in
+one call, so the session list does not accumulate dead-session corpses. Both
+refuse a still-running session — stop it first — and revoke any still-live staged
+credentials before deleting a record, so a removal can never orphan secrets on
+disk. `prune` first runs the liveness reconcile, so a crashed session (marked
+`running` but whose process is gone) is persisted as `stopped` and swept in the
+same pass. The Emacs portal exposes these as `x` (remove one) and `X` (prune).
 
 `safeslop down` removes safeslop-managed host-container stacks by label. Container
 startup also sweeps managed, record-less orphan boundaries on the host Docker

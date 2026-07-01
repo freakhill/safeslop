@@ -429,7 +429,7 @@ func sweepManagedOrphans(ctx context.Context) error {
 
 func cmdSession() *cobra.Command {
 	c := &cobra.Command{Use: "session", Short: "Manage Emacs-visible safeslop sessions"}
-	c.AddCommand(cmdSessionCreate(), cmdSessionRun(), cmdSessionStatus(), cmdSessionStop(), cmdSessionList(), cmdSessionSupervise(), cmdSessionAttach())
+	c.AddCommand(cmdSessionCreate(), cmdSessionRun(), cmdSessionStatus(), cmdSessionStop(), cmdSessionList(), cmdSessionRemove(), cmdSessionPrune(), cmdSessionSupervise(), cmdSessionAttach())
 	return c
 }
 
@@ -657,6 +657,74 @@ func cmdSessionStop() *cobra.Command {
 	}
 	c.Flags().StringVar(&id, "session-id", "", "session id")
 	c.Flags().BoolVar(&revoke, "revoke-credentials", false, "revoke ephemeral credentials before stopping")
+	c.Flags().StringVar(&output, "output", "", "output format: json")
+	return c
+}
+
+// cmdSessionRemove deletes a single non-running session record so the operator
+// can clear a stopped/created "corpse" out of the portal list. A running session
+// is refused with SESSION_ALREADY_RUNNING pointing at `stop` first; still-live
+// credentials are revoked before the record is deleted so removal can never
+// orphan staged secrets.
+func cmdSessionRemove() *cobra.Command {
+	var id, output string
+	c := &cobra.Command{
+		Use:   "rm --session-id <id> --output json",
+		Short: "Remove a stopped safeslop session record",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if output != "json" {
+				return fmt.Errorf("session rm requires --output json")
+			}
+			sess, err := sessionStore().Remove(id, sessionRevokeCredentials, sessionReapBoundary)
+			if err != nil {
+				switch {
+				case errors.Is(err, engsession.ErrNotFound):
+					return emitContractError(jsoncontract.CodeSessionNotFound, "session not found", map[string]any{"session_id": id})
+				case errors.Is(err, engsession.ErrSessionRunning):
+					return emitContractError(jsoncontract.CodeSessionAlreadyRunning, "session is running; stop it before removing", map[string]any{"session_id": id})
+				default:
+					return emitContractError(jsoncontract.CodeIOError, "remove session", map[string]any{"error": err.Error()})
+				}
+			}
+			emitContract(jsoncontract.OK(map[string]any{"removed": []string{sess.ID}}))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&id, "session-id", "", "session id")
+	c.Flags().StringVar(&output, "output", "", "output format: json")
+	return c
+}
+
+// cmdSessionPrune removes every stopped session record in one call so the
+// operator can clear all the "failed corpses" at once. It reconciles liveness
+// first, so a session whose run process is gone (crash/kill/host sleep) is
+// persisted as stopped and then pruned in the same pass; created and running
+// sessions are always left untouched.
+func cmdSessionPrune() *cobra.Command {
+	var output string
+	c := &cobra.Command{
+		Use:   "prune --output json",
+		Short: "Remove all stopped safeslop session records",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if output != "json" {
+				return fmt.Errorf("session prune requires --output json")
+			}
+			store := sessionStore()
+			// Reconcile first so a crashed session (still marked running but whose
+			// process is gone) is persisted as stopped and swept in this same pass.
+			if _, err := store.ListReconciled(time.Now(), sessionProcessAlive, sessionReapBoundary); err != nil {
+				return emitContractError(jsoncontract.CodeIOError, "list sessions", map[string]any{"error": err.Error()})
+			}
+			removed, err := store.PruneStopped(sessionRevokeCredentials, sessionReapBoundary)
+			if err != nil {
+				return emitContractError(jsoncontract.CodeIOError, "prune sessions", map[string]any{"error": err.Error(), "removed": removed})
+			}
+			emitContract(jsoncontract.OK(map[string]any{"removed": removed}))
+			return nil
+		},
+	}
 	c.Flags().StringVar(&output, "output", "", "output format: json")
 	return c
 }

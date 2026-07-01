@@ -35,6 +35,8 @@
 (declare-function safeslop-portal-run-detached "safeslop-portal" ())
 (declare-function safeslop-portal-follow-profile "safeslop-portal" ())
 (declare-function safeslop-portal-stop "safeslop-portal" ())
+(declare-function safeslop-portal-remove "safeslop-portal" ())
+(declare-function safeslop-portal-prune "safeslop-portal" ())
 (declare-function safeslop-portal-new "safeslop-portal" ())
 (declare-function safeslop-portal-refresh "safeslop-portal" ())
 (declare-function safeslop-portal-toggle-auto-refresh "safeslop-portal" ())
@@ -75,7 +77,9 @@
     (kbd "I") #'safeslop-install
     (kbd "F") #'safeslop-profiles
     (kbd "[") #'safeslop-surface-prev
-    (kbd "]") #'safeslop-surface-next)
+    (kbd "]") #'safeslop-surface-next
+    (kbd "TAB") #'safeslop-surface-next
+    (kbd "<backtab>") #'safeslop-surface-prev)
   ;; The portal is a tabulated-list dashboard whose single-key actions (o/i/k/n/R…)
   ;; would otherwise be Evil normal-state motions; bind them through Evil so the
   ;; dashboard is drivable.
@@ -87,6 +91,8 @@
     (kbd "R")   #'safeslop-portal-reattach
     (kbd "i")   #'safeslop-portal-status
     (kbd "k")   #'safeslop-portal-stop
+    (kbd "x")   #'safeslop-portal-remove
+    (kbd "X")   #'safeslop-portal-prune
     (kbd "n")   #'safeslop-portal-new
     (kbd "f")   #'safeslop-portal-follow-profile
     (kbd "g")   #'safeslop-portal-refresh
@@ -101,7 +107,9 @@
     (kbd "I")   #'safeslop-install
     (kbd "F")   #'safeslop-profiles
     (kbd "[")   #'safeslop-surface-prev
-    (kbd "]")   #'safeslop-surface-next)
+    (kbd "]")   #'safeslop-surface-next
+    (kbd "TAB") #'safeslop-surface-next
+    (kbd "<backtab>") #'safeslop-surface-prev)
   ;; The Install + Profiles surfaces are tabulated-list dashboards too; drive
   ;; their single-key actions and the shared switch keys through Evil normal state.
   (evil-set-initial-state 'safeslop-install-mode 'normal)
@@ -120,7 +128,9 @@
     (kbd "I") #'safeslop-install
     (kbd "F") #'safeslop-profiles
     (kbd "[") #'safeslop-surface-prev
-    (kbd "]") #'safeslop-surface-next)
+    (kbd "]") #'safeslop-surface-next
+    (kbd "TAB") #'safeslop-surface-next
+    (kbd "<backtab>") #'safeslop-surface-prev)
   (evil-set-initial-state 'safeslop-profiles-mode 'normal)
   (evil-define-key 'normal safeslop-profiles-mode-map
     (kbd "RET") #'safeslop-profiles-inspect
@@ -141,7 +151,9 @@
     (kbd "I")   #'safeslop-install
     (kbd "F")   #'safeslop-profiles
     (kbd "[")   #'safeslop-surface-prev
-    (kbd "]")   #'safeslop-surface-next))
+    (kbd "]")   #'safeslop-surface-next
+    (kbd "TAB") #'safeslop-surface-next
+    (kbd "<backtab>") #'safeslop-surface-prev))
 
 ;;;###autoload
 (defun safeslop-doom-bind-leader ()

@@ -249,6 +249,28 @@ envelope via the callback, never a crash."
       (should (safeslop-contract-ok-p (safeslop-test--await (lambda (cb) (safeslop-session-stop "sess-1" cb)))))
       (should (equal (safeslop-test--argv-log-lines) (list (safeslop-test--json-key argv)))))))
 
+(ert-deftest safeslop-test-session-remove-exact-argv ()
+  "`safeslop-session-remove' runs the exact `session rm' contract argv."
+  (let* ((argv '("session" "rm" "--session-id" "sess-dead" "--output" "json"))
+         (routes `((,(safeslop-test--json-key argv) .
+                   ((stdout . "{\"schema_version\":1,\"ok\":true,\"data\":{\"removed\":[\"sess-dead\"]},\"warnings\":[],\"errors\":[]}")
+                    (exit . 0))))))
+    (safeslop-test--with-fake-cli routes
+      (should (safeslop-contract-ok-p (safeslop-test--await (lambda (cb) (safeslop-session-remove "sess-dead" cb)))))
+      (should (equal (safeslop-test--argv-log-lines) (list (safeslop-test--json-key argv)))))))
+
+(ert-deftest safeslop-test-session-prune-exact-argv ()
+  "`safeslop-session-prune' runs the exact `session prune' contract argv."
+  (let* ((argv '("session" "prune" "--output" "json"))
+         (routes `((,(safeslop-test--json-key argv) .
+                   ((stdout . "{\"schema_version\":1,\"ok\":true,\"data\":{\"removed\":[\"sess-a\",\"sess-b\"]},\"warnings\":[],\"errors\":[]}")
+                    (exit . 0))))))
+    (safeslop-test--with-fake-cli routes
+      (let ((env (safeslop-test--await (lambda (cb) (safeslop-session-prune cb)))))
+        (should (safeslop-contract-ok-p env))
+        (should (= (length (alist-get 'removed (safeslop-contract-data env))) 2)))
+      (should (equal (safeslop-test--argv-log-lines) (list (safeslop-test--json-key argv)))))))
+
 (ert-deftest safeslop-test-workspace-path-never-shell-expanded ()
   (let* ((tmp (make-temp-file "safeslop a;b $(touch pwn)" t))
          (workspace (expand-file-name tmp))

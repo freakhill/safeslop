@@ -396,7 +396,13 @@ freshly created profile)."
      (lambda (envelope)
        (when (buffer-live-p buf)
          (with-current-buffer buf
-           (let (error-message)
+           ;; Snapshot scroll+cursor of every showing window before the reprint so
+           ;; a keep-point refresh cannot collapse point to the top or lose scroll
+           ;; in a non-selected window; remember the kept row id to re-find it after
+           ;; the header is re-inserted (the shared cursor-jump fix).
+           (let ((views (and keep-point (safeslop-surface--capture-views)))
+                 (kept-id (and keep-point (tabulated-list-get-id)))
+                 error-message)
              (if (safeslop-contract-ok-p envelope)
                  (let ((data (safeslop-contract-data envelope)))
                    (setq safeslop-profiles--config-path (alist-get 'path data))
@@ -411,12 +417,21 @@ freshly created profile)."
                  (goto-char (point-min))
                  (insert (safeslop-profiles--header))
                  (when (null tabulated-list-entries)
-                   (insert (safeslop-profiles--empty-state safeslop-profiles--config-path error-message))))))
-           (unless keep-point
-             (goto-char (point-min))
-             (while (and (not (tabulated-list-get-id)) (not (eobp)))
-               (forward-line 1)))
-           (when then (funcall then))))))))
+                   (insert (safeslop-profiles--empty-state safeslop-profiles--config-path error-message)))))
+             (cond
+              ;; THEN controls point (reveal a just-created/target profile).
+              (then (funcall then))
+              (keep-point
+               (or (safeslop-surface--goto-id kept-id)
+                   (safeslop-profiles--goto-first-row))
+               (safeslop-surface--restore-views views (point)))
+              (t (safeslop-profiles--goto-first-row))))))))))
+
+(defun safeslop-profiles--goto-first-row ()
+  "Move point past the header block to the first profile row."
+  (goto-char (point-min))
+  (while (and (not (tabulated-list-get-id)) (not (eobp)))
+    (forward-line 1)))
 
 (defun safeslop-profiles-refresh ()
   "Re-fetch the profile list and redraw, keeping point on its profile."
