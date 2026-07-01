@@ -651,3 +651,144 @@ func TestSessionCreateRejectsInvalidNetwork(t *testing.T) {
 		t.Fatalf("error code = %q, want %q", env.Errors[0].Code, jsoncontract.CodeInvalidArgument)
 	}
 }
+
+// TestSessionRemoveDeletesStoppedRecordAndRevokes proves `session rm` deletes a
+// stopped session's record (clearing a portal "corpse") and revokes any still-live
+// staged credentials first, so a removal can never orphan secrets.
+func TestSessionRemoveDeletesStoppedRecordAndRevokes(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+	revoked := 0
+	oldRevoke := sessionRevokeCredentials
+	sessionRevokeCredentials = func(_ engsession.Session) error { revoked++; return nil }
+	defer func() { sessionRevokeCredentials = oldRevoke }()
+
+	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--workspace", ws, "--output", "json")
+	if err != nil {
+		t.Fatalf("create: %v\n%s", err, out)
+	}
+	id := parseEnvelopeForTest(t, out).Data["session_id"].(string)
+	if _, err := sessionStore().Finish(id, 1, "boom", nowForTest(t)); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+
+	out, err = runRootForTest(t, ws, "session", "rm", "--session-id", id, "--output", "json")
+	if err != nil {
+		t.Fatalf("rm: %v\n%s", err, out)
+	}
+	env := parseEnvelopeForTest(t, out)
+	if !env.OK {
+		t.Fatalf("rm not ok: %+v", env)
+	}
+	removed, _ := env.Data["removed"].([]any)
+	if len(removed) != 1 || removed[0].(string) != id {
+		t.Fatalf("rm removed = %v, want [%s]", env.Data["removed"], id)
+	}
+	if revoked != 1 {
+		t.Fatalf("rm revoked %d times, want 1", revoked)
+	}
+	if _, err := sessionStore().Get(id); !errors.Is(err, engsession.ErrNotFound) {
+		t.Fatalf("record still present after rm: %v", err)
+	}
+}
+
+// TestSessionRemoveRefusesRunning proves `session rm` refuses a running session
+// (you must stop it first) with SESSION_ALREADY_RUNNING and leaves the record.
+func TestSessionRemoveRefusesRunning(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+
+	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--workspace", ws, "--output", "json")
+	if err != nil {
+		t.Fatalf("create: %v\n%s", err, out)
+	}
+	id := parseEnvelopeForTest(t, out).Data["session_id"].(string)
+	if _, err := sessionStore().MarkRunning(id, 4242, nowForTest(t)); err != nil {
+		t.Fatalf("mark running: %v", err)
+	}
+
+	out, _ = runRootForTest(t, ws, "session", "rm", "--session-id", id, "--output", "json")
+	env := parseEnvelopeForTest(t, out)
+	if env.OK {
+		t.Fatalf("rm of a running session must fail: %+v", env)
+	}
+	if code := string(env.Errors[0].Code); code != string(jsoncontract.CodeSessionAlreadyRunning) {
+		t.Fatalf("rm error code = %q, want SESSION_ALREADY_RUNNING", code)
+	}
+	if _, err := sessionStore().Get(id); err != nil {
+		t.Fatalf("running record wrongly deleted: %v", err)
+	}
+}
+
+func TestSessionRemoveNotFound(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+	out, _ := runRootForTest(t, ws, "session", "rm", "--session-id", "sess-missing", "--output", "json")
+	env := parseEnvelopeForTest(t, out)
+	if env.OK || string(env.Errors[0].Code) != string(jsoncontract.CodeSessionNotFound) {
+		t.Fatalf("rm of missing session = %+v, want SESSION_NOT_FOUND", env)
+	}
+}
+
+// TestSessionPruneRemovesStoppedIncludingCrashed proves `session prune` clears
+// every stopped session in one call — including a crashed session (still marked
+// running but whose process is gone) via the reconcile pass — while leaving
+// created and live-running sessions untouched.
+func TestSessionPruneRemovesStoppedIncludingCrashed(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+	oldAlive := sessionProcessAlive
+	// A recorded PID of 4242 is our crashed session; everything else is "alive".
+	sessionProcessAlive = func(pid int) bool { return pid != 4242 }
+	defer func() { sessionProcessAlive = oldAlive }()
+
+	mk := func(agent string) string {
+		out, err := runRootForTest(t, ws, "session", "create", "--agent", agent, "--environment", "host", "--workspace", ws, "--output", "json")
+		if err != nil {
+			t.Fatalf("create %s: %v\n%s", agent, err, out)
+		}
+		return parseEnvelopeForTest(t, out).Data["session_id"].(string)
+	}
+	stopped := mk("claude")
+	crashed := mk("pi")
+	created := mk("fish")
+	if _, err := sessionStore().Finish(stopped, 0, "", nowForTest(t)); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	if _, err := sessionStore().MarkRunning(crashed, 4242, nowForTest(t)); err != nil {
+		t.Fatalf("mark running crashed: %v", err)
+	}
+
+	out, err := runRootForTest(t, ws, "session", "prune", "--output", "json")
+	if err != nil {
+		t.Fatalf("prune: %v\n%s", err, out)
+	}
+	env := parseEnvelopeForTest(t, out)
+	if !env.OK {
+		t.Fatalf("prune not ok: %+v", env)
+	}
+	removed, _ := env.Data["removed"].([]any)
+	got := map[string]bool{}
+	for _, r := range removed {
+		got[r.(string)] = true
+	}
+	if !got[stopped] || !got[crashed] || got[created] {
+		t.Fatalf("prune removed = %v, want {stopped,crashed} not created", env.Data["removed"])
+	}
+	if _, err := sessionStore().Get(created); err != nil {
+		t.Fatalf("created session wrongly pruned: %v", err)
+	}
+}
+
+func TestSessionRmAndPruneRegistered(t *testing.T) {
+	sessionCmd := cmdSession()
+	names := map[string]bool{}
+	for _, c := range sessionCmd.Commands() {
+		names[c.Name()] = true
+	}
+	for _, want := range []string{"rm", "prune"} {
+		if !names[want] {
+			t.Fatalf("session %q subcommand not registered; have %v", want, names)
+		}
+	}
+}

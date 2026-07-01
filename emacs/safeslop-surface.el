@@ -28,12 +28,17 @@
 (declare-function safeslop-show-last-error "safeslop" ())
 
 (defconst safeslop-surface--order
-  '((sessions "Sessions" . safeslop-portal)
-    (install  "Install"  . safeslop-install)
-    (profiles "Profiles" . safeslop-profiles))
-  "Ordered surfaces: (SYMBOL LABEL . COMMAND).
-Drives the tab strip and `[' / `]' cycling.  Keep in step with the modes that
-set `safeslop-surface-mode-map' as their parent.")
+  '((sessions "Sessions" "P" safeslop-portal)
+    (install  "Install"  "I" safeslop-install)
+    (profiles "Profiles" "F" safeslop-profiles))
+  "Ordered surfaces: (SYMBOL LABEL KEY COMMAND).
+KEY is the direct switch key shown in the tab strip (also bound in every surface
+map).  Drives the tab strip and `[' / `]' / TAB cycling.  Keep in step with the
+modes that set `safeslop-surface-mode-map' as their parent.")
+
+(defun safeslop-surface--command (entry)
+  "Return the surface command for an `safeslop-surface--order' ENTRY."
+  (nth 3 entry))
 
 (defun safeslop-surface--current-sym ()
   "Return the surface symbol for the current buffer's major mode, or nil."
@@ -43,26 +48,83 @@ set `safeslop-surface-mode-map' as their parent.")
 
 (defun safeslop-surface--tab-strip (active)
   "Return the `Sessions | Install | Profiles' tab strip for ACTIVE surface.
-ACTIVE (a surface symbol) is rendered bold via `mode-line-emphasis'; the others
-are `link'-faced and clickable.  Ends with a blank line separating it from the
-buffer's own shortcut legend."
+Each label is preceded by its direct switch key (faced as a key binding) so the
+way to change surface is legible in the strip itself, not hidden.  ACTIVE (a
+surface symbol) is rendered bold via `mode-line-emphasis'; the others are
+`link'-faced and clickable (mouse-1).  A trailing hint names the cycle keys.
+Ends with a blank line separating it from the buffer's own shortcut legend."
   (concat
    (mapconcat
     (lambda (entry)
-      (let ((sym (car entry)) (label (cadr entry)) (cmd (cddr entry)))
-        (if (eq sym active)
-            (propertize label 'face 'mode-line-emphasis)
-          (propertize label
-                      'face 'link
-                      'mouse-face 'highlight
-                      'help-echo (format "Switch to the %s surface" label)
-                      'keymap (let ((m (make-sparse-keymap)))
-                                (define-key m [mouse-1]
-                                            (lambda () (interactive) (funcall cmd)))
-                                m)))))
+      (let* ((sym (car entry)) (label (cadr entry)) (key (nth 2 entry))
+             (cmd (safeslop-surface--command entry))
+             (switch (lambda () (interactive) (funcall cmd)))
+             (keymap (let ((m (make-sparse-keymap)))
+                       (define-key m [mouse-1] switch)
+                       m)))
+        (concat
+         (propertize key 'face 'help-key-binding
+                     'mouse-face 'highlight 'keymap keymap
+                     'help-echo (format "Switch to the %s surface (%s)" label key))
+         " "
+         (if (eq sym active)
+             (propertize label 'face 'mode-line-emphasis)
+           (propertize label
+                       'face 'link
+                       'mouse-face 'highlight
+                       'help-echo (format "Switch to the %s surface (%s)" label key)
+                       'keymap keymap)))))
     safeslop-surface--order
     "  │  ")
+   "   "
+   (propertize "TAB" 'face 'help-key-binding) "/"
+   (propertize "[" 'face 'help-key-binding)
+   (propertize "]" 'face 'help-key-binding)
+   " cycle surface"
    "\n\n"))
+
+;; --- In-place re-render without losing the operator's place -----------------
+;; safeslop's dashboards refresh by reprinting the tabulated list and re-inserting
+;; the header block above it.  A naive reprint erases the buffer, which collapses
+;; `window-point' to the top in every window showing the buffer that is not the
+;; selected one (and drops the scroll position everywhere) — the "cursor randomly
+;; jumps to the top" bug, which also makes the row action keys land on the header
+;; and appear broken.  This mirrors the fix slopmaxx's console uses: snapshot each
+;; showing window's start/point before the reprint and restore them after, so an
+;; automatic or manual refresh never scrolls or jumps the cursor out from under
+;; the operator.
+
+(defun safeslop-surface--capture-views ()
+  "Snapshot (WINDOW POINT START) for every window showing the current buffer.
+Pass the result to `safeslop-surface--restore-views' after an in-place re-render."
+  (mapcar (lambda (win) (list win (window-point win) (window-start win)))
+          (get-buffer-window-list (current-buffer) nil t)))
+
+(defun safeslop-surface--goto-id (id)
+  "Move point to the tabulated-list row whose id is ID; return non-nil if found.
+Shared by the dashboards so a keep-point refresh can re-find the operator's row
+*after* the header is re-inserted (inserting the header at `point-min' otherwise
+leaves a first-row point stranded on the header — part of the cursor-jump fix)."
+  (when id
+    (goto-char (point-min))
+    (let (found)
+      (while (and (not found) (not (eobp)))
+        (if (equal (tabulated-list-get-id) id)
+            (setq found t)
+          (forward-line 1)))
+      found)))
+
+(defun safeslop-surface--restore-views (views &optional point)
+  "Restore scroll and cursor for VIEWS captured by `safeslop-surface--capture-views'.
+POINT, when non-nil, is the buffer position every window's cursor is synced to
+(e.g. the row `tabulated-list-print' just restored); otherwise each window keeps
+its own captured point.  Positions are clamped so a now-shorter buffer cannot
+error, and `set-window-start' is non-forcing so the cursor stays visible."
+  (dolist (view views)
+    (let ((win (nth 0 view)) (old-point (nth 1 view)) (start (nth 2 view)))
+      (when (window-live-p win)
+        (set-window-point win (min (or point old-point) (point-max)))
+        (set-window-start win (min start (point-max)) t)))))
 
 (defun safeslop-surface--step (delta)
   "Switch to the surface DELTA positions from the current one, wrapping around."
@@ -71,7 +133,7 @@ buffer's own shortcut legend."
          (cur (or (safeslop-surface--current-sym) (car syms)))
          (idx (or (seq-position syms cur) 0))
          (target (nth (mod (+ idx delta) n) syms)))
-    (funcall (cddr (assq target safeslop-surface--order)))))
+    (funcall (safeslop-surface--command (assq target safeslop-surface--order)))))
 
 (defun safeslop-surface-next ()
   "Switch to the next safeslop surface."
@@ -174,6 +236,8 @@ buffer's own shortcut legend."
     (define-key map (kbd "F") #'safeslop-profiles)
     (define-key map (kbd "[") #'safeslop-surface-prev)
     (define-key map (kbd "]") #'safeslop-surface-next)
+    (define-key map (kbd "TAB") #'safeslop-surface-next)
+    (define-key map (kbd "<backtab>") #'safeslop-surface-prev)
     (define-key map (kbd "d") #'safeslop-doctor)
     (define-key map (kbd "E") #'safeslop-show-last-error)
     (define-key map (kbd "L") #'safeslop-debug-log)

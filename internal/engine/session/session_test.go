@@ -296,3 +296,136 @@ func TestStoreStopCanRevokeAlreadyStoppedUnrevokedSession(t *testing.T) {
 		t.Fatalf("credentials not marked revoked: %+v", stopped)
 	}
 }
+
+func TestRemoveDeletesNonRunningRecordAndRevokesLiveCredentials(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(dir)
+	sess, err := store.Create("claude", "host", t.TempDir(), testNow())
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := store.Finish(sess.ID, 1, "boom", testNow()); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+
+	var revoked, reaped bool
+	removed, err := store.Remove(sess.ID,
+		func(Session) error { revoked = true; return nil },
+		func(Session) error { reaped = true; return nil })
+	if err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if removed.ID != sess.ID {
+		t.Fatalf("removed wrong session: %+v", removed)
+	}
+	if !revoked {
+		t.Fatal("Remove must revoke still-live credentials before deleting the record")
+	}
+	if !reaped {
+		t.Fatal("Remove must reap any residual boundary")
+	}
+	if _, err := store.Get(sess.ID); err != ErrNotFound {
+		t.Fatalf("record still present after remove: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, sess.ID+".json")); !os.IsNotExist(err) {
+		t.Fatalf("session file not deleted: %v", err)
+	}
+}
+
+func TestRemoveSkipsRevokeWhenAlreadyRevoked(t *testing.T) {
+	store := NewStore(t.TempDir())
+	sess, err := store.Create("claude", "host", t.TempDir(), testNow())
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := store.Finish(sess.ID, 0, "", testNow()); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	// Simulate a session already stopped with credentials revoked.
+	if _, err := store.Stop(sess.ID, true, testNow(),
+		func(Session) error { return nil }, func(int) error { return nil }, nil); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+
+	revokeCalls := 0
+	if _, err := store.Remove(sess.ID, func(Session) error { revokeCalls++; return nil }); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if revokeCalls != 0 {
+		t.Fatalf("Remove revoked %d times for an already-revoked session, want 0", revokeCalls)
+	}
+}
+
+func TestRemoveRefusesRunningSession(t *testing.T) {
+	store := NewStore(t.TempDir())
+	sess, err := store.Create("claude", "host", t.TempDir(), testNow())
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := store.MarkRunning(sess.ID, 4242, testNow()); err != nil {
+		t.Fatalf("mark running: %v", err)
+	}
+	if _, err := store.Remove(sess.ID, func(Session) error { return nil }); err != ErrSessionRunning {
+		t.Fatalf("Remove of a running session = %v, want ErrSessionRunning", err)
+	}
+	if _, err := store.Get(sess.ID); err != nil {
+		t.Fatalf("running session record wrongly deleted: %v", err)
+	}
+}
+
+func TestRemoveNotFound(t *testing.T) {
+	store := NewStore(t.TempDir())
+	if _, err := store.Remove("sess-missing", nil); err != ErrNotFound {
+		t.Fatalf("Remove of missing session = %v, want ErrNotFound", err)
+	}
+}
+
+func TestPruneStoppedRemovesOnlyStoppedSessions(t *testing.T) {
+	store := NewStore(t.TempDir())
+	stopped1, _ := store.Create("claude", "host", t.TempDir(), testNow())
+	stopped2, _ := store.Create("pi", "host", t.TempDir(), testNow())
+	created, _ := store.Create("fish", "host", t.TempDir(), testNow())
+	running, _ := store.Create("zsh", "host", t.TempDir(), testNow())
+	for _, id := range []string{stopped1.ID, stopped2.ID} {
+		if _, err := store.Finish(id, 0, "", testNow()); err != nil {
+			t.Fatalf("finish %s: %v", id, err)
+		}
+	}
+	if _, err := store.MarkRunning(running.ID, 4242, testNow()); err != nil {
+		t.Fatalf("mark running: %v", err)
+	}
+
+	revokeCalls := 0
+	removed, err := store.PruneStopped(func(Session) error { revokeCalls++; return nil })
+	if err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	if len(removed) != 2 {
+		t.Fatalf("pruned %v, want the 2 stopped sessions", removed)
+	}
+	for _, id := range removed {
+		if _, err := store.Get(id); err != ErrNotFound {
+			t.Fatalf("pruned session %s still present: %v", id, err)
+		}
+	}
+	if _, err := store.Get(created.ID); err != nil {
+		t.Fatalf("created session wrongly pruned: %v", err)
+	}
+	if _, err := store.Get(running.ID); err != nil {
+		t.Fatalf("running session wrongly pruned: %v", err)
+	}
+}
+
+func TestPruneStoppedNoopWhenNoneStopped(t *testing.T) {
+	store := NewStore(t.TempDir())
+	if _, err := store.Create("claude", "host", t.TempDir(), testNow()); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	removed, err := store.PruneStopped(func(Session) error { return nil })
+	if err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	if len(removed) != 0 {
+		t.Fatalf("pruned %v, want none", removed)
+	}
+}

@@ -33,6 +33,8 @@
 (declare-function safeslop-session-reattach "safeslop-session" (&optional session-id))
 (declare-function safeslop-session-status "safeslop-session" (&optional session-id))
 (declare-function safeslop-session-stop "safeslop-session" (&optional session-id callback))
+(declare-function safeslop-session-remove "safeslop-session" (&optional session-id callback))
+(declare-function safeslop-session-prune "safeslop-session" (&optional callback))
 (declare-function safeslop-session-run-detached "safeslop-session" (&optional session-id callback))
 (declare-function safeslop-session-detail "safeslop-session" (&optional session-id data))
 (declare-function safeslop-profiles "safeslop-profiles" ())
@@ -62,6 +64,11 @@ A single timer serves the one portal buffer (`safeslop-portal-buffer-name').")
 
 (defvar safeslop-portal--last-refresh nil
   "Time of the last portal render, for the visible auto-refresh status line.")
+
+(defvar-local safeslop-portal--refresh-in-flight nil
+  "Non-nil while an async portal fetch is outstanding for this buffer.
+Guards the auto-refresh timer from stacking a second fetch on top of one that
+has not returned yet (the slow-CLI pile-up that made refreshes fight input).")
 
 (defvar-local safeslop-portal--sessions-by-id nil
   "Alist mapping session id to full session alist from the last render.")
@@ -350,9 +357,9 @@ refresh here would race the still-running create."
 
 (defconst safeslop-portal--key-hints
   '(("RET" . "open") ("D" . "detach") ("R" . "reattach") ("i" . "details")
-    ("k" . "stop/revoke") ("n" . "new") ("f" . "profile") ("g" . "refresh")
-    ("a" . "auto") ("d" . "doctor") ("E" . "error") ("L" . "debug")
-    ("?" . "help") ("q" . "quit"))
+    ("k" . "stop/revoke") ("x" . "remove") ("X" . "prune") ("n" . "new")
+    ("f" . "profile") ("g" . "refresh") ("a" . "auto") ("d" . "doctor")
+    ("E" . "error") ("L" . "debug") ("?" . "help") ("q" . "quit"))
   "Key/action pairs shown in the portal's in-buffer shortcut legend.")
 
 (defun safeslop-portal--legend ()
@@ -412,31 +419,47 @@ happens in its callback, so neither a manual `g' nor the auto-refresh timer ever
 freezes Emacs (the whole point of the timer is that it must not block).  The
 header is plain buffer text above the rows (the column titles stay in the window
 header line).  With KEEP-POINT non-nil, stay on the same session across the
-reprint (for auto-refresh and `g'); otherwise land on the first row (for a fresh
-open).  AFTER, when given, is called with point in the buffer once the redraw is
-done (used to reveal a just-created session)."
+reprint AND keep every showing window's scroll/cursor steady (for auto-refresh
+and `g'); otherwise land on the first row (for a fresh open).  AFTER, when given,
+is called with point in the buffer once the redraw is done (used to reveal a
+just-created session)."
   (let ((buf (current-buffer)))
+    (setq safeslop-portal--refresh-in-flight t)
     (safeslop--call-json-async
      '("session" "list" "--output" "json")
      (lambda (envelope)
        (when (buffer-live-p buf)
          (with-current-buffer buf
-           (let ((sessions (safeslop-portal--sessions-from envelope)))
+           (setq safeslop-portal--refresh-in-flight nil)
+           ;; Snapshot each showing window's scroll+cursor BEFORE the reprint so a
+           ;; refresh in a non-selected window can't collapse point to the top or
+           ;; drop the scroll position (the "cursor jumps to the top" bug).  Also
+           ;; remember which row the operator was on, to re-find it AFTER the header
+           ;; is re-inserted (a first row would otherwise strand point on the header).
+           (let ((views (and keep-point (safeslop-surface--capture-views)))
+                 (kept-id (and keep-point (tabulated-list-get-id)))
+                 (sessions (safeslop-portal--sessions-from envelope)))
              (setq safeslop-portal--sessions-by-id
                    (mapcar (lambda (s) (cons (safeslop-portal--field s 'session_id) s)) sessions))
-             (setq tabulated-list-entries (safeslop-portal--rows sessions)))
-           (setq safeslop-portal--last-refresh (current-time))
-           ;; `tabulated-list-print' erases the buffer (header included) and reprints;
-           ;; with KEEP-POINT it restores point to the same entry id, so the header
-           ;; re-insert above (before point) shifts but does not move it off the session.
-           (tabulated-list-print keep-point)
-           (let ((inhibit-read-only t))
-             (save-excursion
-               (goto-char (point-min))
-               (insert (safeslop-portal--header))))
-           (unless keep-point
-             (safeslop-portal--goto-first-row))
-           (when after (funcall after))))))))
+             (setq tabulated-list-entries (safeslop-portal--rows sessions))
+             (setq safeslop-portal--last-refresh (current-time))
+             (tabulated-list-print keep-point)
+             (let ((inhibit-read-only t))
+               (save-excursion
+                 (goto-char (point-min))
+                 (insert (safeslop-portal--header))))
+             (cond
+              ;; AFTER controls point (reveal a specific/just-created row); let
+              ;; redisplay scroll naturally so the revealed row is shown.
+              (after (funcall after))
+              ;; Keep-point refresh: re-find the operator's row now the header is in
+              ;; place, then restore each window's captured scroll + cursor so a
+              ;; refresh in any window never jumps the cursor or loses scroll.
+              (keep-point
+               (or (safeslop-surface--goto-id kept-id)
+                   (safeslop-portal--goto-first-row))
+               (safeslop-surface--restore-views views (point)))
+              (t (safeslop-portal--goto-first-row))))))))))
 
 (defun safeslop-portal--reveal-session (id)
   "If a live portal exists, refresh it and land point on session ID.
@@ -455,6 +478,43 @@ once — the create is async, so a plain refresh would race it."
       (with-current-buffer buf
         (safeslop-portal--render t)))))
 
+(defun safeslop-portal-remove ()
+  "Remove the stopped session at point from the list (clear a dead-session corpse).
+Refuses a running session (stop it first with `k'); stopped/created records are
+deleted after confirmation.  `safeslop session rm' revokes any still-live staged
+credentials before deleting, so a removal never orphans secrets."
+  (interactive)
+  (let* ((sess (safeslop-portal--session-at-point))
+         (id (safeslop-portal--field sess 'session_id))
+         (status (safeslop-portal--field sess 'status)))
+    (when (equal status "running")
+      (user-error "%s is running — press k to stop/revoke it first, then x to remove"
+                  (safeslop-portal--short-id id)))
+    (when (yes-or-no-p (format "Remove %s (%s) from the list? "
+                               (safeslop-portal--short-id id) status))
+      (safeslop-session-remove
+       id (lambda (env)
+            (if (safeslop-contract-ok-p env)
+                (safeslop-portal-refresh)
+              (message "safeslop: remove failed: %s"
+                       (safeslop-surface--error-message env "remove failed"))))))))
+
+(defun safeslop-portal-prune ()
+  "Remove ALL stopped sessions at once (clear every dead-session corpse).
+Running and created sessions are left untouched; crashed sessions (marked running
+but whose process is gone) are reconciled to stopped and pruned in the same pass.
+Credentials are revoked before each record is deleted."
+  (interactive)
+  (when (yes-or-no-p "Remove all stopped sessions from the list? ")
+    (safeslop-session-prune
+     (lambda (env)
+       (if (safeslop-contract-ok-p env)
+           (let ((n (length (alist-get 'removed (safeslop-contract-data env)))))
+             (message "safeslop: pruned %d stopped session%s" n (if (= n 1) "" "s"))
+             (safeslop-portal-refresh))
+         (message "safeslop: prune failed: %s"
+                  (safeslop-surface--error-message env "prune failed")))))))
+
 (defun safeslop-portal--cancel-timer ()
   "Cancel the portal auto-refresh timer if one is running."
   (when safeslop-portal--timer
@@ -462,15 +522,22 @@ once — the create is async, so a plain refresh would race it."
     (setq safeslop-portal--timer nil)))
 
 (defun safeslop-portal--auto-refresh ()
-  "Timer callback: refresh the portal when it is live, shown, and not prompting.
-Self-cancels once the portal buffer is gone; skips a tick while any minibuffer is
-active so it never fights a `k'-stop confirmation or other prompt."
+  "Timer callback: refresh the portal when it is live, shown, and idle.
+Self-cancels once the portal buffer is gone.  Skips a tick while any minibuffer
+is active (so it never fights a `k'-stop confirmation or other prompt), while the
+operator has keystrokes pending (`input-pending-p', so an automatic redraw can't
+land mid-keypress and move point out from under an action key), or while a prior
+async fetch for this buffer has not returned (`safeslop-portal--refresh-in-flight',
+so slow `session list' calls can't stack up).  These are the same idle guards
+slopmaxx's console adopted to stop refreshes fighting operator input."
   (let ((buf (get-buffer safeslop-portal-buffer-name)))
     (cond
      ((not (buffer-live-p buf)) (safeslop-portal--cancel-timer))
      (safeslop-portal--auto-paused nil)
      ((and (get-buffer-window buf 'visible)
-           (not (active-minibuffer-window)))
+           (not (active-minibuffer-window))
+           (not (input-pending-p))
+           (not (buffer-local-value 'safeslop-portal--refresh-in-flight buf)))
       (let ((safeslop--debug-call-event 'poll))
         (safeslop-portal-refresh))))))
 
@@ -513,6 +580,8 @@ A nil or non-positive interval leaves the portal static (manual `g' only)."
     (define-key map (kbd "R")   #'safeslop-portal-reattach)
     (define-key map (kbd "i")   #'safeslop-portal-status)
     (define-key map (kbd "k")   #'safeslop-portal-stop)
+    (define-key map (kbd "x")   #'safeslop-portal-remove)
+    (define-key map (kbd "X")   #'safeslop-portal-prune)
     (define-key map (kbd "n")   #'safeslop-portal-new)
     (define-key map (kbd "f")   #'safeslop-portal-follow-profile)
     (define-key map (kbd "g")   #'safeslop-portal-refresh)
@@ -547,8 +616,8 @@ A nil or non-positive interval leaves the portal static (manual `g' only)."
 ;;;###autoload
 (defun safeslop-portal ()
   "Open the safeslop session portal: a dashboard of sessions you can act on.
-Keys: RET/o open (run), R reattach, i status, k stop, n new, g refresh,
-a toggle auto-refresh, d doctor, L debug log, q quit.
+Keys: RET/o open (run), R reattach, i status, k stop, x remove, X prune,
+n new, g refresh, a toggle auto-refresh, d doctor, L debug log, q quit.
 
 While displayed, the portal auto-refreshes every
 `safeslop-portal-refresh-interval' seconds (nil disables)."

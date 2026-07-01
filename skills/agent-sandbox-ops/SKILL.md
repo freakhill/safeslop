@@ -38,6 +38,8 @@ file transfer between host and sandboxed runtimes.
 - `safeslop session attach --session-id <id>` — rejoin a detached session's agent over its socket under a controlling terminal, exiting with the agent's code; one active attach at a time. No usable TTY emits `PTY_UNAVAILABLE`.
 - `safeslop session status --session-id <id> --output <json|jsonl>` — inspect or monitor session state; a running detached session also reports its `socket`.
 - `safeslop session stop --session-id <id> --revoke-credentials --output json` — stop idempotently, revoking ephemeral credentials before terminating the process (a detached supervisor's whole process group), and removing the socket.
+- `safeslop session rm --session-id <id> --output json` — permanently remove one stopped/created session record so the portal does not accumulate dead-session corpses. Refuses a running session (stop it first); revokes any still-live staged credentials before deleting, so removal never orphans secrets. Returns `data.removed` (the removed id).
+- `safeslop session prune --output json` — remove every stopped session record in one call, leaving created and running sessions untouched. Runs the liveness reconcile first, so a crashed session (marked `running` but whose process is gone) is persisted as `stopped` and swept in the same pass. Returns `data.removed` (the removed ids). In Emacs these are the portal's `x` (remove one) and `X` (prune) keys.
 - `safeslop doctor` — report available tools and isolation tiers.
 - `safeslop down` — tear down safeslop-managed host-container stacks by label (the Lima VM backend is torn down through its own runtime path).
 - `safeslop gc [--until <age>] [--keep <N>]` — remove only unreferenced safeslop-managed images; current resolving profiles, the repo lockfile, and live sessions anchor images.
@@ -71,6 +73,15 @@ In Emacs, `C-c s F` opens the Profiles surface. Use `RET`/`i` to inspect a
 profile's resolved packages/egress/recipe, `x` to launch a session from the row
 after an isolation/network summary, `e` to edit the CUE at that profile's block,
 `n` to create, `c` to clone, `D` for guided manual deletion, and `g` to refresh.
+
+`C-c s P` opens the Sessions portal. The tab strip shows each surface's direct
+switch key (`P` Sessions, `I` Install, `F` Profiles); `TAB`/`S-TAB` or `[`/`]`
+cycle between them, and the strip is mouse-clickable. Portal row keys: `RET`/`o`
+state-aware open, `R` reattach, `i` details, `k` stop/revoke, `x` remove one
+stopped session, `X` prune all stopped sessions, `n` new, `g` refresh, `a`
+pause/resume auto-refresh. Each in-place refresh keeps point on the same session
+and preserves window scroll, so it never jumps the cursor out from under a row
+action key.
 
 ### Maintain the catalog (bump / propose / add / audit)
 

@@ -12,12 +12,16 @@ state and get normal-state bindings for refresh/error/quit actions.
 ## Operator UI navigation
 
 The Emacs package is a small operator UI with three surfaces: **Sessions** (`P`),
-**Install** (`I`), and **Profiles** (`F`).  In any operator UI surface and most result
-buffers, the shared keys are:
+**Install** (`I`), and **Profiles** (`F`).  The tab strip at the top of every
+surface shows each surface's direct switch key next to its name
+(`P Sessions │ I Install │ F Profiles   TAB/[] cycle surface`), and every label
+and key in the strip is clickable with the mouse — so switching surface is never a
+guess.  In any operator UI surface and most result buffers, the shared keys are:
 
 | key | action |
 |---|---|
-| `P` / `I` / `F` | switch to Sessions / Install / Profiles |
+| `P` / `I` / `F` | switch directly to Sessions / Install / Profiles |
+| `TAB` / `S-TAB` | cycle next / previous surface |
 | `[` / `]` | cycle previous / next surface |
 | `g` | refresh this view (result buffers only rerun read-only commands) |
 | `d` | doctor |
@@ -45,20 +49,34 @@ network, status, PID, age, recipe/image, workspace — that you act on in place:
 | `R` | reattach only when a detached supervisor socket exists |
 | `i` | details buffer (lifecycle, credentials, last error, next action) |
 | `k` | stop, revoke credentials, and tear down the boundary |
+| `x` | remove one stopped/created session record from the list |
+| `X` | prune — remove every stopped session at once |
 | `n` | new session |
 | `f` | jump to the backing profile when present |
 | `g` | refresh now |
 | `a` | pause/resume auto-refresh |
 
+A session that has exited stays listed as `stopped` so you can read its exit code
+and last error; `x` clears one such record and `X` clears them all in one call, so
+the portal never fills up with dead-session corpses.  `x`/`X` refuse a running
+session (stop it first with `k`); the CLI (`session rm` / `session prune`) revokes
+any still-live staged credentials before deleting a record, and `prune` also
+reconciles a crashed session (marked running but whose process is gone) to
+`stopped` and sweeps it in the same pass.
+
 Detached sessions are explicit because they survive the Emacs buffer and keep
 staged credentials until stop/revoke.  Coupled run remains the default.
 
 While the portal is displayed, it **auto-refreshes** every
-`safeslop-portal-refresh-interval` seconds (default 5; set to nil to disable),
-keeping point on the same session across redraws and skipping a tick while a
-prompt is open.  The header shows whether polling is on or paused; polling only
-runs `safeslop session list`, never an agent action.  Debug lines from polling are
-labelled `event=poll`.
+`safeslop-portal-refresh-interval` seconds (default 5; set to nil to disable).
+Each in-place redraw preserves every showing window's scroll position and keeps
+point on the same session — an automatic or manual refresh never scrolls the
+window or jumps the cursor to the top (so the row action keys always act on the
+row you are looking at).  A tick is skipped while a prompt is open, while you have
+keystrokes pending, or while a previous fetch is still in flight, so refreshes
+never fight your input or pile up.  The header shows whether polling is on or
+paused; polling only runs `safeslop session list`, never an agent action.  Debug
+lines from polling are labelled `event=poll`.
 
 ## Profiles
 

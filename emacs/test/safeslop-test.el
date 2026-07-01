@@ -13,6 +13,8 @@
                 safeslop-session-list
                 safeslop-session-status
                 safeslop-session-stop
+                safeslop-session-remove
+                safeslop-session-prune
                 safeslop-session-reattach
                 safeslop-session-new-from-profile
                 safeslop-switch-to-session-buffer
@@ -320,6 +322,61 @@
   (should (= (length safeslop-surface--order) 3))
   (should (equal (mapcar #'car safeslop-surface--order) '(sessions install profiles))))
 
+(ert-deftest safeslop-test-surface-tab-strip-shows-switch-keys ()
+  "The tab strip advertises the direct switch key before each label and the cycle
+keys after, so changing surface is discoverable in the strip itself."
+  (let ((strip (substring-no-properties (safeslop-surface--tab-strip 'sessions))))
+    (should (string-match-p "P Sessions" strip))
+    (should (string-match-p "I Install" strip))
+    (should (string-match-p "F Profiles" strip))
+    (should (string-match-p "cycle surface" strip))))
+
+(ert-deftest safeslop-test-surface-tab-and-cycle-keys ()
+  "TAB/backtab and [/] cycle surfaces from every dashboard's shared parent map."
+  (should (eq (lookup-key safeslop-surface-mode-map (kbd "TAB")) #'safeslop-surface-next))
+  (should (eq (lookup-key safeslop-surface-mode-map (kbd "<backtab>")) #'safeslop-surface-prev))
+  (should (eq (lookup-key safeslop-surface-mode-map (kbd "]")) #'safeslop-surface-next))
+  (should (eq (lookup-key safeslop-surface-mode-map (kbd "[")) #'safeslop-surface-prev))
+  ;; Reachable through each surface's own keymap (portal binds TAB directly; the
+  ;; others inherit it via the parent).
+  (should (eq (lookup-key safeslop-portal-mode-map (kbd "TAB")) #'safeslop-surface-next))
+  (should (eq (lookup-key safeslop-profiles-mode-map (kbd "TAB")) #'safeslop-surface-next))
+  (should (eq (lookup-key safeslop-install-mode-map (kbd "TAB")) #'safeslop-surface-next)))
+
+(ert-deftest safeslop-test-surface-step-cycles ()
+  "`safeslop-surface--step' calls the next/prev surface command, wrapping around."
+  (let (called)
+    (cl-letf (((symbol-function 'safeslop-portal) (lambda () (interactive) (setq called 'sessions)))
+              ((symbol-function 'safeslop-install) (lambda () (interactive) (setq called 'install)))
+              ((symbol-function 'safeslop-profiles) (lambda () (interactive) (setq called 'profiles))))
+      ;; No safeslop surface is current in a temp buffer, so step starts from the
+      ;; first surface (sessions): +1 -> install, -1 -> profiles (wrap).
+      (with-temp-buffer
+        (safeslop-surface--step 1)
+        (should (eq called 'install))
+        (safeslop-surface--step -1)
+        (should (eq called 'profiles))))))
+
+(ert-deftest safeslop-test-surface-restore-views-preserves-scroll-and-point ()
+  "`restore-views' puts each window's scroll back and syncs the cursor to POINT,
+clamping to a now-shorter buffer instead of erroring — the core of the cursor-jump
+fix."
+  (let (set-points set-starts)
+    (cl-letf (((symbol-function 'window-live-p) (lambda (_w) t))
+              ((symbol-function 'set-window-point)
+               (lambda (w p) (push (cons w p) set-points)))
+              ((symbol-function 'set-window-start)
+               (lambda (w s &optional _noforce) (push (cons w s) set-starts))))
+      (with-temp-buffer
+        (insert (make-string 50 ?x))       ; point-max = 51
+        (safeslop-surface--restore-views '((winA 999 40) (winB 10 5)) 999)
+        ;; POINT (999) is clamped to point-max (51) for both windows.
+        (should (equal (alist-get 'winA set-points) 51))
+        (should (equal (alist-get 'winB set-points) 51))
+        ;; Each window's captured scroll start is restored (clamped).
+        (should (equal (alist-get 'winA set-starts) 40))
+        (should (equal (alist-get 'winB set-starts) 5))))))
+
 (ert-deftest safeslop-test-surface-tab-strip ()
   "The tab strip names all three surfaces; the active one is emphasized."
   (let ((strip (safeslop-surface--tab-strip 'install)))
@@ -390,3 +447,126 @@
     (should (safeslop-portal--goto-id "sess-2"))
     (should (equal (tabulated-list-get-id) "sess-2"))
     (should-not (safeslop-portal--goto-id "sess-nope"))))
+
+;;; Portal corpse cleanup: remove/prune (session rm/prune) -------------------
+
+(ert-deftest safeslop-test-portal-remove-prune-keys ()
+  "The portal binds x to remove one session and X to prune all stopped ones."
+  (should (eq (lookup-key safeslop-portal-mode-map (kbd "x")) #'safeslop-portal-remove))
+  (should (eq (lookup-key safeslop-portal-mode-map (kbd "X")) #'safeslop-portal-prune)))
+
+(ert-deftest safeslop-test-portal-legend-lists-remove ()
+  "The in-buffer legend advertises remove and prune."
+  (let ((legend (substring-no-properties (safeslop-portal--legend))))
+    (should (string-match-p "remove" legend))
+    (should (string-match-p "prune" legend))))
+
+(ert-deftest safeslop-test-session-remove-prune-argv ()
+  "Remove/prune build the exact CLI argv (no shell, contract --output json)."
+  (should (equal (safeslop-session--remove-args "sess-9")
+                 '("session" "rm" "--session-id" "sess-9" "--output" "json")))
+  (should (equal (safeslop-session--prune-args)
+                 '("session" "prune" "--output" "json"))))
+
+(ert-deftest safeslop-test-portal-remove-refuses-running ()
+  "`x' on a running session refuses (stop it first) and never calls remove."
+  (let (removed)
+    (cl-letf (((symbol-function 'safeslop-portal--session-at-point)
+               (lambda () '((session_id . "sess-run") (status . "running"))))
+              ((symbol-function 'safeslop-session-remove)
+               (lambda (&rest _) (setq removed t))))
+      (should-error (safeslop-portal-remove) :type 'user-error)
+      (should-not removed))))
+
+(ert-deftest safeslop-test-portal-remove-confirms-then-calls ()
+  "`x' on a stopped session confirms, then calls remove with its id."
+  (let (removed-id)
+    (cl-letf (((symbol-function 'safeslop-portal--session-at-point)
+               (lambda () '((session_id . "sess-dead") (status . "stopped"))))
+              ((symbol-function 'yes-or-no-p) (lambda (&rest _) t))
+              ((symbol-function 'safeslop-session-remove)
+               (lambda (id &optional _cb) (setq removed-id id))))
+      (safeslop-portal-remove)
+      (should (equal removed-id "sess-dead")))))
+
+(ert-deftest safeslop-test-portal-remove-declined-does-nothing ()
+  "Declining the confirm leaves the session untouched."
+  (let (removed)
+    (cl-letf (((symbol-function 'safeslop-portal--session-at-point)
+               (lambda () '((session_id . "sess-dead") (status . "stopped"))))
+              ((symbol-function 'yes-or-no-p) (lambda (&rest _) nil))
+              ((symbol-function 'safeslop-session-remove)
+               (lambda (&rest _) (setq removed t))))
+      (safeslop-portal-remove)
+      (should-not removed))))
+
+(ert-deftest safeslop-test-portal-prune-confirms-then-calls ()
+  "`X' confirms once, then calls prune."
+  (let (pruned)
+    (cl-letf (((symbol-function 'yes-or-no-p) (lambda (&rest _) t))
+              ((symbol-function 'safeslop-session-prune)
+               (lambda (&optional _cb) (setq pruned t))))
+      (safeslop-portal-prune)
+      (should pruned))))
+
+;;; Cursor-jump fix: in-place refresh preserves window scroll + point --------
+
+(ert-deftest safeslop-test-portal-refresh-preserves-window-view ()
+  "A keep-point re-render restores the showing window's scroll and cursor rather
+than collapsing point to the top (the cursor-jump regression)."
+  (let ((buf (get-buffer-create "*safeslop portal view test*")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'safeslop--call-json-async)
+                   (lambda (_args cb)
+                     (funcall cb (safeslop-contract-parse-string
+                                  (concat "{\"schema_version\":1,\"ok\":true,\"data\":{\"sessions\":["
+                                          "{\"session_id\":\"sess-1\",\"agent\":\"claude\",\"environment\":\"host\","
+                                          "\"network\":\"deny\",\"status\":\"running\",\"workspace\":\"/w\"},"
+                                          "{\"session_id\":\"sess-2\",\"agent\":\"pi\",\"environment\":\"host\","
+                                          "\"network\":\"deny\",\"status\":\"created\",\"workspace\":\"/w\"}]},"
+                                          "\"warnings\":[],\"errors\":[]}"))))))
+          (with-current-buffer buf
+            (safeslop-portal-mode)
+            (safeslop-portal--render)          ; initial fill, lands on first row
+            (let* ((win (display-buffer buf))
+                   captured)
+              (with-selected-window win
+                (safeslop-portal--goto-id "sess-2")
+                (setq captured (point))
+                ;; A keep-point refresh must leave the cursor on sess-2, not row 1.
+                (safeslop-portal--render t)
+                (should (equal (tabulated-list-get-id) "sess-2"))
+                (should (= (point) captured))))))
+      (when (get-buffer buf) (kill-buffer buf)))))
+
+(ert-deftest safeslop-test-portal-auto-refresh-skips-pending-input ()
+  "The auto-refresh timer skips a tick when the operator has input pending, so a
+redraw never lands mid-keystroke and moves point out from under an action key."
+  (let ((buf (get-buffer-create safeslop-portal-buffer-name))
+        refreshed)
+    (unwind-protect
+        (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) 'win))
+                  ((symbol-function 'active-minibuffer-window) (lambda () nil))
+                  ((symbol-function 'input-pending-p) (lambda (&rest _) t))
+                  ((symbol-function 'safeslop-portal-refresh) (lambda () (setq refreshed t))))
+          (let ((safeslop-portal--auto-paused nil))
+            (safeslop-portal--auto-refresh)
+            (should-not refreshed)))
+      (when (get-buffer buf) (kill-buffer buf)))))
+
+(ert-deftest safeslop-test-portal-auto-refresh-skips-in-flight ()
+  "The auto-refresh timer skips a tick while a prior async fetch is still in
+flight, so slow `session list' calls can't stack up."
+  (let ((buf (get-buffer-create safeslop-portal-buffer-name))
+        refreshed)
+    (unwind-protect
+        (progn
+          (with-current-buffer buf (setq safeslop-portal--refresh-in-flight t))
+          (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) 'win))
+                    ((symbol-function 'active-minibuffer-window) (lambda () nil))
+                    ((symbol-function 'input-pending-p) (lambda (&rest _) nil))
+                    ((symbol-function 'safeslop-portal-refresh) (lambda () (setq refreshed t))))
+            (let ((safeslop-portal--auto-paused nil))
+              (safeslop-portal--auto-refresh)
+              (should-not refreshed))))
+      (when (get-buffer buf) (kill-buffer buf)))))

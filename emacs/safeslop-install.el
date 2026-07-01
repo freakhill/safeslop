@@ -89,17 +89,30 @@ the reprint; otherwise land on the first row."
              (message "safeslop install: %s"
                       (or (alist-get 'message (car (safeslop-contract-errors envelope)))
                           "install status failed")))
-           (setq tabulated-list-entries
-                 (safeslop-install--rows (safeslop-contract-data envelope)))
-           (tabulated-list-print keep-point)
-           (let ((inhibit-read-only t))
-             (save-excursion
-               (goto-char (point-min))
-               (insert (safeslop-install--header))))
-           (unless keep-point
-             (goto-char (point-min))
-             (while (and (not (tabulated-list-get-id)) (not (eobp)))
-               (forward-line 1)))))))))
+           ;; Snapshot scroll+cursor before the reprint so a keep-point refresh in a
+           ;; non-selected window cannot jump the cursor to the top; remember the
+           ;; kept row to re-find it after the header re-insert (shared fix).
+           (let ((views (and keep-point (safeslop-surface--capture-views)))
+                 (kept-id (and keep-point (tabulated-list-get-id))))
+             (setq tabulated-list-entries
+                   (safeslop-install--rows (safeslop-contract-data envelope)))
+             (tabulated-list-print keep-point)
+             (let ((inhibit-read-only t))
+               (save-excursion
+                 (goto-char (point-min))
+                 (insert (safeslop-install--header))))
+             (if keep-point
+                 (progn
+                   (or (safeslop-surface--goto-id kept-id)
+                       (safeslop-install--goto-first-row))
+                   (safeslop-surface--restore-views views (point)))
+               (safeslop-install--goto-first-row)))))))))
+
+(defun safeslop-install--goto-first-row ()
+  "Move point past the header block to the first tool row."
+  (goto-char (point-min))
+  (while (and (not (tabulated-list-get-id)) (not (eobp)))
+    (forward-line 1)))
 
 (defun safeslop-install-refresh ()
   "Re-fetch install status and redraw, keeping point on its tool."
