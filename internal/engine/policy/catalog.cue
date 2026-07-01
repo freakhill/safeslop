@@ -71,6 +71,14 @@ catalog: {
 			arm64: "0000000000000000000000000000000000000000000000000000000000000000"
 		}
 		buildFetch: ["github.com"]
+		upstream: {
+			kind: "github-releases"
+			url:  "https://api.github.com/repos/sharkdp/bat/releases"
+			asset: {
+				amd64: "https://github.com/sharkdp/bat/releases/download/v{version}/bat-v{version}-x86_64-unknown-linux-gnu.tar.gz"
+				arm64: "https://github.com/sharkdp/bat/releases/download/v{version}/bat-v{version}-aarch64-unknown-linux-gnu.tar.gz"
+			}
+		}
 	}, {
 		name:    "bun"
 		kind:    "binary"
@@ -81,6 +89,14 @@ catalog: {
 			arm64: "0000000000000000000000000000000000000000000000000000000000000000"
 		}
 		buildFetch: ["github.com"]
+		upstream: {
+			kind: "github-releases"
+			url:  "https://api.github.com/repos/oven-sh/bun/releases"
+			asset: {
+				amd64: "https://github.com/oven-sh/bun/releases/download/bun-v{version}/bun-linux-x64.zip"
+				arm64: "https://github.com/oven-sh/bun/releases/download/bun-v{version}/bun-linux-aarch64.zip"
+			}
+		}
 	}, {
 		name:    "cargo-audit"
 		kind:    "binary"
@@ -92,6 +108,10 @@ catalog: {
 		}
 		requires: ["rust"]
 		buildFetch: ["github.com"]
+		upstream: {
+			kind: "github-releases"
+			url:  "https://api.github.com/repos/rustsec/rustsec/releases"
+		}
 	}, {
 		name:    "cargo-binutils"
 		kind:    "binary"
@@ -102,6 +122,10 @@ catalog: {
 		}
 		requires: ["rust"]
 		buildFetch: ["github.com"]
+		upstream: {
+			kind: "github-releases"
+			url:  "https://api.github.com/repos/rust-embedded/cargo-binutils/releases"
+		}
 	}, {
 		name:    "cargo-deny"
 		kind:    "binary"
@@ -112,6 +136,10 @@ catalog: {
 		}
 		requires: ["rust"]
 		buildFetch: ["github.com"]
+		upstream: {
+			kind: "github-releases"
+			url:  "https://api.github.com/repos/EmbarkStudios/cargo-deny/releases"
+		}
 	}, {
 		name:    "cargo-expand"
 		kind:    "binary"
@@ -122,6 +150,10 @@ catalog: {
 		}
 		requires: ["rust"]
 		buildFetch: ["github.com"]
+		upstream: {
+			kind: "github-releases"
+			url:  "https://api.github.com/repos/dtolnay/cargo-expand/releases"
+		}
 	}, {
 		name:    "cargo-make"
 		kind:    "binary"
@@ -132,6 +164,10 @@ catalog: {
 		}
 		requires: ["rust"]
 		buildFetch: ["github.com"]
+		upstream: {
+			kind: "github-releases"
+			url:  "https://api.github.com/repos/sagiegurari/cargo-make/releases"
+		}
 	}, {
 		name:    "cargo-nextest"
 		kind:    "binary"
@@ -142,6 +178,10 @@ catalog: {
 		}
 		requires: ["rust"]
 		buildFetch: ["github.com"]
+		upstream: {
+			kind: "github-releases"
+			url:  "https://api.github.com/repos/nextest-rs/nextest/releases"
+		}
 	}, {
 		name:    "cargo-watch"
 		kind:    "binary"
@@ -152,6 +192,10 @@ catalog: {
 		}
 		requires: ["rust"]
 		buildFetch: ["github.com"]
+		upstream: {
+			kind: "github-releases"
+			url:  "https://api.github.com/repos/watchexec/cargo-watch/releases"
+		}
 	}, {
 		name:    "claude-code"
 		kind:    "npm"
@@ -160,12 +204,20 @@ catalog: {
 		requires: ["node"]
 		buildFetch: ["registry.npmjs.org"]
 		runtimeEgress: [".anthropic.com"]
+		upstream: {
+			kind: "npm-registry"
+			url:  "https://registry.npmjs.org/@anthropic-ai%2fclaude-code"
+		}
 	}, {
 		name:    "eslint"
 		kind:    "npm"
 		version: "9.22.0"
 		requires: ["node"]
 		buildFetch: ["registry.npmjs.org"]
+		upstream: {
+			kind: "npm-registry"
+			url:  "https://registry.npmjs.org/eslint"
+		}
 	}, {
 		name:    "eza"
 		kind:    "binary"
@@ -175,6 +227,14 @@ catalog: {
 			arm64: "0000000000000000000000000000000000000000000000000000000000000000"
 		}
 		buildFetch: ["github.com"]
+		upstream: {
+			kind: "github-releases"
+			url:  "https://api.github.com/repos/eza-community/eza/releases"
+			asset: {
+				amd64: "https://github.com/eza-community/eza/releases/download/v{version}/eza_x86_64-unknown-linux-gnu.tar.gz"
+				arm64: "https://github.com/eza-community/eza/releases/download/v{version}/eza_aarch64-unknown-linux-gnu.tar.gz"
+			}
+		}
 	}, {
 		name:    "fd"
 		kind:    "binary"
@@ -184,6 +244,14 @@ catalog: {
 			arm64: "0000000000000000000000000000000000000000000000000000000000000000"
 		}
 		buildFetch: ["github.com"]
+		upstream: {
+			kind: "github-releases"
+			url:  "https://api.github.com/repos/sharkdp/fd/releases"
+			asset: {
+				amd64: "https://github.com/sharkdp/fd/releases/download/v{version}/fd-v{version}-x86_64-unknown-linux-gnu.tar.gz"
+				arm64: "https://github.com/sharkdp/fd/releases/download/v{version}/fd-v{version}-aarch64-unknown-linux-gnu.tar.gz"
+			}
+		}
 	}, {
 		name:    "flip-link"
 		kind:    "binary"
@@ -194,6 +262,10 @@ catalog: {
 		}
 		requires: ["rust"]
 		buildFetch: ["github.com"]
+		upstream: {
+			kind: "github-releases"
+			url:  "https://api.github.com/repos/knurling-rs/flip-link/releases"
+		}
 	}, {
 		name:    "fzf"
 		kind:    "binary"
@@ -203,6 +275,14 @@ catalog: {
 			arm64: "0000000000000000000000000000000000000000000000000000000000000000"
 		}
 		buildFetch: ["github.com"]
+		upstream: {
+			kind: "github-releases"
+			url:  "https://api.github.com/repos/junegunn/fzf/releases"
+			asset: {
+				amd64: "https://github.com/junegunn/fzf/releases/download/v{version}/fzf-{version}-linux_amd64.tar.gz"
+				arm64: "https://github.com/junegunn/fzf/releases/download/v{version}/fzf-{version}-linux_arm64.tar.gz"
+			}
+		}
 	}, {
 		name:    "go"
 		kind:    "binary"
@@ -214,6 +294,15 @@ catalog: {
 		}
 		buildFetch: ["go.dev"]
 		runtimeEgress: ["proxy.golang.org", "sum.golang.org"]
+		upstream: {
+			kind:        "url-regex"
+			url:         "https://go.dev/dl/?mode=json&include=all"
+			manifestURL: "https://go.dev/dl/?mode=json&include=all"
+			asset: {
+				amd64: "https://go.dev/dl/go{version}.linux-amd64.tar.gz"
+				arm64: "https://go.dev/dl/go{version}.linux-arm64.tar.gz"
+			}
+		}
 	}, {
 		name:    "hyperfine"
 		kind:    "binary"
@@ -223,6 +312,14 @@ catalog: {
 			arm64: "0000000000000000000000000000000000000000000000000000000000000000"
 		}
 		buildFetch: ["github.com"]
+		upstream: {
+			kind: "github-releases"
+			url:  "https://api.github.com/repos/sharkdp/hyperfine/releases"
+			asset: {
+				amd64: "https://github.com/sharkdp/hyperfine/releases/download/v{version}/hyperfine-v{version}-x86_64-unknown-linux-gnu.tar.gz"
+				arm64: "https://github.com/sharkdp/hyperfine/releases/download/v{version}/hyperfine-v{version}-aarch64-unknown-linux-gnu.tar.gz"
+			}
+		}
 	}, {
 		name:    "mise"
 		kind:    "binary"
@@ -232,6 +329,14 @@ catalog: {
 			arm64: "0000000000000000000000000000000000000000000000000000000000000000"
 		}
 		buildFetch: ["github.com"]
+		upstream: {
+			kind: "github-releases"
+			url:  "https://api.github.com/repos/jdx/mise/releases"
+			asset: {
+				amd64: "https://github.com/jdx/mise/releases/download/v{version}/mise-v{version}-linux-x64.tar.gz"
+				arm64: "https://github.com/jdx/mise/releases/download/v{version}/mise-v{version}-linux-arm64.tar.gz"
+			}
+		}
 	}, {
 		name:    "node"
 		kind:    "binary"
@@ -242,30 +347,55 @@ catalog: {
 			arm64: "0294e8b915ab75f92c7513d2fcb830ae06e10684e6c603e99a87dbf8835389c1"
 		}
 		buildFetch: ["nodejs.org"]
+		upstream: {
+			kind:        "node-dist"
+			url:         "https://nodejs.org/dist/index.json"
+			manifestURL: "https://nodejs.org/dist/v{version}/SHASUMS256.txt"
+			asset: {
+				amd64: "https://nodejs.org/dist/v{version}/node-v{version}-linux-x64.tar.xz"
+				arm64: "https://nodejs.org/dist/v{version}/node-v{version}-linux-arm64.tar.xz"
+			}
+		}
 	}, {
 		name:    "pi"
 		kind:    "npm"
 		version: "0.80.2"
 		requires: ["node"]
 		buildFetch: ["registry.npmjs.org"]
+		upstream: {
+			kind: "npm-registry"
+			url:  "https://registry.npmjs.org/@earendil-works%2fpi-coding-agent"
+		}
 	}, {
 		name:    "pnpm"
 		kind:    "npm"
 		version: "9.15.0"
 		requires: ["node"]
 		buildFetch: ["registry.npmjs.org"]
+		upstream: {
+			kind: "npm-registry"
+			url:  "https://registry.npmjs.org/pnpm"
+		}
 	}, {
 		name:    "prettier"
 		kind:    "npm"
 		version: "3.5.3"
 		requires: ["node"]
 		buildFetch: ["registry.npmjs.org"]
+		upstream: {
+			kind: "npm-registry"
+			url:  "https://registry.npmjs.org/prettier"
+		}
 	}, {
 		name:    "python3"
 		kind:    "apt"
 		version: "3.11"
 		note:    "apt kind — transitives are frozen by the golden-base Debian-snapshot pin (specs/0058 N2.2); reserved for what only apt provides"
 		buildFetch: ["deb.debian.org", "snapshot.debian.org"]
+		upstream: {
+			kind: "debian-snapshot"
+			url:  "https://snapshot.debian.org/mr/package/python3.11/"
+		}
 	}, {
 		name:    "ripgrep"
 		kind:    "binary"
@@ -275,6 +405,14 @@ catalog: {
 			arm64: "0000000000000000000000000000000000000000000000000000000000000000"
 		}
 		buildFetch: ["github.com"]
+		upstream: {
+			kind: "github-releases"
+			url:  "https://api.github.com/repos/BurntSushi/ripgrep/releases"
+			asset: {
+				amd64: "https://github.com/BurntSushi/ripgrep/releases/download/{version}/ripgrep-{version}-x86_64-unknown-linux-musl.tar.gz"
+				arm64: "https://github.com/BurntSushi/ripgrep/releases/download/{version}/ripgrep-{version}-aarch64-unknown-linux-gnu.tar.gz"
+			}
+		}
 	}, {
 		name:    "ruff"
 		kind:    "binary"
@@ -284,6 +422,14 @@ catalog: {
 			arm64: "0000000000000000000000000000000000000000000000000000000000000000"
 		}
 		buildFetch: ["astral.sh", "github.com"]
+		upstream: {
+			kind: "github-releases"
+			url:  "https://api.github.com/repos/astral-sh/ruff/releases"
+			asset: {
+				amd64: "https://github.com/astral-sh/ruff/releases/download/{version}/ruff-x86_64-unknown-linux-gnu.tar.gz"
+				arm64: "https://github.com/astral-sh/ruff/releases/download/{version}/ruff-aarch64-unknown-linux-gnu.tar.gz"
+			}
+		}
 	}, {
 		name:    "rust"
 		kind:    "binary"
@@ -295,6 +441,15 @@ catalog: {
 		}
 		buildFetch: ["static.rust-lang.org"]
 		runtimeEgress: [".crates.io", "static.rust-lang.org"]
+		upstream: {
+			kind:        "url-regex"
+			url:         "https://static.rust-lang.org/dist/channel-rust-stable.toml"
+			manifestURL: "https://static.rust-lang.org/dist/channel-rust-stable.toml"
+			asset: {
+				amd64: "https://static.rust-lang.org/dist/rust-{version}-x86_64-unknown-linux-gnu.tar.xz"
+				arm64: "https://static.rust-lang.org/dist/rust-{version}-aarch64-unknown-linux-gnu.tar.xz"
+			}
+		}
 	}, {
 		name:    "rustup"
 		kind:    "binary"
@@ -304,6 +459,14 @@ catalog: {
 			arm64: "0000000000000000000000000000000000000000000000000000000000000000"
 		}
 		buildFetch: ["static.rust-lang.org"]
+		upstream: {
+			kind: "github-releases"
+			url:  "https://api.github.com/repos/rust-lang/rustup/releases"
+			asset: {
+				amd64: "https://static.rust-lang.org/rustup/archive/{version}/x86_64-unknown-linux-gnu/rustup-init"
+				arm64: "https://static.rust-lang.org/rustup/archive/{version}/aarch64-unknown-linux-gnu/rustup-init"
+			}
+		}
 	}, {
 		name:    "sccache"
 		kind:    "binary"
@@ -313,6 +476,10 @@ catalog: {
 			arm64: "0000000000000000000000000000000000000000000000000000000000000000"
 		}
 		buildFetch: ["github.com"]
+		upstream: {
+			kind: "github-releases"
+			url:  "https://api.github.com/repos/mozilla/sccache/releases"
+		}
 	}, {
 		name:    "tokei"
 		kind:    "binary"
@@ -322,12 +489,20 @@ catalog: {
 			arm64: "0000000000000000000000000000000000000000000000000000000000000000"
 		}
 		buildFetch: ["github.com"]
+		upstream: {
+			kind: "github-releases"
+			url:  "https://api.github.com/repos/XAMPPRocky/tokei/releases"
+		}
 	}, {
 		name:    "typescript"
 		kind:    "npm"
 		version: "5.8.2"
 		requires: ["node"]
 		buildFetch: ["registry.npmjs.org"]
+		upstream: {
+			kind: "npm-registry"
+			url:  "https://registry.npmjs.org/typescript"
+		}
 	}, {
 		name:    "uv"
 		kind:    "binary"
@@ -337,18 +512,34 @@ catalog: {
 			arm64: "0000000000000000000000000000000000000000000000000000000000000000"
 		}
 		buildFetch: ["astral.sh", "github.com"]
+		upstream: {
+			kind: "github-releases"
+			url:  "https://api.github.com/repos/astral-sh/uv/releases"
+			asset: {
+				amd64: "https://github.com/astral-sh/uv/releases/download/{version}/uv-x86_64-unknown-linux-gnu.tar.gz"
+				arm64: "https://github.com/astral-sh/uv/releases/download/{version}/uv-aarch64-unknown-linux-gnu.tar.gz"
+			}
+		}
 	}, {
 		name:    "vite"
 		kind:    "npm"
 		version: "6.3.5"
 		requires: ["node"]
 		buildFetch: ["registry.npmjs.org"]
+		upstream: {
+			kind: "npm-registry"
+			url:  "https://registry.npmjs.org/vite"
+		}
 	}, {
 		name:    "web-ext"
 		kind:    "npm"
 		version: "8.5.0"
 		requires: ["node"]
 		buildFetch: ["registry.npmjs.org"]
+		upstream: {
+			kind: "npm-registry"
+			url:  "https://registry.npmjs.org/web-ext"
+		}
 	}, {
 		name:    "yq"
 		kind:    "binary"
@@ -358,6 +549,14 @@ catalog: {
 			arm64: "0000000000000000000000000000000000000000000000000000000000000000"
 		}
 		buildFetch: ["github.com"]
+		upstream: {
+			kind: "github-releases"
+			url:  "https://api.github.com/repos/mikefarah/yq/releases"
+			asset: {
+				amd64: "https://github.com/mikefarah/yq/releases/download/v{version}/yq_linux_amd64"
+				arm64: "https://github.com/mikefarah/yq/releases/download/v{version}/yq_linux_arm64"
+			}
+		}
 	}, {
 		name:    "zoxide"
 		kind:    "binary"
@@ -367,5 +566,13 @@ catalog: {
 			arm64: "0000000000000000000000000000000000000000000000000000000000000000"
 		}
 		buildFetch: ["github.com"]
+		upstream: {
+			kind: "github-releases"
+			url:  "https://api.github.com/repos/ajeetdsouza/zoxide/releases"
+			asset: {
+				amd64: "https://github.com/ajeetdsouza/zoxide/releases/download/v{version}/zoxide-{version}-x86_64-unknown-linux-musl.tar.gz"
+				arm64: "https://github.com/ajeetdsouza/zoxide/releases/download/v{version}/zoxide-{version}-aarch64-unknown-linux-musl.tar.gz"
+			}
+		}
 	}]
 }

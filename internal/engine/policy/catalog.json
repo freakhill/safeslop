@@ -128,6 +128,14 @@
         "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
         "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
       },
+      "upstream": {
+        "asset": {
+          "amd64": "https://github.com/sharkdp/bat/releases/download/v{version}/bat-v{version}-x86_64-unknown-linux-gnu.tar.gz",
+          "arm64": "https://github.com/sharkdp/bat/releases/download/v{version}/bat-v{version}-aarch64-unknown-linux-gnu.tar.gz"
+        },
+        "kind": "github-releases",
+        "url": "https://api.github.com/repos/sharkdp/bat/releases"
+      },
       "version": "0.25.0"
     },
     {
@@ -140,6 +148,14 @@
       "sha256": {
         "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
         "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "upstream": {
+        "asset": {
+          "amd64": "https://github.com/oven-sh/bun/releases/download/bun-v{version}/bun-linux-x64.zip",
+          "arm64": "https://github.com/oven-sh/bun/releases/download/bun-v{version}/bun-linux-aarch64.zip"
+        },
+        "kind": "github-releases",
+        "url": "https://api.github.com/repos/oven-sh/bun/releases"
       },
       "version": "1.1.38"
     },
@@ -157,6 +173,10 @@
         "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
         "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
       },
+      "upstream": {
+        "kind": "github-releases",
+        "url": "https://api.github.com/repos/rustsec/rustsec/releases"
+      },
       "version": "0.21.2"
     },
     {
@@ -171,6 +191,10 @@
       "sha256": {
         "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
         "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "upstream": {
+        "kind": "github-releases",
+        "url": "https://api.github.com/repos/rust-embedded/cargo-binutils/releases"
       },
       "version": "0.3.6"
     },
@@ -187,6 +211,10 @@
         "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
         "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
       },
+      "upstream": {
+        "kind": "github-releases",
+        "url": "https://api.github.com/repos/EmbarkStudios/cargo-deny/releases"
+      },
       "version": "0.18.2"
     },
     {
@@ -201,6 +229,10 @@
       "sha256": {
         "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
         "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "upstream": {
+        "kind": "github-releases",
+        "url": "https://api.github.com/repos/dtolnay/cargo-expand/releases"
       },
       "version": "1.0.110"
     },
@@ -217,6 +249,10 @@
         "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
         "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
       },
+      "upstream": {
+        "kind": "github-releases",
+        "url": "https://api.github.com/repos/sagiegurari/cargo-make/releases"
+      },
       "version": "0.37.26"
     },
     {
@@ -231,6 +267,10 @@
       "sha256": {
         "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
         "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "upstream": {
+        "kind": "github-releases",
+        "url": "https://api.github.com/repos/nextest-rs/nextest/releases"
       },
       "version": "0.9.98"
     },
@@ -247,6 +287,10 @@
         "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
         "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
       },
+      "upstream": {
+        "kind": "github-releases",
+        "url": "https://api.github.com/repos/watchexec/cargo-watch/releases"
+      },
       "version": "8.5.4"
     },
     {
@@ -262,6 +306,10 @@
       "runtimeEgress": [
         ".anthropic.com"
       ],
+      "upstream": {
+        "kind": "npm-registry",
+        "url": "https://registry.npmjs.org/@anthropic-ai%2fclaude-code"
+      },
       "version": "2.1.121"
     },
     {
@@ -273,6 +321,10 @@
       "requires": [
         "node"
       ],
+      "upstream": {
+        "kind": "npm-registry",
+        "url": "https://registry.npmjs.org/eslint"
+      },
       "version": "9.22.0"
     },
     {
@@ -285,6 +337,14 @@
         "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
         "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
       },
+      "upstream": {
+        "asset": {
+          "amd64": "https://github.com/eza-community/eza/releases/download/v{version}/eza_x86_64-unknown-linux-gnu.tar.gz",
+          "arm64": "https://github.com/eza-community/eza/releases/download/v{version}/eza_aarch64-unknown-linux-gnu.tar.gz"
+        },
+        "kind": "github-releases",
+        "url": "https://api.github.com/repos/eza-community/eza/releases"
+      },
       "version": "0.21.1"
     },
     {
@@ -296,6 +356,14 @@
       "sha256": {
         "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
         "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "upstream": {
+        "asset": {
+          "amd64": "https://github.com/sharkdp/fd/releases/download/v{version}/fd-v{version}-x86_64-unknown-linux-gnu.tar.gz",
+          "arm64": "https://github.com/sharkdp/fd/releases/download/v{version}/fd-v{version}-aarch64-unknown-linux-gnu.tar.gz"
+        },
+        "kind": "github-releases",
+        "url": "https://api.github.com/repos/sharkdp/fd/releases"
       },
       "version": "10.2.0"
     },
@@ -312,6 +380,10 @@
         "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
         "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
       },
+      "upstream": {
+        "kind": "github-releases",
+        "url": "https://api.github.com/repos/knurling-rs/flip-link/releases"
+      },
       "version": "0.1.12"
     },
     {
@@ -323,6 +395,14 @@
       "sha256": {
         "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
         "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "upstream": {
+        "asset": {
+          "amd64": "https://github.com/junegunn/fzf/releases/download/v{version}/fzf-{version}-linux_amd64.tar.gz",
+          "arm64": "https://github.com/junegunn/fzf/releases/download/v{version}/fzf-{version}-linux_arm64.tar.gz"
+        },
+        "kind": "github-releases",
+        "url": "https://api.github.com/repos/junegunn/fzf/releases"
       },
       "version": "0.59.0"
     },
@@ -341,6 +421,15 @@
         "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
         "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
       },
+      "upstream": {
+        "asset": {
+          "amd64": "https://go.dev/dl/go{version}.linux-amd64.tar.gz",
+          "arm64": "https://go.dev/dl/go{version}.linux-arm64.tar.gz"
+        },
+        "kind": "url-regex",
+        "manifestURL": "https://go.dev/dl/?mode=json\u0026include=all",
+        "url": "https://go.dev/dl/?mode=json\u0026include=all"
+      },
       "version": "1.26.0"
     },
     {
@@ -353,6 +442,14 @@
         "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
         "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
       },
+      "upstream": {
+        "asset": {
+          "amd64": "https://github.com/sharkdp/hyperfine/releases/download/v{version}/hyperfine-v{version}-x86_64-unknown-linux-gnu.tar.gz",
+          "arm64": "https://github.com/sharkdp/hyperfine/releases/download/v{version}/hyperfine-v{version}-aarch64-unknown-linux-gnu.tar.gz"
+        },
+        "kind": "github-releases",
+        "url": "https://api.github.com/repos/sharkdp/hyperfine/releases"
+      },
       "version": "1.19.0"
     },
     {
@@ -364,6 +461,14 @@
       "sha256": {
         "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
         "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "upstream": {
+        "asset": {
+          "amd64": "https://github.com/jdx/mise/releases/download/v{version}/mise-v{version}-linux-x64.tar.gz",
+          "arm64": "https://github.com/jdx/mise/releases/download/v{version}/mise-v{version}-linux-arm64.tar.gz"
+        },
+        "kind": "github-releases",
+        "url": "https://api.github.com/repos/jdx/mise/releases"
       },
       "version": "2026.6.11"
     },
@@ -378,6 +483,15 @@
         "amd64": "9749e988f437343b7fa832c69ded82a312e41a03116d766797ac14f6f9eee578",
         "arm64": "0294e8b915ab75f92c7513d2fcb830ae06e10684e6c603e99a87dbf8835389c1"
       },
+      "upstream": {
+        "asset": {
+          "amd64": "https://nodejs.org/dist/v{version}/node-v{version}-linux-x64.tar.xz",
+          "arm64": "https://nodejs.org/dist/v{version}/node-v{version}-linux-arm64.tar.xz"
+        },
+        "kind": "node-dist",
+        "manifestURL": "https://nodejs.org/dist/v{version}/SHASUMS256.txt",
+        "url": "https://nodejs.org/dist/index.json"
+      },
       "version": "22.23.1"
     },
     {
@@ -389,6 +503,10 @@
       "requires": [
         "node"
       ],
+      "upstream": {
+        "kind": "npm-registry",
+        "url": "https://registry.npmjs.org/@earendil-works%2fpi-coding-agent"
+      },
       "version": "0.80.2"
     },
     {
@@ -400,6 +518,10 @@
       "requires": [
         "node"
       ],
+      "upstream": {
+        "kind": "npm-registry",
+        "url": "https://registry.npmjs.org/pnpm"
+      },
       "version": "9.15.0"
     },
     {
@@ -411,6 +533,10 @@
       "requires": [
         "node"
       ],
+      "upstream": {
+        "kind": "npm-registry",
+        "url": "https://registry.npmjs.org/prettier"
+      },
       "version": "3.5.3"
     },
     {
@@ -421,6 +547,10 @@
       "kind": "apt",
       "name": "python3",
       "note": "apt kind — transitives are frozen by the golden-base Debian-snapshot pin (specs/0058 N2.2); reserved for what only apt provides",
+      "upstream": {
+        "kind": "debian-snapshot",
+        "url": "https://snapshot.debian.org/mr/package/python3.11/"
+      },
       "version": "3.11"
     },
     {
@@ -432,6 +562,14 @@
       "sha256": {
         "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
         "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "upstream": {
+        "asset": {
+          "amd64": "https://github.com/BurntSushi/ripgrep/releases/download/{version}/ripgrep-{version}-x86_64-unknown-linux-musl.tar.gz",
+          "arm64": "https://github.com/BurntSushi/ripgrep/releases/download/{version}/ripgrep-{version}-aarch64-unknown-linux-gnu.tar.gz"
+        },
+        "kind": "github-releases",
+        "url": "https://api.github.com/repos/BurntSushi/ripgrep/releases"
       },
       "version": "14.1.1"
     },
@@ -445,6 +583,14 @@
       "sha256": {
         "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
         "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "upstream": {
+        "asset": {
+          "amd64": "https://github.com/astral-sh/ruff/releases/download/{version}/ruff-x86_64-unknown-linux-gnu.tar.gz",
+          "arm64": "https://github.com/astral-sh/ruff/releases/download/{version}/ruff-aarch64-unknown-linux-gnu.tar.gz"
+        },
+        "kind": "github-releases",
+        "url": "https://api.github.com/repos/astral-sh/ruff/releases"
       },
       "version": "0.11.0"
     },
@@ -463,6 +609,15 @@
         "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
         "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
       },
+      "upstream": {
+        "asset": {
+          "amd64": "https://static.rust-lang.org/dist/rust-{version}-x86_64-unknown-linux-gnu.tar.xz",
+          "arm64": "https://static.rust-lang.org/dist/rust-{version}-aarch64-unknown-linux-gnu.tar.xz"
+        },
+        "kind": "url-regex",
+        "manifestURL": "https://static.rust-lang.org/dist/channel-rust-stable.toml",
+        "url": "https://static.rust-lang.org/dist/channel-rust-stable.toml"
+      },
       "version": "1.96.0"
     },
     {
@@ -474,6 +629,14 @@
       "sha256": {
         "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
         "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "upstream": {
+        "asset": {
+          "amd64": "https://static.rust-lang.org/rustup/archive/{version}/x86_64-unknown-linux-gnu/rustup-init",
+          "arm64": "https://static.rust-lang.org/rustup/archive/{version}/aarch64-unknown-linux-gnu/rustup-init"
+        },
+        "kind": "github-releases",
+        "url": "https://api.github.com/repos/rust-lang/rustup/releases"
       },
       "version": "1.28.0"
     },
@@ -487,6 +650,10 @@
         "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
         "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
       },
+      "upstream": {
+        "kind": "github-releases",
+        "url": "https://api.github.com/repos/mozilla/sccache/releases"
+      },
       "version": "0.10.0"
     },
     {
@@ -499,6 +666,10 @@
         "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
         "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
       },
+      "upstream": {
+        "kind": "github-releases",
+        "url": "https://api.github.com/repos/XAMPPRocky/tokei/releases"
+      },
       "version": "13.0.0"
     },
     {
@@ -510,6 +681,10 @@
       "requires": [
         "node"
       ],
+      "upstream": {
+        "kind": "npm-registry",
+        "url": "https://registry.npmjs.org/typescript"
+      },
       "version": "5.8.2"
     },
     {
@@ -523,6 +698,14 @@
         "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
         "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
       },
+      "upstream": {
+        "asset": {
+          "amd64": "https://github.com/astral-sh/uv/releases/download/{version}/uv-x86_64-unknown-linux-gnu.tar.gz",
+          "arm64": "https://github.com/astral-sh/uv/releases/download/{version}/uv-aarch64-unknown-linux-gnu.tar.gz"
+        },
+        "kind": "github-releases",
+        "url": "https://api.github.com/repos/astral-sh/uv/releases"
+      },
       "version": "0.5.11"
     },
     {
@@ -534,6 +717,10 @@
       "requires": [
         "node"
       ],
+      "upstream": {
+        "kind": "npm-registry",
+        "url": "https://registry.npmjs.org/vite"
+      },
       "version": "6.3.5"
     },
     {
@@ -545,6 +732,10 @@
       "requires": [
         "node"
       ],
+      "upstream": {
+        "kind": "npm-registry",
+        "url": "https://registry.npmjs.org/web-ext"
+      },
       "version": "8.5.0"
     },
     {
@@ -557,6 +748,14 @@
         "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
         "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
       },
+      "upstream": {
+        "asset": {
+          "amd64": "https://github.com/mikefarah/yq/releases/download/v{version}/yq_linux_amd64",
+          "arm64": "https://github.com/mikefarah/yq/releases/download/v{version}/yq_linux_arm64"
+        },
+        "kind": "github-releases",
+        "url": "https://api.github.com/repos/mikefarah/yq/releases"
+      },
       "version": "4.45.4"
     },
     {
@@ -568,6 +767,14 @@
       "sha256": {
         "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
         "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "upstream": {
+        "asset": {
+          "amd64": "https://github.com/ajeetdsouza/zoxide/releases/download/v{version}/zoxide-{version}-x86_64-unknown-linux-musl.tar.gz",
+          "arm64": "https://github.com/ajeetdsouza/zoxide/releases/download/v{version}/zoxide-{version}-aarch64-unknown-linux-musl.tar.gz"
+        },
+        "kind": "github-releases",
+        "url": "https://api.github.com/repos/ajeetdsouza/zoxide/releases"
       },
       "version": "0.9.8"
     }

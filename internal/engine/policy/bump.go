@@ -3,6 +3,7 @@ package policy
 import (
 	"bufio"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"path"
 	"strings"
@@ -86,15 +87,15 @@ func resolveBumpDigests(pkg Package, target string, fetcher Fetcher) (map[string
 }
 
 func resolveSignedManifestDigests(pkg Package, target string, fetcher Fetcher) (map[string]string, bumpResolvedDigests, error) {
-	manifestURL := substituteVersion(pkg.Upstream.ManifestURL, target)
+	manifestURL := substituteManifestTemplate(pkg.Upstream.ManifestURL, target, pkg)
 	manifestBytes, err := fetcher.Get(manifestURL)
 	if err != nil {
 		return nil, bumpResolvedDigests{}, fmt.Errorf("bump: fetch manifest %q: %w", manifestURL, err)
 	}
-	manifest := parseSHASUMS256(manifestBytes)
+	manifest := parseChecksumManifest(manifestBytes)
 	shaByArch := make(map[string]string, len(buildArches))
 	for _, arch := range buildArches {
-		assetURL, err := assetURLForArch(pkg, arch, target)
+		assetURL, err := upstreamAssetURLForArch(pkg, arch, target)
 		if err != nil {
 			return nil, bumpResolvedDigests{}, err
 		}
@@ -115,7 +116,7 @@ func resolveSelfComputedDigests(pkg Package, target string, fetcher Fetcher) (ma
 	shaByArch := make(map[string]string, len(buildArches))
 	originParts := make([]string, 0, len(buildArches))
 	for _, arch := range buildArches {
-		assetURL, err := assetURLForArch(pkg, arch, target)
+		assetURL, err := upstreamAssetURLForArch(pkg, arch, target)
 		if err != nil {
 			return nil, bumpResolvedDigests{}, err
 		}
@@ -130,18 +131,13 @@ func resolveSelfComputedDigests(pkg Package, target string, fetcher Fetcher) (ma
 	return shaByArch, bumpResolvedDigests{Origin: strings.Join(originParts, ", "), VerificationMethod: VerificationSelfComputedWeak}, nil
 }
 
-func assetURLForArch(pkg Package, arch, target string) (string, error) {
-	if pkg.Upstream == nil || pkg.Upstream.Asset == nil {
-		return "", fmt.Errorf("law-A: package %q has no upstream asset templates", pkg.Name)
+func parseChecksumManifest(b []byte) map[string]string {
+	if jsonManifest := parseGoDownloadManifest(b); len(jsonManifest) > 0 {
+		return jsonManifest
 	}
-	template, ok := pkg.Upstream.Asset[arch]
-	if !ok || strings.TrimSpace(template) == "" {
-		return "", fmt.Errorf("law-A: package %q has no upstream asset template for %s", pkg.Name, arch)
+	if rustManifest := parseRustChannelManifest(b); len(rustManifest) > 0 {
+		return rustManifest
 	}
-	return substituteVersion(template, target), nil
-}
-
-func parseSHASUMS256(b []byte) map[string]string {
 	out := make(map[string]string)
 	s := bufio.NewScanner(strings.NewReader(string(b)))
 	for s.Scan() {
@@ -149,16 +145,78 @@ func parseSHASUMS256(b []byte) map[string]string {
 		if line == "" {
 			continue
 		}
-		parts := strings.SplitN(line, "  ", 2)
-		if len(parts) != 2 {
+		parts := strings.Fields(line)
+		if len(parts) < 2 {
 			continue
 		}
 		sha := strings.TrimSpace(parts[0])
-		filename := strings.TrimSpace(parts[1])
+		filename := strings.TrimPrefix(strings.TrimSpace(parts[1]), "*")
 		if sha == "" || filename == "" {
 			continue
 		}
 		out[filename] = sha
+	}
+	return out
+}
+
+func parseGoDownloadManifest(b []byte) map[string]string {
+	var releases []struct {
+		Files []struct {
+			Filename string `json:"filename"`
+			SHA256   string `json:"sha256"`
+		} `json:"files"`
+	}
+	if err := json.Unmarshal(b, &releases); err != nil {
+		return nil
+	}
+	out := make(map[string]string)
+	for _, release := range releases {
+		for _, file := range release.Files {
+			if file.Filename == "" || file.SHA256 == "" {
+				continue
+			}
+			out[file.Filename] = file.SHA256
+		}
+	}
+	return out
+}
+
+func parseRustChannelManifest(b []byte) map[string]string {
+	out := make(map[string]string)
+	var channelVersion string
+	var currentPackage string
+	var currentTarget string
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "version = ") && channelVersion == "" {
+			value := strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "version = ")), `"`)
+			if fields := strings.Fields(value); len(fields) > 0 {
+				channelVersion = fields[0]
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "[pkg.") && strings.HasSuffix(line, "]") {
+			parts := strings.Split(strings.TrimSuffix(strings.TrimPrefix(line, "[pkg."), "]"), ".")
+			currentPackage, currentTarget = "", ""
+			if len(parts) >= 1 {
+				currentPackage = parts[0]
+			}
+			if len(parts) >= 3 && parts[1] == "target" {
+				currentTarget = parts[2]
+			}
+			continue
+		}
+		if currentPackage == "" || currentTarget == "" || !strings.HasPrefix(line, "hash = ") {
+			continue
+		}
+		hash := strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "hash = ")), `"`)
+		if hash == "" {
+			continue
+		}
+		out[fmt.Sprintf("%s-%s.tar.xz", currentPackage, currentTarget)] = hash
+		if channelVersion != "" {
+			out[fmt.Sprintf("%s-%s-%s.tar.xz", currentPackage, channelVersion, currentTarget)] = hash
+		}
 	}
 	return out
 }
