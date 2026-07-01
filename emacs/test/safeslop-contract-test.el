@@ -345,6 +345,18 @@ envelope via the callback, never a crash."
               (accept-process-output proc 0.1))))
         (should (equal (safeslop-test--argv-log-lines) (list (safeslop-test--json-key argv))))))))
 
+(ert-deftest safeslop-test-session-run-detached-args ()
+  (should (equal (safeslop-session--run-detached-args "sess-detached")
+                 '("session" "run" "--session-id" "sess-detached" "--detach")))
+  (should-not (member "--output" (safeslop-session--run-detached-args "sess-detached"))))
+
+(ert-deftest safeslop-test-session-id-candidates-from-list ()
+  (let ((env (safeslop-contract-parse-string
+              (concat "{\"schema_version\":1,\"ok\":true,\"data\":{\"sessions\":"
+                      "[{\"session_id\":\"sess-a\"},{\"session_id\":\"sess-b\"}]},"
+                      "\"warnings\":[],\"errors\":[]}"))))
+    (should (equal (safeslop-session--session-id-candidates env) '("sess-a" "sess-b")))))
+
 (ert-deftest safeslop-test-reattach-uses-attach-argv ()
   "Reattach builds `session attach --session-id ...' argv under a term PTY
 \(specs/0051 PR4): the detached session is rejoined over its socket, not re-run."

@@ -17,6 +17,7 @@
 (require 'subr-x)
 (require 'cl-lib)
 (require 'safeslop-contract)
+(require 'safeslop-surface)
 
 (defgroup safeslop nil
   "Run safeslop from Emacs."
@@ -75,11 +76,42 @@ Only allowlisted, non-secret fields are emitted."
   (pop-to-buffer (get-buffer-create safeslop-debug-buffer-name))
   (special-mode))
 
+(defvar-local safeslop-output--args nil
+  "Safeslop argv that produced this output buffer, for safe refresh.")
+
+(defvar-local safeslop-output--buffer-name nil
+  "Name to reuse when refreshing this output buffer.")
+
+(defun safeslop--safe-rerun-p (args)
+  "Return non-nil when ARGS names a read-only command safe to re-run with `g'."
+  (pcase args
+    (`("doctor" . ,_) t)
+    (`("validate" . ,_) t)
+    (`("session" ,(or "list" "status") . ,_) t)
+    (`("profile" ,(or "show" "list") . ,_) t)
+    (`("catalog" . ,_) t)
+    (`("bundle" "list" . ,_) t)
+    (`("install" ,(or "status" "plan") . ,_) t)
+    (`("install" "apply" "--dry-run" . ,_) t)
+    (_ nil)))
+
+(defun safeslop-output-refresh ()
+  "Refresh this output buffer when its original command is read-only."
+  (interactive)
+  (if (safeslop--safe-rerun-p safeslop-output--args)
+      (let ((args safeslop-output--args)
+            (name (or safeslop-output--buffer-name (buffer-name))))
+        (safeslop--call-json-async
+         args
+         (lambda (env)
+           (safeslop--show-envelope-buffer name args env))))
+    (message "safeslop: this result came from a mutating command; rerun it from its surface so confirmation runs.")))
+
 (defvar safeslop-output-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "g") #'safeslop-doctor)
+    (define-key map (kbd "g") #'safeslop-output-refresh)
     (define-key map (kbd "e") #'safeslop-show-last-error)
-    (define-key map (kbd "q") #'quit-window)
+    (set-keymap-parent map (make-composed-keymap safeslop-surface-mode-map special-mode-map))
     map)
   "Keymap for `safeslop-output-mode'.")
 
@@ -127,6 +159,9 @@ actionable message instead of a `json-parse-error' crash."
         (safeslop--debug :event 'result :status status :ok "nil" :error "non-json")
         (safeslop--error-envelope "CLIENT_NON_JSON" msg)))))
 
+(defvar safeslop--debug-call-event 'call
+  "Debug event label for the next safeslop CLI call (`call' or UI `poll').")
+
 (defun safeslop--call-json (args)
   "Run safeslop with ARGS synchronously and parse stdout as a contract envelope.
 ARGS is passed to `call-process' as an argv list; no shell is used.  This BLOCKS
@@ -135,7 +170,7 @@ user-facing so a slow command (credential staging, `doctor' probing the toolchai
 a boundary launch) never freezes the editor.  Kept for the parse-path tests and
 any genuinely fast, must-be-synchronous caller.  Degrades gracefully via
 `safeslop--finish-envelope'."
-  (safeslop--debug :event 'call :argv (string-join args " "))
+  (safeslop--debug :event safeslop--debug-call-event :argv (string-join args " "))
   (with-temp-buffer
     (let ((status (condition-case err
                       (apply #'call-process safeslop-program nil t nil args)
@@ -149,7 +184,7 @@ envelope (a real one, or a CLIENT_* error envelope on a missing program / non-JS
 output) — and runs in the process sentinel once the subprocess exits, so a slow
 command never blocks Emacs's main thread.  Returns the process, or nil when it
 could not be spawned (CALLBACK is still invoked, with a client error envelope)."
-  (safeslop--debug :event 'call :argv (string-join args " "))
+  (safeslop--debug :event safeslop--debug-call-event :argv (string-join args " "))
   (let ((buf (generate-new-buffer " *safeslop-call*")))
     (condition-case err
         (make-process
@@ -221,8 +256,11 @@ Handles JSON objects (alists), arrays (lists), and scalars."
   "Render ENVELOPE for safeslop ARGS into buffer NAME and return ENVELOPE."
   (let ((buf (get-buffer-create name)))
     (with-current-buffer buf
+      (setq safeslop-output--args args
+            safeslop-output--buffer-name name)
       (let ((inhibit-read-only t))
         (erase-buffer)
+        (insert (safeslop-surface--breadcrumb args))
         (insert (format "$ %s %s\n\n" safeslop-program (string-join args " ")))
         (insert (format "ok: %s\n" (if (safeslop-contract-ok-p envelope) "true" "false")))
         (dolist (warning (safeslop-contract-warnings envelope))

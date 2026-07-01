@@ -32,7 +32,13 @@
 (declare-function safeslop-session-attach "safeslop-session" (&optional session-id))
 (declare-function safeslop-session-reattach "safeslop-session" (&optional session-id))
 (declare-function safeslop-session-status "safeslop-session" (&optional session-id))
-(declare-function safeslop-session-stop "safeslop-session" (&optional session-id))
+(declare-function safeslop-session-stop "safeslop-session" (&optional session-id callback))
+(declare-function safeslop-session-run-detached "safeslop-session" (&optional session-id callback))
+(declare-function safeslop-session-detail "safeslop-session" (&optional session-id data))
+(declare-function safeslop-profiles "safeslop-profiles" ())
+(declare-function safeslop-profiles--render "safeslop-profiles" (&optional keep-point then))
+(declare-function safeslop-profiles--goto-name "safeslop-profiles" (name))
+(defvar safeslop-profiles-buffer-name)
 
 (defconst safeslop-portal-buffer-name "*safeslop portal*"
   "Buffer name for the safeslop session dashboard.")
@@ -50,6 +56,15 @@ auto-refresh.  Set to nil for a static, manual-only portal."
 (defvar safeslop-portal--timer nil
   "Repeating timer driving portal auto-refresh, or nil when inactive.
 A single timer serves the one portal buffer (`safeslop-portal-buffer-name').")
+
+(defvar safeslop-portal--auto-paused nil
+  "Non-nil when the operator paused portal auto-refresh with `a'.")
+
+(defvar safeslop-portal--last-refresh nil
+  "Time of the last portal render, for the visible auto-refresh status line.")
+
+(defvar-local safeslop-portal--sessions-by-id nil
+  "Alist mapping session id to full session alist from the last render.")
 
 (defun safeslop-portal--field (sess key)
   "Return SESS's KEY as a display string (empty when absent)."
@@ -73,9 +88,25 @@ A single timer serves the one portal buffer (`safeslop-portal-buffer-name').")
     ((or "exited" "failed" "error" "cancelled") 'error)
     (_ 'default)))
 
-(defun safeslop-portal--status-cell (status)
+(defun safeslop-portal--status-help (sess)
+  "Return a one-line lifecycle/safety summary for SESS."
+  (let ((socket (safeslop-portal--field sess 'socket))
+        (revoked (eq (alist-get 'credentials_revoked sess) t))
+        (err (safeslop-portal--field sess 'last_error)))
+    (string-join
+     (delq nil (list (if (and (stringp socket) (not (string-empty-p socket))) "detached" "coupled")
+                     (if revoked "credentials revoked" "credentials live")
+                     (unless (string-empty-p err) (concat "last error: " err))))
+     " · ")))
+
+(defun safeslop-portal--status-cell (status &optional sess)
   "Return STATUS as a tabulated-list cell coloured by its status face."
-  (propertize status 'face (safeslop-portal--status-face status)))
+  (apply #'propertize status 'face (safeslop-portal--status-face status)
+         (when sess (list 'help-echo (safeslop-portal--status-help sess)))))
+
+(defun safeslop-portal--net-cell (net)
+  "Return NET as a colour-redundant egress cell."
+  (safeslop-surface--net-cell net))
 
 ;; --- Isolation-tier signalling (specs/0052 #5) -------------------------------
 ;; The Env column already shows the environment name (host/container/vm); we
@@ -121,6 +152,20 @@ sole signal (specs/0031).  An unknown env renders plainly."
                 (propertize (concat (car row) "=" (nth 2 row)) 'face (nth 1 row)))
               safeslop-portal--env-tiers "  ")
    "\n\n"))
+
+(defun safeslop-portal--status-legend ()
+  "Return a one-line legend for status colours."
+  (concat "status: "
+          (mapconcat (lambda (status)
+                       (propertize status 'face (safeslop-portal--status-face status)))
+                     '("running" "created" "stopped" "failed") "  ")
+          "\n"))
+
+(defun safeslop-portal--net-legend ()
+  "Return a one-line legend for network posture."
+  (concat "net: "
+          (safeslop-portal--net-cell "deny") "=guarded  "
+          (safeslop-portal--net-cell "allow") "=open\n"))
 
 (defun safeslop-portal--pid (sess)
   "Return SESS's pid as a display string, or an em dash when it has none."
@@ -188,9 +233,9 @@ Pure: SESSIONS is already-fetched data, so the row builder never blocks on I/O."
        (list id
              (vector (safeslop-portal--short-id id)
                      (safeslop-portal--field sess 'agent)
-                     (safeslop-portal--env-cell (safeslop-portal--field sess 'environment))
-                     (safeslop-portal--field sess 'network)
-                     (safeslop-portal--status-cell (safeslop-portal--field sess 'status))
+                      (safeslop-portal--env-cell (safeslop-portal--field sess 'environment))
+                     (safeslop-portal--net-cell (safeslop-portal--field sess 'network))
+                     (safeslop-portal--status-cell (safeslop-portal--field sess 'status) sess)
                      (safeslop-portal--pid sess)
                      (safeslop-portal--age sess)
                      (safeslop-portal--recipe-cell sess)
@@ -206,28 +251,94 @@ Pure: SESSIONS is already-fetched data, so the row builder never blocks on I/O."
   (or (tabulated-list-get-id)
       (user-error "No session on this line")))
 
+(defun safeslop-portal--session-at-point ()
+  "Return full session data for the current row, or signal a user error."
+  (let ((id (safeslop-portal--id-at-point)))
+    (or (alist-get id safeslop-portal--sessions-by-id nil nil #'equal)
+        (user-error "No session data for this row; press g to refresh"))))
+
+(defun safeslop-portal--primary-action (status socket)
+  "Return the obvious primary action for STATUS and SOCKET."
+  (cond ((equal status "created") 'run)
+        ((and (equal status "running") (stringp socket) (not (string-empty-p socket))) 'reattach)
+        ((equal status "running") 'live)
+        (t 'status)))
+
 (defun safeslop-portal-open ()
-  "Open (run) the agent for the session at point in a term buffer."
+  "Do the obvious action for the session at point, based on its state."
   (interactive)
-  (safeslop-session-attach (safeslop-portal--id-at-point)))
+  (let* ((sess (safeslop-portal--session-at-point))
+         (id (safeslop-portal--field sess 'session_id)))
+    (pcase (safeslop-portal--primary-action
+            (safeslop-portal--field sess 'status)
+            (safeslop-portal--field sess 'socket))
+      ('run (safeslop-session-attach id))
+      ('reattach (safeslop-session-reattach id))
+      ('live (if-let ((buf (get-buffer (concat "*safeslop-" id "*"))))
+                 (pop-to-buffer buf)
+               (message "safeslop: %s is already running coupled; press i for details or k to stop/revoke"
+                        (safeslop-portal--short-id id))))
+      ('status (safeslop-session-detail id sess)))))
 
 (defun safeslop-portal-reattach ()
-  "Reattach to the detached supervisor of the session at point."
+  "Reattach only when the session at point is detached and serving a socket."
   (interactive)
-  (safeslop-session-reattach (safeslop-portal--id-at-point)))
+  (let* ((sess (safeslop-portal--session-at-point))
+         (id (safeslop-portal--field sess 'session_id))
+         (status (safeslop-portal--field sess 'status))
+         (socket (safeslop-portal--field sess 'socket)))
+    (cond
+     ((and (stringp socket) (not (string-empty-p socket))) (safeslop-session-reattach id))
+     ((equal status "created")
+      (message "safeslop: %s is not detached — press D to start detached, or RET to run coupled"
+               (safeslop-portal--short-id id)))
+     ((equal status "running")
+      (message "safeslop: %s is coupled, not detached — RET focuses its terminal, k stops/revokes"
+               (safeslop-portal--short-id id)))
+     (t (message "safeslop: %s is not running — press i for details"
+                 (safeslop-portal--short-id id))))))
 
 (defun safeslop-portal-status ()
-  "Show status for the session at point."
+  "Show a faced detail buffer for the session at point."
   (interactive)
-  (safeslop-session-status (safeslop-portal--id-at-point)))
+  (let ((sess (safeslop-portal--session-at-point)))
+    (safeslop-session-detail (safeslop-portal--field sess 'session_id) sess)))
+
+(defun safeslop-portal-run-detached ()
+  "Start the session at point detached, after a credential-lifetime warning."
+  (interactive)
+  (let* ((sess (safeslop-portal--session-at-point))
+         (id (safeslop-portal--field sess 'session_id)))
+    (when (yes-or-no-p
+           (format "Run %s detached? It survives this Emacs buffer and KEEPS staged credentials until stop/revoke. "
+                   (safeslop-portal--short-id id)))
+      (safeslop-session-run-detached id (lambda (_env) (safeslop-portal-refresh))))))
+
+(defun safeslop-portal-follow-profile ()
+  "Switch to Profiles and land on this session's backing profile when present."
+  (interactive)
+  (let ((profile (safeslop-portal--field (safeslop-portal--session-at-point) 'profile)))
+    (if (string-empty-p profile)
+        (message "safeslop: ad-hoc session has no backing profile; press F for Profiles")
+      (safeslop-profiles)
+      (when-let ((buf (get-buffer safeslop-profiles-buffer-name)))
+        (with-current-buffer buf
+          (safeslop-profiles--render t (lambda () (safeslop-profiles--goto-name profile))))))))
 
 (defun safeslop-portal-stop ()
-  "Stop the session at point (revoking credentials) and refresh."
+  "Stop the session at point (revoking credentials) and refresh after completion."
   (interactive)
-  (let ((id (safeslop-portal--id-at-point)))
-    (when (yes-or-no-p (format "Stop session %s (revoke credentials)? " id))
-      (safeslop-session-stop id)
-      (safeslop-portal-refresh))))
+  (let* ((sess (safeslop-portal--session-at-point))
+         (id (safeslop-portal--field sess 'session_id)))
+    (when (yes-or-no-p
+           (format "Stop %s? This revokes staged credentials and tears down the boundary. "
+                   (safeslop-portal--short-id id)))
+      (safeslop-session-stop
+       id (lambda (env)
+            (if (safeslop-contract-ok-p env)
+                (safeslop-portal-refresh)
+              (message "safeslop: stop failed: %s"
+                       (safeslop-surface--error-message env "stop failed"))))))))
 
 (defun safeslop-portal-new ()
   "Create a new session.
@@ -238,9 +349,10 @@ refresh here would race the still-running create."
   (call-interactively #'safeslop-session-new))
 
 (defconst safeslop-portal--key-hints
-  '(("RET" . "open") ("R" . "reattach") ("i" . "status") ("k" . "stop")
-    ("n" . "new") ("g" . "refresh") ("a" . "auto") ("d" . "doctor")
-    ("L" . "debug") ("?" . "help") ("q" . "quit"))
+  '(("RET" . "open") ("D" . "detach") ("R" . "reattach") ("i" . "details")
+    ("k" . "stop/revoke") ("n" . "new") ("f" . "profile") ("g" . "refresh")
+    ("a" . "auto") ("d" . "doctor") ("E" . "error") ("L" . "debug")
+    ("?" . "help") ("q" . "quit"))
   "Key/action pairs shown in the portal's in-buffer shortcut legend.")
 
 (defun safeslop-portal--legend ()
@@ -251,10 +363,29 @@ refresh here would race the still-running create."
                      safeslop-portal--key-hints "  ")
           "\n\n"))
 
+(defun safeslop-portal--auto-status-line ()
+  "Return visible auto-refresh state, explicitly distinguishing UI polling from agent action."
+  (let ((text (cond
+               ((not (and (numberp safeslop-portal-refresh-interval)
+                          (> safeslop-portal-refresh-interval 0)))
+                "— auto-refresh off · g to refresh")
+               (safeslop-portal--auto-paused
+                "⏸ auto-refresh paused · a to resume · g to refresh")
+               (t (format "⟳ auto-refresh on · every %ss%s · a to pause"
+                          safeslop-portal-refresh-interval
+                          (if safeslop-portal--last-refresh
+                              (format " · last %s" (format-time-string "%H:%M:%S" safeslop-portal--last-refresh))
+                            ""))))))
+    (propertize text 'face (if safeslop-portal--auto-paused 'warning 'shadow)
+                'help-echo "Polling only runs `safeslop session list`; it never runs, resumes, or advances an agent.")))
+
 (defun safeslop-portal--header ()
-  "Return the portal header block: surface tab strip, tier legend, shortcut legend."
+  "Return the portal header block: surface tab strip, legends, auto status, shortcuts."
   (concat (safeslop-surface--tab-strip 'sessions)
           (safeslop-portal--tier-legend)
+          (safeslop-portal--status-legend)
+          (safeslop-portal--net-legend)
+          (safeslop-portal--auto-status-line) "\n\n"
           (safeslop-portal--legend)))
 
 (defun safeslop-portal--goto-first-row ()
@@ -290,8 +421,11 @@ done (used to reveal a just-created session)."
      (lambda (envelope)
        (when (buffer-live-p buf)
          (with-current-buffer buf
-           (setq tabulated-list-entries
-                 (safeslop-portal--rows (safeslop-portal--sessions-from envelope)))
+           (let ((sessions (safeslop-portal--sessions-from envelope)))
+             (setq safeslop-portal--sessions-by-id
+                   (mapcar (lambda (s) (cons (safeslop-portal--field s 'session_id) s)) sessions))
+             (setq tabulated-list-entries (safeslop-portal--rows sessions)))
+           (setq safeslop-portal--last-refresh (current-time))
            ;; `tabulated-list-print' erases the buffer (header included) and reprints;
            ;; with KEEP-POINT it restores point to the same entry id, so the header
            ;; re-insert above (before point) shifts but does not move it off the session.
@@ -334,15 +468,18 @@ active so it never fights a `k'-stop confirmation or other prompt."
   (let ((buf (get-buffer safeslop-portal-buffer-name)))
     (cond
      ((not (buffer-live-p buf)) (safeslop-portal--cancel-timer))
+     (safeslop-portal--auto-paused nil)
      ((and (get-buffer-window buf 'visible)
            (not (active-minibuffer-window)))
-      (safeslop-portal-refresh)))))
+      (let ((safeslop--debug-call-event 'poll))
+        (safeslop-portal-refresh))))))
 
 (defun safeslop-portal--start-timer ()
   "(Re)start the auto-refresh timer per `safeslop-portal-refresh-interval'.
 A nil or non-positive interval leaves the portal static (manual `g' only)."
   (safeslop-portal--cancel-timer)
-  (when (and (numberp safeslop-portal-refresh-interval)
+  (when (and (not safeslop-portal--auto-paused)
+             (numberp safeslop-portal-refresh-interval)
              (> safeslop-portal-refresh-interval 0))
     (setq safeslop-portal--timer
           (run-at-time safeslop-portal-refresh-interval
@@ -353,29 +490,33 @@ A nil or non-positive interval leaves the portal static (manual `g' only)."
   "Toggle the portal's automatic refresh on or off for this Emacs session."
   (interactive)
   (if safeslop-portal--timer
-      (progn (safeslop-portal--cancel-timer)
-             (message "safeslop portal: auto-refresh off (g to refresh)"))
+      (progn
+        (setq safeslop-portal--auto-paused t)
+        (safeslop-portal--cancel-timer)
+        (safeslop-portal-refresh)
+        (message "safeslop portal: auto-refresh paused (g to refresh, a to resume)"))
     (if (and (numberp safeslop-portal-refresh-interval)
              (> safeslop-portal-refresh-interval 0))
-        (progn (safeslop-portal--start-timer)
-               (message "safeslop portal: auto-refresh every %ss"
-                        safeslop-portal-refresh-interval))
+        (progn
+          (setq safeslop-portal--auto-paused nil)
+          (safeslop-portal--start-timer)
+          (safeslop-portal-refresh)
+          (message "safeslop portal: auto-refresh every %ss"
+                   safeslop-portal-refresh-interval))
       (user-error "Set `safeslop-portal-refresh-interval' to a positive number first"))))
 
 (defvar safeslop-portal-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "RET") #'safeslop-portal-open)
     (define-key map (kbd "o")   #'safeslop-portal-open)
+    (define-key map (kbd "D")   #'safeslop-portal-run-detached)
     (define-key map (kbd "R")   #'safeslop-portal-reattach)
     (define-key map (kbd "i")   #'safeslop-portal-status)
     (define-key map (kbd "k")   #'safeslop-portal-stop)
     (define-key map (kbd "n")   #'safeslop-portal-new)
+    (define-key map (kbd "f")   #'safeslop-portal-follow-profile)
     (define-key map (kbd "g")   #'safeslop-portal-refresh)
     (define-key map (kbd "a")   #'safeslop-portal-toggle-auto-refresh)
-    (define-key map (kbd "d")   #'safeslop-doctor)
-    (define-key map (kbd "L")   #'safeslop-debug-log)
-    (define-key map (kbd "?")   #'describe-mode)
-    (define-key map (kbd "q")   #'quit-window)
     ;; Inherit the shared surface switch keys (P/I/F, [/]); the portal's own keys
     ;; above take precedence, the unbound switch keys fall through to the parent.
     (set-keymap-parent map safeslop-surface-mode-map)
@@ -421,7 +562,8 @@ While displayed, the portal auto-refreshes every
     ;; transient popup.  Plain `pop-to-buffer' would split into a half window on
     ;; first open (the fix slopmaxx's console uses).
     (pop-to-buffer-same-window buf)
-    ;; Start (or restart) the shared auto-refresh timer for the live dashboard.
+    ;; Start (or restart) the shared auto-refresh timer for the live dashboard,
+    ;; unless the operator explicitly paused it with `a'.
     (safeslop-portal--start-timer)
     buf))
 

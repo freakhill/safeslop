@@ -32,6 +32,8 @@
 (declare-function safeslop-portal-open "safeslop-portal" ())
 (declare-function safeslop-portal-reattach "safeslop-portal" ())
 (declare-function safeslop-portal-status "safeslop-portal" ())
+(declare-function safeslop-portal-run-detached "safeslop-portal" ())
+(declare-function safeslop-portal-follow-profile "safeslop-portal" ())
 (declare-function safeslop-portal-stop "safeslop-portal" ())
 (declare-function safeslop-portal-new "safeslop-portal" ())
 (declare-function safeslop-portal-refresh "safeslop-portal" ())
@@ -43,14 +45,15 @@
 (declare-function safeslop-install-apply "safeslop-install" ())
 (declare-function safeslop-install-dry-run "safeslop-install" ())
 (declare-function safeslop-install-rollback "safeslop-install" ())
+(declare-function safeslop-output-refresh "safeslop" ())
 (declare-function safeslop-profiles-inspect "safeslop-profiles" ())
+(declare-function safeslop-profiles-launch "safeslop-profiles" ())
 (declare-function safeslop-profiles-edit "safeslop-profiles" ())
 (declare-function safeslop-profiles-create "safeslop-profiles" ())
 (declare-function safeslop-profiles-clone "safeslop-profiles" ())
 (declare-function safeslop-profiles-validate "safeslop-profiles" ())
 (declare-function safeslop-profiles-delete "safeslop-profiles" ())
 (declare-function safeslop-profiles-refresh "safeslop-profiles" ())
-(declare-function tabulated-list-sort "tabulated-list" (&optional n))
 (defvar safeslop-portal-mode-map)
 (defvar safeslop-install-mode-map)
 (defvar safeslop-profiles-mode-map)
@@ -61,9 +64,18 @@
   ;; state so single-key actions are not interpreted as editing commands.
   (evil-set-initial-state 'safeslop-output-mode 'normal)
   (evil-define-key 'normal safeslop-output-mode-map
-    (kbd "g") #'safeslop-doctor
+    (kbd "g") #'safeslop-output-refresh
+    (kbd "d") #'safeslop-doctor
     (kbd "e") #'safeslop-show-last-error
-    (kbd "q") #'quit-window)
+    (kbd "E") #'safeslop-show-last-error
+    (kbd "L") #'safeslop-debug-log
+    (kbd "?") #'describe-mode
+    (kbd "q") #'quit-window
+    (kbd "P") #'safeslop-portal
+    (kbd "I") #'safeslop-install
+    (kbd "F") #'safeslop-profiles
+    (kbd "[") #'safeslop-surface-prev
+    (kbd "]") #'safeslop-surface-next)
   ;; The portal is a tabulated-list dashboard whose single-key actions (o/i/k/n/R…)
   ;; would otherwise be Evil normal-state motions; bind them through Evil so the
   ;; dashboard is drivable.
@@ -71,13 +83,16 @@
   (evil-define-key 'normal safeslop-portal-mode-map
     (kbd "RET") #'safeslop-portal-open
     (kbd "o")   #'safeslop-portal-open
+    (kbd "D")   #'safeslop-portal-run-detached
     (kbd "R")   #'safeslop-portal-reattach
     (kbd "i")   #'safeslop-portal-status
     (kbd "k")   #'safeslop-portal-stop
     (kbd "n")   #'safeslop-portal-new
+    (kbd "f")   #'safeslop-portal-follow-profile
     (kbd "g")   #'safeslop-portal-refresh
     (kbd "a")   #'safeslop-portal-toggle-auto-refresh
     (kbd "d")   #'safeslop-doctor
+    (kbd "E")   #'safeslop-show-last-error
     (kbd "L")   #'safeslop-debug-log
     (kbd "?")   #'describe-mode
     (kbd "q")   #'quit-window
@@ -97,6 +112,7 @@
     (kbd "D") #'safeslop-install-dry-run
     (kbd "b") #'safeslop-install-rollback
     (kbd "d") #'safeslop-doctor
+    (kbd "E") #'safeslop-show-last-error
     (kbd "L") #'safeslop-debug-log
     (kbd "?") #'describe-mode
     (kbd "q") #'quit-window
@@ -109,13 +125,15 @@
   (evil-define-key 'normal safeslop-profiles-mode-map
     (kbd "RET") #'safeslop-profiles-inspect
     (kbd "i")   #'safeslop-profiles-inspect
+    (kbd "x")   #'safeslop-profiles-launch
     (kbd "e")   #'safeslop-profiles-edit
     (kbd "n")   #'safeslop-profiles-create
     (kbd "c")   #'safeslop-profiles-clone
     (kbd "v")   #'safeslop-profiles-validate
-    (kbd "d")   #'safeslop-profiles-delete
-    (kbd "S")   #'tabulated-list-sort
+    (kbd "D")   #'safeslop-profiles-delete
     (kbd "g")   #'safeslop-profiles-refresh
+    (kbd "d")   #'safeslop-doctor
+    (kbd "E")   #'safeslop-show-last-error
     (kbd "L")   #'safeslop-debug-log
     (kbd "?")   #'describe-mode
     (kbd "q")   #'quit-window

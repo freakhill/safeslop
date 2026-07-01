@@ -47,7 +47,9 @@
       ;; Both the output buffers and the portal dashboard enter Evil normal state.
       (should (member '(safeslop-output-mode normal) initial-states))
       (should (member '(safeslop-portal-mode normal) initial-states))
-      (should (eq (lookup-key safeslop-output-mode-map (kbd "g")) #'safeslop-doctor))
+      (should (eq (lookup-key safeslop-output-mode-map (kbd "g")) #'safeslop-output-refresh))
+      (should (eq (lookup-key safeslop-output-mode-map (kbd "d")) #'safeslop-doctor))
+      (should (eq (lookup-key safeslop-output-mode-map (kbd "E")) #'safeslop-show-last-error))
       (should (eq (lookup-key safeslop-output-mode-map (kbd "q")) #'quit-window))
       (should (eq (lookup-key safeslop-portal-mode-map (kbd "k")) #'safeslop-portal-stop)))))
 
@@ -71,6 +73,8 @@
   (should (eq (lookup-key safeslop-portal-mode-map (kbd "k")) #'safeslop-portal-stop))
   (should (eq (lookup-key safeslop-portal-mode-map (kbd "g")) #'safeslop-portal-refresh))
   (should (eq (lookup-key safeslop-portal-mode-map (kbd "a")) #'safeslop-portal-toggle-auto-refresh))
+  (should (eq (lookup-key safeslop-portal-mode-map (kbd "D")) #'safeslop-portal-run-detached))
+  (should (eq (lookup-key safeslop-portal-mode-map (kbd "f")) #'safeslop-portal-follow-profile))
   (should (eq (lookup-key safeslop-portal-mode-map (kbd "L")) #'safeslop-debug-log)))
 
 (ert-deftest safeslop-test-portal-legend-lists-auto ()
@@ -241,6 +245,22 @@
   (should (eq (safeslop-portal--status-face "exited") 'error))
   (should (eq (safeslop-portal--status-face "weird") 'default)))
 
+(ert-deftest safeslop-test-portal-net-cell ()
+  "Network cells preserve text and add colour-redundant safety hints."
+  (let ((allow (safeslop-portal--net-cell "allow"))
+        (deny (safeslop-portal--net-cell "deny")))
+    (should (equal allow "allow"))
+    (should (equal deny "deny"))
+    (should (eq (get-text-property 0 'face allow) 'safeslop-net-allow))
+    (should (eq (get-text-property 0 'face deny) 'safeslop-net-deny))
+    (should (get-text-property 0 'help-echo allow))))
+
+(ert-deftest safeslop-test-portal-primary-action-by-state ()
+  (should (eq (safeslop-portal--primary-action "created" "") 'run))
+  (should (eq (safeslop-portal--primary-action "running" "/tmp/s.sock") 'reattach))
+  (should (eq (safeslop-portal--primary-action "running" "") 'live))
+  (should (eq (safeslop-portal--primary-action "stopped" "") 'status)))
+
 (ert-deftest safeslop-test-portal-status-cell-and-pid ()
   "Rows colour the Status cell by status and carry a PID column."
   (let ((envelope (safeslop-contract-parse-string
@@ -255,6 +275,7 @@
            (created (cl-find "sess-c" rows :key #'car :test #'equal)))
       (should (eq (get-text-property 0 'face (aref (cadr running) 4)) 'success))
       (should (eq (get-text-property 0 'face (aref (cadr created) 4)) 'warning))
+      (should (eq (get-text-property 0 'face (aref (cadr running) 3)) 'safeslop-net-deny))
       (should (equal (aref (cadr running) 5) "4242"))
       (should (equal (aref (cadr created) 5) "—")))))
 
@@ -280,6 +301,20 @@
   (should-not (equal (safeslop-portal--age '((updated_at . "2026-06-28T00:00:00Z"))) "—")))
 
 ;;; Surface navigation (specs/0052 M0) ---------------------------------------
+
+(ert-deftest safeslop-test-surface-universal-keys ()
+  (should (eq (lookup-key safeslop-surface-mode-map (kbd "d")) #'safeslop-doctor))
+  (should (eq (lookup-key safeslop-surface-mode-map (kbd "E")) #'safeslop-show-last-error))
+  (should (eq (lookup-key safeslop-surface-mode-map (kbd "L")) #'safeslop-debug-log))
+  (should (eq (lookup-key safeslop-surface-mode-map (kbd "?")) #'describe-mode))
+  (should (eq (lookup-key safeslop-surface-mode-map (kbd "q")) #'quit-window)))
+
+(ert-deftest safeslop-test-output-safe-rerun-predicate ()
+  (should (safeslop--safe-rerun-p '("validate" "safeslop.cue" "--json")))
+  (should (safeslop--safe-rerun-p '("session" "status" "--session-id" "sess-x" "--output" "json")))
+  (should (safeslop--safe-rerun-p '("install" "apply" "--dry-run" "--output" "json")))
+  (should-not (safeslop--safe-rerun-p '("install" "apply" "--output" "json")))
+  (should-not (safeslop--safe-rerun-p '("profile" "create" "--output" "json"))))
 
 (ert-deftest safeslop-test-surface-order-has-three ()
   (should (= (length safeslop-surface--order) 3))

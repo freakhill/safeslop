@@ -23,6 +23,9 @@
 (declare-function safeslop-portal "safeslop-portal" ())
 (declare-function safeslop-install "safeslop-install" ())
 (declare-function safeslop-profiles "safeslop-profiles" ())
+(declare-function safeslop-doctor "safeslop" ())
+(declare-function safeslop-debug-log "safeslop" ())
+(declare-function safeslop-show-last-error "safeslop" ())
 
 (defconst safeslop-surface--order
   '((sessions "Sessions" . safeslop-portal)
@@ -80,6 +83,90 @@ buffer's own shortcut legend."
   (interactive)
   (safeslop-surface--step -1))
 
+(defface safeslop-net-deny '((t :inherit success))
+  "Face for network=deny: default-deny egress (safe default)."
+  :group 'safeslop)
+
+(defface safeslop-net-allow '((t :inherit warning))
+  "Face for network=allow: open outbound egress from the boundary."
+  :group 'safeslop)
+
+(defface safeslop-surface-error '((t :inherit error :weight bold))
+  "Face for persistent safeslop surface error banners."
+  :group 'safeslop)
+
+(defface safeslop-surface-hint '((t :inherit shadow))
+  "Face for persistent safeslop surface empty/loading guidance."
+  :group 'safeslop)
+
+(defun safeslop-surface--net-cell (net)
+  "Return NET as a colour-redundant cell with honest egress help."
+  (pcase net
+    ("allow" (propertize "allow" 'face 'safeslop-net-allow
+                          'help-echo "network=allow: open outbound egress from the agent boundary"))
+    ("deny" (propertize "deny" 'face 'safeslop-net-deny
+                         'help-echo "network=deny: default-deny egress (safe default)"))
+    (_ (or net ""))))
+
+(defun safeslop-surface--error-message (envelope &optional fallback)
+  "Return ENVELOPE's first error message, or FALLBACK."
+  (or (alist-get 'message (car (and (fboundp 'safeslop-contract-errors)
+                                    (safeslop-contract-errors envelope))))
+      fallback
+      "unknown error"))
+
+(defun safeslop-surface--error-banner (label message)
+  "Return persistent error guidance for LABEL and MESSAGE."
+  (concat (propertize (format "⚠ %s failed: %s" label message)
+                      'face 'safeslop-surface-error)
+          " · "
+          (propertize "g" 'face 'help-key-binding) " retry  "
+          (propertize "d" 'face 'help-key-binding) " doctor  "
+          (propertize "E" 'face 'help-key-binding) " last error  "
+          (propertize "L" 'face 'help-key-binding) " debug\n"))
+
+(defun safeslop-surface--empty-state (noun new-key)
+  "Return persistent empty-state guidance for NOUN, advertising NEW-KEY when non-nil."
+  (concat (propertize (format "No %s yet" noun) 'face 'safeslop-surface-hint)
+          (if new-key
+              (format " — press %s to create one, or %s to refresh.\n"
+                      (propertize new-key 'face 'help-key-binding)
+                      (propertize "g" 'face 'help-key-binding))
+            (format " — press %s to refresh or %s for doctor.\n"
+                    (propertize "g" 'face 'help-key-binding)
+                    (propertize "d" 'face 'help-key-binding)))))
+
+(defun safeslop-surface--loading (noun)
+  "Return a non-blocking loading banner for NOUN."
+  (propertize (format "↻ checking %s… (Emacs stays responsive)\n" noun)
+              'face 'safeslop-surface-hint))
+
+(defun safeslop-surface--infer (args)
+  "Infer the active surface symbol from safeslop ARGS."
+  (pcase args
+    (`("session" . ,_) 'sessions)
+    (`("install" . ,_) 'install)
+    (`("profile" . ,_) 'profiles)
+    (`("validate" . ,_) 'profiles)
+    (_ nil)))
+
+(defun safeslop-surface--breadcrumb-title (args)
+  "Return a compact title for an output buffer produced by ARGS."
+  (let ((tokens nil))
+    (dolist (arg args)
+      (unless (or (string-prefix-p "--" arg)
+                  (string-match-p "\`/" arg))
+        (push arg tokens)))
+    (string-join (seq-take (nreverse tokens) 2) " ")))
+
+(defun safeslop-surface--breadcrumb (args)
+  "Return a operator UI tab strip plus compact output title for ARGS."
+  (let ((active (safeslop-surface--infer args))
+        (title (safeslop-surface--breadcrumb-title args)))
+    (concat (safeslop-surface--tab-strip active)
+            (when (not (string-empty-p title))
+              (format "▸ %s\n\n" title)))))
+
 (defvar safeslop-surface-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "P") #'safeslop-portal)
@@ -87,6 +174,11 @@ buffer's own shortcut legend."
     (define-key map (kbd "F") #'safeslop-profiles)
     (define-key map (kbd "[") #'safeslop-surface-prev)
     (define-key map (kbd "]") #'safeslop-surface-next)
+    (define-key map (kbd "d") #'safeslop-doctor)
+    (define-key map (kbd "E") #'safeslop-show-last-error)
+    (define-key map (kbd "L") #'safeslop-debug-log)
+    (define-key map (kbd "?") #'describe-mode)
+    (define-key map (kbd "q") #'quit-window)
     map)
   "Parent keymap shared by every safeslop dashboard surface.
 Surface modes install it with `set-keymap-parent'; their own action keys take

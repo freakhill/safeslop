@@ -19,6 +19,7 @@
 (require 'subr-x)
 (require 'term)
 (require 'safeslop-contract)
+(require 'safeslop-surface)
 
 (defvar safeslop-program)
 (defvar safeslop-last-error)
@@ -29,6 +30,8 @@
 (declare-function safeslop--finish-envelope "safeslop" (stdout status))
 (declare-function safeslop--show-envelope-buffer "safeslop" (name args envelope))
 (declare-function safeslop-portal--reveal-session "safeslop-portal" (id))
+(declare-function safeslop-portal "safeslop-portal" ())
+(declare-function safeslop-debug-log "safeslop" ())
 ;; Optional eat terminal API — loaded lazily in `safeslop-session--make-terminal'
 ;; only when eat is installed; declared here so the byte-compiler stays quiet.
 (declare-function eat-mode "eat" ())
@@ -76,8 +79,17 @@ raw argv shape."
 (defconst safeslop-session-progress-buffer-name "*safeslop session progress*"
   "Buffer name for profile-backed session creation progress.")
 
+(defvar safeslop-progress-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "P") #'safeslop-portal)
+    (define-key map (kbd "L") #'safeslop-debug-log)
+    (define-key map (kbd "q") #'quit-window)
+    map)
+  "Keymap for live safeslop progress buffers.")
+
 (define-derived-mode safeslop-progress-mode text-mode "safeslop-progress"
-  "Major mode for live safeslop progress output buffers."
+  "Major mode for live safeslop progress output buffers.
+Keys: P portal, L debug log, q quit."
   (setq-local truncate-lines t))
 
 (defun safeslop-session--progress-buffer (args)
@@ -143,11 +155,11 @@ envelope, exactly like `safeslop--call-json-async'."
          (funcall callback (safeslop--error-envelope "CLIENT_SPAWN" msg))
          nil)))))
 
-(defun safeslop-session--create-async (args profile-p callback)
+(defun safeslop-session--create-async (args progress-p callback)
   "Run session-create ARGS and pass the resulting envelope to CALLBACK.
-PROFILE-P enables the visible progress buffer path because profile-backed
-container sessions may need a slow lazy first image build."
-  (if profile-p
+PROGRESS-P enables the visible progress buffer path because container sessions may
+need a slow lazy first image build."
+  (if progress-p
       (safeslop-session--call-json-async-with-progress args callback)
     (safeslop--call-json-async args callback)))
 
@@ -191,9 +203,10 @@ those flags for compatibility tests.  CALLBACK, when given, receives the envelop
                    (safeslop-session--create-profile-args profile)
                  (safeslop-session--create-args (or agent "claude")
                                                 (or workspace default-directory)
-                                                environment network))))
+                                                environment network)))
+         (progress-p (or profile-p (equal (or environment "container") "container"))))
     (safeslop-session--create-async
-     args profile-p
+     args progress-p
      (lambda (envelope)
        (safeslop-session--handle-create-result args callback envelope)))))
 
@@ -223,6 +236,21 @@ This is the noninteractive/testable profile-picker bridge used by
 (defun safeslop-session--attach-args (session-id)
   "Return exact argv for reattaching to SESSION-ID's detached supervisor."
   (list "session" "attach" "--session-id" session-id))
+
+(defun safeslop-session--run-detached-args (session-id)
+  "Return exact argv for starting SESSION-ID under a detached supervisor."
+  (list "session" "run" "--session-id" session-id "--detach"))
+
+(defun safeslop-session--session-id-candidates (&optional envelope)
+  "Return session ids from a `session list' ENVELOPE, or fetch them synchronously."
+  (let ((env (or envelope (safeslop--call-json '("session" "list" "--output" "json")))))
+    (when (safeslop-contract-ok-p env)
+      (mapcar (lambda (s) (alist-get 'session_id s))
+              (alist-get 'sessions (safeslop-contract-data env))))))
+
+(defun safeslop-session--read-id (prompt)
+  "Read a session id with completion over known sessions; free text is allowed."
+  (completing-read prompt (safeslop-session--session-id-candidates) nil nil))
 
 (defvar-local safeslop-session--run-output nil
   "Raw stdout accumulated from the `session run' process for this buffer.
@@ -306,8 +334,22 @@ read-only JSONL status fallback (`safeslop-session-status-fallback')."
   "Attach to SESSION-ID by running its agent under a built-in term-mode PTY.
 On PTY_UNAVAILABLE (no usable controlling terminal), switch to the read-only
 JSONL status fallback (`safeslop-session-status-fallback')."
-  (interactive (list (read-string "Session id: ")))
+  (interactive (list (safeslop-session--read-id "Run session: ")))
   (safeslop-session--launch-term session-id (safeslop-session--run-args session-id)))
+
+;;;###autoload
+(defun safeslop-session-run-detached (&optional session-id callback)
+  "Start SESSION-ID under a detached supervisor, asynchronously."
+  (interactive (list (safeslop-session--read-id "Run detached: ")))
+  (let ((args (safeslop-session--run-detached-args session-id)))
+    (safeslop--call-json-async
+     args
+     (lambda (envelope)
+       (safeslop--show-envelope-buffer "*safeslop session detach*" args envelope)
+       (when (and (null callback) (safeslop-contract-ok-p envelope)
+                  (y-or-n-p (format "Detached. Reattach to %s now? " session-id)))
+         (safeslop-session-reattach session-id))
+       (when callback (funcall callback envelope))))))
 
 ;;;###autoload
 (defun safeslop-session-list (&optional callback)
@@ -325,7 +367,7 @@ CALLBACK, when given, is called with the envelope once it arrives (used by tests
 (defun safeslop-session-status (&optional session-id callback)
   "Show SESSION-ID status via the JSON contract, asynchronously.
 CALLBACK, when given, is called with the envelope once it arrives (used by tests)."
-  (interactive (list (read-string "Session id: ")))
+  (interactive (list (safeslop-session--read-id "Session status: ")))
   (let ((args (list "session" "status" "--session-id" session-id "--output" "json")))
     (safeslop--call-json-async
      args
@@ -338,7 +380,11 @@ CALLBACK, when given, is called with the envelope once it arrives (used by tests
   "Stop SESSION-ID, revoking credentials, asynchronously, and show the envelope.
 Credential revocation can take a moment, so the call is async and never blocks
 Emacs.  CALLBACK, when given, is called with the envelope once it arrives (tests)."
-  (interactive (list (read-string "Session id: ")))
+  (interactive
+   (let ((id (safeslop-session--read-id "Stop session: ")))
+     (unless (yes-or-no-p (format "Stop %s? This revokes staged credentials and tears down the boundary. " id))
+       (user-error "Stop cancelled"))
+     (list id nil)))
   (let ((args (list "session" "stop" "--session-id" session-id "--revoke-credentials" "--output" "json")))
     (safeslop--call-json-async
      args
@@ -353,21 +399,87 @@ term-mode PTY.  Unlike `safeslop-session-attach' (which runs the agent coupled),
 this rejoins an agent already running under a detached supervisor (specs/0051).
 On PTY_UNAVAILABLE (no usable controlling terminal), switch to the read-only
 JSONL status fallback (`safeslop-session-status-fallback')."
-  (interactive (list (read-string "Session id: ")))
+  (interactive (list (safeslop-session--read-id "Reattach session: ")))
   (safeslop-session--launch-term session-id (safeslop-session--attach-args session-id)))
 
+(defun safeslop-session--detail-format (data)
+  "Return a human-readable, faced detail view for session DATA."
+  (cl-labels ((field (k) (let ((v (alist-get k data)))
+                           (cond ((stringp v) v) ((null v) "") (t (format "%s" v)))))
+              (line (k v &optional face)
+                    (format "%-14s%s" k (if face (propertize (format "%s" v) 'face face) v))))
+    (let* ((status (field 'status))
+           (socket (field 'socket))
+           (network (field 'network))
+           (revoked (eq (alist-get 'credentials_revoked data) t))
+           (last-error (field 'last_error))
+           (detached (and (not (string-empty-p socket)) socket)))
+      (mapconcat
+       #'identity
+       (delq nil
+             (list (line "Session:" (field 'session_id))
+                   (line "Agent:" (field 'agent))
+                   (unless (string-empty-p (field 'profile)) (line "Profile:" (field 'profile)))
+                   (line "Workspace:" (abbreviate-file-name (field 'workspace)))
+                   (line "Environment:" (field 'environment))
+                   (line "Network:" network (and (equal network "allow") 'safeslop-net-allow))
+                   (line "Status:" status)
+                   (line "Lifecycle:" (if detached "detached (survives buffer; reattach with R)"
+                                         "coupled (tied to its terminal buffer)"))
+                   (line "Credentials:" (if revoked "revoked" "live") (if revoked 'success 'warning))
+                   (unless (string-empty-p (field 'pid)) (line "PID:" (field 'pid)))
+                   (unless (string-empty-p (field 'exit_code)) (line "Exit code:" (field 'exit_code)))
+                   (unless (string-empty-p last-error) (line "Last error:" last-error 'error))
+                   (when detached (line "Socket:" socket))
+                   ""
+                   (pcase status
+                     ("created" "Next: RET run coupled · D detach · k stop/revoke · P portal")
+                     ("running" (if detached
+                                    "Next: RET/R join detached · k stop/revoke · P portal"
+                                  "Next: RET focus terminal · k stop/revoke · P portal"))
+                     (_ "Next: n new session · P portal"))))
+       "\n"))))
+
 ;;;###autoload
+(defun safeslop-session-detail (&optional session-id data)
+  "Show a read-only detail buffer for SESSION-ID using DATA or `session status'."
+  (interactive (list (safeslop-session--read-id "Session detail: ")))
+  (if data
+      (let ((buf (get-buffer-create (format "*safeslop session %s*" session-id))))
+        (with-current-buffer buf
+          (safeslop-output-mode)
+          (setq safeslop-output--args (list "session" "status" "--session-id" session-id "--output" "json")
+                safeslop-output--buffer-name (buffer-name))
+          (let ((inhibit-read-only t))
+            (erase-buffer)
+            (insert (safeslop-surface--breadcrumb safeslop-output--args))
+            (insert (safeslop-session--detail-format data))
+            (goto-char (point-min))))
+        (pop-to-buffer buf)
+        buf)
+    (safeslop-session-status session-id)))
+
+(defvar safeslop-session-status-fallback-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "P") #'safeslop-portal)
+    (define-key map (kbd "L") #'safeslop-debug-log)
+    (define-key map (kbd "q") #'quit-window)
+    map)
+  "Keymap for JSONL session status fallback buffers.")
+
 (defun safeslop-session-status-fallback (&optional session-id)
   "Open a read-only compilation buffer for SESSION-ID JSONL status fallback.
 The monitor process is started with an exact argv list; no shell is used."
-  (interactive (list (read-string "Session id: ")))
+  (interactive (list (safeslop-session--read-id "Session id: ")))
   (let* ((buf (get-buffer-create "*safeslop session status jsonl*"))
          (argv (list safeslop-program "session" "status"
                      "--session-id" session-id "--output" "jsonl")))
     (with-current-buffer buf
       (let ((inhibit-read-only t))
         (erase-buffer)
-        (compilation-mode)))
+        (compilation-mode)
+        (use-local-map (make-composed-keymap safeslop-session-status-fallback-mode-map
+                                             compilation-mode-map))))
     (make-process :name "safeslop-status-jsonl"
                   :buffer buf
                   :command argv

@@ -1304,19 +1304,19 @@ func cmdProfileShow() *cobra.Command {
 			}
 			path, err := findConfig(argAt(args, 1))
 			if err != nil {
-				return err
+				return emitContractError(jsoncontract.CodeNotFound, "safeslop.cue not found", map[string]any{"error": err.Error()})
 			}
 			cfg, err := policy.Load(path)
 			if err != nil {
-				return err
+				return emitContractError(jsoncontract.CodeSchemaViolation, "load safeslop.cue", map[string]any{"path": path, "error": err.Error()})
 			}
 			prof, ok := cfg.Profiles[args[0]]
 			if !ok {
-				return fmt.Errorf("no profile %q in safeslop.cue", args[0])
+				return emitContractError(jsoncontract.CodeNotFound, fmt.Sprintf("no profile %q in safeslop.cue", args[0]), map[string]any{"profile": args[0], "path": path})
 			}
 			data, err := profileResolvedData(path, args[0], prof)
 			if err != nil {
-				return err
+				return emitContractError(jsoncontract.CodeInvalidArgument, "resolve profile image recipe", map[string]any{"profile": args[0], "error": err.Error()})
 			}
 			emitContract(jsoncontract.OK(data))
 			return nil
@@ -1339,14 +1339,14 @@ func cmdProfileCreate() *cobra.Command {
 				return fmt.Errorf("profile create requires --output json")
 			}
 			if name == "" || agent == "" || environment == "" {
-				return fmt.Errorf("profile create requires --name, --agent, and --environment")
+				return emitContractError(jsoncontract.CodeInvalidArgument, "profile create requires --name, --agent, and --environment", nil)
 			}
 			if network == "" {
 				network = "deny"
 			}
 			path, cfg, err := loadOrNewConfigForCreate()
 			if err != nil {
-				return err
+				return emitContractError(jsoncontract.CodeIOError, "load safeslop.cue", map[string]any{"error": err.Error()})
 			}
 			prof := policy.Profile{
 				Agent:       policy.NormalizeAgent(agent),
@@ -1358,26 +1358,22 @@ func cmdProfileCreate() *cobra.Command {
 				BareAgent:   noDefaultBundle,
 			}
 			if _, err := policy.Resolve(prof); err != nil {
-				return err
+				return emitContractError(jsoncontract.CodeInvalidArgument, "resolve profile packages", map[string]any{"profile": name, "error": err.Error()})
+			}
+			data, err := profileResolvedData(path, name, prof)
+			if err != nil {
+				return emitContractError(jsoncontract.CodeInvalidArgument, "resolve profile image recipe", map[string]any{"profile": name, "error": err.Error()})
 			}
 			cfg.Profiles[name] = prof
 			rendered, err := renderConfigCUE(cfg)
 			if err != nil {
-				return err
+				return emitContractError(jsoncontract.CodeInternal, "render safeslop.cue", map[string]any{"error": err.Error()})
 			}
 			if _, err := policy.LoadBytes(rendered); err != nil {
-				return fmt.Errorf("rendered safeslop.cue did not validate; not writing: %w", err)
+				return emitContractError(jsoncontract.CodeSchemaViolation, "rendered safeslop.cue did not validate; not writing", map[string]any{"error": err.Error()})
 			}
 			if err := os.WriteFile(path, rendered, 0o644); err != nil {
-				return fmt.Errorf("write %s: %w", path, err)
-			}
-			loaded, err := policy.Load(path)
-			if err != nil {
-				return err
-			}
-			data, err := profileResolvedData(path, name, loaded.Profiles[name])
-			if err != nil {
-				return err
+				return emitContractError(jsoncontract.CodeIOError, "write safeslop.cue", map[string]any{"path": path, "error": err.Error()})
 			}
 			data["created"] = true
 			emitContract(jsoncontract.OK(data))

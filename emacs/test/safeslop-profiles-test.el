@@ -31,9 +31,11 @@
       (should (equal (aref (cadr review) 1) "claude"))
       (should (equal (aref (cadr review) 2) "container")) ; env-cell text; equal ignores face
       (should (equal (aref (cadr review) 3) "deny"))
-      (should (eq (get-text-property 0 'face (aref (cadr review) 2)) 'safeslop-tier-container)))
+      (should (eq (get-text-property 0 'face (aref (cadr review) 2)) 'safeslop-tier-container))
+      (should (eq (get-text-property 0 'face (aref (cadr review) 3)) 'safeslop-net-deny)))
     (let ((yolo (assoc "yolo" rows)))
-      (should (eq (get-text-property 0 'face (aref (cadr yolo) 2)) 'safeslop-tier-host)))))
+      (should (eq (get-text-property 0 'face (aref (cadr yolo) 2)) 'safeslop-tier-host))
+      (should (eq (get-text-property 0 'face (aref (cadr yolo) 3)) 'safeslop-net-allow)))))
 
 (ert-deftest safeslop-test-profiles-keymap ()
   ;; RET is the safe primary action (inspect); editing the CUE file is `e'.
@@ -43,8 +45,10 @@
   (should (eq (lookup-key safeslop-profiles-mode-map (kbd "n")) #'safeslop-profiles-create))
   (should (eq (lookup-key safeslop-profiles-mode-map (kbd "c")) #'safeslop-profiles-clone))
   (should (eq (lookup-key safeslop-profiles-mode-map (kbd "v")) #'safeslop-profiles-validate))
-  (should (eq (lookup-key safeslop-profiles-mode-map (kbd "d")) #'safeslop-profiles-delete))
-  (should (eq (lookup-key safeslop-profiles-mode-map (kbd "S")) #'tabulated-list-sort))
+  (should (eq (lookup-key safeslop-profiles-mode-map (kbd "x")) #'safeslop-profiles-launch))
+  (should (eq (lookup-key safeslop-profiles-mode-map (kbd "D")) #'safeslop-profiles-delete))
+  (should (eq (lookup-key safeslop-profiles-mode-map (kbd "d")) #'safeslop-doctor))
+  (should-not (eq (lookup-key safeslop-profiles-mode-map (kbd "S")) #'tabulated-list-sort))
   ;; inherited surface switch keys
   (should (eq (lookup-key safeslop-profiles-mode-map (kbd "P")) #'safeslop-portal))
   (should (eq (lookup-key safeslop-profiles-mode-map (kbd "I")) #'safeslop-install)))
@@ -142,6 +146,8 @@
     (should (string-match-p "Resolved:    claude-code, node, pnpm" text))
     (should (string-match-p "Egress:      .anthropic.com" text))
     (should (string-match-p "Recipe:      abcdef012345" text))
+    (should (string-match-p "Isolation:   container" text))
+    (should (string-match-p "built on first launch" text))
     (should (string-match-p "Base:        debian:bookworm-slim@sha256:dead" text))))
 
 (ert-deftest safeslop-test-profiles-clone-prefills-create-from-show ()

@@ -94,6 +94,24 @@ func TestAgentImageTagsSensitiveToPackageSet(t *testing.T) {
 
 // A profile that resolves a not-yet-built package (sentinel-digest binary or an
 // unwired catalog entry) must fail fast, never silently drop the tool (specs/0058 N1).
+func TestAgentImageTagsAcceptsRipgrep(t *testing.T) {
+	_, _, toolsArgs, err := agentImageTags([]string{"node", "pi", "ripgrep"})
+	if err != nil {
+		t.Fatalf("ripgrep should be buildable now: %v", err)
+	}
+	joined := strings.Join(toolsArgs, " ")
+	for _, want := range []string{
+		"ENABLE_RIPGREP=true",
+		"RIPGREP_VERSION=14.1.1",
+		"RIPGREP_SHA256_AMD64=4cf9f2741e6c465ffdb7c26f38056a59e2a2544b51f7cc128ef28337eeae4d8e",
+		"RIPGREP_SHA256_ARM64=c827481c4ff4ea10c9dc7a4022c8de5db34a5737cb74484d62eb94a95841ab2f",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("tools build-args missing %q: %v", want, toolsArgs)
+		}
+	}
+}
+
 func TestAgentImageTagsRejectsUnbuildablePackages(t *testing.T) {
 	if _, _, _, err := agentImageTags([]string{"uv"}); err == nil {
 		t.Fatal("expected error for a sentinel-digest binary (uv); got nil")

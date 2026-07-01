@@ -16,14 +16,15 @@ const (
 )
 
 // iw2BuildablePackages are the catalog packages Dockerfile.agent.tools wires in IW2.
-// Others are modeled in the catalog but not yet built here: the sentinel-digest binaries
-// (bun/uv/mise/ripgrep/fd) and apt python3. A profile that resolves one fails fast in
+// Others are modeled in the catalog but not yet built here: the remaining sentinel-digest
+// binaries (bun/uv/mise/fd) and apt python3. A profile that resolves one fails fast in
 // agentImageTags rather than silently dropping it (specs/0058 N1, deferred packages).
 var iw2BuildablePackages = map[string]bool{
 	"node":        true,
 	"claude-code": true,
 	"pi":          true,
 	"pnpm":        true,
+	"ripgrep":     true,
 }
 
 // RecipeID is the content-hash identity of a build: the first 12 hex chars of

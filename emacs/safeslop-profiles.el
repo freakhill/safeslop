@@ -50,6 +50,8 @@
 (declare-function safeslop--show-envelope-buffer "safeslop" (name args envelope))
 (declare-function safeslop-policy-check-file "safeslop" (file &optional callback))
 (declare-function safeslop-debug-log "safeslop" ())
+(declare-function safeslop-doctor "safeslop" ())
+(declare-function safeslop-session-new-from-profile "safeslop-session" (profile &optional callback))
 
 (defconst safeslop-profiles-buffer-name "*safeslop profiles*"
   "Buffer name for the safeslop profiles surface.")
@@ -129,9 +131,7 @@ create write remains asynchronous."
           (list "--output" "json")))
 
 (defun safeslop-profiles--rows (data)
-  "Build tabulated rows from `profile list' DATA (a profiles name->fields map).
-The Env cell reuses the portal's tier colouring so isolation strength reads the
-same on both surfaces."
+  "Build tabulated rows from `profile list' DATA, name-ordered and safety-faced."
   (mapcar
    (lambda (entry)
      (let ((name (symbol-name (car entry)))
@@ -140,8 +140,9 @@ same on both surfaces."
              (vector name
                      (or (alist-get 'agent p) "")
                      (safeslop-portal--env-cell (or (alist-get 'environment p) ""))
-                     (or (alist-get 'network p) "")))))
-   (alist-get 'profiles data)))
+                     (safeslop-surface--net-cell (or (alist-get 'network p) ""))))))
+   (sort (copy-sequence (alist-get 'profiles data))
+         (lambda (a b) (string< (symbol-name (car a)) (symbol-name (car b)))))))
 
 ;;; ---- pure CRUD helpers (unit-tested) -------------------------------------
 
@@ -160,15 +161,28 @@ same on both surfaces."
       (mapconcat #'identity values ", ")
     "(none)"))
 
-(defun safeslop-profiles--row-summary (name)
-  "Return a one-line \"agent, env, net\" summary for listed profile NAME, or nil."
+(defun safeslop-profiles--row-fields (name)
+  "Return (AGENT ENV NETWORK) for listed profile NAME, stripping text properties."
   (let ((entry (assoc name tabulated-list-entries)))
     (when entry
       (let ((v (cadr entry)))
-        (format "%s, %s, %s"
-                (aref v 1)
-                (substring-no-properties (aref v 2))
-                (aref v 3))))))
+        (list (substring-no-properties (aref v 1))
+              (substring-no-properties (aref v 2))
+              (substring-no-properties (aref v 3)))))))
+
+(defun safeslop-profiles--row-summary (name)
+  "Return a one-line \"agent, env, net\" summary for listed profile NAME, or nil."
+  (when-let ((fields (safeslop-profiles--row-fields name)))
+    (format "%s, %s, %s" (nth 0 fields) (nth 1 fields) (nth 2 fields))))
+
+(defun safeslop-profiles--danger-summary (agent environment network)
+  "Return a one-line isolation/network risk summary."
+  (let ((note (or (nth 3 (assoc environment safeslop-portal--env-tiers))
+                  "unknown isolation"))
+        (net (if (equal network "allow")
+                 "network ALLOW (egress reachable)"
+               "network deny (default-deny egress)")))
+    (format "%s · %s · %s" agent note net)))
 
 (defun safeslop-profiles--show-args (name)
   "Return argv for `profile show' of NAME, pinned to this buffer's config when known.
@@ -261,6 +275,8 @@ a top-level or nested same-named block outside the profile map."
   (let* ((name (alist-get 'name data))
          (prof (alist-get 'profile data))
          (resolved (alist-get 'resolved data))
+         (env (alist-get 'environment prof))
+         (net (alist-get 'network prof))
          (ws (alist-get 'workspace prof)))
     (mapconcat
      #'identity
@@ -268,8 +284,11 @@ a top-level or nested same-named block outside the profile map."
            (list
             (format "Profile:     %s" (or name ""))
             (format "Agent:       %s" (or (alist-get 'agent prof) ""))
-            (format "Environment: %s" (or (alist-get 'environment prof) ""))
-            (format "Network:     %s" (or (alist-get 'network prof) "deny"))
+            (format "Environment: %s" (or env ""))
+            (let ((note (nth 3 (assoc env safeslop-portal--env-tiers))))
+              (when note (format "Isolation:   %s" note)))
+            (format "Network:     %s%s" (or net "deny")
+                    (if (equal net "allow") " — egress reachable (deny is the safe default)" ""))
             (when (and (stringp ws) (not (string-empty-p ws)))
               (format "Workspace:   %s" ws))
             (format "Bundles:     %s" (safeslop-profiles--join (alist-get 'bundles prof)))
@@ -277,7 +296,8 @@ a top-level or nested same-named block outside the profile map."
             (format "Resolved:    %s" (safeslop-profiles--join (alist-get 'identitySet resolved)))
             (format "Egress:      %s" (safeslop-profiles--join (alist-get 'runtimeEgress resolved)))
             (when (alist-get 'recipeID data) (format "Recipe:      %s" (alist-get 'recipeID data)))
-            (when (alist-get 'image data) (format "Image:       %s" (alist-get 'image data)))
+            (when (alist-get 'image data)
+              (format "Image:       %s (built on first launch if absent)" (alist-get 'image data)))
             (when (alist-get 'base data) (format "Base:        %s" (alist-get 'base data)))))
      "\n")))
 
@@ -331,9 +351,9 @@ initial value (used by clone)."
 ;;; ---- rendering -----------------------------------------------------------
 
 (defconst safeslop-profiles--key-hints
-  '(("RET" . "inspect") ("e" . "edit") ("n" . "create") ("c" . "clone")
-    ("v" . "validate") ("d" . "delete") ("S" . "sort") ("g" . "refresh")
-    ("?" . "help") ("q" . "quit"))
+  '(("RET" . "inspect") ("x" . "launch") ("e" . "edit") ("n" . "create")
+    ("c" . "clone") ("v" . "validate") ("D" . "delete") ("g" . "refresh")
+    ("d" . "doctor") ("E" . "error") ("L" . "debug") ("?" . "help") ("q" . "quit"))
   "Key/action pairs shown in the profiles surface's in-buffer legend.")
 
 (defun safeslop-profiles--legend ()
@@ -344,19 +364,23 @@ initial value (used by clone)."
                      safeslop-profiles--key-hints "  ")
           "\n\n"))
 
-(defun safeslop-profiles--empty-state ()
-  "Return persistent in-buffer guidance shown when no profiles are listed.
-Unlike an echo-area message (wiped by the next keystroke), this stays visible."
-  (concat (propertize "No profiles yet" 'face 'shadow)
-          " — press "
-          (propertize "n" 'face 'help-key-binding)
-          " to create one, or "
-          (propertize "g" 'face 'help-key-binding)
-          " to refresh.\n"))
+(defun safeslop-profiles--empty-state (&optional config-path error-message)
+  "Return persistent guidance for empty or failed profile listing."
+  (cond
+   (error-message (safeslop-surface--error-banner "profile list" error-message))
+   (config-path (concat (propertize (format "No profiles in %s yet" (abbreviate-file-name config-path))
+                                    'face 'safeslop-surface-hint)
+                        " — press " (propertize "n" 'face 'help-key-binding)
+                        " to add one, or " (propertize "g" 'face 'help-key-binding) " to refresh.\n"))
+   (t (concat (propertize "No safeslop.cue found" 'face 'safeslop-surface-hint)
+              " — press " (propertize "n" 'face 'help-key-binding)
+              " to create one, or " (propertize "g" 'face 'help-key-binding) " to retry.\n"))))
 
 (defun safeslop-profiles--header ()
-  "Return the profiles header block: surface tab strip then shortcut legend."
+  "Return the profiles header block: tab strip, tier/net legends, shortcuts."
   (concat (safeslop-surface--tab-strip 'profiles)
+          (safeslop-portal--tier-legend)
+          (safeslop-portal--net-legend)
           (safeslop-profiles--legend)))
 
 (defun safeslop-profiles--render (&optional keep-point then)
@@ -372,22 +396,22 @@ freshly created profile)."
      (lambda (envelope)
        (when (buffer-live-p buf)
          (with-current-buffer buf
-           (if (safeslop-contract-ok-p envelope)
-               (let ((data (safeslop-contract-data envelope)))
-                 (setq safeslop-profiles--config-path (alist-get 'path data))
-                 (setq tabulated-list-entries (safeslop-profiles--rows data)))
-             (setq safeslop-profiles--config-path nil)
-             (setq tabulated-list-entries nil)
-             (message "safeslop profiles: %s"
-                      (or (alist-get 'message (car (safeslop-contract-errors envelope)))
-                          "no safeslop.cue found — press `n' to create one")))
-           (tabulated-list-print keep-point)
-           (let ((inhibit-read-only t))
-             (save-excursion
-               (goto-char (point-min))
-               (insert (safeslop-profiles--header))
-               (when (null tabulated-list-entries)
-                 (insert (safeslop-profiles--empty-state)))))
+           (let (error-message)
+             (if (safeslop-contract-ok-p envelope)
+                 (let ((data (safeslop-contract-data envelope)))
+                   (setq safeslop-profiles--config-path (alist-get 'path data))
+                   (setq tabulated-list-entries (safeslop-profiles--rows data)))
+               (setq safeslop-profiles--config-path nil)
+               (setq tabulated-list-entries nil)
+               (setq error-message (safeslop-surface--error-message envelope "no safeslop.cue found"))
+               (message "safeslop profiles: %s" error-message))
+             (tabulated-list-print keep-point)
+             (let ((inhibit-read-only t))
+               (save-excursion
+                 (goto-char (point-min))
+                 (insert (safeslop-profiles--header))
+                 (when (null tabulated-list-entries)
+                   (insert (safeslop-profiles--empty-state safeslop-profiles--config-path error-message))))))
            (unless keep-point
              (goto-char (point-min))
              (while (and (not (tabulated-list-get-id)) (not (eobp)))
@@ -428,13 +452,55 @@ freshly created profile)."
 
 ;;; ---- read (inspect) ------------------------------------------------------
 
+(defvar-local safeslop-profiles--inspect-name nil
+  "Profile name described by the current inspect buffer.")
+
+(defvar safeslop-profiles-inspect-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "x") #'safeslop-profiles-inspect-launch)
+    (define-key map (kbd "e") #'safeslop-profiles-inspect-edit)
+    (define-key map (kbd "c") #'safeslop-profiles-inspect-clone)
+    (define-key map (kbd "g") #'safeslop-profiles-inspect-back)
+    (define-key map (kbd "RET") #'safeslop-profiles-inspect-back)
+    (define-key map (kbd "q") #'quit-window)
+    map)
+  "Keymap for profile inspect buffers.")
+
+(defun safeslop-profiles--inspect-legend ()
+  "Return profile inspect key help."
+  (concat (propertize "x" 'face 'help-key-binding) " launch  "
+          (propertize "e" 'face 'help-key-binding) " edit  "
+          (propertize "c" 'face 'help-key-binding) " clone  "
+          (propertize "g" 'face 'help-key-binding) " back  "
+          (propertize "q" 'face 'help-key-binding) " quit\n\n"))
+
+(defun safeslop-profiles--from-inspect (command)
+  "Return to this inspect buffer's row and run COMMAND when non-nil."
+  (let ((name safeslop-profiles--inspect-name)
+        (buf (get-buffer safeslop-profiles-buffer-name)))
+    (unless (buffer-live-p buf)
+      (user-error "The profiles list is gone; press `C-c s F' to reopen it"))
+    (pop-to-buffer-same-window buf)
+    (when name (safeslop-profiles--goto-name name))
+    (when command (call-interactively command))))
+
+(defun safeslop-profiles-inspect-launch () (interactive) (safeslop-profiles--from-inspect #'safeslop-profiles-launch))
+(defun safeslop-profiles-inspect-edit () (interactive) (safeslop-profiles--from-inspect #'safeslop-profiles-edit))
+(defun safeslop-profiles-inspect-clone () (interactive) (safeslop-profiles--from-inspect #'safeslop-profiles-clone))
+(defun safeslop-profiles-inspect-back () (interactive) (safeslop-profiles--from-inspect nil))
+
 (defun safeslop-profiles--show-inspect (name data)
-  "Render `profile show' DATA for NAME in a read-only detail buffer."
+  "Render `profile show' DATA for NAME in a read-only actionable detail buffer."
   (let ((buf (get-buffer-create (format "*safeslop profile %s*" name))))
     (with-current-buffer buf
-      (special-mode) ; read-only; q quits
+      (safeslop-output-mode)
+      (setq safeslop-profiles--inspect-name name)
+      (use-local-map (make-composed-keymap safeslop-profiles-inspect-mode-map
+                                           safeslop-output-mode-map))
       (let ((inhibit-read-only t))
         (erase-buffer)
+        (insert (safeslop-surface--breadcrumb (safeslop-profiles--show-args name)))
+        (insert (safeslop-profiles--inspect-legend))
         (insert (safeslop-profiles--inspect-format data))
         (goto-char (point-min))))
     (pop-to-buffer buf)
@@ -458,6 +524,18 @@ dry-run recipe/image/base — without touching the CUE file."
                       "unknown error")))))))
 
 ;;; ---- update (edit) -------------------------------------------------------
+
+(defun safeslop-profiles-launch ()
+  "Create a session from the profile at point after an explicit risk summary."
+  (interactive)
+  (let ((name (tabulated-list-get-id)))
+    (unless name (user-error "No profile on this line"))
+    (pcase-let ((`(,agent ,env ,net)
+                 (or (safeslop-profiles--row-fields name) '("claude" "container" "deny"))))
+      (when (yes-or-no-p
+             (format "Launch session from `%s' [%s]? "
+                     name (safeslop-profiles--danger-summary agent env net)))
+        (safeslop-session-new-from-profile name)))))
 
 (defun safeslop-profiles-edit ()
   "Open the active safeslop.cue for editing, jumping to the profile at point.
@@ -599,16 +677,13 @@ through `profile create'."
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "RET") #'safeslop-profiles-inspect)
     (define-key map (kbd "i")   #'safeslop-profiles-inspect)
+    (define-key map (kbd "x")   #'safeslop-profiles-launch)
     (define-key map (kbd "e")   #'safeslop-profiles-edit)
     (define-key map (kbd "n")   #'safeslop-profiles-create)
     (define-key map (kbd "c")   #'safeslop-profiles-clone)
     (define-key map (kbd "v")   #'safeslop-profiles-validate)
-    (define-key map (kbd "d")   #'safeslop-profiles-delete)
-    (define-key map (kbd "S")   #'tabulated-list-sort)
+    (define-key map (kbd "D")   #'safeslop-profiles-delete)
     (define-key map (kbd "g")   #'safeslop-profiles-refresh)
-    (define-key map (kbd "L")   #'safeslop-debug-log)
-    (define-key map (kbd "?")   #'describe-mode)
-    (define-key map (kbd "q")   #'quit-window)
     (set-keymap-parent map safeslop-surface-mode-map)
     map)
   "Keymap for `safeslop-profiles-mode'.")
@@ -617,18 +692,18 @@ through `profile create'."
   "Major mode for the safeslop profiles (policy) surface.
 \\{safeslop-profiles-mode-map}"
   (setq tabulated-list-format
-        [("Profile" 20 t)
-         ("Agent" 12 t)
-         ("Env" 11 t)
-         ("Net" 6 t)])
+        [("Profile" 20 nil)
+         ("Agent" 12 nil)
+         ("Env" 11 nil)
+         ("Net" 6 nil)])
   (setq tabulated-list-padding 1)
   (tabulated-list-init-header))
 
 ;;;###autoload
 (defun safeslop-profiles ()
   "Open the safeslop profiles surface: the profiles in your safeslop.cue.
-Keys: RET/i inspect, e edit, n create, c clone, v validate, d delete (guided),
-S sort, g refresh; P/I/F switch surface, [/] cycle."
+Keys: RET/i inspect, x launch, e edit, n create, c clone, v validate,
+D delete (guided), g refresh; P/I/F switch surface, [/] cycle."
   (interactive)
   (let ((buf (get-buffer-create safeslop-profiles-buffer-name)))
     (with-current-buffer buf

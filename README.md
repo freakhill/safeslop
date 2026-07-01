@@ -284,15 +284,17 @@ Each preset is a complete, validated `safeslop.cue` with a one-line description:
 | `shell-container` | A plain `fish` shell in a container — a sandboxed shell, no coding agent. |
 
 The Emacs Profiles surface (`C-c s F`) is a list of your `safeslop.cue` profiles
-with ergonomic CRUD keys: `RET`/`i` inspect a profile's resolved packages, egress,
-and image recipe (read-only, no file edit); `e` opens the CUE file jumped to that
-profile's block; `n` creates one with structured prompts (the name is validated and
-overwriting an existing profile is confirmed); `c` clones the row at point (only a
-new name is required); `d` guides deletion (pick the target, confirm, then remove
-the block by hand); `S` sorts; `g` refreshes. Creating is backed by the
-catalog/bundle lists and routes through `profile create`, while CUE stays the stored
-source of truth. This repo also dogfoods a checked-in `safeslop.cue` with `default`,
-`pi`, and `shell` profiles so the Profiles surface has useful local rows immediately.
+with ergonomic CRUD and launch keys: `RET`/`i` inspect a profile's resolved
+packages, egress, and image recipe (read-only, no file edit); `x` launches a
+session from the selected profile after an isolation/network summary; `e` opens
+the CUE file jumped to that profile's block; `n` creates one with structured
+prompts (the name is validated and overwriting an existing profile is confirmed);
+`c` clones the row at point (only a new name is required); `D` guides deletion
+(pick the target, confirm, then remove the block by hand); `g` refreshes. Creating
+is backed by the catalog/bundle lists and routes through `profile create`, while
+CUE stays the stored source of truth. This repo also dogfoods a checked-in
+`safeslop.cue` with `default`, `pi`, and `shell` profiles so the Profiles surface
+has useful local rows immediately.
 
 ### Trust model
 
