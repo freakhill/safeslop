@@ -98,14 +98,14 @@ without re-probing; nil before the first fetch returns.")
   (nth 2 (assoc status safeslop-credentials--status-meta)))
 
 (defun safeslop-credentials--status-cell (status)
-  "Return STATUS as a colour-redundant cell with its honest meaning as help-echo."
+  "Return STATUS as a colour-redundant cell (its meaning rides help-echo)."
   (let ((meta (assoc status safeslop-credentials--status-meta)))
     (if meta
         (propertize status 'face (nth 1 meta) 'help-echo (nth 2 meta))
       (or status ""))))
 
 (defun safeslop-credentials--source-cell (ref scope status)
-  "Return the Source cell: the REF when present, else the SCOPE, else a STATUS note.
+  "Return the Source cell: the REF, else the SCOPE, else a STATUS note.
 REF (op://.../env:NAME) is a reference, never a value, so it is safe to show."
   (cond ((and (stringp ref) (not (string-empty-p ref))) ref)
         ((and (stringp scope) (not (string-empty-p scope))) scope)

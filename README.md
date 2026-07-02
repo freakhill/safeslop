@@ -379,6 +379,25 @@ safety guarantee.
   repos. safeslop does not mint or revoke account PATs; rotate/revoke them at
   the forge.
 
+### Inspecting credential posture (Emacs `C-c s K`, `safeslop creds`)
+
+The Emacs Credentials surface (`C-c s K`, "Keys") makes a workspace's credential
+posture legible *before* launch. For every profile it lists each declared secret
+and credential with its **source ref** (`op://…`/`env:NAME` — a reference, never a
+value), whether it is **ephemeral** (a deploy key minted per session and wiped on
+exit) or **ref-backed**, and — for the ref-backed ones — a value-free **readiness
+status**: `resolvable`, `missing`, `op-signed-out`, `op-unavailable`, `ephemeral`,
+or `ambient` (host SSO/ADC). `RET`/`i` inspect a profile's credentials, `e` opens
+the `safeslop.cue` credentials block (authoring stays CUE-canonical — you edit
+refs, not values), and `g` re-probes.
+
+The surface is backed by `safeslop creds list [safeslop.cue] --output json` and
+`safeslop creds show <profile> --output json`. The readiness probe resolves each
+ref only to keep the pass/fail result and **discards the value**, so no secret is
+ever read into the UI or the envelope. There is no in-UI mint/revoke — ephemeral
+keys live and die with a session (`run`/`session`), so the surface is read +
+status + jump-to-edit, never a secret vault.
+
 ## Development
 
 Requirements for engine work:

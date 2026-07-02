@@ -20,8 +20,19 @@ sessions.
 ## Current command surface
 
 Credential staging is driven by `safeslop run <profile>` from the profile's
-`credentials:` block. Manual key management commands were intentionally dropped;
-a future `safeslop creds gc` sweep is the only planned manual credential command.
+`credentials:` block. Mutating key management commands were intentionally dropped;
+a future `safeslop creds gc` sweep is the only planned *mutating* credential
+command.
+
+Read-only posture inspection exists (specs/0067): `safeslop creds list
+[safeslop.cue] --output json` and `safeslop creds show <profile> --output json`
+enumerate every declared secret/credential across profiles with a value-free
+**readiness status** (does its `op://`/`env:` ref resolve now? is the key
+`ephemeral` or the cloud auth `ambient`?). The probe resolves each ref only to
+keep the pass/fail result and discards the value — no secret is read into the
+output. This is surfaced in Emacs as the Credentials surface (`C-c s K`). It
+never reveals values and never mints/revokes; staging stays at run time and
+revocation at `session stop`.
 
 For Emacs-driven sessions, `safeslop session stop --session-id <id>
 --revoke-credentials` revokes ephemeral credentials before forcing process
