@@ -11,21 +11,36 @@
 ;; The safeslop operator view is three sibling dashboard buffers — Sessions
 ;; (`safeslop-portal'), Install (`safeslop-install'), and Profiles
 ;; (`safeslop-profiles') — that share one navigation model (specs/0052).  This
-;; file holds the bits common to all three: a parent keymap binding the surface
-;; switch keys (P/I/F and [/]) and a textual tab strip rendered atop each buffer
-;; so the active surface is legible without colour (specs/0031 non-colour
-;; signalling).  Each surface mode sets this map as its keymap parent.
+;; file holds everything common to all three (specs/0062):
+;;
+;;   - the parent keymap binding the surface switch keys (P/I/F, [/], TAB) and
+;;     the textual tab strip rendered atop each buffer, so the active surface
+;;     is legible without colour (specs/0031 non-colour signalling);
+;;   - the shared presentation cells: network posture and isolation-tier
+;;     colouring with their honest help-echo notes, the tier/net legends, and
+;;     the key-hint legend renderer;
+;;   - the persistent state banners (error / empty / loading);
+;;   - `safeslop-surface-render', the one dashboard render engine.  It owns
+;;     the async fetch, the tabulated-list reprint, the header re-insert, and
+;;     the window scroll/cursor preservation from specs/0061, so the
+;;     cursor-jump fix lives in exactly one place.
+;;
+;; Each surface mode sets `safeslop-surface-mode-map' as its keymap parent and
+;; drives its redraws through the engine with surface-specific row builders.
 
 ;;; Code:
 
 (require 'seq)
+(require 'cl-lib)
+(require 'subr-x)
+(require 'tabulated-list)
+(require 'safeslop-contract)
+(require 'safeslop-client)
 
 (declare-function safeslop-portal "safeslop-portal" ())
 (declare-function safeslop-install "safeslop-install" ())
 (declare-function safeslop-profiles "safeslop-profiles" ())
 (declare-function safeslop-doctor "safeslop" ())
-(declare-function safeslop-debug-log "safeslop" ())
-(declare-function safeslop-show-last-error "safeslop" ())
 
 (defconst safeslop-surface--order
   '((sessions "Sessions" "P" safeslop-portal)
@@ -114,6 +129,12 @@ leaves a first-row point stranded on the header — part of the cursor-jump fix)
           (forward-line 1)))
       found)))
 
+(defun safeslop-surface--goto-first-row ()
+  "Move point past the header block to the first tabulated-list row."
+  (goto-char (point-min))
+  (while (and (not (tabulated-list-get-id)) (not (eobp)))
+    (forward-line 1)))
+
 (defun safeslop-surface--restore-views (views &optional point)
   "Restore scroll and cursor for VIEWS captured by `safeslop-surface--capture-views'.
 POINT, when non-nil, is the buffer position every window's cursor is synced to
@@ -145,6 +166,8 @@ error, and `set-window-start' is non-forcing so the cursor stays visible."
   (interactive)
   (safeslop-surface--step -1))
 
+;;; Shared cells, faces, and legends -------------------------------------------
+
 (defface safeslop-net-deny '((t :inherit success))
   "Face for network=deny: default-deny egress (safe default)."
   :group 'safeslop)
@@ -170,10 +193,73 @@ error, and `set-window-start' is non-forcing so the cursor stays visible."
                          'help-echo "network=deny: default-deny egress (safe default)"))
     (_ (or net ""))))
 
+;; --- Isolation-tier signalling (specs/0052 #5) -------------------------------
+;; The Env column shows the environment name (host/container); we colour that
+;; text by isolation strength so the honest danger ramp the old GUI drew as
+;; chrome is preserved — colour reinforces the always-present word, it never
+;; replaces it (specs/0031 non-colour danger channel).  Shared here because the
+;; Sessions and Profiles surfaces render the same ramp (specs/0062).
+
+(defface safeslop-tier-host '((t :inherit error))
+  "Face for the `host' environment: no isolation boundary (most dangerous)."
+  :group 'safeslop)
+(defface safeslop-tier-container '((t :inherit success))
+  "Face for the `container' environment: egress-allowlisted network control."
+  :group 'safeslop)
+
+(defconst safeslop-surface--env-tiers
+  ;; Mirrors internal/engine/policy/policy.go EnvTier (tier label + honest note),
+  ;; ordered host < container (least -> most isolated).  Keep in sync with
+  ;; EnvTier; doctor's data.tiers carries the authoritative copy at runtime.
+  '(("host"      safeslop-tier-host      "none"               "no isolation boundary — the agent runs as you, with your full account")
+    ("container" safeslop-tier-container "egress-allowlisted" "container + default-deny per-domain egress allowlist: stops curl|sh + accidental beaconing, not exfil via an allowed domain"))
+  "Per-environment (FACE TIER NOTE) used to colour and annotate the Env cell.")
+
+(defun safeslop-surface--env-face (env)
+  "Return the isolation-tier face for environment ENV, or `default' if unknown."
+  (or (nth 1 (assoc env safeslop-surface--env-tiers))
+      'default))
+
+(defun safeslop-surface--env-cell (env)
+  "Return ENV as a tier-coloured tabulated-list cell with its honest note as help-echo.
+The text label is always present, so colour is a redundant reinforcement, not the
+sole signal (specs/0031).  An unknown env renders plainly."
+  (let* ((row (assoc env safeslop-surface--env-tiers)))
+    (if row
+        (propertize env
+                    'face (nth 1 row)
+                    'help-echo (format "%s — %s" (nth 2 row) (nth 3 row)))
+      env)))
+
+(defun safeslop-surface--tier-legend ()
+  "Return a one-line isolation-tier ramp legend (host most dangerous -> container safest)."
+  (concat
+   "tiers: "
+   (mapconcat (lambda (row)
+                (propertize (concat (car row) "=" (nth 2 row)) 'face (nth 1 row)))
+              safeslop-surface--env-tiers "  ")
+   "\n\n"))
+
+(defun safeslop-surface--net-legend ()
+  "Return a one-line legend for network posture."
+  (concat "net: "
+          (safeslop-surface--net-cell "deny") "=guarded  "
+          (safeslop-surface--net-cell "allow") "=open\n"))
+
+(defun safeslop-surface--legend (hints)
+  "Render HINTS — an alist of (KEY . ACTION) strings — as one shortcut legend line.
+Keys are faced as bindings; ends with a blank separator line."
+  (concat (mapconcat (lambda (pair)
+                       (concat (propertize (car pair) 'face 'help-key-binding)
+                               " " (cdr pair)))
+                     hints "  ")
+          "\n\n"))
+
+;;; Persistent state banners -----------------------------------------------------
+
 (defun safeslop-surface--error-message (envelope &optional fallback)
   "Return ENVELOPE's first error message, or FALLBACK."
-  (or (alist-get 'message (car (and (fboundp 'safeslop-contract-errors)
-                                    (safeslop-contract-errors envelope))))
+  (or (alist-get 'message (car (safeslop-contract-errors envelope)))
       fallback
       "unknown error"))
 
@@ -203,6 +289,8 @@ error, and `set-window-start' is non-forcing so the cursor stays visible."
   (propertize (format "↻ checking %s… (Emacs stays responsive)\n" noun)
               'face 'safeslop-surface-hint))
 
+;;; Output-buffer breadcrumbs ------------------------------------------------------
+
 (defun safeslop-surface--infer (args)
   "Infer the active surface symbol from safeslop ARGS."
   (pcase args
@@ -213,11 +301,13 @@ error, and `set-window-start' is non-forcing so the cursor stays visible."
     (_ nil)))
 
 (defun safeslop-surface--breadcrumb-title (args)
-  "Return a compact title for an output buffer produced by ARGS."
+  "Return a compact title for an output buffer produced by ARGS.
+Flags and file paths (absolute or home-relative) are dropped so the title stays
+a short verb phrase (\"validate\", \"session status\"), not a full command line."
   (let ((tokens nil))
     (dolist (arg args)
       (unless (or (string-prefix-p "--" arg)
-                  (string-match-p "\`/" arg))
+                  (string-match-p "\\`[/~]" arg))
         (push arg tokens)))
     (string-join (seq-take (nreverse tokens) 2) " ")))
 
@@ -228,6 +318,86 @@ error, and `set-window-start' is non-forcing so the cursor stays visible."
     (concat (safeslop-surface--tab-strip active)
             (when (not (string-empty-p title))
               (format "▸ %s\n\n" title)))))
+
+;;; The shared dashboard render engine ---------------------------------------------
+
+(defvar-local safeslop-surface--refresh-in-flight nil
+  "Non-nil while an async dashboard fetch is outstanding for this buffer.
+Set and cleared by `safeslop-surface-render'.  Guards pollers (the portal
+auto-refresh timer) from stacking a second fetch on top of one that has not
+returned yet — the slow-CLI pile-up that made refreshes fight input.")
+
+(cl-defun safeslop-surface-render
+    (&key argv label noun entries-fn header-fn empty-fn keep-point then)
+  "Fetch ARGV asynchronously, then re-render the current dashboard in place.
+The one render engine behind the Sessions/Install/Profiles surfaces: the fetch
+runs in a subprocess and the redraw happens in its callback, so neither a manual
+\\`g' nor an auto-refresh timer ever freezes Emacs (specs/0052 #7).
+
+ENTRIES-FN is called in the surface buffer with the parsed envelope and must
+return the new `tabulated-list-entries', doing any surface-specific bookkeeping
+(caching rows by id, remembering the config path) as it goes.  HEADER-FN returns
+the header block inserted above the rows.  On a failed envelope the engine echoes
+and inserts a persistent `safeslop-surface--error-banner' for LABEL (the
+human-readable name of the fetch, e.g. \"session list\"); on an empty result it
+inserts EMPTY-FN's guidance instead, so an empty table is never mysterious.
+NOUN (plural, e.g. \"sessions\") drives the loading hint painted immediately
+into a still-empty buffer on first open.
+
+With KEEP-POINT non-nil, the engine snapshots every showing window's
+scroll+cursor BEFORE the reprint, re-finds the operator's row AFTER the header
+is re-inserted, and restores each view — the specs/0061 cursor-jump fix.  THEN,
+when given, is called with point in the redrawn buffer and controls point
+instead (used to reveal a just-created row); otherwise a plain render lands on
+the first row."
+  (let ((buf (current-buffer)))
+    ;; First open: paint the header + loading hint at once so the operator never
+    ;; faces a blank buffer while the first fetch is in flight.
+    (when (and noun (= (point-min) (point-max)))
+      (let ((inhibit-read-only t))
+        (save-excursion
+          (insert (funcall header-fn) (safeslop-surface--loading noun)))))
+    (setq safeslop-surface--refresh-in-flight t)
+    (safeslop--call-json-async
+     argv
+     (lambda (envelope)
+       (when (buffer-live-p buf)
+         (with-current-buffer buf
+           (setq safeslop-surface--refresh-in-flight nil)
+           ;; Snapshot each showing window's scroll+cursor BEFORE the reprint so a
+           ;; refresh in a non-selected window can't collapse point to the top or
+           ;; drop the scroll position; remember which row the operator was on, to
+           ;; re-find it AFTER the header is re-inserted (a first row would
+           ;; otherwise strand point on the header).
+           (let ((views (and keep-point (safeslop-surface--capture-views)))
+                 (kept-id (and keep-point (tabulated-list-get-id)))
+                 (error-message (unless (safeslop-contract-ok-p envelope)
+                                  (safeslop-surface--error-message
+                                   envelope (format "%s failed" label)))))
+             (setq tabulated-list-entries (funcall entries-fn envelope))
+             (when error-message
+               (message "safeslop %s: %s" label error-message))
+             (tabulated-list-print keep-point)
+             (let ((inhibit-read-only t))
+               (save-excursion
+                 (goto-char (point-min))
+                 (insert (funcall header-fn))
+                 (cond
+                  (error-message
+                   (insert (safeslop-surface--error-banner label error-message)))
+                  ((null tabulated-list-entries)
+                   (insert (funcall empty-fn))))))
+             (cond
+              ;; THEN controls point (reveal a specific/just-created row); let
+              ;; redisplay scroll naturally so the revealed row is shown.
+              (then (funcall then))
+              ;; Keep-point refresh: re-find the operator's row now the header is
+              ;; in place, then restore each window's captured scroll + cursor.
+              (keep-point
+               (or (safeslop-surface--goto-id kept-id)
+                   (safeslop-surface--goto-first-row))
+               (safeslop-surface--restore-views views (point)))
+              (t (safeslop-surface--goto-first-row))))))))))
 
 (defvar safeslop-surface-mode-map
   (let ((map (make-sparse-keymap)))

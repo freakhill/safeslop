@@ -19,24 +19,22 @@
 (require 'subr-x)
 (require 'term)
 (require 'safeslop-contract)
+(require 'safeslop-client)
 (require 'safeslop-surface)
+(require 'safeslop-output)
 
-(defvar safeslop-program)
-(defvar safeslop-last-error)
-(declare-function safeslop--call-json "safeslop" (args))
-(declare-function safeslop--call-json-async "safeslop" (args callback))
-(declare-function safeslop--debug "safeslop" (&rest event))
-(declare-function safeslop--error-envelope "safeslop" (code message))
-(declare-function safeslop--finish-envelope "safeslop" (stdout status))
-(declare-function safeslop--show-envelope-buffer "safeslop" (name args envelope))
+;; The portal sits above this layer (it requires safeslop-session); the reveal
+;; hook is called `fboundp'-guarded and the command only from keymaps, so these
+;; upward references stay late-bound.
 (declare-function safeslop-portal--reveal-session "safeslop-portal" (id))
 (declare-function safeslop-portal "safeslop-portal" ())
-(declare-function safeslop-debug-log "safeslop" ())
 ;; Optional eat terminal API — loaded lazily in `safeslop-session--make-terminal'
 ;; only when eat is installed; declared here so the byte-compiler stays quiet.
 (declare-function eat-mode "eat" ())
 (declare-function eat-exec "eat" (buffer name command startfile switches))
 (defvar eat-term-name)
+;; Defined once `compilation-mode' runs in the JSONL status fallback buffer.
+(defvar compilation-mode-map)
 
 (defun safeslop-session--create-args (agent workspace &optional environment network)
   "Return exact argv for creating an ad-hoc session with AGENT in WORKSPACE.
@@ -104,8 +102,10 @@ Keys: P portal, L debug log, q quit."
     (display-buffer buf)
     buf))
 
-(defun safeslop-session--progress-finish (buf status)
-  "Append final process STATUS to progress BUF when it is still live."
+(defun safeslop-session--progress-finish (buf status &optional envelope)
+  "Append final process STATUS to progress BUF when it is still live.
+On failure, ENVELOPE's first error message (when available) is appended to the
+status line so the reason is readable where the operator is already looking."
   (when (buffer-live-p buf)
     (with-current-buffer buf
       (let ((inhibit-read-only t))
@@ -113,47 +113,28 @@ Keys: P portal, L debug log, q quit."
         (unless (bolp) (insert "\n"))
         (insert (if (equal status 0)
                     (format "\nsafeslop: finished successfully (exit %s)\n" status)
-                  (format "\nsafeslop: failed (exit %s)\n" status)))))))
+                  (format "\nsafeslop: failed (exit %s)%s\n" status
+                          (let ((msg (and envelope
+                                          (safeslop-surface--error-message envelope nil))))
+                            (if msg (concat " — " msg) "")))))))))
 
 (defun safeslop-session--call-json-async-with-progress (args callback)
   "Run safeslop ARGS asynchronously with stderr mirrored to a progress buffer.
 Stdout stays reserved for the final JSON contract envelope; stderr is user-visible
-progress for slow lazy profile image builds.  CALLBACK receives the parsed
-envelope, exactly like `safeslop--call-json-async'."
-  (safeslop--debug :event 'call :argv (string-join args " "))
-  (let ((stdout-buf (generate-new-buffer " *safeslop-session-json*"))
-        (progress-buf (safeslop-session--progress-buffer args)))
-    (condition-case err
-        (make-process
-         :name "safeslop-session-create"
-         :buffer stdout-buf
-         :stderr progress-buf
-         :command (cons safeslop-program args)
-         :connection-type 'pipe
-         :noquery t
-         :sentinel
-         (lambda (proc _event)
-           (unless (process-live-p proc)
-             (let ((stdout (if (buffer-live-p stdout-buf)
-                               (with-current-buffer stdout-buf (buffer-string))
-                             ""))
-                   (status (process-exit-status proc)))
-               (when (buffer-live-p stdout-buf) (kill-buffer stdout-buf))
-               (safeslop-session--progress-finish progress-buf status)
-               (funcall callback (safeslop--finish-envelope stdout status))))))
-      (error
-       (when (buffer-live-p stdout-buf) (kill-buffer stdout-buf))
-       (let ((msg (format "could not run `%s': %s — is it installed? Run `make install'."
-                          safeslop-program (error-message-string err))))
-         (setq safeslop-last-error msg)
-         (when (buffer-live-p progress-buf)
-           (with-current-buffer progress-buf
-             (let ((inhibit-read-only t))
-               (goto-char (point-max))
-               (insert (format "\nsafeslop: %s\n" msg)))))
-         (safeslop--debug :event 'result :status -1 :ok "nil" :error "client-spawn")
-         (funcall callback (safeslop--error-envelope "CLIENT_SPAWN" msg))
-         nil)))))
+progress for slow lazy profile image builds.  A thin wrapper over
+`safeslop--call-json-async' (which owns spawn/parse/degrade): this only displays
+the progress buffer up front and appends the outcome — success, CLI failure, or a
+spawn failure — once the call resolves, reading `safeslop--last-call-status' in
+the callback (stable there; sentinels run one at a time).  CALLBACK receives the
+parsed envelope, exactly like `safeslop--call-json-async'."
+  (let ((progress-buf (safeslop-session--progress-buffer args)))
+    (safeslop--call-json-async
+     args
+     (lambda (envelope)
+       (safeslop-session--progress-finish
+        progress-buf safeslop--last-call-status envelope)
+       (funcall callback envelope))
+     progress-buf)))
 
 (defun safeslop-session--create-async (args progress-p callback)
   "Run session-create ARGS and pass the resulting envelope to CALLBACK.

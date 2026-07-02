@@ -9,6 +9,25 @@ ERT tests consume Go's canonical `internal/jsoncontract/testdata/*.golden.json`
 fixtures directly.  When Doom/Evil is present, output buffers enter Evil normal
 state and get normal-state bindings for refresh/error/quit actions.
 
+## Module layout
+
+One direction of `require`s, entry point at the bottom (specs/0062); every
+dashboard redraw goes through the one `safeslop-surface-render` engine, so the
+scroll/cursor preservation from specs/0061 lives in exactly one place:
+
+| file | role |
+|---|---|
+| `safeslop-contract.el` | versioned JSON envelope parse/validate |
+| `safeslop-client.el` | CLI subprocess substrate + redacted debug log |
+| `safeslop-surface.el` | shared dashboard chrome, tier/net cells, render engine |
+| `safeslop-output.el` | read-only envelope output buffers (`safeslop-output-mode`) |
+| `safeslop-session.el` | session commands, terminal attach, detail view |
+| `safeslop-portal.el` | Sessions dashboard |
+| `safeslop-install.el` | Install dashboard |
+| `safeslop-profiles.el` | Profiles dashboard + CUE-backed CRUD |
+| `safeslop.el` | entry point: top-level commands + `C-c s` command map |
+| `safeslop-doom.el` | optional Doom/Evil shim (data-driven binding tables) |
+
 ## Operator UI navigation
 
 The Emacs package is a small operator UI with three surfaces: **Sessions** (`P`),
@@ -30,9 +49,11 @@ guess.  In any operator UI surface and most result buffers, the shared keys are:
 | `?` | describe-mode help |
 | `q` | quit window |
 
-Error output is persistent in-buffer text rather than only an echo-area flash;
-when a command fails, the banner points to `g` retry, `d` doctor, `E` last error,
-and `L` debug.  Environment and network cells keep their text labels and add
+Every dashboard keeps its state legible in the buffer itself rather than only as
+an echo-area flash: a persistent error banner when a fetch fails (pointing to
+`g` retry, `d` doctor, `E` last error, `L` debug), an empty-state hint when
+there are no rows, and a loading hint while the first fetch is in flight — never
+a silent blank table.  Environment and network cells keep their text labels and add
 colour/help-echo as redundant safety hints: `host` is no isolation, `container` is
 contained, `deny` is default-deny egress, and `allow` is open egress.
 

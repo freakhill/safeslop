@@ -13,20 +13,17 @@
 ;; a thin tabulated-list view over `safeslop install status --output json' (and
 ;; the plan/apply/rollback siblings), every call async through the shared
 ;; substrate so even a slow `install apply' download never freezes Emacs
-;; (specs/0052 #6).  The engine already existed; this only surfaces it.
+;; (specs/0052 #6).  Rows and actions live here; the fetch/reprint machinery is
+;; the shared `safeslop-surface-render' engine (specs/0062).
 
 ;;; Code:
 
 (require 'subr-x)
 (require 'tabulated-list)
 (require 'safeslop-contract)
+(require 'safeslop-client)
 (require 'safeslop-surface)
-
-(defvar safeslop-program)
-(declare-function safeslop--call-json-async "safeslop" (args callback))
-(declare-function safeslop--show-envelope-buffer "safeslop" (name args envelope))
-(declare-function safeslop-doctor "safeslop" ())
-(declare-function safeslop-debug-log "safeslop" ())
+(require 'safeslop-output)
 
 (defconst safeslop-install-buffer-name "*safeslop install*"
   "Buffer name for the safeslop install/update surface.")
@@ -58,16 +55,13 @@
 
 (defconst safeslop-install--key-hints
   '(("g" . "refresh") ("p" . "plan") ("x" . "apply") ("D" . "dry-run")
-    ("b" . "rollback") ("d" . "doctor") ("L" . "debug") ("?" . "help") ("q" . "quit"))
+    ("b" . "rollback") ("d" . "doctor") ("E" . "error") ("L" . "debug")
+    ("?" . "help") ("q" . "quit"))
   "Key/action pairs shown in the install surface's in-buffer legend.")
 
 (defun safeslop-install--legend ()
   "Return the install shortcut legend line, trailing blank line."
-  (concat (mapconcat (lambda (pair)
-                       (concat (propertize (car pair) 'face 'help-key-binding)
-                               " " (cdr pair)))
-                     safeslop-install--key-hints "  ")
-          "\n\n"))
+  (safeslop-surface--legend safeslop-install--key-hints))
 
 (defun safeslop-install--header ()
   "Return the install header block: surface tab strip then shortcut legend."
@@ -75,44 +69,18 @@
           (safeslop-install--legend)))
 
 (defun safeslop-install--render (&optional keep-point)
-  "Asynchronously fetch install status, then fill the current surface buffer.
-Non-blocking: the `install status' probe runs in a subprocess and the redraw
-happens in its callback.  With KEEP-POINT non-nil, stay on the same tool across
-the reprint; otherwise land on the first row."
-  (let ((buf (current-buffer)))
-    (safeslop--call-json-async
-     '("install" "status" "--output" "json")
-     (lambda (envelope)
-       (when (buffer-live-p buf)
-         (with-current-buffer buf
-           (unless (safeslop-contract-ok-p envelope)
-             (message "safeslop install: %s"
-                      (or (alist-get 'message (car (safeslop-contract-errors envelope)))
-                          "install status failed")))
-           ;; Snapshot scroll+cursor before the reprint so a keep-point refresh in a
-           ;; non-selected window cannot jump the cursor to the top; remember the
-           ;; kept row to re-find it after the header re-insert (shared fix).
-           (let ((views (and keep-point (safeslop-surface--capture-views)))
-                 (kept-id (and keep-point (tabulated-list-get-id))))
-             (setq tabulated-list-entries
-                   (safeslop-install--rows (safeslop-contract-data envelope)))
-             (tabulated-list-print keep-point)
-             (let ((inhibit-read-only t))
-               (save-excursion
-                 (goto-char (point-min))
-                 (insert (safeslop-install--header))))
-             (if keep-point
-                 (progn
-                   (or (safeslop-surface--goto-id kept-id)
-                       (safeslop-install--goto-first-row))
-                   (safeslop-surface--restore-views views (point)))
-               (safeslop-install--goto-first-row)))))))))
-
-(defun safeslop-install--goto-first-row ()
-  "Move point past the header block to the first tool row."
-  (goto-char (point-min))
-  (while (and (not (tabulated-list-get-id)) (not (eobp)))
-    (forward-line 1)))
+  "Fetch install status and redraw the current surface buffer in place.
+A thin wrapper over the shared `safeslop-surface-render' engine; KEEP-POINT is
+the engine's KEEP-POINT (stay on the same tool across the reprint)."
+  (safeslop-surface-render
+   :argv '("install" "status" "--output" "json")
+   :label "install status"
+   :noun "managed tools"
+   :header-fn #'safeslop-install--header
+   :empty-fn (lambda () (safeslop-surface--empty-state "managed tools" nil))
+   :entries-fn (lambda (envelope)
+                 (safeslop-install--rows (safeslop-contract-data envelope)))
+   :keep-point keep-point))
 
 (defun safeslop-install-refresh ()
   "Re-fetch install status and redraw, keeping point on its tool."
@@ -175,10 +143,7 @@ Emacs."
     (define-key map (kbd "x") #'safeslop-install-apply)
     (define-key map (kbd "D") #'safeslop-install-dry-run)
     (define-key map (kbd "b") #'safeslop-install-rollback)
-    (define-key map (kbd "d") #'safeslop-doctor)
-    (define-key map (kbd "L") #'safeslop-debug-log)
-    (define-key map (kbd "?") #'describe-mode)
-    (define-key map (kbd "q") #'quit-window)
+    ;; d/E/L/?/q and the surface switch keys fall through to the shared parent.
     (set-keymap-parent map safeslop-surface-mode-map)
     map)
   "Keymap for `safeslop-install-mode'.")

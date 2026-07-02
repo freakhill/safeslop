@@ -39,7 +39,7 @@
   (let (initial-states)
     (cl-letf (((symbol-function 'evil-set-initial-state)
                (lambda (mode state) (push (list mode state) initial-states)))
-              ((symbol-function 'evil-define-key)
+              ((symbol-function 'evil-define-key*)
                (lambda (_state keymap key def &rest bindings)
                  (define-key keymap key def)
                  (while bindings
@@ -208,14 +208,25 @@
       (should (string-match-p "no output" msg)))))
 
 (ert-deftest safeslop-test-portal-surfaces-error ()
-  "A failed session list leaves the portal empty and reports the error."
+  "A failed session list echoes the error AND leaves the persistent in-buffer
+banner (shared engine error state) pointing at g/d/E/L — never a silently
+mysterious bare table."
   (let (msgs)
     (cl-letf (((symbol-function 'message)
-               (lambda (fmt &rest a) (push (apply #'format fmt a) msgs))))
-      (let ((sessions (safeslop-portal--sessions-from
-                       (safeslop--error-envelope "CLIENT_NON_JSON" "stale binary; run make install"))))
-        (should (null sessions))
-        (should (null (safeslop-portal--rows sessions)))
+               (lambda (fmt &rest a) (push (apply #'format fmt a) msgs)))
+              ((symbol-function 'safeslop--call-json-async)
+               (lambda (_args cb)
+                 (funcall cb (safeslop--error-envelope
+                              "CLIENT_NON_JSON" "stale binary; run make install")))))
+      (with-temp-buffer
+        (safeslop-portal-mode)
+        (safeslop-portal--render)
+        (should (null (safeslop-portal--sessions-from
+                       (safeslop--error-envelope "CLIENT_NON_JSON" "x"))))
+        (let ((s (buffer-substring-no-properties (point-min) (point-max))))
+          (should (string-match-p "session list failed" s))
+          (should (string-match-p "stale binary" s))
+          (should (string-match-p "retry" s)))
         (should (cl-some (lambda (m) (string-match-p "stale binary" m)) msgs))))))
 
 ;;; Portal in-buffer shortcut legend + help (slopmaxx-style) -----------------
@@ -592,6 +603,60 @@ redraw never lands mid-keystroke and moves point out from under an action key."
             (should-not refreshed)))
       (when (get-buffer buf) (kill-buffer buf)))))
 
+;;; specs/0062: shared render engine states + breadcrumb hygiene --------------
+
+(ert-deftest safeslop-test-surface-breadcrumb-title-drops-flags-and-paths ()
+  "Output-buffer titles stay short verb phrases: flags and file paths are dropped."
+  (should (equal (safeslop-surface--breadcrumb-title
+                  '("validate" "/abs/path/safeslop.cue" "--json"))
+                 "validate"))
+  (should (equal (safeslop-surface--breadcrumb-title
+                  '("session" "status" "--session-id" "sess-x" "--output" "json"))
+                 "session status"))
+  (should (equal (safeslop-surface--breadcrumb-title
+                  '("profile" "show" "dev" "~/safeslop.cue" "--output" "json"))
+                 "profile show")))
+
+(ert-deftest safeslop-test-portal-empty-state-guidance ()
+  "An empty session list renders persistent guidance (n new / g refresh), not a
+bare table with no explanation."
+  (cl-letf (((symbol-function 'safeslop--call-json-async)
+             (lambda (_args cb)
+               (funcall cb (safeslop-contract-parse-string
+                            "{\"schema_version\":1,\"ok\":true,\"data\":{\"sessions\":[]},\"warnings\":[],\"errors\":[]}")))))
+    (with-temp-buffer
+      (safeslop-portal-mode)
+      (safeslop-portal--render)
+      (should (string-match-p
+               "No sessions yet"
+               (buffer-substring-no-properties (point-min) (point-max)))))))
+
+(ert-deftest safeslop-test-portal-loading-hint-on-first-open ()
+  "While the first fetch is in flight the buffer shows header + loading hint
+instead of staying blank (the mocked fetch here never calls back)."
+  (cl-letf (((symbol-function 'safeslop--call-json-async)
+             (lambda (_args _cb) nil)))
+    (with-temp-buffer
+      (safeslop-portal-mode)
+      (safeslop-portal--render)
+      (should safeslop-surface--refresh-in-flight)
+      (let ((s (buffer-substring-no-properties (point-min) (point-max))))
+        (should (string-match-p "checking sessions" s))
+        (should (string-match-p "Sessions" s))))))
+
+(ert-deftest safeslop-test-install-error-banner ()
+  "Install surface failures render the persistent banner too (shared engine)."
+  (cl-letf (((symbol-function 'safeslop--call-json-async)
+             (lambda (_args cb)
+               (funcall cb (safeslop--error-envelope
+                            "IO_ERROR" "receipt store unreadable")))))
+    (with-temp-buffer
+      (safeslop-install-mode)
+      (safeslop-install--render)
+      (let ((s (buffer-substring-no-properties (point-min) (point-max))))
+        (should (string-match-p "install status failed" s))
+        (should (string-match-p "receipt store unreadable" s))))))
+
 (ert-deftest safeslop-test-portal-auto-refresh-skips-in-flight ()
   "The auto-refresh timer skips a tick while a prior async fetch is still in
 flight, so slow `session list' calls can't stack up."
@@ -599,7 +664,7 @@ flight, so slow `session list' calls can't stack up."
         refreshed)
     (unwind-protect
         (progn
-          (with-current-buffer buf (setq safeslop-portal--refresh-in-flight t))
+          (with-current-buffer buf (setq safeslop-surface--refresh-in-flight t))
           (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) 'win))
                     ((symbol-function 'active-minibuffer-window) (lambda () nil))
                     ((symbol-function 'input-pending-p) (lambda (&rest _) nil))

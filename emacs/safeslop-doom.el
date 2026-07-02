@@ -6,6 +6,14 @@
 
 ;; Optional Doom Emacs sugar for safeslop.  This file does not depend on Doom:
 ;; it loads in raw Emacs and only binds Doom leader keys when `map!' exists.
+;;
+;; Evil bindings are data-driven (specs/0062): one shared table for the keys
+;; every safeslop buffer offers, plus a per-mode table of surface actions.
+;; safeslop's dashboards and output buffers are read-only single-key UIs, so
+;; each mode enters Evil normal state and gets its keys through Evil (Evil does
+;; not consult the keymap parent, and normal state would otherwise interpret
+;; the action keys as motions/edits).  The four hand-maintained binding blocks
+;; this replaces drifted more than once — edit the tables, not copies.
 
 ;;; Code:
 
@@ -28,132 +36,70 @@
 (require 'safeslop)
 
 (declare-function evil-set-initial-state "ext:evil-states" (mode state))
-(declare-function evil-define-key "ext:evil-core" (state keymap key def &rest bindings))
-(declare-function safeslop-portal-open "safeslop-portal" ())
-(declare-function safeslop-portal-reattach "safeslop-portal" ())
-(declare-function safeslop-portal-status "safeslop-portal" ())
-(declare-function safeslop-portal-run-detached "safeslop-portal" ())
-(declare-function safeslop-portal-follow-profile "safeslop-portal" ())
-(declare-function safeslop-portal-stop "safeslop-portal" ())
-(declare-function safeslop-portal-remove "safeslop-portal" ())
-(declare-function safeslop-portal-prune "safeslop-portal" ())
-(declare-function safeslop-portal-new "safeslop-portal" ())
-(declare-function safeslop-portal-refresh "safeslop-portal" ())
-(declare-function safeslop-portal-toggle-auto-refresh "safeslop-portal" ())
-(declare-function safeslop-surface-next "safeslop-surface" ())
-(declare-function safeslop-surface-prev "safeslop-surface" ())
-(declare-function safeslop-install-refresh "safeslop-install" ())
-(declare-function safeslop-install-plan "safeslop-install" ())
-(declare-function safeslop-install-apply "safeslop-install" ())
-(declare-function safeslop-install-dry-run "safeslop-install" ())
-(declare-function safeslop-install-rollback "safeslop-install" ())
-(declare-function safeslop-output-refresh "safeslop" ())
-(declare-function safeslop-profiles-inspect "safeslop-profiles" ())
-(declare-function safeslop-profiles-launch "safeslop-profiles" ())
-(declare-function safeslop-profiles-edit "safeslop-profiles" ())
-(declare-function safeslop-profiles-create "safeslop-profiles" ())
-(declare-function safeslop-profiles-clone "safeslop-profiles" ())
-(declare-function safeslop-profiles-validate "safeslop-profiles" ())
-(declare-function safeslop-profiles-delete "safeslop-profiles" ())
-(declare-function safeslop-profiles-refresh "safeslop-profiles" ())
-(defvar safeslop-portal-mode-map)
-(defvar safeslop-install-mode-map)
-(defvar safeslop-profiles-mode-map)
+(declare-function evil-define-key* "ext:evil-core" (state keymap &rest bindings))
+
+(defconst safeslop-doom--evil-shared-keys
+  '(("d" . safeslop-doctor)
+    ("E" . safeslop-show-last-error)
+    ("L" . safeslop-debug-log)
+    ("?" . describe-mode)
+    ("q" . quit-window)
+    ;; Shared surface switch keys (Evil does not consult the keymap parent).
+    ("P" . safeslop-portal)
+    ("I" . safeslop-install)
+    ("F" . safeslop-profiles)
+    ("[" . safeslop-surface-prev)
+    ("]" . safeslop-surface-next)
+    ("TAB" . safeslop-surface-next)
+    ("<backtab>" . safeslop-surface-prev))
+  "Keys every safeslop buffer offers in Evil normal state, as (KEY . COMMAND).
+Applied to each mode in `safeslop-doom--evil-mode-keys' after its own keys.")
+
+(defconst safeslop-doom--evil-mode-keys
+  '((safeslop-output-mode safeslop-output-mode-map
+     ("g" . safeslop-output-refresh)
+     ("e" . safeslop-show-last-error))
+    (safeslop-portal-mode safeslop-portal-mode-map
+     ("RET" . safeslop-portal-open)
+     ("o"   . safeslop-portal-open)
+     ("D"   . safeslop-portal-run-detached)
+     ("R"   . safeslop-portal-reattach)
+     ("i"   . safeslop-portal-status)
+     ("k"   . safeslop-portal-stop)
+     ("x"   . safeslop-portal-remove)
+     ("X"   . safeslop-portal-prune)
+     ("n"   . safeslop-portal-new)
+     ("f"   . safeslop-portal-follow-profile)
+     ("g"   . safeslop-portal-refresh)
+     ("a"   . safeslop-portal-toggle-auto-refresh))
+    (safeslop-install-mode safeslop-install-mode-map
+     ("g" . safeslop-install-refresh)
+     ("p" . safeslop-install-plan)
+     ("x" . safeslop-install-apply)
+     ("D" . safeslop-install-dry-run)
+     ("b" . safeslop-install-rollback))
+    (safeslop-profiles-mode safeslop-profiles-mode-map
+     ("RET" . safeslop-profiles-inspect)
+     ("i"   . safeslop-profiles-inspect)
+     ("x"   . safeslop-profiles-launch)
+     ("e"   . safeslop-profiles-edit)
+     ("n"   . safeslop-profiles-create)
+     ("c"   . safeslop-profiles-clone)
+     ("v"   . safeslop-profiles-validate)
+     ("D"   . safeslop-profiles-delete)
+     ("g"   . safeslop-profiles-refresh)))
+  "Per-mode Evil normal-state actions: (MODE MAP-SYMBOL (KEY . COMMAND)...).
+Every listed mode also receives `safeslop-doom--evil-shared-keys'.")
 
 (with-eval-after-load 'evil
-  ;; `safeslop-output-mode' buffers are read-only command output buffers.  In
-  ;; Doom/Evil, make that explicit and install bindings through Evil's normal
-  ;; state so single-key actions are not interpreted as editing commands.
-  (evil-set-initial-state 'safeslop-output-mode 'normal)
-  (evil-define-key 'normal safeslop-output-mode-map
-    (kbd "g") #'safeslop-output-refresh
-    (kbd "d") #'safeslop-doctor
-    (kbd "e") #'safeslop-show-last-error
-    (kbd "E") #'safeslop-show-last-error
-    (kbd "L") #'safeslop-debug-log
-    (kbd "?") #'describe-mode
-    (kbd "q") #'quit-window
-    (kbd "P") #'safeslop-portal
-    (kbd "I") #'safeslop-install
-    (kbd "F") #'safeslop-profiles
-    (kbd "[") #'safeslop-surface-prev
-    (kbd "]") #'safeslop-surface-next
-    (kbd "TAB") #'safeslop-surface-next
-    (kbd "<backtab>") #'safeslop-surface-prev)
-  ;; The portal is a tabulated-list dashboard whose single-key actions (o/i/k/n/R…)
-  ;; would otherwise be Evil normal-state motions; bind them through Evil so the
-  ;; dashboard is drivable.
-  (evil-set-initial-state 'safeslop-portal-mode 'normal)
-  (evil-define-key 'normal safeslop-portal-mode-map
-    (kbd "RET") #'safeslop-portal-open
-    (kbd "o")   #'safeslop-portal-open
-    (kbd "D")   #'safeslop-portal-run-detached
-    (kbd "R")   #'safeslop-portal-reattach
-    (kbd "i")   #'safeslop-portal-status
-    (kbd "k")   #'safeslop-portal-stop
-    (kbd "x")   #'safeslop-portal-remove
-    (kbd "X")   #'safeslop-portal-prune
-    (kbd "n")   #'safeslop-portal-new
-    (kbd "f")   #'safeslop-portal-follow-profile
-    (kbd "g")   #'safeslop-portal-refresh
-    (kbd "a")   #'safeslop-portal-toggle-auto-refresh
-    (kbd "d")   #'safeslop-doctor
-    (kbd "E")   #'safeslop-show-last-error
-    (kbd "L")   #'safeslop-debug-log
-    (kbd "?")   #'describe-mode
-    (kbd "q")   #'quit-window
-    ;; Shared surface switch keys (Evil does not consult the keymap parent).
-    (kbd "P")   #'safeslop-portal
-    (kbd "I")   #'safeslop-install
-    (kbd "F")   #'safeslop-profiles
-    (kbd "[")   #'safeslop-surface-prev
-    (kbd "]")   #'safeslop-surface-next
-    (kbd "TAB") #'safeslop-surface-next
-    (kbd "<backtab>") #'safeslop-surface-prev)
-  ;; The Install + Profiles surfaces are tabulated-list dashboards too; drive
-  ;; their single-key actions and the shared switch keys through Evil normal state.
-  (evil-set-initial-state 'safeslop-install-mode 'normal)
-  (evil-define-key 'normal safeslop-install-mode-map
-    (kbd "g") #'safeslop-install-refresh
-    (kbd "p") #'safeslop-install-plan
-    (kbd "x") #'safeslop-install-apply
-    (kbd "D") #'safeslop-install-dry-run
-    (kbd "b") #'safeslop-install-rollback
-    (kbd "d") #'safeslop-doctor
-    (kbd "E") #'safeslop-show-last-error
-    (kbd "L") #'safeslop-debug-log
-    (kbd "?") #'describe-mode
-    (kbd "q") #'quit-window
-    (kbd "P") #'safeslop-portal
-    (kbd "I") #'safeslop-install
-    (kbd "F") #'safeslop-profiles
-    (kbd "[") #'safeslop-surface-prev
-    (kbd "]") #'safeslop-surface-next
-    (kbd "TAB") #'safeslop-surface-next
-    (kbd "<backtab>") #'safeslop-surface-prev)
-  (evil-set-initial-state 'safeslop-profiles-mode 'normal)
-  (evil-define-key 'normal safeslop-profiles-mode-map
-    (kbd "RET") #'safeslop-profiles-inspect
-    (kbd "i")   #'safeslop-profiles-inspect
-    (kbd "x")   #'safeslop-profiles-launch
-    (kbd "e")   #'safeslop-profiles-edit
-    (kbd "n")   #'safeslop-profiles-create
-    (kbd "c")   #'safeslop-profiles-clone
-    (kbd "v")   #'safeslop-profiles-validate
-    (kbd "D")   #'safeslop-profiles-delete
-    (kbd "g")   #'safeslop-profiles-refresh
-    (kbd "d")   #'safeslop-doctor
-    (kbd "E")   #'safeslop-show-last-error
-    (kbd "L")   #'safeslop-debug-log
-    (kbd "?")   #'describe-mode
-    (kbd "q")   #'quit-window
-    (kbd "P")   #'safeslop-portal
-    (kbd "I")   #'safeslop-install
-    (kbd "F")   #'safeslop-profiles
-    (kbd "[")   #'safeslop-surface-prev
-    (kbd "]")   #'safeslop-surface-next
-    (kbd "TAB") #'safeslop-surface-next
-    (kbd "<backtab>") #'safeslop-surface-prev))
+  (dolist (entry safeslop-doom--evil-mode-keys)
+    (let ((mode (nth 0 entry))
+          (map (symbol-value (nth 1 entry))))
+      ;; Read-only single-key UIs: make normal state explicit, then install the
+      ;; mode's own actions and the shared keys through Evil.
+      (evil-set-initial-state mode 'normal)
+      (dolist (binding (append (cddr entry) safeslop-doom--evil-shared-keys))
+        (evil-define-key* 'normal map (kbd (car binding)) (cdr binding))))))
 
 ;;;###autoload
 (defun safeslop-doom-bind-leader ()
