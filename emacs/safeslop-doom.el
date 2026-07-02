@@ -36,6 +36,7 @@
 ;;;###autoload (autoload 'safeslop-show-last-error "safeslop" nil t)
 ;;;###autoload (autoload 'safeslop-help "safeslop" nil t)
 ;;;###autoload (autoload 'safeslop-profiles "safeslop" nil t)
+;;;###autoload (autoload 'safeslop-credentials "safeslop" nil t)
 
 (require 'safeslop)
 
@@ -51,6 +52,7 @@
     ;; Shared surface switch keys (Evil does not consult the keymap parent).
     ("P" . safeslop-portal)
     ("F" . safeslop-profiles)
+    ("K" . safeslop-credentials)
     ("[" . safeslop-surface-prev)
     ("]" . safeslop-surface-next)
     ("TAB" . safeslop-surface-next)
@@ -86,7 +88,12 @@ Applied to each mode in `safeslop-doom--evil-mode-keys' after its own keys.")
      ("C"   . safeslop-profiles-clone)
      ("v"   . safeslop-profiles-validate)
      ("D"   . safeslop-profiles-delete)
-     ("gr"  . safeslop-profiles-refresh)))
+     ("gr"  . safeslop-profiles-refresh))
+    (safeslop-credentials-mode safeslop-credentials-mode-map
+     ("RET" . safeslop-credentials-inspect)
+     ("i"   . safeslop-credentials-inspect)
+     ("e"   . safeslop-credentials-edit)
+     ("gr"  . safeslop-credentials-refresh)))
   "Per-mode Evil normal-state actions: (MODE MAP-SYMBOL (KEY . COMMAND)...).
 Every listed mode also receives `safeslop-doom--evil-shared-keys'.  Keys that
 would shadow Evil motions (j k g n f a) are deliberately absent (specs/0063

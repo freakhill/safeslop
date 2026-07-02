@@ -67,7 +67,7 @@ func newRoot() *cobra.Command {
 		SilenceErrors: true,
 	}
 	root.PersistentFlags().BoolVar(&jsonOut, "json", false, "emit machine-readable JSON output")
-	root.AddCommand(cmdValidate(), cmdList(), cmdDoctor(), cmdRun(), cmdSession(), cmdTrust(), cmdDown(), cmdGC(), cmdLaunch(), cmdCatalog(), cmdBundle(), cmdProfile(), cmdLock())
+	root.AddCommand(cmdValidate(), cmdList(), cmdDoctor(), cmdRun(), cmdSession(), cmdTrust(), cmdDown(), cmdGC(), cmdLaunch(), cmdCatalog(), cmdBundle(), cmdProfile(), cmdCreds(), cmdLock())
 	return root
 }
 
@@ -1377,6 +1377,97 @@ func buildLockfile(prof policy.Profile, resolved *policy.Resolved, recipe *conta
 
 // cmdProfile groups the enveloped policy surfaces the Emacs profiles view consumes
 // (specs/0052 E2/E3, specs/0058 IW3).
+// credsProber builds the Prober behind `creds list|show`. It is a seam: tests replace it with a
+// hermetic prober so the command never shells out to `op` or reads the real process env.
+var credsProber = creds.DefaultProber
+
+// cmdCreds groups read-only credential-posture inspection over safeslop.cue (specs/0067). Authoring
+// stays CUE-canonical (edit safeslop.cue itself); this surface only reads and reports value-free
+// readiness status — it never handles or reveals a secret value.
+func cmdCreds() *cobra.Command {
+	c := &cobra.Command{Use: "creds", Short: "Inspect the credential posture of safeslop.cue profiles"}
+	c.AddCommand(cmdCredsList(), cmdCredsShow())
+	return c
+}
+
+func cmdCredsList() *cobra.Command {
+	var output string
+	c := &cobra.Command{
+		Use:   "list [safeslop.cue] --output json",
+		Short: "List declared credentials across profiles with value-free readiness status",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			if output != "json" {
+				return fmt.Errorf("creds list requires --output json")
+			}
+			path, err := findConfig(argAt(args, 0))
+			if err != nil {
+				return emitContractError(jsoncontract.CodeNotFound, "safeslop.cue not found", map[string]any{"error": err.Error()})
+			}
+			cfg, err := policy.Load(path)
+			if err != nil {
+				return emitContractError(jsoncontract.CodeSchemaViolation, "load safeslop.cue", map[string]any{"path": path, "error": err.Error()})
+			}
+			rep := creds.Inspect(context.Background(), cfg, credsProber())
+			emitContract(jsoncontract.OK(map[string]any{
+				"config":      path,
+				"op":          rep.Op,
+				"credentials": credRowsOrEmpty(rep.Rows),
+			}))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&output, "output", "", "output format: json")
+	return c
+}
+
+func cmdCredsShow() *cobra.Command {
+	var output string
+	c := &cobra.Command{
+		Use:   "show <profile> [safeslop.cue] --output json",
+		Short: "Show one profile's declared credentials with value-free readiness status",
+		Args:  cobra.RangeArgs(1, 2),
+		RunE: func(_ *cobra.Command, args []string) error {
+			if output != "json" {
+				return fmt.Errorf("creds show requires --output json")
+			}
+			path, err := findConfig(argAt(args, 1))
+			if err != nil {
+				return emitContractError(jsoncontract.CodeNotFound, "safeslop.cue not found", map[string]any{"error": err.Error()})
+			}
+			cfg, err := policy.Load(path)
+			if err != nil {
+				return emitContractError(jsoncontract.CodeSchemaViolation, "load safeslop.cue", map[string]any{"path": path, "error": err.Error()})
+			}
+			prof, ok := cfg.Profiles[args[0]]
+			if !ok {
+				return emitContractError(jsoncontract.CodeNotFound, fmt.Sprintf("no profile %q in safeslop.cue", args[0]), map[string]any{"profile": args[0], "path": path})
+			}
+			// Scope Inspect to just this profile for the detail view.
+			one := &policy.Config{Version: cfg.Version, Profiles: map[string]policy.Profile{args[0]: prof}}
+			rep := creds.Inspect(context.Background(), one, credsProber())
+			emitContract(jsoncontract.OK(map[string]any{
+				"config":      path,
+				"profile":     args[0],
+				"op":          rep.Op,
+				"credentials": credRowsOrEmpty(rep.Rows),
+			}))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&output, "output", "", "output format: json")
+	return c
+}
+
+// credRowsOrEmpty coalesces a nil row slice to non-nil so the envelope always carries a
+// `credentials: []` array (never `null`) for the Emacs client.
+func credRowsOrEmpty(rows []creds.CredRow) []creds.CredRow {
+	if rows == nil {
+		return []creds.CredRow{}
+	}
+	return rows
+}
+
 func cmdProfile() *cobra.Command {
 	c := &cobra.Command{Use: "profile", Short: "Inspect and author safeslop.cue profiles"}
 	c.AddCommand(cmdProfileList(), cmdProfilePresets(), cmdProfileShow(), cmdProfileCreate())

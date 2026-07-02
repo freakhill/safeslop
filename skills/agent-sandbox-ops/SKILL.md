@@ -28,6 +28,7 @@ file transfer between host and sandboxed runtimes.
 - `safeslop bundle add|remove <name> <pkg>...` — mutate bundle membership, re-validating references.
 - `safeslop bundle list --output json` — list curated bundles.
 - `safeslop profile create --name N --agent A --environment E [--bundle B] [--package P] --output json` — create or update a `safeslop.cue` profile.
+- `safeslop creds list|show [<profile>] --output json` — inspect the credential posture of `safeslop.cue` profiles (declared creds + value-free readiness status); read-only, never reveals secret values.
 - `safeslop profile show <name> --output json` — inspect a profile with resolved package set and dry-run image recipe.
 - `safeslop lock [profile] --output json` — write repo-root `safeslop.lock.json` for the selected profile's recipe identity.
 - `safeslop trust` — approve a policy's exact bytes for launch.

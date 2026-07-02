@@ -347,9 +347,9 @@ mysterious bare table."
   (should (safeslop--safe-rerun-p '("session" "status" "--session-id" "sess-x" "--output" "json")))
   (should-not (safeslop--safe-rerun-p '("profile" "create" "--output" "json"))))
 
-(ert-deftest safeslop-test-surface-order-has-two ()
-  (should (= (length safeslop-surface--order) 2))
-  (should (equal (mapcar #'car safeslop-surface--order) '(sessions profiles))))
+(ert-deftest safeslop-test-surface-order-has-three ()
+  (should (= (length safeslop-surface--order) 3))
+  (should (equal (mapcar #'car safeslop-surface--order) '(sessions profiles credentials))))
 
 (ert-deftest safeslop-test-surface-tab-strip-shows-switch-keys ()
   "The tab strip advertises the direct switch key before each label and the cycle
@@ -357,6 +357,7 @@ keys after, so changing surface is discoverable in the strip itself."
   (let ((strip (substring-no-properties (safeslop-surface--tab-strip 'sessions))))
     (should (string-match-p "P Sessions" strip))
     (should (string-match-p "F Profiles" strip))
+    (should (string-match-p "K Credentials" strip))
     (should (string-match-p "cycle surface" strip))))
 
 (ert-deftest safeslop-test-surface-tab-and-cycle-keys ()
@@ -374,16 +375,17 @@ keys after, so changing surface is discoverable in the strip itself."
   "`safeslop-surface--step' calls the next/prev surface command, wrapping around."
   (let (called)
     (cl-letf (((symbol-function 'safeslop-portal) (lambda () (interactive) (setq called 'sessions)))
-              ((symbol-function 'safeslop-profiles) (lambda () (interactive) (setq called 'profiles))))
+              ((symbol-function 'safeslop-profiles) (lambda () (interactive) (setq called 'profiles)))
+              ((symbol-function 'safeslop-credentials) (lambda () (interactive) (setq called 'credentials))))
       ;; No safeslop surface is current in a temp buffer, so step starts from the
-      ;; first surface (sessions); with two surfaces, +1 and -1 both reach the
-      ;; other surface (profiles) by wrapping.
+      ;; first surface (sessions); with three surfaces [sessions profiles
+      ;; credentials], +1 reaches profiles and -1 wraps to credentials.
       (with-temp-buffer
         (safeslop-surface--step 1)
         (should (eq called 'profiles))
         (setq called nil)
         (safeslop-surface--step -1)
-        (should (eq called 'profiles))))))
+        (should (eq called 'credentials))))))
 
 (ert-deftest safeslop-test-surface-restore-views-preserves-scroll-and-point ()
   "`restore-views' puts each window's scroll back and syncs the cursor to POINT,
