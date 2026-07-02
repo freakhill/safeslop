@@ -262,7 +262,8 @@ func TestSuperviseAndAttachUnderOverflowingStateDir(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go func() { _, _ = Supervise(ctx, store, id, time.Now) }()
+	done := make(chan struct{})
+	go func() { defer close(done); _, _ = Supervise(ctx, store, id, time.Now) }()
 
 	if !waitForFile(sock, 5*time.Second) {
 		t.Fatalf("supervisor never bound the relocated socket %q", sock)
@@ -277,6 +278,14 @@ func TestSuperviseAndAttachUnderOverflowingStateDir(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "MARKER") {
 		t.Fatalf("attach did not bridge the agent's output: %q", out.String())
+	}
+	// attachSession returns on the exit frame, before the supervisor's teardown
+	// writes to the state dir finish; returning here then would let t.TempDir
+	// cleanup race those writes ("directory not empty" flakes).
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Supervise did not return after agent exit")
 	}
 }
 
