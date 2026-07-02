@@ -33,6 +33,16 @@ services:
     tmpfs:
       - /tmp
       - /var/tmp
+      # Writable, EPHEMERAL home (specs/0064): agents keep runtime state under
+      # $HOME (pi's ~/.pi session store, claude's ~/.claude), which the
+      # read-only rootfs refuses — pi exits 1 at startup without it. tmpfs is
+      # in-memory and wiped on exit; no host path is exposed. It masks the
+      # image's baked shell dotfiles (acceptable: agents, not login shells).
+      # uid/gid/mode: a bare tmpfs mounts root:root 0755, which only moves the
+      # startup crash from ENOENT to EACCES (validated 2026-07-02) — own it to
+      # the agent user (uid 1000 in Dockerfile.agent, matching the hardcoded
+      # /home/agent path this template already relies on).
+      - /home/agent:uid=1000,gid=1000,mode=0700
     cap_drop: [ALL]
     security_opt:
       - "no-new-privileges:true"

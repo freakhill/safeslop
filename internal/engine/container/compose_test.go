@@ -29,6 +29,36 @@ func TestComposeIsNetworkEnforcedAndLeakFree(t *testing.T) {
 	}
 }
 
+func TestComposeGivesAgentWritableEphemeralHome(t *testing.T) {
+	yml, err := renderCompose(composeParams{RuntimeDir: "/rt", Workspace: "/ws", StageDir: "/st"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// specs/0064: the rootfs stays read-only; $HOME is a tmpfs so agents can
+	// keep runtime state (pi's ~/.pi session store) with no host exposure.
+	if !strings.Contains(yml, "read_only: true") {
+		t.Fatal("agent rootfs must stay read-only")
+	}
+	if !strings.Contains(yml, "- /home/agent") {
+		t.Fatalf("agent tmpfs home missing (pi state-dir crash, specs/0064):\n%s", yml)
+	}
+}
+
+func TestEntrypointPreCreatesAgentStateDirs(t *testing.T) {
+	b, err := readAsset("entrypoint.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	// specs/0064: the tmpfs home starts empty and pi's session-store mkdir is
+	// non-recursive, so the entrypoint must pre-create the state trees.
+	for _, want := range []string{"mkdir -p", ".pi/agent/sessions", ".claude"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("entrypoint.sh missing %q (specs/0064)", want)
+		}
+	}
+}
+
 func TestWriteSecretsEnvEscapesAndIs0600(t *testing.T) {
 	dir := t.TempDir()
 	p, err := writeSecretsEnv(dir, []string{`ANTHROPIC_API_KEY=sk-a'b`})
