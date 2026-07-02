@@ -82,6 +82,24 @@ A single timer serves the one portal buffer (`safeslop-portal-buffer-name').")
       (concat (substring id 0 16) "…")
     (or id "")))
 
+(defconst safeslop-portal--session-width 24
+  "Display width of the Session column: short id plus optional inline name (N2).
+Kept in sync with the Session entry in `tabulated-list-format'.")
+
+(defun safeslop-portal--session-cell (sess)
+  "Return the Session cell for SESS: the short id, plus its display name inline.
+Per specs/0065 N2 the optional name is a suffix inside the Session column (never
+an 11th column).  When a name is present the id is compressed to leave room, and
+the whole cell is truncated with `truncate-string-to-width' — which counts
+terminal cells, so a wide-rune name (CJK/emoji, N1) can't overflow the row."
+  (let ((id (safeslop-portal--field sess 'session_id))
+        (name (safeslop-portal--field sess 'name)))
+    (if (string-empty-p name)
+        (safeslop-portal--short-id id)
+      (truncate-string-to-width
+       (concat (truncate-string-to-width id 10 nil nil "…") " " name)
+       safeslop-portal--session-width nil nil "…"))))
+
 (defun safeslop-portal--status-face (status)
   "Return a face for a session STATUS string (slopmaxx-style mapping)."
   (pcase status
@@ -195,7 +213,7 @@ builder never blocks on I/O."
    (lambda (sess)
      (let ((id (safeslop-portal--field sess 'session_id)))
        (list id
-             (vector (safeslop-portal--short-id id)
+             (vector (safeslop-portal--session-cell sess)
                      (safeslop-portal--field sess 'agent)
                      (safeslop-surface--env-cell (safeslop-portal--field sess 'environment))
                      (safeslop-surface--net-cell (safeslop-portal--field sess 'network))
@@ -336,6 +354,26 @@ already does the state-aware thing."
                        (safeslop-surface--error-message env "stop failed"))))
        t))))
 
+(defun safeslop-portal-rename ()
+  "Rename the session at point (set or clear its display label) and refresh.
+The name is a pure label (specs/0065): a rename touches nothing derived from the
+id, so it is offered in any status.  Empty input clears the name.  Refreshes the
+portal in place on success rather than popping a result buffer over it."
+  (interactive)
+  (let* ((sess (safeslop-portal--session-at-point))
+         (id (safeslop-portal--field sess 'session_id))
+         (name (read-string (format "Name for %s (empty clears): "
+                                    (safeslop-portal--short-id id))
+                            (safeslop-portal--field sess 'name))))
+    (safeslop-session-rename
+     id name
+     (lambda (env)
+       (if (safeslop-contract-ok-p env)
+           (safeslop-portal-refresh)
+         (message "safeslop: rename failed: %s"
+                  (safeslop-surface--error-message env "rename failed"))))
+     t)))
+
 (defun safeslop-portal-new ()
   "Create a new session.
 `safeslop-session-new' is async, so it reveals the new session in the portal
@@ -389,7 +427,7 @@ Credentials are revoked before each record is deleted."
 (defconst safeslop-portal--key-hints
   '(("RET" . "open") ("r" . "run") ("R" . "detach") ("A" . "reattach")
     ("i" . "details") ("s" . "stop/revoke") ("x" . "remove") ("X" . "prune")
-    ("c" . "new") ("^" . "profile") ("g" . "refresh") ("a" . "auto")
+    ("c" . "new") ("N" . "rename") ("^" . "profile") ("g" . "refresh") ("a" . "auto")
     ("d" . "doctor") ("E" . "error") ("L" . "debug") ("?" . "help") ("q" . "quit"))
   "Key/action pairs shown in the portal's in-buffer shortcut legend.")
 
@@ -535,6 +573,7 @@ A nil or non-positive interval leaves the portal static (manual `g' only)."
     (define-key map (kbd "x")   #'safeslop-portal-remove)
     (define-key map (kbd "X")   #'safeslop-portal-prune)
     (define-key map (kbd "c")   #'safeslop-portal-new)
+    (define-key map (kbd "N")   #'safeslop-portal-rename)
     (define-key map (kbd "^")   #'safeslop-portal-follow-profile)
     (define-key map (kbd "g")   #'safeslop-portal-refresh)
     (define-key map (kbd "a")   #'safeslop-portal-toggle-auto-refresh)
@@ -550,16 +589,16 @@ A nil or non-positive interval leaves the portal static (manual `g' only)."
   ;; Columns are non-sortable so an interactive header click never re-prints and
   ;; wipes the in-buffer legend; rows are status-ordered in `safeslop-portal--rows'.
   (setq tabulated-list-format
-        [("Session" 17 nil)
-         ("Agent" 12 nil)
-         ("Env" 10 nil)
-         ("Net" 5 nil)
-         ("Status" 10 nil)
-         ("PID" 7 nil)
-         ("Age" 6 nil)
-         ("Recipe" 24 nil)
-         ("Image" 13 nil)
-         ("Workspace" 32 nil)])
+        (vector (list "Session" safeslop-portal--session-width nil)
+                '("Agent" 12 nil)
+                '("Env" 10 nil)
+                '("Net" 5 nil)
+                '("Status" 10 nil)
+                '("PID" 7 nil)
+                '("Age" 6 nil)
+                '("Recipe" 24 nil)
+                '("Image" 13 nil)
+                '("Workspace" 32 nil)))
   (setq tabulated-list-padding 1)
   (tabulated-list-init-header)
   ;; Stop the shared auto-refresh timer when the dashboard goes away.
@@ -569,8 +608,8 @@ A nil or non-positive interval leaves the portal static (manual `g' only)."
 (defun safeslop-portal ()
   "Open the safeslop session portal: a dashboard of sessions you can act on.
 Keys: RET/o open (state-aware), r run, R run detached, A reattach, i status,
-s stop, x remove, X prune, c new, ^ profile, g refresh, a toggle auto-refresh,
-d doctor, L debug log, q quit.
+s stop, x remove, X prune, c new, N rename, ^ profile, g refresh, a toggle
+auto-refresh, d doctor, L debug log, q quit.
 
 While displayed, the portal auto-refreshes every
 `safeslop-portal-refresh-interval' seconds (nil disables)."

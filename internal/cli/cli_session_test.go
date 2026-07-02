@@ -786,9 +786,190 @@ func TestSessionRmAndPruneRegistered(t *testing.T) {
 	for _, c := range sessionCmd.Commands() {
 		names[c.Name()] = true
 	}
-	for _, want := range []string{"rm", "prune"} {
+	for _, want := range []string{"rm", "rename", "prune"} {
 		if !names[want] {
 			t.Fatalf("session %q subcommand not registered; have %v", want, names)
 		}
+	}
+}
+
+// createSessionForRename creates a minimal host session and returns its id, so
+// the rename tests can exercise the CLI surface without reaching into the store.
+func createSessionForRename(t *testing.T, ws string) string {
+	t.Helper()
+	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--workspace", ws, "--output", "json")
+	if err != nil {
+		t.Fatalf("create session: %v\nout=%s", err, out)
+	}
+	return parseEnvelopeForTest(t, out).Data["session_id"].(string)
+}
+
+// TestSessionCreateAppliesName proves `session create --name` validates and
+// persists the display name and surfaces it in the OK envelope (specs/0065 S2).
+func TestSessionCreateAppliesName(t *testing.T) {
+	ws := t.TempDir()
+	state := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", state)
+
+	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--workspace", ws, "--name", "Foo", "--output", "json")
+	if err != nil {
+		t.Fatalf("session create --name: %v\nout=%s", err, out)
+	}
+	env := parseEnvelopeForTest(t, out)
+	if !env.OK {
+		t.Fatalf("create returned error envelope: %+v", env.Errors)
+	}
+	if got := env.Data["name"]; got != "Foo" {
+		t.Fatalf("name = %#v, want Foo", got)
+	}
+	id := env.Data["session_id"].(string)
+	stored, err := sessionStore().Get(id)
+	if err != nil {
+		t.Fatalf("load stored session: %v", err)
+	}
+	if stored.Name != "Foo" {
+		t.Fatalf("stored name = %q, want Foo", stored.Name)
+	}
+}
+
+// TestSessionCreateRejectsControlName proves a name carrying a control character
+// (a newline, which would also break the one-envelope-per-line protocol) is
+// rejected with CodeInvalidArgument before any record is written.
+func TestSessionCreateRejectsControlName(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+
+	out, _ := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--workspace", ws, "--name", "a\nb", "--output", "json")
+	env := parseEnvelopeForTest(t, out)
+	if env.OK || len(env.Errors) == 0 || env.Errors[0].Code != jsoncontract.CodeInvalidArgument {
+		t.Fatalf("expected CodeInvalidArgument error envelope, got: %+v", env)
+	}
+}
+
+// TestSessionCreateProfileWithNameNotRejected proves --name is combinable with
+// --profile (it is not part of the profile-exclusivity guard) and is applied.
+func TestSessionCreateProfileWithNameNotRejected(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+	project := filepath.Join(ws, "project")
+	if err := os.Mkdir(project, 0o755); err != nil {
+		t.Fatalf("mkdir project workspace: %v", err)
+	}
+	cue := `package safeslop
+
+safeslop: {
+	version: 1
+	profiles: {
+		review: {
+			agent: "pi"
+			environment: "container"
+			network: "deny"
+			workspace: "project"
+		}
+	}
+}
+`
+	if err := os.WriteFile(filepath.Join(ws, "safeslop.cue"), []byte(cue), 0o644); err != nil {
+		t.Fatalf("write safeslop.cue: %v", err)
+	}
+
+	out, err := runRootForTest(t, ws, "session", "create", "--profile", "review", "--name", "Foo", "--output", "json")
+	if err != nil {
+		t.Fatalf("session create --profile --name: %v\nout=%s", err, out)
+	}
+	env := parseEnvelopeForTest(t, out)
+	if !env.OK {
+		t.Fatalf("create returned error envelope: %+v", env.Errors)
+	}
+	if got := env.Data["profile"]; got != "review" {
+		t.Fatalf("profile = %#v, want review", got)
+	}
+	if got := env.Data["name"]; got != "Foo" {
+		t.Fatalf("name = %#v, want Foo", got)
+	}
+}
+
+// TestSessionRenameSetsName proves the happy path: rename returns an OK envelope
+// carrying the new name.
+func TestSessionRenameSetsName(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+	id := createSessionForRename(t, ws)
+
+	out, err := runRootForTest(t, ws, "session", "rename", "--session-id", id, "--name", "Renamed", "--output", "json")
+	if err != nil {
+		t.Fatalf("session rename: %v\nout=%s", err, out)
+	}
+	env := parseEnvelopeForTest(t, out)
+	if !env.OK {
+		t.Fatalf("rename returned error envelope: %+v", env.Errors)
+	}
+	if got := env.Data["name"]; got != "Renamed" {
+		t.Fatalf("name = %#v, want Renamed", got)
+	}
+	if got := env.Data["session_id"]; got != id {
+		t.Fatalf("session_id = %#v, want %q", got, id)
+	}
+}
+
+// TestSessionRenameClearsName proves an empty --name clears the label: the OK
+// envelope omits "name" (sessionData surfaces it only when non-empty).
+func TestSessionRenameClearsName(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+	id := createSessionForRename(t, ws)
+	if _, err := runRootForTest(t, ws, "session", "rename", "--session-id", id, "--name", "Temp", "--output", "json"); err != nil {
+		t.Fatalf("seed name: %v", err)
+	}
+
+	out, err := runRootForTest(t, ws, "session", "rename", "--session-id", id, "--name", "", "--output", "json")
+	if err != nil {
+		t.Fatalf("session rename clear: %v\nout=%s", err, out)
+	}
+	env := parseEnvelopeForTest(t, out)
+	if !env.OK {
+		t.Fatalf("rename clear returned error envelope: %+v", env.Errors)
+	}
+	if _, present := env.Data["name"]; present {
+		t.Fatalf("name should be absent after clear, got: %#v", env.Data["name"])
+	}
+}
+
+// TestSessionRenameNotFound proves an unknown id maps to SESSION_NOT_FOUND.
+func TestSessionRenameNotFound(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+	out, _ := runRootForTest(t, ws, "session", "rename", "--session-id", "sess-missing", "--name", "x", "--output", "json")
+	env := parseEnvelopeForTest(t, out)
+	if env.OK || string(env.Errors[0].Code) != string(jsoncontract.CodeSessionNotFound) {
+		t.Fatalf("rename of missing session = %+v, want SESSION_NOT_FOUND", env)
+	}
+}
+
+// TestSessionRenameRejectsControlName proves a name with a disallowed bidi
+// override is rejected with CodeInvalidArgument. U+202E (RLO) is the
+// Trojan-Source character that could make a stopped session render as running.
+func TestSessionRenameRejectsControlName(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+	id := createSessionForRename(t, ws)
+
+	out, _ := runRootForTest(t, ws, "session", "rename", "--session-id", id, "--name", "a\u202eb", "--output", "json")
+	env := parseEnvelopeForTest(t, out)
+	if env.OK || len(env.Errors) == 0 || env.Errors[0].Code != jsoncontract.CodeInvalidArgument {
+		t.Fatalf("expected CodeInvalidArgument error envelope, got: %+v", env)
+	}
+}
+
+// TestSessionRenameRequiresOutputJSON proves rename without --output json is a
+// usage error (matching its sibling session commands), not a contract envelope.
+func TestSessionRenameRequiresOutputJSON(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+	id := createSessionForRename(t, ws)
+
+	out, err := runRootForTest(t, ws, "session", "rename", "--session-id", id, "--name", "x")
+	if err == nil {
+		t.Fatalf("rename without --output json must be a usage error; out=%s", out)
 	}
 }

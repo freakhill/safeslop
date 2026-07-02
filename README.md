@@ -72,14 +72,15 @@ safeslop profile show <name> --output json         profile + resolved packages +
 safeslop lock [profile] --output json              write repo-root safeslop.lock.json
 safeslop trust [safeslop.cue]       approve this policy's exact bytes
 safeslop run <profile> [--dry-run]  launch a trusted profile
-safeslop session create --profile <name> --output json
-safeslop session create --agent <claude|pi|fish|zsh> --environment <host|container> --workspace <dir> --output json
+safeslop session create --profile <name> [--name <label>] --output json
+safeslop session create --agent <claude|pi|fish|zsh> --environment <host|container> --workspace <dir> [--name <label>] --output json
 safeslop session run --session-id <id> [--detach]
 safeslop session attach --session-id <id>
 safeslop session status --session-id <id> --output <json|jsonl>
 safeslop session stop --session-id <id> --revoke-credentials --output json
 safeslop session rm --session-id <id> --output json        remove one stopped session record
 safeslop session prune --output json                       remove all stopped session records
+safeslop session rename --session-id <id> --name <label> --output json   set or clear a session's display name
 safeslop doctor                     report available tools and isolation tiers
 safeslop down                       tear down safeslop-managed container stacks
 safeslop gc [--until <age>] [--keep <N>]   remove unreferenced safeslop-managed images
@@ -147,6 +148,14 @@ credentials before deleting a record, so a removal can never orphan secrets on
 disk. `prune` first runs the liveness reconcile, so a crashed session (marked
 `running` but whose process is gone) is persisted as `stopped` and swept in the
 same pass. The Emacs portal exposes these as `x` (remove one) and `X` (prune).
+
+A session can carry an optional human display name. Set it at creation with
+`session create --name <label>` (combinable with `--profile`), or later — in any
+status — with `session rename --session-id <id> --name <label>`; an empty
+`--name` clears it. The name is validated (control, format, and bidi characters
+are rejected so it cannot break the JSONL line protocol or spoof a status) and,
+when set, is surfaced in the session's `status`/`list` envelope and the Emacs
+portal.
 
 `safeslop down` removes safeslop-managed host-container stacks by label. Container
 startup also sweeps managed, record-less orphan boundaries on the host Docker

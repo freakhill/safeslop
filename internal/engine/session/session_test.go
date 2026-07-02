@@ -1,6 +1,7 @@
 package session
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -427,5 +428,245 @@ func TestPruneStoppedNoopWhenNoneStopped(t *testing.T) {
 	}
 	if len(removed) != 0 {
 		t.Fatalf("pruned %v, want none", removed)
+	}
+}
+
+func TestRenameRoundTrip(t *testing.T) {
+	store := NewStore(t.TempDir())
+	sess, err := store.Create("claude", "host", t.TempDir(), testNow())
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	renamed, err := store.Rename(sess.ID, "prod", testNow())
+	if err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	if renamed.Name != "prod" {
+		t.Fatalf("returned name = %q, want prod", renamed.Name)
+	}
+	got, err := store.Get(sess.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Name != "prod" {
+		t.Fatalf("persisted name = %q, want prod", got.Name)
+	}
+}
+
+// TestRenameClearOmitsNameOnDisk proves the empty-name clear path and that
+// `omitempty` keeps the key out of the persisted JSON (the wire-format promise
+// in specs/0065 D4).
+func TestRenameClearOmitsNameOnDisk(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(dir)
+	sess, err := store.Create("claude", "host", t.TempDir(), testNow())
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := store.Rename(sess.ID, "prod", testNow()); err != nil {
+		t.Fatalf("rename set: %v", err)
+	}
+	cleared, err := store.Rename(sess.ID, "", testNow())
+	if err != nil {
+		t.Fatalf("rename clear: %v", err)
+	}
+	if cleared.Name != "" {
+		t.Fatalf("name = %q, want empty after clear", cleared.Name)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, sess.ID+".json"))
+	if err != nil {
+		t.Fatalf("read record: %v", err)
+	}
+	if strings.Contains(string(b), `"name"`) {
+		t.Fatalf("cleared record still contains a name key: %s", b)
+	}
+}
+
+// TestRenameRejectsControlLeavesRecordUnchanged covers the Cc line-protocol
+// hazard: a newline would break the one-envelope-per-line JSONL status output.
+func TestRenameRejectsControlLeavesRecordUnchanged(t *testing.T) {
+	store := NewStore(t.TempDir())
+	sess, err := store.Create("claude", "host", t.TempDir(), testNow())
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := store.Rename(sess.ID, "good", testNow()); err != nil {
+		t.Fatalf("rename set: %v", err)
+	}
+	if _, err := store.Rename(sess.ID, "a\nb", testNow()); err == nil {
+		t.Fatal("rename with a control char should error")
+	}
+	got, err := store.Get(sess.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Name != "good" {
+		t.Fatalf("record changed by rejected rename: name = %q, want good", got.Name)
+	}
+}
+
+// TestRenameRejectsBidiAndZeroWidth pins the S1 security cases: a bidi override
+// (Trojan Source, CVE-2021-42574) can spoof status rendering, and a zero-width
+// char makes two names visually identical. Both are Cf and must be rejected.
+func TestRenameRejectsBidiAndZeroWidth(t *testing.T) {
+	store := NewStore(t.TempDir())
+	sess, err := store.Create("claude", "host", t.TempDir(), testNow())
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	for _, tc := range []struct {
+		name string
+		in   string
+	}{
+		{"bidi override", "a\u202Eb"},
+		{"zero width", "a\u200Bb"},
+	} {
+		if _, err := store.Rename(sess.ID, tc.in, testNow()); err == nil {
+			t.Fatalf("%s: rename should error", tc.name)
+		}
+	}
+}
+
+// TestRenameLengthBoundary uses a multi-byte rune so the cap proves runes, not
+// bytes: 64 runes accepted, 65 rejected.
+func TestRenameLengthBoundary(t *testing.T) {
+	store := NewStore(t.TempDir())
+	sess, err := store.Create("claude", "host", t.TempDir(), testNow())
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := store.Rename(sess.ID, strings.Repeat("\u00e9", 64), testNow()); err != nil {
+		t.Fatalf("64-rune name should be accepted: %v", err)
+	}
+	if _, err := store.Rename(sess.ID, strings.Repeat("\u00e9", 65), testNow()); err == nil {
+		t.Fatal("65-rune name should be rejected")
+	}
+}
+
+func TestRenameTrimsWhitespace(t *testing.T) {
+	store := NewStore(t.TempDir())
+	sess, err := store.Create("claude", "host", t.TempDir(), testNow())
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	renamed, err := store.Rename(sess.ID, "  spaced  ", testNow())
+	if err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	if renamed.Name != "spaced" {
+		t.Fatalf("name = %q, want spaced", renamed.Name)
+	}
+}
+
+func TestRenameUnknownID(t *testing.T) {
+	store := NewStore(t.TempDir())
+	if _, err := store.Rename("sess-missing", "x", testNow()); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("rename unknown id = %v, want ErrNotFound", err)
+	}
+}
+
+// TestNameSurvivesLifecycleTransitions checks the label is independent of
+// lifecycle: MarkRunning, Finish, and Stop are each a distinct Save path and
+// must all preserve Name (specs/0065 D5).
+func TestNameSurvivesLifecycleTransitions(t *testing.T) {
+	t.Run("MarkRunning", func(t *testing.T) {
+		store := NewStore(t.TempDir())
+		sess, err := store.Create("claude", "host", t.TempDir(), testNow())
+		if err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		if _, err := store.Rename(sess.ID, "keep", testNow()); err != nil {
+			t.Fatalf("rename: %v", err)
+		}
+		if _, err := store.MarkRunning(sess.ID, 4242, testNow()); err != nil {
+			t.Fatalf("mark running: %v", err)
+		}
+		got, err := store.Get(sess.ID)
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		if got.Name != "keep" {
+			t.Fatalf("name = %q, want keep after MarkRunning", got.Name)
+		}
+	})
+
+	t.Run("Finish", func(t *testing.T) {
+		store := NewStore(t.TempDir())
+		sess, err := store.Create("claude", "host", t.TempDir(), testNow())
+		if err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		if _, err := store.Rename(sess.ID, "keep", testNow()); err != nil {
+			t.Fatalf("rename: %v", err)
+		}
+		if _, err := store.Finish(sess.ID, 0, "", testNow()); err != nil {
+			t.Fatalf("finish: %v", err)
+		}
+		got, err := store.Get(sess.ID)
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		if got.Name != "keep" {
+			t.Fatalf("name = %q, want keep after Finish", got.Name)
+		}
+	})
+
+	t.Run("Stop", func(t *testing.T) {
+		store := NewStore(t.TempDir())
+		sess, err := store.Create("claude", "host", t.TempDir(), testNow())
+		if err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		if _, err := store.Rename(sess.ID, "keep", testNow()); err != nil {
+			t.Fatalf("rename: %v", err)
+		}
+		if _, err := store.MarkRunning(sess.ID, 4242, testNow()); err != nil {
+			t.Fatalf("mark running: %v", err)
+		}
+		if _, err := store.Stop(sess.ID, true, testNow(),
+			func(Session) error { return nil },
+			func(int) error { return nil },
+			func(Session) error { return nil }); err != nil {
+			t.Fatalf("stop: %v", err)
+		}
+		got, err := store.Get(sess.ID)
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		if got.Name != "keep" {
+			t.Fatalf("name = %q, want keep after Stop", got.Name)
+		}
+	})
+}
+
+// TestGetLoadsLegacyRecordWithoutName is the backward-compat guarantee (D4): a
+// record written by an old binary has no `name` key and must load with an empty
+// Name and no error.
+func TestGetLoadsLegacyRecordWithoutName(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(dir)
+	id := "sess-legacy0000"
+	legacy := `{
+  "session_id": "sess-legacy0000",
+  "agent": "claude",
+  "workspace": "/tmp/ws",
+  "environment": "host",
+  "network": "deny",
+  "backend": "system",
+  "status": "created",
+  "created_at": "2026-06-26T00:00:00Z",
+  "updated_at": "2026-06-26T00:00:00Z",
+  "credentials_revoked": false
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, id+".json"), []byte(legacy), 0o600); err != nil {
+		t.Fatalf("seed legacy record: %v", err)
+	}
+	got, err := store.Get(id)
+	if err != nil {
+		t.Fatalf("get legacy: %v", err)
+	}
+	if got.Name != "" {
+		t.Fatalf("legacy record loaded with name = %q, want empty", got.Name)
 	}
 }

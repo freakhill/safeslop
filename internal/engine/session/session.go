@@ -11,8 +11,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 const (
@@ -45,6 +48,7 @@ type ResolvedMetadata struct {
 type Session struct {
 	ID                 string            `json:"session_id"`
 	Profile            string            `json:"profile,omitempty"`
+	Name               string            `json:"name,omitempty"`
 	Agent              string            `json:"agent"`
 	Workspace          string            `json:"workspace"`
 	Environment        string            `json:"environment"`
@@ -191,6 +195,61 @@ func (s Store) Finish(id string, exitCode int, lastErr string, now time.Time) (S
 	sess.ExitCode = &exitCode
 	sess.LastError = lastErr
 	sess.StoppedAt = now.UTC()
+	sess.UpdatedAt = now.UTC()
+	return sess, s.Save(sess)
+}
+
+// maxNameRunes caps a display name post-trim. 64 runes is ample for a human
+// label; note a wide (CJK/emoji) rune is ~2 terminal cells, so the portal must
+// still truncate for display (specs/0065 N1) — this is a storage cap, not a
+// width cap.
+const maxNameRunes = 64
+
+// ValidateName cleans and checks an optional human display name. It is a pure
+// function (no I/O) so the CLI can reuse the exact same rule at create time and
+// at rename. It trims surrounding whitespace, returns ("", nil) for an
+// empty/whitespace-only input (meaning "no name" / clear), and otherwise returns
+// the trimmed name.
+//
+// It rejects any rune in Unicode categories Cc (controls), Cf (format), Zl, or
+// Zp. The name is echoed into the JSONL status line and rendered in a terminal /
+// Emacs buffer, so this closes a line-protocol + display-spoof hazard: Cc covers
+// newlines/NUL/DEL that would break the one-envelope-per-line protocol, and Cf
+// covers the bidi overrides (U+202A-202E/U+2066-2069) and zero-width chars
+// behind Trojan Source (CVE-2021-42574) — an RLO could make a stopped session
+// render as running, and zero-width chars make two names visually identical.
+func ValidateName(raw string) (string, error) {
+	name := strings.TrimSpace(raw)
+	if name == "" {
+		return "", nil
+	}
+	for _, r := range name {
+		if unicode.In(r, unicode.Cc, unicode.Cf, unicode.Zl, unicode.Zp) {
+			return "", fmt.Errorf("name contains a disallowed control, format, or separator character (U+%04X)", r)
+		}
+	}
+	if utf8.RuneCountInString(name) > maxNameRunes {
+		return "", fmt.Errorf("name exceeds %d characters", maxNameRunes)
+	}
+	return name, nil
+}
+
+// Rename sets (or, with an empty name, clears) a session's display name. The
+// name is validated with ValidateName, whose error is returned unchanged so the
+// CLI can map it to INVALID_ARGUMENT. There is no status guard: a label touches
+// no boundary, credential, or process state, so a rename is allowed in any
+// status — created, running, or stopped (specs/0065 D5). ErrNotFound from Get is
+// preserved for an unknown id.
+func (s Store) Rename(id, name string, now time.Time) (Session, error) {
+	sess, err := s.Get(id)
+	if err != nil {
+		return Session{}, err
+	}
+	name, err = ValidateName(name)
+	if err != nil {
+		return Session{}, err
+	}
+	sess.Name = name
 	sess.UpdatedAt = now.UTC()
 	return sess, s.Save(sess)
 }
