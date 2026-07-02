@@ -23,23 +23,22 @@ scroll/cursor preservation from specs/0061 lives in exactly one place:
 | `safeslop-output.el` | read-only envelope output buffers (`safeslop-output-mode`) |
 | `safeslop-session.el` | session commands, terminal attach, detail view |
 | `safeslop-portal.el` | Sessions dashboard |
-| `safeslop-install.el` | Install dashboard |
 | `safeslop-profiles.el` | Profiles dashboard + CUE-backed CRUD |
 | `safeslop.el` | entry point: top-level commands + `C-c s` command map |
 | `safeslop-doom.el` | optional Doom/Evil shim (data-driven binding tables) |
 
 ## Operator UI navigation
 
-The Emacs package is a small operator UI with three surfaces: **Sessions** (`P`),
-**Install** (`I`), and **Profiles** (`F`).  The tab strip at the top of every
+The Emacs package is a small operator UI with two surfaces: **Sessions** (`P`)
+and **Profiles** (`F`).  The tab strip at the top of every
 surface shows each surface's direct switch key next to its name
-(`P Sessions │ I Install │ F Profiles   TAB/[] cycle surface`), and every label
+(`P Sessions │ F Profiles   TAB/[] cycle surface`), and every label
 and key in the strip is clickable with the mouse — so switching surface is never a
 guess.  In any operator UI surface and most result buffers, the shared keys are:
 
 | key | action |
 |---|---|
-| `P` / `I` / `F` | switch directly to Sessions / Install / Profiles |
+| `P` / `F` | switch directly to Sessions / Profiles |
 | `TAB` / `S-TAB` | cycle next / previous surface |
 | `[` / `]` | cycle previous / next surface |
 | `g` (Evil: `gr`) | refresh this view (result buffers rerun read-only commands; detail/inspect views re-render faced, never a raw dump) |
@@ -125,13 +124,6 @@ safety legends as the portal.
 The intended flow is profile → inspect → launch → portal.  Inspect buffers are no
 longer dead ends: `r`, `e`, and `C` act from the detail view too; `g` (Evil:
 `gr`) re-fetches and re-renders the faced view, and `RET` returns to the list.
-
-## Install
-
-`M-x safeslop-install` (`C-c s I`) opens the **Install** surface listing the
-toolchains and runtimes safeslop manages: `p` plan, `r` apply (confirmed,
-async), `v` dry-run, `u` rollback of the tool at point, `g` refresh (Evil:
-`gr`).
 
 ## Debug buffer
 

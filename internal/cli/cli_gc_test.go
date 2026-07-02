@@ -8,26 +8,31 @@ import (
 	engsession "github.com/freakhill/safeslop/internal/engine/session"
 )
 
-func TestRecordSessionBackendPersistsLimaOptIn(t *testing.T) {
+// TestRecordSessionBackendPersistsDetectedRuntime pins specs/0066 D7: recordSessionBackend fills
+// Session.Backend from the detected ambient runtime's Name(). The detection seam is stubbed so the test
+// stays hermetic (no real docker/podman/lima probe).
+func TestRecordSessionBackendPersistsDetectedRuntime(t *testing.T) {
 	store := engsession.NewStore(filepath.Join(t.TempDir(), "sessions"))
 	sess, err := store.Create("claude", "container", t.TempDir(), nowForTest(t))
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	t.Setenv("SAFESLOP_CONTAINER_BACKEND", "lima")
+	orig := detectEngineName
+	t.Cleanup(func() { detectEngineName = orig })
+	detectEngineName = func() string { return "podman" }
 	updated, err := recordSessionBackend(store, sess)
 	if err != nil {
 		t.Fatalf("record backend: %v", err)
 	}
-	if updated.Backend != "lima" {
-		t.Fatalf("backend = %q, want lima", updated.Backend)
+	if updated.Backend != "podman" {
+		t.Fatalf("backend = %q, want podman", updated.Backend)
 	}
 	stored, err := store.Get(sess.ID)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if stored.Backend != "lima" {
-		t.Fatalf("stored backend = %q, want lima", stored.Backend)
+	if stored.Backend != "podman" {
+		t.Fatalf("stored backend = %q, want podman", stored.Backend)
 	}
 }
 
@@ -37,6 +42,9 @@ func TestRecordSessionBackendPersistsRecipeAnchorsForAdHocContainerSession(t *te
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
+	orig := detectEngineName
+	t.Cleanup(func() { detectEngineName = orig })
+	detectEngineName = func() string { return "" } // hermetic: exercise the recipe-anchor path without a runtime probe
 	updated, err := recordSessionBackend(store, sess)
 	if err != nil {
 		t.Fatalf("record backend: %v", err)

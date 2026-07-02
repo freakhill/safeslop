@@ -41,8 +41,24 @@ file transfer between host and sandboxed runtimes.
 - `safeslop session rm --session-id <id> --output json` — permanently remove one stopped/created session record so the portal does not accumulate dead-session corpses. Refuses a running session (stop it first); revokes any still-live staged credentials before deleting, so removal never orphans secrets. Returns `data.removed` (the removed id).
 - `safeslop session prune --output json` — remove every stopped session record in one call, leaving created and running sessions untouched. Runs the liveness reconcile first, so a crashed session (marked `running` but whose process is gone) is persisted as `stopped` and swept in the same pass. Returns `data.removed` (the removed ids). In Emacs these are the portal's `x` (remove one) and `X` (prune) keys.
 - `safeslop doctor` — report available tools and isolation tiers.
-- `safeslop down` — tear down safeslop-managed host-container stacks by label (the Lima VM backend is torn down through its own runtime path).
+- `safeslop down` — tear down safeslop-managed host-container stacks by label, on the detected container runtime.
 - `safeslop gc [--until <age>] [--keep <N>]` — remove only unreferenced safeslop-managed images; current resolving profiles, the repo lockfile, and live sessions anchor images.
+
+## Container runtime
+
+The `container` tier runs on an **ambient, user-provided** container runtime; safeslop detects
+one and drives it, and never installs, upgrades, or manages one. Have one present:
+
+- **docker** (Docker Desktop / OrbStack / any docker-compatible CLI) — the only runtime
+  egress-verified for `network: deny` today.
+- **podman** — `podman` plus a working `podman compose`.
+- **lima** — a user-managed lima instance on a containerd/nerdctl template (`lima nerdctl`).
+
+Selection: `SAFESLOP_CONTAINER_RUNTIME=docker|podman|lima` forces one (used or fail closed — no
+silent fallback); otherwise auto-detect **docker → podman → lima** (first with a working compose
+wins); none present fails closed naming all three. A `network: deny` profile is **refused on
+podman/lima** (not yet egress-verified) unless `SAFESLOP_ALLOW_UNVERIFIED_RUNTIME=1` is set;
+teardown (`down`, the startup sweep, session reap) is never gated.
 
 ## Default policy
 
@@ -75,7 +91,7 @@ after an isolation/network summary, `e` to edit the CUE at that profile's block,
 `n` to create, `c` to clone, `D` for guided manual deletion, and `g` to refresh.
 
 `C-c s P` opens the Sessions portal. The tab strip shows each surface's direct
-switch key (`P` Sessions, `I` Install, `F` Profiles); `TAB`/`S-TAB` or `[`/`]`
+switch key (`P` Sessions, `F` Profiles); `TAB`/`S-TAB` or `[`/`]`
 cycle between them, and the strip is mouse-clickable. Portal row keys: `RET`/`o`
 state-aware open, `R` reattach, `i` details, `k` stop/revoke, `x` remove one
 stopped session, `X` prune all stopped sessions, `n` new, `g` refresh, `a`

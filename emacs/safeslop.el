@@ -21,7 +21,6 @@
 ;;   safeslop-output.el    read-only envelope output buffers
 ;;   safeslop-session.el   session commands, terminal attach, detail view
 ;;   safeslop-portal.el    Sessions dashboard
-;;   safeslop-install.el   Install dashboard
 ;;   safeslop-profiles.el  Profiles dashboard + CUE-backed CRUD
 ;;   safeslop.el           this file: top-level commands + `C-c s' command map
 
@@ -33,7 +32,6 @@
 (require 'safeslop-output)
 (require 'safeslop-session)
 (require 'safeslop-portal)
-(require 'safeslop-install)
 (require 'safeslop-profiles)
 
 ;;;###autoload
@@ -101,7 +99,6 @@ Generated rather than hand-written so it cannot drift from the bindings again
 (defvar safeslop-command-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "P") #'safeslop-portal)
-    (define-key map (kbd "I") #'safeslop-install)
     (define-key map (kbd "F") #'safeslop-profiles)
     (define-key map (kbd "d") #'safeslop-doctor)
     (define-key map (kbd "p") #'safeslop-policy-check-file)

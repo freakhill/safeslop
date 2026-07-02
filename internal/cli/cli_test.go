@@ -93,6 +93,17 @@ func TestLaunchRegistered(t *testing.T) {
 	}
 }
 
+// TestInstallUninstallRemovedFromRoot pins specs/0066 D1: the self-installer surface is gone, so neither
+// `safeslop install` nor `safeslop uninstall` may be registered on the root command.
+func TestInstallUninstallRemovedFromRoot(t *testing.T) {
+	root := newRoot()
+	for _, c := range root.Commands() {
+		if c.Name() == "install" || c.Name() == "uninstall" {
+			t.Fatalf("safeslop %s must stay removed after the ambient-runtime pivot (specs/0066)", c.Name())
+		}
+	}
+}
+
 func TestGcCommandRegistered(t *testing.T) {
 	root := newRoot()
 	for _, c := range root.Commands() {

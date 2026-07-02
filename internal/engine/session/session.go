@@ -94,10 +94,13 @@ func (s Store) Create(agent, environment, workspace string, now time.Time) (Sess
 		Workspace:   abs,
 		Environment: environment,
 		Network:     "deny",
-		Backend:     "system",
-		Status:      StatusCreated,
-		CreatedAt:   now.UTC(),
-		UpdatedAt:   now.UTC(),
+		// Backend is unknown-until-provisioned: session.Create runs BEFORE the container runtime is
+		// detected, so recordSessionBackend fills it from the detected engine's Name() at run time
+		// (specs/0066 D7). Empty rather than a fabricated default.
+		Backend:   "",
+		Status:    StatusCreated,
+		CreatedAt: now.UTC(),
+		UpdatedAt: now.UTC(),
 	}
 	return sess, s.Save(sess)
 }
@@ -116,6 +119,12 @@ func (s Store) Get(id string) (Session, error) {
 	var sess Session
 	if err := json.Unmarshal(b, &sess); err != nil {
 		return Session{}, err
+	}
+	// A legacy on-disk `"backend":"system"` predates the ambient multi-runtime pivot (specs/0066 D7
+	// repurposed Backend from "system"|"lima" to the detected engine name). "system" only ever meant the
+	// ambient host docker, so normalize it to "docker" on read.
+	if sess.Backend == "system" {
+		sess.Backend = "docker"
 	}
 	return sess, nil
 }

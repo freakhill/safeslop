@@ -147,21 +147,45 @@ func TestStoreStopRevokesBeforeKillAndIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestCreateDefaultsBackendSystem(t *testing.T) {
+// TestCreateLeavesBackendUnset pins specs/0066 D7: session.Create runs before the container runtime is
+// detected, so Backend is unknown-until-provisioned ("") rather than a fabricated default; it is filled
+// from the detected engine's Name() at run time by recordSessionBackend.
+func TestCreateLeavesBackendUnset(t *testing.T) {
 	store := NewStore(t.TempDir())
 	sess, err := store.Create("claude", "container", t.TempDir(), testNow())
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if sess.Backend != "system" {
-		t.Fatalf("backend = %q, want system", sess.Backend)
+	if sess.Backend != "" {
+		t.Fatalf("backend = %q, want empty (unknown until provisioned)", sess.Backend)
 	}
 	stored, err := store.Get(sess.ID)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if stored.Backend != "system" {
-		t.Fatalf("stored backend = %q, want system", stored.Backend)
+	if stored.Backend != "" {
+		t.Fatalf("stored backend = %q, want empty", stored.Backend)
+	}
+}
+
+// TestGetNormalizesLegacySystemBackend pins the read-normalization: a legacy on-disk `"backend":"system"`
+// (its only prior meaning was the ambient host docker) loads as "docker" after the multi-runtime pivot.
+func TestGetNormalizesLegacySystemBackend(t *testing.T) {
+	store := NewStore(t.TempDir())
+	sess, err := store.Create("claude", "container", t.TempDir(), testNow())
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	sess.Backend = "system" // simulate a legacy record persisted before specs/0066
+	if err := store.Save(sess); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	stored, err := store.Get(sess.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if stored.Backend != "docker" {
+		t.Fatalf("legacy backend = %q, want normalized to docker", stored.Backend)
 	}
 }
 

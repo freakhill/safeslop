@@ -1,7 +1,6 @@
 package container
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -11,30 +10,16 @@ import (
 
 	"github.com/freakhill/safeslop/internal/engine/container/runtime"
 	"github.com/freakhill/safeslop/internal/engine/exec"
-	"github.com/freakhill/safeslop/internal/engine/install"
 )
 
-// preferLimaBackend reports whether the user opted into the safeslop-managed lima container runtime
-// (SAFESLOP_CONTAINER_BACKEND=lima). Unset → use the ambient host docker when present (today's
-// behaviour); lima is never an automatic fallback, so it is never a surprise VM boot.
-func preferLimaBackend() bool {
-	return os.Getenv("SAFESLOP_CONTAINER_BACKEND") == "lima"
-}
-
-// confirmLimaBlastRadius is the first-run consent gate (specs/0044 Phase 4.2): before safeslop first
-// boots the managed lima VM it itemises the blast radius and requires a typed confirmation. Fails closed
-// when stdin is not a terminal (booting a VM unattended without consent is exactly what this prevents).
-func confirmLimaBlastRadius(lb *runtime.LimaBackend) error {
-	fmt.Fprintln(os.Stderr, lb.BlastRadius())
-	if fi, _ := os.Stdin.Stat(); fi == nil || fi.Mode()&os.ModeCharDevice == 0 {
-		return fmt.Errorf("the lima container VM needs first-run consent; run `safeslop run` interactively once to approve it")
+// policyFromNetwork maps a profile's `network:` field to the runtime.Detect egress posture. Anything
+// other than the explicit "allow" is the safe default (deny), which makes Detect fail-close on an
+// egress-unverified rootless runtime (specs/0066 D6).
+func policyFromNetwork(network string) runtime.NetworkPolicy {
+	if network == "allow" {
+		return runtime.PolicyAllow
 	}
-	fmt.Fprint(os.Stderr, "\nType 'boot the vm' to proceed (anything else aborts): ")
-	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
-	if strings.TrimSpace(line) != "boot the vm" {
-		return fmt.Errorf("aborted: lima VM consent not given")
-	}
-	return lb.RecordConsent()
+	return runtime.PolicyDeny
 }
 
 // materializeRun writes the per-run runtime dir (squid.conf, allowlist.domains, compose.yml,
@@ -114,29 +99,11 @@ func provision(ctx context.Context, sessionID string, agentArgv []string, worksp
 		workspace = real
 	}
 
-	// Select + bring up the container engine. Default: the ambient host docker (unchanged behaviour).
-	// SAFESLOP_CONTAINER_BACKEND=lima opts into the safeslop-managed, pinned, rootless lima VM; lima is
-	// also the fallback when no host docker is present. The lima VM mounts the workspace (writable) so the
-	// agent's edits land on the host repo (specs/0044 Phase 4.1). Backend.Ensure fails closed if its
-	// engine is unavailable (no docker / no limactl).
-	dirs, err := install.DefaultDirs()
-	if err != nil {
-		return nil, "", nil, err
-	}
-	// Lima is OPT-IN, never an automatic fallback: without the opt-in we use the ambient host docker
-	// (and surface the unchanged "needs docker" error if it is absent), so enabling the managed VM is
-	// always a deliberate choice, never a surprise boot.
-	var backend runtime.Backend = &runtime.SystemBackend{}
-	if preferLimaBackend() {
-		lb := runtime.NewLimaBackend(dirs)
-		if lb.NeedsConsent() { // first-run blast-radius gate (Phase 4.2)
-			if cerr := confirmLimaBlastRadius(lb); cerr != nil {
-				return nil, "", nil, cerr
-			}
-		}
-		backend = lb
-	}
-	eng, err = backend.Ensure(ctx, workspace, func(s string) { fmt.Fprintln(os.Stderr, "safeslop: "+s) })
+	// Detect the ambient container runtime (docker → podman → lima) and drive it; safeslop never
+	// provisions one (specs/0066 D3). The deny-tier fail-closed egress gate lives inside Detect, so a
+	// network:deny profile cannot launch on an egress-unverified rootless runtime (podman/lima) without an
+	// explicit opt-in — Detect returns an actionable error instead.
+	eng, err = runtime.Detect(policyFromNetwork(network))
 	if err != nil {
 		return nil, "", nil, err
 	}
