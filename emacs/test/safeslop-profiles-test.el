@@ -54,8 +54,7 @@
   (should (eq (lookup-key safeslop-profiles-mode-map (kbd "d")) #'safeslop-doctor))
   (should-not (eq (lookup-key safeslop-profiles-mode-map (kbd "S")) #'tabulated-list-sort))
   ;; inherited surface switch keys
-  (should (eq (lookup-key safeslop-profiles-mode-map (kbd "P")) #'safeslop-portal))
-  (should (eq (lookup-key safeslop-profiles-mode-map (kbd "I")) #'safeslop-install)))
+  (should (eq (lookup-key safeslop-profiles-mode-map (kbd "P")) #'safeslop-portal)))
 
 (ert-deftest safeslop-test-profiles-valid-name-p ()
   "Name validation accepts CUE-ish identifiers and rejects empty/space/leading-digit."

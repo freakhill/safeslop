@@ -96,8 +96,6 @@ Only allowlisted, non-secret fields are emitted."
     (`("profile" ,(or "show" "list") . ,_) t)
     (`("catalog" . ,_) t)
     (`("bundle" "list" . ,_) t)
-    (`("install" ,(or "status" "plan") . ,_) t)
-    (`("install" "apply" "--dry-run" . ,_) t)
     (_ nil)))
 
 (defun safeslop--error-envelope (code message)

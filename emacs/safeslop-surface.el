@@ -8,12 +8,12 @@
 
 ;;; Commentary:
 
-;; The safeslop operator view is three sibling dashboard buffers — Sessions
-;; (`safeslop-portal'), Install (`safeslop-install'), and Profiles
-;; (`safeslop-profiles') — that share one navigation model (specs/0052).  This
-;; file holds everything common to all three (specs/0062):
+;; The safeslop operator view is two sibling dashboard buffers — Sessions
+;; (`safeslop-portal') and Profiles (`safeslop-profiles') — that share one
+;; navigation model (specs/0052).  This file holds everything common to both
+;; (specs/0062):
 ;;
-;;   - the parent keymap binding the surface switch keys (P/I/F, [/], TAB) and
+;;   - the parent keymap binding the surface switch keys (P/F, [/], TAB) and
 ;;     the textual tab strip rendered atop each buffer, so the active surface
 ;;     is legible without colour (specs/0031 non-colour signalling);
 ;;   - the shared presentation cells: network posture and isolation-tier
@@ -38,13 +38,11 @@
 (require 'safeslop-client)
 
 (declare-function safeslop-portal "safeslop-portal" ())
-(declare-function safeslop-install "safeslop-install" ())
 (declare-function safeslop-profiles "safeslop-profiles" ())
 (declare-function safeslop-doctor "safeslop" ())
 
 (defconst safeslop-surface--order
   '((sessions "Sessions" "P" safeslop-portal)
-    (install  "Install"  "I" safeslop-install)
     (profiles "Profiles" "F" safeslop-profiles))
   "Ordered surfaces: (SYMBOL LABEL KEY COMMAND).
 KEY is the direct switch key shown in the tab strip (also bound in every surface
@@ -58,11 +56,10 @@ modes that set `safeslop-surface-mode-map' as their parent.")
 (defun safeslop-surface--current-sym ()
   "Return the surface symbol for the current buffer's major mode, or nil."
   (cond ((derived-mode-p 'safeslop-portal-mode) 'sessions)
-        ((derived-mode-p 'safeslop-install-mode) 'install)
         ((derived-mode-p 'safeslop-profiles-mode) 'profiles)))
 
 (defun safeslop-surface--tab-strip (active)
-  "Return the `Sessions | Install | Profiles' tab strip for ACTIVE surface.
+  "Return the `Sessions | Profiles' tab strip for ACTIVE surface.
 Each label is preceded by its direct switch key (faced as a key binding) so the
 way to change surface is legible in the strip itself, not hidden.  ACTIVE (a
 surface symbol) is rendered bold via `mode-line-emphasis'; the others are
@@ -307,7 +304,6 @@ Keys are faced as bindings; ends with a blank separator line."
   "Infer the active surface symbol from safeslop ARGS."
   (pcase args
     (`("session" . ,_) 'sessions)
-    (`("install" . ,_) 'install)
     (`("profile" . ,_) 'profiles)
     (`("validate" . ,_) 'profiles)
     (_ nil)))
@@ -342,7 +338,7 @@ returned yet — the slow-CLI pile-up that made refreshes fight input.")
 (cl-defun safeslop-surface-render
     (&key argv label noun entries-fn header-fn empty-fn keep-point then)
   "Fetch ARGV asynchronously, then re-render the current dashboard in place.
-The one render engine behind the Sessions/Install/Profiles surfaces: the fetch
+The one render engine behind the Sessions/Profiles surfaces: the fetch
 runs in a subprocess and the redraw happens in its callback, so neither a manual
 \\`g' nor an auto-refresh timer ever freezes Emacs (specs/0052 #7).
 
@@ -414,7 +410,6 @@ the first row."
 (defvar safeslop-surface-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "P") #'safeslop-portal)
-    (define-key map (kbd "I") #'safeslop-install)
     (define-key map (kbd "F") #'safeslop-profiles)
     (define-key map (kbd "[") #'safeslop-surface-prev)
     (define-key map (kbd "]") #'safeslop-surface-next)

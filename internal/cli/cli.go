@@ -29,7 +29,6 @@ import (
 	engexec "github.com/freakhill/safeslop/internal/engine/exec"
 	"github.com/freakhill/safeslop/internal/engine/gitguard"
 	"github.com/freakhill/safeslop/internal/engine/hostenv"
-	"github.com/freakhill/safeslop/internal/engine/install"
 	"github.com/freakhill/safeslop/internal/engine/launch"
 	"github.com/freakhill/safeslop/internal/engine/policy"
 	"github.com/freakhill/safeslop/internal/engine/secrets"
@@ -68,7 +67,7 @@ func newRoot() *cobra.Command {
 		SilenceErrors: true,
 	}
 	root.PersistentFlags().BoolVar(&jsonOut, "json", false, "emit machine-readable JSON output")
-	root.AddCommand(cmdValidate(), cmdList(), cmdDoctor(), cmdRun(), cmdSession(), cmdTrust(), cmdDown(), cmdGC(), cmdLaunch(), cmdCatalog(), cmdBundle(), cmdProfile(), cmdLock(), cmdInstall(), cmdUninstall())
+	root.AddCommand(cmdValidate(), cmdList(), cmdDoctor(), cmdRun(), cmdSession(), cmdTrust(), cmdDown(), cmdGC(), cmdLaunch(), cmdCatalog(), cmdBundle(), cmdProfile(), cmdLock())
 	return root
 }
 
@@ -367,11 +366,16 @@ func sessionReapBoundary(sess engsession.Session) error {
 	return container.ReapBySession(context.Background(), engineForSession(sess), sess.ID)
 }
 
-func selectedContainerBackendName() string {
-	if os.Getenv("SAFESLOP_CONTAINER_BACKEND") == "lima" {
-		return "lima"
+// detectEngineName reports the ambient container runtime that would drive a session, for recording
+// Session.Backend (specs/0066 D7). It detects with PolicyAllow — recording the name must never be blocked
+// by the deny-tier egress gate — and is best-effort: with no runtime present it returns "" and Backend
+// stays unknown-until-provisioned. Overridable in tests so backend recording stays hermetic.
+var detectEngineName = func() string {
+	eng, err := runtimepkg.Detect(runtimepkg.PolicyAllow)
+	if err != nil {
+		return ""
 	}
-	return "system"
+	return eng.Name()
 }
 
 func recordSessionBackend(store engsession.Store, sess engsession.Session) (engsession.Session, error) {
@@ -379,8 +383,7 @@ func recordSessionBackend(store engsession.Store, sess engsession.Session) (engs
 		return sess, nil
 	}
 	changed := false
-	backend := selectedContainerBackendName()
-	if sess.Backend != backend {
+	if backend := detectEngineName(); backend != "" && sess.Backend != backend {
 		sess.Backend = backend
 		changed = true
 	}
@@ -405,26 +408,30 @@ func recordSessionBackend(store engsession.Store, sess engsession.Session) (engs
 	return sess, store.Save(sess)
 }
 
-func engineForSession(sess engsession.Session) runtimepkg.Engine {
-	if sess.Backend == "lima" {
-		if dirs, err := install.DefaultDirs(); err == nil {
-			return runtimepkg.LimaNerdctlEngine{Limactl: filepath.Join(dirs.BinDir, "limactl"), Instance: "safeslop", UID: os.Getuid(), LimaHome: filepath.Join(runtimepkg.NewLimaBackend(dirs).StateDir(), "home")}
-		}
+// engineForSession returns the container engine to reap a session's boundary through. Teardown/reap must
+// work on ANY ambient runtime, verified or not, so it detects with PolicyAllow (never the deny-tier
+// gate). With no runtime present it falls back to docker — the reap then simply finds nothing to remove
+// (specs/0066 D5).
+func engineForSession(_ engsession.Session) runtimepkg.Engine {
+	if eng, err := runtimepkg.Detect(runtimepkg.PolicyAllow); err == nil {
+		return eng
 	}
 	return runtimepkg.HostDockerEngine{}
 }
 
+// sweepManagedOrphans reaps labelled boundaries whose session record is gone, before a new container run.
+// It detects the ambient runtime with PolicyAllow (teardown is never gated); with no runtime present
+// Detect fails and the sweep is a no-op — nothing safeslop could have started (specs/0066 D5).
 func sweepManagedOrphans(ctx context.Context) error {
-	// The startup sweep is for ambient host docker. The lima backend needs consent/Ensure before an
-	// engine exists, so do not accidentally block an explicit lima run by probing host docker here.
-	if os.Getenv("SAFESLOP_CONTAINER_BACKEND") == "lima" || !container.Available() {
+	eng, err := runtimepkg.Detect(runtimepkg.PolicyAllow)
+	if err != nil {
 		return nil
 	}
 	live, err := container.LiveSessions(sessionStore().Dir)
 	if err != nil {
 		return err
 	}
-	return container.SweepManagedOrphans(ctx, runtimepkg.HostDockerEngine{}, live)
+	return container.SweepManagedOrphans(ctx, eng, live)
 }
 
 func cmdSession() *cobra.Command {
@@ -1224,29 +1231,22 @@ func cmdDown() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			ctx := context.Background()
-			if container.Available() {
-				dir, composeFile, err := container.ComposeForDown()
-				if err != nil {
-					return err
-				}
-				defer os.RemoveAll(dir)
-				// `safeslop down` targets the ambient host docker; the lima VM itself is torn down below.
-				eng := runtimepkg.HostDockerEngine{}
-				if err := container.Down(ctx, eng, composeFile); err != nil {
-					return err
-				}
-				if err := container.ReapManaged(ctx, eng); err != nil {
-					return err
-				}
+			// Detect with PolicyAllow: `down` must clean up whatever ambient runtime safeslop launched on,
+			// verified or not (the deny-tier gate applies only to launching). With no runtime present there
+			// is nothing safeslop could have started, so down is a no-op (specs/0066 D5).
+			eng, err := runtimepkg.Detect(runtimepkg.PolicyAllow)
+			if err != nil {
+				return nil
 			}
-			// Also reap the safeslop-managed lima container VM if one was provisioned (idempotent: a no-op
-			// when limactl is absent or no instance exists). This still runs on hosts without ambient Docker.
-			if dirs, derr := install.DefaultDirs(); derr == nil {
-				if err := runtimepkg.NewLimaBackend(dirs).Teardown(ctx); err != nil {
-					return err
-				}
+			dir, composeFile, err := container.ComposeForDown()
+			if err != nil {
+				return err
 			}
-			return nil
+			defer os.RemoveAll(dir)
+			if err := container.Down(ctx, eng, composeFile); err != nil {
+				return err
+			}
+			return container.ReapManaged(ctx, eng)
 		},
 	}
 }
@@ -1578,234 +1578,6 @@ func profileResolvedData(path, name string, prof policy.Profile) (map[string]any
 		"baseImage": recipe.BaseImage,
 		"recipe":    recipe,
 	}, nil
-}
-
-func cmdInstall() *cobra.Command {
-	var output string
-	c := &cobra.Command{
-		Use:   "install",
-		Short: "Inventory and (later) provision the safeslop toolchain",
-	}
-	// `--output json` adds the enveloped contract shape the Emacs surfaces parse, alongside the
-	// legacy raw `--json`; a persistent flag so every subcommand honors it (specs/0052 E1).
-	c.PersistentFlags().StringVar(&output, "output", "", "enveloped JSON contract output: json")
-	c.AddCommand(&cobra.Command{
-		Use:   "status",
-		Short: "Report whether safeslop, toolchains, and runtimes are installed",
-		Args:  cobra.NoArgs,
-		RunE: func(_ *cobra.Command, _ []string) error {
-			if output == "json" {
-				st := install.Status(context.Background(), Version)
-				emitContract(jsoncontract.OK(map[string]any{
-					"self": st.Self, "toolchains": st.Toolchains, "runtimes": st.Runtimes,
-				}))
-				return nil
-			}
-			if jsonOut {
-				fmt.Println(renderInstallStatusJSON(Version))
-				return nil
-			}
-			st := install.Status(context.Background(), Version)
-			fmt.Printf("safeslop %s  (on PATH: %v)\n", st.Self.Version, st.Self.OnPath)
-			if st.Self.Path != "" {
-				fmt.Printf("  binary: %s\n", st.Self.Path)
-			}
-			printTools("toolchains", st.Toolchains)
-			printTools("runtimes", st.Runtimes)
-			return nil
-		},
-	})
-	c.AddCommand(&cobra.Command{
-		Use:   "plan",
-		Short: "Show the pinned actions needed to install/upgrade toolchains + runtimes",
-		Args:  cobra.NoArgs,
-		RunE: func(_ *cobra.Command, _ []string) error {
-			if output == "json" {
-				res, err := installPlanResult(Version)
-				if err != nil {
-					return err
-				}
-				emitContract(jsoncontract.OK(map[string]any{"pending": res.Pending(), "actions": res.Actions}))
-				return nil
-			}
-			if jsonOut {
-				out, err := renderInstallPlanJSON(Version)
-				if err != nil {
-					return err
-				}
-				fmt.Println(out)
-				return nil
-			}
-			res, err := installPlanResult(Version)
-			if err != nil {
-				return err // fail closed: a bad manifest is an error, not an empty plan
-			}
-			fmt.Printf("%d change(s) pending\n", res.Pending())
-			for _, a := range res.Actions {
-				cur := a.Current
-				if cur == "" {
-					cur = "-"
-				}
-				fmt.Printf("  %-10s %-8s %s -> %s\n", a.Name, a.Kind, cur, a.Desired)
-			}
-			if len(res.Actions) == 0 {
-				fmt.Println("  (desired-state manifest is empty)")
-			}
-			if msg := install.Freshness(time.Now()).Message(); msg != "" {
-				fmt.Printf("\nnote: %s\n", msg) // advisory freshness floor — warn, never block
-			}
-			return nil
-		},
-	})
-	c.AddCommand(func() *cobra.Command {
-		var dryRun bool
-		ac := &cobra.Command{
-			Use:   "apply",
-			Short: "Download, verify (fail-closed), and install the pinned toolchains + runtimes",
-			Args:  cobra.NoArgs,
-			RunE: func(cmd *cobra.Command, _ []string) error {
-				res, err := installPlanResult(Version)
-				if err != nil {
-					return err
-				}
-				if dryRun {
-					if output == "json" {
-						emitContract(jsoncontract.OK(map[string]any{
-							"dry_run": true, "pending": res.Pending(), "actions": res.Actions,
-						}))
-						return nil
-					}
-					if jsonOut {
-						out, _ := renderInstallApplyDryRunJSON(Version)
-						fmt.Println(out)
-						return nil
-					}
-					fmt.Printf("%d change(s) would be applied\n", res.Pending())
-					for _, a := range res.Actions {
-						if a.Kind != install.ActionOK {
-							fmt.Printf("  %-10s %-8s -> %s\n", a.Name, a.Kind, a.Desired)
-						}
-					}
-					return nil
-				}
-				dirs, err := install.DefaultDirs()
-				if err != nil {
-					return err
-				}
-				var events []install.Event
-				emit := func(e install.Event) {
-					switch {
-					case output == "json":
-						events = append(events, e) // buffered; one terminal envelope below
-					case jsonOut:
-						emitJSON(map[string]any{"kind": e.Kind, "tool": e.Tool, "msg": e.Msg})
-					default:
-						fmt.Printf("  [%s] %s %s\n", e.Tool, e.Kind, e.Msg)
-					}
-				}
-				if err := install.Apply(cmd.Context(), res, dirs, install.HTTPFetcher{}, emit); err != nil {
-					if output == "json" {
-						return emitContractError(jsoncontract.CodeIOError, "install apply failed",
-							map[string]any{"error": err.Error(), "events": events})
-					}
-					return err
-				}
-				warnIfNotOnPath(dirs.BinDir)
-				if output == "json" {
-					emitContract(jsoncontract.OK(map[string]any{"events": events}))
-				}
-				return nil
-			},
-		}
-		ac.Flags().BoolVar(&dryRun, "dry-run", false, "show what would be installed without doing it")
-		return ac
-	}())
-	c.AddCommand(&cobra.Command{
-		Use:   "rollback <tool>",
-		Short: "Restore a tool's prior version, kept as a backup by the last install",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			dirs, err := install.DefaultDirs()
-			if err != nil {
-				return err
-			}
-			name := args[0]
-			if err := install.Rollback(name, dirs); err != nil {
-				if output == "json" {
-					return emitContractError(jsoncontract.CodeIOError, "rollback failed",
-						map[string]any{"error": err.Error(), "tool": name})
-				}
-				return err // fail clearly when there is no backup to restore
-			}
-			if output == "json" {
-				emitContract(jsoncontract.OK(map[string]any{"rolled_back": name}))
-				return nil
-			}
-			if jsonOut {
-				emitJSON(map[string]any{"ok": true, "rolled_back": name})
-			} else {
-				fmt.Printf("rolled back %s to its prior version\n", name)
-			}
-			return nil
-		},
-	})
-	return c
-}
-
-func renderInstallApplyDryRunJSON(version string) (string, error) {
-	res, err := installPlanResult(version)
-	if err != nil {
-		return "", err
-	}
-	b, _ := json.MarshalIndent(map[string]any{"dry_run": true, "actions": res.Actions}, "", "  ")
-	return string(b), nil
-}
-
-func warnIfNotOnPath(binDir string) {
-	for _, p := range filepath.SplitList(os.Getenv("PATH")) {
-		if p == binDir {
-			return
-		}
-	}
-	fmt.Fprintf(os.Stderr, "note: %s is not on your $PATH — add it so installed tools resolve\n", binDir)
-}
-
-func renderInstallStatusJSON(version string) string {
-	st := install.Status(context.Background(), version)
-	b, _ := json.MarshalIndent(st, "", "  ")
-	return string(b)
-}
-
-func installPlanResult(version string) (install.Result, error) {
-	st := install.Status(context.Background(), version)
-	return install.Plan(st, install.DesiredState())
-}
-
-func renderInstallPlanJSON(version string) (string, error) {
-	res, err := installPlanResult(version)
-	if err != nil {
-		return "", err
-	}
-	b, _ := json.MarshalIndent(map[string]any{
-		"actions":   res.Actions,
-		"freshness": install.Freshness(time.Now()),
-	}, "", "  ")
-	return string(b), nil
-}
-
-func printTools(label string, tools []install.Tool) {
-	fmt.Printf("  %s:\n", label)
-	for _, t := range tools {
-		mark := "no"
-		if t.Present {
-			mark = "yes"
-		}
-		v := t.Version
-		if v == "" {
-			v = "-"
-		}
-		fmt.Printf("    %-10s %-4s %s\n", t.Name, mark, v)
-	}
 }
 
 func cmdLaunch() *cobra.Command {

@@ -84,8 +84,6 @@ safeslop session rename --session-id <id> --name <label> --output json   set or 
 safeslop doctor                     report available tools and isolation tiers
 safeslop down                       tear down safeslop-managed container stacks
 safeslop gc [--until <age>] [--keep <N>]   remove unreferenced safeslop-managed images
-safeslop install                    inventory and install pinned toolchains/runtimes
-safeslop uninstall                  receipt-driven removal of installed tools
 safeslop launch <profile>           open a terminal running a profile
 ```
 
@@ -158,11 +156,34 @@ when set, is surfaced in the session's `status`/`list` envelope and the Emacs
 portal.
 
 `safeslop down` removes safeslop-managed host-container stacks by label. Container
-startup also sweeps managed, record-less orphan boundaries on the host Docker
-backend. `safeslop gc` only removes safeslop-managed images after protecting the
-current image recipe for resolving profiles, the repo `safeslop.lock.json`, and
-running session image references; `--until` and `--keep` apply only to the
-unreferenced remainder.
+startup also sweeps managed, record-less orphan boundaries on the detected
+container runtime. `safeslop gc` only removes safeslop-managed images after
+protecting the current image recipe for resolving profiles, the repo
+`safeslop.lock.json`, and running session image references; `--until` and `--keep`
+apply only to the unreferenced remainder.
+
+## Container runtime
+
+The `container` tier runs on an **ambient, user-provided** container runtime — safeslop
+detects one and drives it; it never installs, upgrades, or manages one. Have one of these
+present:
+
+- **docker** — Docker Desktop, OrbStack, or any docker-compatible CLI on PATH (today's
+  behaviour). The only runtime egress-verified for the `network: deny` tier.
+- **podman** — `podman` plus a working `podman compose`.
+- **lima** — a user-managed lima instance on a containerd/nerdctl template (`lima nerdctl`).
+
+Selection order: `SAFESLOP_CONTAINER_RUNTIME=docker|podman|lima` (an explicit override — that
+runtime is used or the command fails closed, never a silent fallback to another), else
+auto-detect in the fixed precedence **docker → podman → lima** (first whose CLI *and* working
+compose capability is present wins). With none present/working, the command fails closed and
+names all three.
+
+**Deny-tier fail-closed:** a `network: deny` profile must place the agent on a network with no
+default route. Only docker/OrbStack are egress-verified for this today, so launching a `deny`
+profile on **podman or lima is refused** unless you set `SAFESLOP_ALLOW_UNVERIFIED_RUNTIME=1`
+to accept the (still-unverified) risk. Teardown — `down`, the startup sweep, session reap — is
+never gated, so cleanup works on any detected runtime, verified or not.
 
 ## `safeslop.cue` reference
 
@@ -339,7 +360,7 @@ safeslop launches, only confined accidents).
 | environment | label | summary |
 |---|---|---|
 | `host` | none | No isolation boundary; the agent runs as you. |
-| `container` | egress-allowlisted | Docker/Lima container plus proxy topology for per-domain egress control. |
+| `container` | egress-allowlisted | An ambient docker/podman/lima container plus proxy topology for per-domain egress control. |
 
 Use `container` for routine agent sessions (network-bound agents belong here),
 and `host` only when you accept no isolation.

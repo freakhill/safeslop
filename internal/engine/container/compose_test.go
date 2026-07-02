@@ -120,14 +120,13 @@ func TestComposeNetworksByBackend(t *testing.T) {
 }
 
 // TestComposeRunArgvLimaWrapsInGuest pins that the lima engine routes the same compose run through
-// `limactl shell <inst> … nerdctl …` — the tier code is unchanged, only the engine differs.
+// `lima nerdctl …` against the user's own default instance — the tier code is unchanged, only the engine
+// differs (specs/0066).
 func TestComposeRunArgvLimaWrapsInGuest(t *testing.T) {
-	eng := runtime.LimaNerdctlEngine{Limactl: "/b/limactl", Instance: "safeslop", UID: 501, LimaHome: "/h"}
-	got := strings.Join(composeRunArgv(eng, "/rt/compose.yml", []string{"fish"}), " ")
-	for _, want := range []string{"limactl shell safeslop", "nerdctl compose -f /rt/compose.yml run --rm agent fish"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("lima compose argv missing %q: %s", want, got)
-		}
+	got := strings.Join(composeRunArgv(runtime.LimaEngine{}, "/rt/compose.yml", []string{"fish"}), " ")
+	want := "lima nerdctl compose -f /rt/compose.yml run --rm agent fish"
+	if got != want {
+		t.Fatalf("lima compose argv = %q, want %q", got, want)
 	}
 }
 

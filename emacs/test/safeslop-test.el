@@ -345,20 +345,17 @@ mysterious bare table."
 (ert-deftest safeslop-test-output-safe-rerun-predicate ()
   (should (safeslop--safe-rerun-p '("validate" "safeslop.cue" "--json")))
   (should (safeslop--safe-rerun-p '("session" "status" "--session-id" "sess-x" "--output" "json")))
-  (should (safeslop--safe-rerun-p '("install" "apply" "--dry-run" "--output" "json")))
-  (should-not (safeslop--safe-rerun-p '("install" "apply" "--output" "json")))
   (should-not (safeslop--safe-rerun-p '("profile" "create" "--output" "json"))))
 
-(ert-deftest safeslop-test-surface-order-has-three ()
-  (should (= (length safeslop-surface--order) 3))
-  (should (equal (mapcar #'car safeslop-surface--order) '(sessions install profiles))))
+(ert-deftest safeslop-test-surface-order-has-two ()
+  (should (= (length safeslop-surface--order) 2))
+  (should (equal (mapcar #'car safeslop-surface--order) '(sessions profiles))))
 
 (ert-deftest safeslop-test-surface-tab-strip-shows-switch-keys ()
   "The tab strip advertises the direct switch key before each label and the cycle
 keys after, so changing surface is discoverable in the strip itself."
   (let ((strip (substring-no-properties (safeslop-surface--tab-strip 'sessions))))
     (should (string-match-p "P Sessions" strip))
-    (should (string-match-p "I Install" strip))
     (should (string-match-p "F Profiles" strip))
     (should (string-match-p "cycle surface" strip))))
 
@@ -371,20 +368,20 @@ keys after, so changing surface is discoverable in the strip itself."
   ;; Reachable through each surface's own keymap (portal binds TAB directly; the
   ;; others inherit it via the parent).
   (should (eq (lookup-key safeslop-portal-mode-map (kbd "TAB")) #'safeslop-surface-next))
-  (should (eq (lookup-key safeslop-profiles-mode-map (kbd "TAB")) #'safeslop-surface-next))
-  (should (eq (lookup-key safeslop-install-mode-map (kbd "TAB")) #'safeslop-surface-next)))
+  (should (eq (lookup-key safeslop-profiles-mode-map (kbd "TAB")) #'safeslop-surface-next)))
 
 (ert-deftest safeslop-test-surface-step-cycles ()
   "`safeslop-surface--step' calls the next/prev surface command, wrapping around."
   (let (called)
     (cl-letf (((symbol-function 'safeslop-portal) (lambda () (interactive) (setq called 'sessions)))
-              ((symbol-function 'safeslop-install) (lambda () (interactive) (setq called 'install)))
               ((symbol-function 'safeslop-profiles) (lambda () (interactive) (setq called 'profiles))))
       ;; No safeslop surface is current in a temp buffer, so step starts from the
-      ;; first surface (sessions): +1 -> install, -1 -> profiles (wrap).
+      ;; first surface (sessions); with two surfaces, +1 and -1 both reach the
+      ;; other surface (profiles) by wrapping.
       (with-temp-buffer
         (safeslop-surface--step 1)
-        (should (eq called 'install))
+        (should (eq called 'profiles))
+        (setq called nil)
         (safeslop-surface--step -1)
         (should (eq called 'profiles))))))
 
@@ -409,12 +406,11 @@ fix."
         (should (equal (alist-get 'winB set-starts) 5))))))
 
 (ert-deftest safeslop-test-surface-tab-strip ()
-  "The tab strip names all three surfaces; the active one is emphasized."
-  (let ((strip (safeslop-surface--tab-strip 'install)))
+  "The tab strip names both surfaces; the active one is emphasized."
+  (let ((strip (safeslop-surface--tab-strip 'profiles)))
     (should (string-match-p "Sessions" strip))
-    (should (string-match-p "Install" strip))
     (should (string-match-p "Profiles" strip))
-    (should (eq (get-text-property (string-match "Install" strip) 'face strip)
+    (should (eq (get-text-property (string-match "Profiles" strip) 'face strip)
                 'mode-line-emphasis))
     ;; an inactive label is a clickable link, not emphasized
     (should (eq (get-text-property (string-match "Sessions" strip) 'face strip)
@@ -422,7 +418,6 @@ fix."
 
 (ert-deftest safeslop-test-portal-inherits-surface-keys ()
   "The portal keymap inherits the shared surface switch keys."
-  (should (eq (lookup-key safeslop-portal-mode-map (kbd "I")) #'safeslop-install))
   (should (eq (lookup-key safeslop-portal-mode-map (kbd "F")) #'safeslop-profiles))
   (should (eq (lookup-key safeslop-portal-mode-map (kbd "]")) #'safeslop-surface-next))
   ;; the portal's own keys still win over the parent
@@ -664,19 +659,6 @@ instead of staying blank (the mocked fetch here never calls back)."
       (let ((s (buffer-substring-no-properties (point-min) (point-max))))
         (should (string-match-p "checking sessions" s))
         (should (string-match-p "Sessions" s))))))
-
-(ert-deftest safeslop-test-install-error-banner ()
-  "Install surface failures render the persistent banner too (shared engine)."
-  (cl-letf (((symbol-function 'safeslop--call-json-async)
-             (lambda (_args cb)
-               (funcall cb (safeslop--error-envelope
-                            "IO_ERROR" "receipt store unreadable")))))
-    (with-temp-buffer
-      (safeslop-install-mode)
-      (safeslop-install--render)
-      (let ((s (buffer-substring-no-properties (point-min) (point-max))))
-        (should (string-match-p "install status failed" s))
-        (should (string-match-p "receipt store unreadable" s))))))
 
 (ert-deftest safeslop-test-portal-auto-refresh-skips-in-flight ()
   "The auto-refresh timer skips a tick while a prior async fetch is still in

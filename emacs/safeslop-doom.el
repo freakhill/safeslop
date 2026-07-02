@@ -35,7 +35,6 @@
 ;;;###autoload (autoload 'safeslop-switch-to-session-buffer "safeslop" nil t)
 ;;;###autoload (autoload 'safeslop-show-last-error "safeslop" nil t)
 ;;;###autoload (autoload 'safeslop-help "safeslop" nil t)
-;;;###autoload (autoload 'safeslop-install "safeslop" nil t)
 ;;;###autoload (autoload 'safeslop-profiles "safeslop" nil t)
 
 (require 'safeslop)
@@ -51,7 +50,6 @@
     ("q" . quit-window)
     ;; Shared surface switch keys (Evil does not consult the keymap parent).
     ("P" . safeslop-portal)
-    ("I" . safeslop-install)
     ("F" . safeslop-profiles)
     ("[" . safeslop-surface-prev)
     ("]" . safeslop-surface-next)
@@ -79,12 +77,6 @@ Applied to each mode in `safeslop-doom--evil-mode-keys' after its own keys.")
      ("^"   . safeslop-portal-follow-profile)
      ("gr"  . safeslop-portal-refresh)
      ("ga"  . safeslop-portal-toggle-auto-refresh))
-    (safeslop-install-mode safeslop-install-mode-map
-     ("gr" . safeslop-install-refresh)
-     ("p" . safeslop-install-plan)
-     ("r" . safeslop-install-apply)
-     ("v" . safeslop-install-dry-run)
-     ("u" . safeslop-install-rollback))
     (safeslop-profiles-mode safeslop-profiles-mode-map
      ("RET" . safeslop-profiles-inspect)
      ("i"   . safeslop-profiles-inspect)
