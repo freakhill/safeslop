@@ -54,8 +54,8 @@
    (safeslop-install--tool-rows "runtime" (alist-get 'runtimes data))))
 
 (defconst safeslop-install--key-hints
-  '(("g" . "refresh") ("p" . "plan") ("x" . "apply") ("D" . "dry-run")
-    ("b" . "rollback") ("d" . "doctor") ("E" . "error") ("L" . "debug")
+  '(("g" . "refresh") ("p" . "plan") ("r" . "apply") ("v" . "dry-run")
+    ("u" . "rollback") ("d" . "doctor") ("E" . "error") ("L" . "debug")
     ("?" . "help") ("q" . "quit"))
   "Key/action pairs shown in the install surface's in-buffer legend.")
 
@@ -140,9 +140,9 @@ Emacs."
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "g") #'safeslop-install-refresh)
     (define-key map (kbd "p") #'safeslop-install-plan)
-    (define-key map (kbd "x") #'safeslop-install-apply)
-    (define-key map (kbd "D") #'safeslop-install-dry-run)
-    (define-key map (kbd "b") #'safeslop-install-rollback)
+    (define-key map (kbd "r") #'safeslop-install-apply)
+    (define-key map (kbd "v") #'safeslop-install-dry-run)
+    (define-key map (kbd "u") #'safeslop-install-rollback)
     ;; d/E/L/?/q and the surface switch keys fall through to the shared parent.
     (set-keymap-parent map safeslop-surface-mode-map)
     map)
@@ -162,7 +162,7 @@ Emacs."
 ;;;###autoload
 (defun safeslop-install ()
   "Open the safeslop install/update surface: toolchains + runtimes you can act on.
-Keys: g refresh, p plan, x apply, D dry-run, b rollback, d doctor; P/I/F switch
+Keys: g refresh, p plan, r apply, v dry-run, u rollback, d doctor; P/I/F switch
 surface, [/] cycle."
   (interactive)
   (let ((buf (get-buffer-create safeslop-install-buffer-name)))

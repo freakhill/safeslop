@@ -222,16 +222,44 @@ This is the noninteractive/testable profile-picker bridge used by
   "Return exact argv for starting SESSION-ID under a detached supervisor."
   (list "session" "run" "--session-id" session-id "--detach"))
 
-(defun safeslop-session--session-id-candidates (&optional envelope)
-  "Return session ids from a `session list' ENVELOPE, or fetch them synchronously."
+(defun safeslop-session--sessions (&optional envelope)
+  "Return session alists from a `session list' ENVELOPE, or fetch synchronously."
   (let ((env (or envelope (safeslop--call-json '("session" "list" "--output" "json")))))
     (when (safeslop-contract-ok-p env)
-      (mapcar (lambda (s) (alist-get 'session_id s))
-              (alist-get 'sessions (safeslop-contract-data env))))))
+      (alist-get 'sessions (safeslop-contract-data env)))))
+
+(defun safeslop-session--session-id-candidates (&optional envelope)
+  "Return session ids from a `session list' ENVELOPE, or fetch them synchronously."
+  (mapcar (lambda (s) (alist-get 'session_id s))
+          (safeslop-session--sessions envelope)))
+
+(defun safeslop-session--annotate (sess)
+  "Return the completion annotation for session alist SESS (specs/0063 F7).
+Bare ids are opaque; annotate with name (when the record has one — specs/0065
+forward-compat), agent, status, and workspace so the pick is informed."
+  (let ((name (alist-get 'name sess))
+        (agent (alist-get 'agent sess))
+        (status (alist-get 'status sess))
+        (ws (alist-get 'workspace sess)))
+    (concat "  "
+            (string-join
+             (delq nil (list (and (stringp name) (not (string-empty-p name)) name)
+                             agent status
+                             (and (stringp ws) (not (string-empty-p ws))
+                                  (abbreviate-file-name ws))))
+             " · "))))
 
 (defun safeslop-session--read-id (prompt)
-  "Read a session id with completion over known sessions; free text is allowed."
-  (completing-read prompt (safeslop-session--session-id-candidates) nil nil))
+  "Read a session id with annotated completion; free text is allowed."
+  (let* ((sessions (safeslop-session--sessions))
+         (by-id (mapcar (lambda (s) (cons (alist-get 'session_id s) s)) sessions))
+         (completion-extra-properties
+          (list :annotation-function
+                (lambda (id)
+                  (if-let* ((sess (cdr (assoc id by-id))))
+                      (safeslop-session--annotate sess)
+                    "")))))
+    (completing-read prompt (mapcar #'car by-id) nil nil)))
 
 (defvar-local safeslop-session--run-output nil
   "Raw stdout accumulated from the `session run' process for this buffer.
@@ -452,10 +480,12 @@ JSONL status fallback (`safeslop-session-status-fallback')."
                    (line "Agent:" (field 'agent))
                    (unless (string-empty-p (field 'profile)) (line "Profile:" (field 'profile)))
                    (line "Workspace:" (abbreviate-file-name (field 'workspace)))
-                   (line "Environment:" (field 'environment))
-                   (line "Network:" network (and (equal network "allow") 'safeslop-net-allow))
+                   ;; Same tier/net colour channel as the dashboards (specs/0063
+                   ;; F11): the text label stays, colour + help-echo reinforce it.
+                   (line "Environment:" (safeslop-surface--env-cell (field 'environment)))
+                   (line "Network:" (safeslop-surface--net-cell network))
                    (line "Status:" status)
-                   (line "Lifecycle:" (if detached "detached (survives buffer; reattach with R)"
+                   (line "Lifecycle:" (if detached "detached (survives buffer; reattach with A)"
                                          "coupled (tied to its terminal buffer)"))
                    (line "Credentials:" (if revoked "revoked" "live") (if revoked 'success 'warning))
                    (unless (string-empty-p (field 'pid)) (line "PID:" (field 'pid)))
@@ -464,11 +494,11 @@ JSONL status fallback (`safeslop-session-status-fallback')."
                    (when detached (line "Socket:" socket))
                    ""
                    (pcase status
-                     ("created" "Next: RET run coupled · D detach · k stop/revoke · P portal")
+                     ("created" "Next: RET/r run coupled · R detach · s stop/revoke · P portal")
                      ("running" (if detached
-                                    "Next: RET/R join detached · k stop/revoke · P portal"
-                                  "Next: RET focus terminal · k stop/revoke · P portal"))
-                     (_ "Next: n new session · P portal"))))
+                                    "Next: RET/A join detached · s stop/revoke · P portal"
+                                  "Next: RET focus terminal · s stop/revoke · P portal"))
+                     (_ "Next: c new session · P portal"))))
        "\n"))))
 
 ;;;###autoload
@@ -481,6 +511,12 @@ JSONL status fallback (`safeslop-session-status-fallback')."
           (safeslop-output-mode)
           (setq safeslop-output--args (list "session" "status" "--session-id" session-id "--output" "json")
                 safeslop-output--buffer-name (buffer-name))
+          ;; Refresh (raw `g' / Evil `gr') re-renders this faced detail view;
+          ;; the generic output path would degrade it to the raw envelope dump
+          ;; (specs/0063 F5).
+          (setq safeslop-output--rerender
+                (lambda (env)
+                  (safeslop-session-detail session-id (safeslop-contract-data env))))
           (let ((inhibit-read-only t))
             (erase-buffer)
             (insert (safeslop-surface--breadcrumb safeslop-output--args))

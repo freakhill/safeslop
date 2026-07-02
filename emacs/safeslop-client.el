@@ -117,14 +117,16 @@ just before the callback runs.  Callbacks that report process outcome (the
 session progress buffer) must read it immediately — sentinels run one at a
 time, so the value is stable for the duration of the callback.")
 
-(defun safeslop--finish-envelope (stdout status)
+(defun safeslop--finish-envelope (stdout status &optional stderr-line)
   "Parse CLI STDOUT (process exit STATUS) into a contract envelope, gracefully.
 Shared by the synchronous `safeslop--call-json' and the asynchronous
 `safeslop--call-json-async': records the result in the debug log, updates
 `safeslop-last-error' and `safeslop--last-call-status', and never raises —
 non-JSON or empty output (e.g. a stale binary that predates a subcommand) yields
 a CLIENT_* error envelope with a clear, actionable message instead of a
-`json-parse-error' crash."
+`json-parse-error' crash.  STDERR-LINE, when non-nil, is the first line the
+process wrote to stderr; it is folded into the failure message and debug log so
+the real reason (specs/0063 F9) is not lost behind \"exit status N\"."
   (setq safeslop--last-call-status status)
   (let ((envelope (condition-case _err
                       (safeslop-contract-parse-string stdout)
@@ -140,13 +142,15 @@ a CLIENT_* error envelope with a clear, actionable message instead of a
           envelope)
       ;; Non-JSON / unparseable output: surface a useful message, don't crash.
       (let* ((line (string-trim (or (car (split-string stdout "\n" t "[ \t\r]*")) "")))
+             (stderr-note (if stderr-line (format " — stderr: %s" stderr-line) ""))
              (msg (if (string-empty-p line)
-                      (format "safeslop produced no output (status %s); is `%s' installed and current? Run `make install'."
-                              status safeslop-program)
-                    (format "safeslop did not return JSON (status %s): %s — is `%s' current? Run `make install'."
-                            status line safeslop-program))))
+                      (format "safeslop produced no output (status %s)%s; is `%s' installed and current? Run `make install'."
+                              status stderr-note safeslop-program)
+                    (format "safeslop did not return JSON (status %s): %s%s — is `%s' current? Run `make install'."
+                            status line stderr-note safeslop-program))))
         (setq safeslop-last-error msg)
-        (safeslop--debug :event 'result :status status :ok "nil" :error "non-json")
+        (safeslop--debug :event 'result :status status :ok "nil" :error "non-json"
+                         :detail (or stderr-line "-"))
         (safeslop--error-envelope "CLIENT_NON_JSON" msg)))))
 
 (defvar safeslop--debug-call-event 'call
@@ -162,8 +166,11 @@ any genuinely fast, must-be-synchronous caller.  Degrades gracefully via
 `safeslop--finish-envelope'."
   (safeslop--debug :event safeslop--debug-call-event :argv (string-join args " "))
   (with-temp-buffer
+    ;; DESTINATION (t nil): stdout here, stderr discarded — the envelope parse
+    ;; must never see stderr noise (specs/0063 F9; the async runner separates
+    ;; and reports stderr instead, so prefer it for anything user-facing).
     (let ((status (condition-case err
-                      (apply #'call-process safeslop-program nil t nil args)
+                      (apply #'call-process safeslop-program nil '(t nil) nil args)
                     (error (insert (error-message-string err)) -1))))
       (safeslop--finish-envelope (buffer-string) status))))
 
@@ -174,30 +181,46 @@ envelope (a real one, or a CLIENT_* error envelope on a missing program / non-JS
 output) — and runs in the process sentinel once the subprocess exits, so a slow
 command never blocks Emacs's main thread.  STDERR, when non-nil, is a buffer that
 receives the process's stderr (used for user-visible progress, e.g. lazy image
-builds); stdout stays reserved for the JSON envelope either way.  Returns the
-process, or nil when it could not be spawned (CALLBACK is still invoked, with a
-client error envelope)."
+builds); when nil, a private stderr sink is attached instead (specs/0063 F9), so
+stderr noise can never corrupt the stdout envelope parse, and its first line is
+folded into the failure diagnostics.  Returns the process, or nil when it could
+not be spawned (CALLBACK is still invoked, with a client error envelope)."
   (safeslop--debug :event safeslop--debug-call-event :argv (string-join args " "))
-  (let ((buf (generate-new-buffer " *safeslop-call*")))
+  (let* ((buf (generate-new-buffer " *safeslop-call*"))
+         (owns-stderr (null stderr))
+         (stderr-buf (or stderr (generate-new-buffer " *safeslop-stderr*"))))
     (condition-case err
-        (make-process
-         :name "safeslop-call-json"
-         :buffer buf
-         :command (cons safeslop-program args)
-         :connection-type 'pipe
-         :noquery t
-         :stderr stderr
-         :sentinel
-         (lambda (proc _event)
-           (unless (process-live-p proc)
-             (let ((stdout (if (buffer-live-p buf)
-                               (with-current-buffer buf (buffer-string))
-                             ""))
-                   (status (process-exit-status proc)))
-               (when (buffer-live-p buf) (kill-buffer buf))
-               (funcall callback (safeslop--finish-envelope stdout status))))))
+        (let ((proc
+               (make-process
+                :name "safeslop-call-json"
+                :buffer buf
+                :command (cons safeslop-program args)
+                :connection-type 'pipe
+                :noquery t
+                :stderr stderr-buf
+                :sentinel
+                (lambda (proc _event)
+                  (unless (process-live-p proc)
+                    (let ((stdout (if (buffer-live-p buf)
+                                      (with-current-buffer buf (buffer-string))
+                                    ""))
+                          (status (process-exit-status proc))
+                          (stderr-line
+                           (when (and owns-stderr (buffer-live-p stderr-buf))
+                             (with-current-buffer stderr-buf
+                               (car (split-string (buffer-string) "\n" t "[ \t\r]*"))))))
+                      (when (buffer-live-p buf) (kill-buffer buf))
+                      (when (and owns-stderr (buffer-live-p stderr-buf))
+                        (kill-buffer stderr-buf))
+                      (funcall callback
+                               (safeslop--finish-envelope stdout status stderr-line))))))))
+          ;; The private sink must never prompt about its pipe process at exit.
+          (when-let* ((sp (get-buffer-process stderr-buf)))
+            (set-process-query-on-exit-flag sp nil))
+          proc)
       (error
        (when (buffer-live-p buf) (kill-buffer buf))
+       (when (and owns-stderr (buffer-live-p stderr-buf)) (kill-buffer stderr-buf))
        (let ((msg (format "could not run `%s': %s — is it installed? Run `make install'."
                           safeslop-program (error-message-string err))))
          (setq safeslop-last-error msg

@@ -62,21 +62,41 @@ CALLBACK, when given, is called with the envelope once it arrives (used by tests
        (safeslop--show-envelope-buffer "*safeslop validate*" args envelope)
        (when callback (funcall callback envelope))))))
 
+(defun safeslop--buffers ()
+  "Return live safeslop buffers, most recently used first.
+Matches the `*safeslop…*' naming family shared by dashboards, output/result
+buffers, session terminals, detail/inspect views, progress, and the debug log."
+  (seq-filter (lambda (b) (string-match-p "\\`\\*safeslop" (buffer-name b)))
+              (buffer-list)))
+
 ;;;###autoload
 (defun safeslop-switch-to-session-buffer ()
-  "Switch to the latest safeslop buffer."
+  "Switch to a live safeslop buffer, most recently used first.
+Offers every safeslop buffer family (specs/0063 F8), not just doctor/validate."
   (interactive)
-  (let ((buf (or (get-buffer "*safeslop doctor*")
-                 (get-buffer "*safeslop validate*"))))
-    (if buf
-        (pop-to-buffer buf)
-      (message "No safeslop buffer yet"))))
+  (let ((names (mapcar #'buffer-name (safeslop--buffers))))
+    (if names
+        (pop-to-buffer (completing-read "safeslop buffer: " names nil t nil nil
+                                        (car names)))
+      (message "No safeslop buffer yet — C-c s P opens the portal"))))
 
 ;;;###autoload
 (defun safeslop-help ()
-  "Show safeslop Emacs help."
+  "Show safeslop Emacs help, generated from the real `C-c s' command map.
+Generated rather than hand-written so it cannot drift from the bindings again
+(specs/0063 F8)."
   (interactive)
-  (message "safeslop: C-c s P portal, I install, F profiles, d doctor, n new session, l list, L debug log"))
+  (let (pairs)
+    (map-keymap
+     (lambda (event def)
+       (when (and (symbolp def) (commandp def))
+         (push (format "%s %s"
+                       (key-description (vector event))
+                       (replace-regexp-in-string "\\`safeslop-" ""
+                                                 (symbol-name def)))
+               pairs)))
+     safeslop-command-map)
+    (message "safeslop: C-c s %s" (string-join (nreverse pairs) ", "))))
 
 (defvar safeslop-command-map
   (let ((map (make-sparse-keymap)))

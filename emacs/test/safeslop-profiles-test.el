@@ -42,10 +42,14 @@
   (should (eq (lookup-key safeslop-profiles-mode-map (kbd "RET")) #'safeslop-profiles-inspect))
   (should (eq (lookup-key safeslop-profiles-mode-map (kbd "i")) #'safeslop-profiles-inspect))
   (should (eq (lookup-key safeslop-profiles-mode-map (kbd "e")) #'safeslop-profiles-edit))
-  (should (eq (lookup-key safeslop-profiles-mode-map (kbd "n")) #'safeslop-profiles-create))
-  (should (eq (lookup-key safeslop-profiles-mode-map (kbd "c")) #'safeslop-profiles-clone))
+  (should (eq (lookup-key safeslop-profiles-mode-map (kbd "c")) #'safeslop-profiles-create))
+  (should (eq (lookup-key safeslop-profiles-mode-map (kbd "C")) #'safeslop-profiles-clone))
   (should (eq (lookup-key safeslop-profiles-mode-map (kbd "v")) #'safeslop-profiles-validate))
-  (should (eq (lookup-key safeslop-profiles-mode-map (kbd "x")) #'safeslop-profiles-launch))
+  (should (eq (lookup-key safeslop-profiles-mode-map (kbd "r")) #'safeslop-profiles-launch))
+  ;; specs/0063 F2: launch left `x' and create left `n', so cross-surface
+  ;; muscle memory can't fire the wrong risk class.
+  (should-not (lookup-key safeslop-profiles-mode-map (kbd "x")))
+  (should-not (lookup-key safeslop-profiles-mode-map (kbd "n")))
   (should (eq (lookup-key safeslop-profiles-mode-map (kbd "D")) #'safeslop-profiles-delete))
   (should (eq (lookup-key safeslop-profiles-mode-map (kbd "d")) #'safeslop-doctor))
   (should-not (eq (lookup-key safeslop-profiles-mode-map (kbd "S")) #'tabulated-list-sort))

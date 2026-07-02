@@ -168,9 +168,29 @@ Pure extraction: a failed list yields nil, and the shared render engine owns
 echoing the error and inserting the persistent in-buffer banner."
   (alist-get 'sessions (safeslop-contract-data envelope)))
 
+(defconst safeslop-portal--status-ranks
+  '(("running" . 0) ("created" . 1) ("stopped" . 2)
+    ("exited" . 3) ("failed" . 3) ("error" . 3) ("cancelled" . 3))
+  "Lifecycle sort rank per status: actionable rows first (specs/0063 F3).")
+
+(defun safeslop-portal--status-rank (status)
+  "Return STATUS's lifecycle sort rank; unknown statuses sink to the bottom."
+  (or (cdr (assoc status safeslop-portal--status-ranks)) 9))
+
+(defun safeslop-portal--session< (a b)
+  "Order sessions A and B by lifecycle rank, then session id (deterministic)."
+  (let ((ra (safeslop-portal--status-rank (safeslop-portal--field a 'status)))
+        (rb (safeslop-portal--status-rank (safeslop-portal--field b 'status))))
+    (if (= ra rb)
+        (string< (safeslop-portal--field a 'session_id)
+                 (safeslop-portal--field b 'session_id))
+      (< ra rb))))
+
 (defun safeslop-portal--rows (sessions)
-  "Build `tabulated-list-entries' from SESSIONS (a list of alists), status-ordered.
-Pure: SESSIONS is already-fetched data, so the row builder never blocks on I/O."
+  "Build `tabulated-list-entries' from SESSIONS (a list of alists), lifecycle-ordered.
+Running and created rows come first (specs/0063 F3) so the actionable sessions
+are where point lands.  Pure: SESSIONS is already-fetched data, so the row
+builder never blocks on I/O."
   (mapcar
    (lambda (sess)
      (let ((id (safeslop-portal--field sess 'session_id)))
@@ -185,10 +205,7 @@ Pure: SESSIONS is already-fetched data, so the row builder never blocks on I/O."
                      (safeslop-portal--recipe-cell sess)
                      (safeslop-portal--image-cell sess)
                      (abbreviate-file-name (safeslop-portal--field sess 'workspace))))))
-   (sort (copy-sequence sessions)
-         (lambda (a b)
-           (string< (safeslop-portal--field a 'status)
-                    (safeslop-portal--field b 'status))))))
+   (sort (copy-sequence sessions) #'safeslop-portal--session<)))
 
 ;;; Row actions -------------------------------------------------------------
 
@@ -218,11 +235,12 @@ Pure: SESSIONS is already-fetched data, so the row builder never blocks on I/O."
     (pcase (safeslop-portal--primary-action
             (safeslop-portal--field sess 'status)
             (safeslop-portal--field sess 'socket))
-      ('run (safeslop-session-attach id))
+      ('run (when (safeslop-portal--confirm-run sess)
+              (safeslop-session-attach id)))
       ('reattach (safeslop-session-reattach id))
       ('live (if-let* ((buf (get-buffer (concat "*safeslop-" id "*"))))
                  (pop-to-buffer buf)
-               (message "safeslop: %s is already running coupled; press i for details or k to stop/revoke"
+               (message "safeslop: %s is already running coupled; press i for details or s to stop/revoke"
                         (safeslop-portal--short-id id))))
       ('status (safeslop-session-detail id sess)))))
 
@@ -236,10 +254,10 @@ Pure: SESSIONS is already-fetched data, so the row builder never blocks on I/O."
     (cond
      ((and (stringp socket) (not (string-empty-p socket))) (safeslop-session-reattach id))
      ((equal status "created")
-      (message "safeslop: %s is not detached — press D to start detached, or RET to run coupled"
+      (message "safeslop: %s is not detached — press R to start detached, or RET to run coupled"
                (safeslop-portal--short-id id)))
      ((equal status "running")
-      (message "safeslop: %s is coupled, not detached — RET focuses its terminal, k stops/revokes"
+      (message "safeslop: %s is coupled, not detached — RET focuses its terminal, s stops/revokes"
                (safeslop-portal--short-id id)))
      (t (message "safeslop: %s is not running — press i for details"
                  (safeslop-portal--short-id id))))))
@@ -249,6 +267,37 @@ Pure: SESSIONS is already-fetched data, so the row builder never blocks on I/O."
   (interactive)
   (let ((sess (safeslop-portal--session-at-point)))
     (safeslop-session-detail (safeslop-portal--field sess 'session_id) sess)))
+
+(defun safeslop-portal--confirm-run (sess)
+  "Confirm running SESS with the same isolation/network summary as Profiles.
+The RET run-branch and `r' share this (specs/0063 F4): running a created
+session is the same world-changing action as launching from a profile, so it
+carries the same danger summary instead of starting silently."
+  (yes-or-no-p
+   (format "Run %s [%s]? "
+           (safeslop-portal--short-id (safeslop-portal--field sess 'session_id))
+           (safeslop-surface--danger-summary
+            (safeslop-portal--field sess 'agent)
+            (safeslop-portal--field sess 'environment)
+            (safeslop-portal--field sess 'network)))))
+
+(defun safeslop-portal-run ()
+  "Run the created session at point coupled, after the isolation/network confirm.
+On a session in any other state, explain the applicable key instead: RET
+already does the state-aware thing."
+  (interactive)
+  (let* ((sess (safeslop-portal--session-at-point))
+         (id (safeslop-portal--field sess 'session_id))
+         (status (safeslop-portal--field sess 'status)))
+    (cond
+     ((equal status "created")
+      (when (safeslop-portal--confirm-run sess)
+        (safeslop-session-attach id)))
+     ((equal status "running")
+      (message "safeslop: %s is already running — RET focuses/joins it, s stops it"
+               (safeslop-portal--short-id id)))
+     (t (message "safeslop: %s is %s — x removes the record, c creates a new session"
+                 (safeslop-portal--short-id id) status)))))
 
 (defun safeslop-portal-run-detached ()
   "Start the session at point detached, after a credential-lifetime warning."
@@ -297,18 +346,19 @@ refresh here would race the still-running create."
 
 (defun safeslop-portal-remove ()
   "Remove the stopped session at point from the list (clear a dead-session corpse).
-Refuses a running session (stop it first with `k'); stopped/created records are
-deleted after confirmation.  `safeslop session rm' revokes any still-live staged
-credentials before deleting, so a removal never orphans secrets."
+Refuses a running session (stop it first with `s'); stopped/created records are
+deleted after a light `y-or-n-p' confirm (specs/0063 F6 — cleanup of inert
+records, not a lifecycle action).  `safeslop session rm' revokes any still-live
+staged credentials before deleting, so a removal never orphans secrets."
   (interactive)
   (let* ((sess (safeslop-portal--session-at-point))
          (id (safeslop-portal--field sess 'session_id))
          (status (safeslop-portal--field sess 'status)))
     (when (equal status "running")
-      (user-error "%s is running — press k to stop/revoke it first, then x to remove"
+      (user-error "%s is running — press s to stop/revoke it first, then x to remove"
                   (safeslop-portal--short-id id)))
-    (when (yes-or-no-p (format "Remove %s (%s) from the list? "
-                               (safeslop-portal--short-id id) status))
+    (when (y-or-n-p (format "Remove %s (%s) from the list? "
+                            (safeslop-portal--short-id id) status))
       (safeslop-session-remove
        id (lambda (env)
             (if (safeslop-contract-ok-p env)
@@ -323,7 +373,7 @@ Running and created sessions are left untouched; crashed sessions (marked runnin
 but whose process is gone) are reconciled to stopped and pruned in the same pass.
 Credentials are revoked before each record is deleted."
   (interactive)
-  (when (yes-or-no-p "Remove all stopped sessions from the list? ")
+  (when (y-or-n-p "Remove all stopped sessions from the list? ")
     (safeslop-session-prune
      (lambda (env)
        (if (safeslop-contract-ok-p env)
@@ -337,10 +387,10 @@ Credentials are revoked before each record is deleted."
 ;;; Header + render -----------------------------------------------------------
 
 (defconst safeslop-portal--key-hints
-  '(("RET" . "open") ("D" . "detach") ("R" . "reattach") ("i" . "details")
-    ("k" . "stop/revoke") ("x" . "remove") ("X" . "prune") ("n" . "new")
-    ("f" . "profile") ("g" . "refresh") ("a" . "auto") ("d" . "doctor")
-    ("E" . "error") ("L" . "debug") ("?" . "help") ("q" . "quit"))
+  '(("RET" . "open") ("r" . "run") ("R" . "detach") ("A" . "reattach")
+    ("i" . "details") ("s" . "stop/revoke") ("x" . "remove") ("X" . "prune")
+    ("c" . "new") ("^" . "profile") ("g" . "refresh") ("a" . "auto")
+    ("d" . "doctor") ("E" . "error") ("L" . "debug") ("?" . "help") ("q" . "quit"))
   "Key/action pairs shown in the portal's in-buffer shortcut legend.")
 
 (defun safeslop-portal--legend ()
@@ -383,7 +433,7 @@ KEEP-POINT/THEN — see its docstring for the scroll/cursor guarantees."
    :label "session list"
    :noun "sessions"
    :header-fn #'safeslop-portal--header
-   :empty-fn (lambda () (safeslop-surface--empty-state "sessions" "n"))
+   :empty-fn (lambda () (safeslop-surface--empty-state "sessions" "c"))
    :entries-fn (lambda (envelope)
                  (let ((sessions (safeslop-portal--sessions-from envelope)))
                    (setq safeslop-portal--sessions-by-id
@@ -477,14 +527,15 @@ A nil or non-positive interval leaves the portal static (manual `g' only)."
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "RET") #'safeslop-portal-open)
     (define-key map (kbd "o")   #'safeslop-portal-open)
-    (define-key map (kbd "D")   #'safeslop-portal-run-detached)
-    (define-key map (kbd "R")   #'safeslop-portal-reattach)
+    (define-key map (kbd "r")   #'safeslop-portal-run)
+    (define-key map (kbd "R")   #'safeslop-portal-run-detached)
+    (define-key map (kbd "A")   #'safeslop-portal-reattach)
     (define-key map (kbd "i")   #'safeslop-portal-status)
-    (define-key map (kbd "k")   #'safeslop-portal-stop)
+    (define-key map (kbd "s")   #'safeslop-portal-stop)
     (define-key map (kbd "x")   #'safeslop-portal-remove)
     (define-key map (kbd "X")   #'safeslop-portal-prune)
-    (define-key map (kbd "n")   #'safeslop-portal-new)
-    (define-key map (kbd "f")   #'safeslop-portal-follow-profile)
+    (define-key map (kbd "c")   #'safeslop-portal-new)
+    (define-key map (kbd "^")   #'safeslop-portal-follow-profile)
     (define-key map (kbd "g")   #'safeslop-portal-refresh)
     (define-key map (kbd "a")   #'safeslop-portal-toggle-auto-refresh)
     ;; Inherit the shared surface switch keys (P/I/F, [/]); the portal's own keys
@@ -517,8 +568,9 @@ A nil or non-positive interval leaves the portal static (manual `g' only)."
 ;;;###autoload
 (defun safeslop-portal ()
   "Open the safeslop session portal: a dashboard of sessions you can act on.
-Keys: RET/o open (run), R reattach, i status, k stop, x remove, X prune,
-n new, g refresh, a toggle auto-refresh, d doctor, L debug log, q quit.
+Keys: RET/o open (state-aware), r run, R run detached, A reattach, i status,
+s stop, x remove, X prune, c new, ^ profile, g refresh, a toggle auto-refresh,
+d doctor, L debug log, q quit.
 
 While displayed, the portal auto-refreshes every
 `safeslop-portal-refresh-interval' seconds (nil disables)."
