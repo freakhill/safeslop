@@ -15,7 +15,7 @@
 ;; (specs/0058 IW4) rather than handwritten snippets; and deleting is guided
 ;; (open the file at the block, remove it, re-validate) rather than a fragile
 ;; machine rewrite of the guard.  All slow calls are async (specs/0052 #7).  The
-;; Env column reuses the portal's isolation-tier colouring.
+;; Env column reuses the shared isolation-tier colouring (safeslop-surface).
 ;;
 ;; Ergonomics (CRUD), following mature Emacs list UIs (package.el, magit, dired,
 ;; ibuffer):
@@ -41,17 +41,15 @@
 (require 'cl-lib)
 (require 'tabulated-list)
 (require 'safeslop-contract)
+(require 'safeslop-client)
 (require 'safeslop-surface)
-(require 'safeslop-portal) ; for `safeslop-portal--env-cell' (shared tier colouring)
+(require 'safeslop-output)
+(require 'safeslop-session)
 
-(defvar safeslop-program)
-(declare-function safeslop--call-json "safeslop" (args))
-(declare-function safeslop--call-json-async "safeslop" (args callback))
-(declare-function safeslop--show-envelope-buffer "safeslop" (name args envelope))
+;; Top-level commands live in the entry file, above this layer; they are only
+;; referenced late-bound (key press / explicit call after the package loads).
 (declare-function safeslop-policy-check-file "safeslop" (file &optional callback))
-(declare-function safeslop-debug-log "safeslop" ())
 (declare-function safeslop-doctor "safeslop" ())
-(declare-function safeslop-session-new-from-profile "safeslop-session" (profile &optional callback))
 
 (defconst safeslop-profiles-buffer-name "*safeslop profiles*"
   "Buffer name for the safeslop profiles surface.")
@@ -139,7 +137,7 @@ create write remains asynchronous."
        (list name
              (vector name
                      (or (alist-get 'agent p) "")
-                     (safeslop-portal--env-cell (or (alist-get 'environment p) ""))
+                     (safeslop-surface--env-cell (or (alist-get 'environment p) ""))
                      (safeslop-surface--net-cell (or (alist-get 'network p) ""))))))
    (sort (copy-sequence (alist-get 'profiles data))
          (lambda (a b) (string< (symbol-name (car a)) (symbol-name (car b)))))))
@@ -172,12 +170,12 @@ create write remains asynchronous."
 
 (defun safeslop-profiles--row-summary (name)
   "Return a one-line \"agent, env, net\" summary for listed profile NAME, or nil."
-  (when-let ((fields (safeslop-profiles--row-fields name)))
+  (when-let* ((fields (safeslop-profiles--row-fields name)))
     (format "%s, %s, %s" (nth 0 fields) (nth 1 fields) (nth 2 fields))))
 
 (defun safeslop-profiles--danger-summary (agent environment network)
   "Return a one-line isolation/network risk summary."
-  (let ((note (or (nth 3 (assoc environment safeslop-portal--env-tiers))
+  (let ((note (or (nth 3 (assoc environment safeslop-surface--env-tiers))
                   "unknown isolation"))
         (net (if (equal network "allow")
                  "network ALLOW (egress reachable)"
@@ -285,7 +283,7 @@ a top-level or nested same-named block outside the profile map."
             (format "Profile:     %s" (or name ""))
             (format "Agent:       %s" (or (alist-get 'agent prof) ""))
             (format "Environment: %s" (or env ""))
-            (let ((note (nth 3 (assoc env safeslop-portal--env-tiers))))
+            (let ((note (nth 3 (assoc env safeslop-surface--env-tiers))))
               (when note (format "Isolation:   %s" note)))
             (format "Network:     %s%s" (or net "deny")
                     (if (equal net "allow") " — egress reachable (deny is the safe default)" ""))
@@ -358,80 +356,51 @@ initial value (used by clone)."
 
 (defun safeslop-profiles--legend ()
   "Return the profiles shortcut legend line, trailing blank line."
-  (concat (mapconcat (lambda (pair)
-                       (concat (propertize (car pair) 'face 'help-key-binding)
-                               " " (cdr pair)))
-                     safeslop-profiles--key-hints "  ")
-          "\n\n"))
+  (safeslop-surface--legend safeslop-profiles--key-hints))
 
-(defun safeslop-profiles--empty-state (&optional config-path error-message)
-  "Return persistent guidance for empty or failed profile listing."
-  (cond
-   (error-message (safeslop-surface--error-banner "profile list" error-message))
-   (config-path (concat (propertize (format "No profiles in %s yet" (abbreviate-file-name config-path))
-                                    'face 'safeslop-surface-hint)
-                        " — press " (propertize "n" 'face 'help-key-binding)
-                        " to add one, or " (propertize "g" 'face 'help-key-binding) " to refresh.\n"))
-   (t (concat (propertize "No safeslop.cue found" 'face 'safeslop-surface-hint)
+(defun safeslop-profiles--empty-state (&optional config-path)
+  "Return persistent guidance for an empty (but successful) profile listing.
+A failed fetch is the render engine's error banner; this covers the two
+ok-but-empty cases: a known CONFIG-PATH with no profiles yet, and no
+safeslop.cue found at all."
+  (if config-path
+      (concat (propertize (format "No profiles in %s yet" (abbreviate-file-name config-path))
+                          'face 'safeslop-surface-hint)
               " — press " (propertize "n" 'face 'help-key-binding)
-              " to create one, or " (propertize "g" 'face 'help-key-binding) " to retry.\n"))))
+              " to add one, or " (propertize "g" 'face 'help-key-binding) " to refresh.\n")
+    (concat (propertize "No safeslop.cue found" 'face 'safeslop-surface-hint)
+            " — press " (propertize "n" 'face 'help-key-binding)
+            " to create one, or " (propertize "g" 'face 'help-key-binding) " to retry.\n")))
 
 (defun safeslop-profiles--header ()
   "Return the profiles header block: tab strip, tier/net legends, shortcuts."
   (concat (safeslop-surface--tab-strip 'profiles)
-          (safeslop-portal--tier-legend)
-          (safeslop-portal--net-legend)
+          (safeslop-surface--tier-legend)
+          (safeslop-surface--net-legend)
           (safeslop-profiles--legend)))
 
 (defun safeslop-profiles--render (&optional keep-point then)
-  "Asynchronously fetch the profile list, then fill the current surface buffer.
-On a missing safeslop.cue the table shows a persistent empty-state hint; `n'
-still works to create one.  Stores the config path for the edit/validate/delete
-keys.  KEEP-POINT preserves point across the redraw; THEN, when given, is a
-nullary function called in the buffer after the redraw (used to land point on a
-freshly created profile)."
-  (let ((buf (current-buffer)))
-    (safeslop--call-json-async
-     '("profile" "list" "--output" "json")
-     (lambda (envelope)
-       (when (buffer-live-p buf)
-         (with-current-buffer buf
-           ;; Snapshot scroll+cursor of every showing window before the reprint so
-           ;; a keep-point refresh cannot collapse point to the top or lose scroll
-           ;; in a non-selected window; remember the kept row id to re-find it after
-           ;; the header is re-inserted (the shared cursor-jump fix).
-           (let ((views (and keep-point (safeslop-surface--capture-views)))
-                 (kept-id (and keep-point (tabulated-list-get-id)))
-                 error-message)
-             (if (safeslop-contract-ok-p envelope)
-                 (let ((data (safeslop-contract-data envelope)))
-                   (setq safeslop-profiles--config-path (alist-get 'path data))
-                   (setq tabulated-list-entries (safeslop-profiles--rows data)))
-               (setq safeslop-profiles--config-path nil)
-               (setq tabulated-list-entries nil)
-               (setq error-message (safeslop-surface--error-message envelope "no safeslop.cue found"))
-               (message "safeslop profiles: %s" error-message))
-             (tabulated-list-print keep-point)
-             (let ((inhibit-read-only t))
-               (save-excursion
-                 (goto-char (point-min))
-                 (insert (safeslop-profiles--header))
-                 (when (null tabulated-list-entries)
-                   (insert (safeslop-profiles--empty-state safeslop-profiles--config-path error-message)))))
-             (cond
-              ;; THEN controls point (reveal a just-created/target profile).
-              (then (funcall then))
-              (keep-point
-               (or (safeslop-surface--goto-id kept-id)
-                   (safeslop-profiles--goto-first-row))
-               (safeslop-surface--restore-views views (point)))
-              (t (safeslop-profiles--goto-first-row))))))))))
-
-(defun safeslop-profiles--goto-first-row ()
-  "Move point past the header block to the first profile row."
-  (goto-char (point-min))
-  (while (and (not (tabulated-list-get-id)) (not (eobp)))
-    (forward-line 1)))
+  "Fetch the profile list and redraw the current surface buffer in place.
+A thin wrapper over the shared `safeslop-surface-render' engine: contributes the
+argv, the row builder (which also records the backing safeslop.cue path for the
+edit/validate/delete keys), the header, and the missing-config empty state.
+KEEP-POINT/THEN are the engine's — THEN is used to land point on a freshly
+created profile."
+  (safeslop-surface-render
+   :argv '("profile" "list" "--output" "json")
+   :label "profile list"
+   :noun "profiles"
+   :header-fn #'safeslop-profiles--header
+   :empty-fn (lambda () (safeslop-profiles--empty-state safeslop-profiles--config-path))
+   :entries-fn (lambda (envelope)
+                 (if (safeslop-contract-ok-p envelope)
+                     (let ((data (safeslop-contract-data envelope)))
+                       (setq safeslop-profiles--config-path (alist-get 'path data))
+                       (safeslop-profiles--rows data))
+                   (setq safeslop-profiles--config-path nil)
+                   nil))
+   :keep-point keep-point
+   :then then))
 
 (defun safeslop-profiles-refresh ()
   "Re-fetch the profile list and redraw, keeping point on its profile."
