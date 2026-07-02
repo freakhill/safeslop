@@ -798,3 +798,78 @@ flight, so slow `session list' calls can't stack up."
     (should (string-match-p "P portal" msg))
     (should (string-match-p "b switch-to-session-buffer" msg))
     (should (string-match-p "L debug-log" msg))))
+
+;;; specs/0065: session naming + rename --------------------------------------
+
+(ert-deftest safeslop-test-session-rename-args ()
+  "Rename builds the exact CLI argv (no shell, contract --output json)."
+  (should (equal (safeslop-session--rename-args "sess-9" "my label")
+                 '("session" "rename" "--session-id" "sess-9"
+                   "--name" "my label" "--output" "json")))
+  ;; Empty input clears: the empty name flows straight through to argv.
+  (should (equal (safeslop-session--rename-args "sess-9" "")
+                 '("session" "rename" "--session-id" "sess-9"
+                   "--name" "" "--output" "json"))))
+
+(ert-deftest safeslop-test-session-rename-empty-input-clears ()
+  "`safeslop-session-rename' with empty input sends an empty --name (clear path)."
+  (let (called)
+    (cl-letf (((symbol-function 'safeslop--call-json-async)
+               (lambda (args _cb) (setq called args))))
+      (safeslop-session-rename "sess-1" "" nil t))
+    (should (equal called
+                   '("session" "rename" "--session-id" "sess-1"
+                     "--name" "" "--output" "json")))))
+
+(ert-deftest safeslop-test-portal-rename-key-and-run-detached-intact ()
+  "N renames the session at point; R still runs detached (specs/0065 B1)."
+  (should (eq (lookup-key safeslop-portal-mode-map (kbd "N")) #'safeslop-portal-rename))
+  (should (eq (lookup-key safeslop-portal-mode-map (kbd "R")) #'safeslop-portal-run-detached)))
+
+(ert-deftest safeslop-test-portal-rename-refreshes-in-place ()
+  "Portal rename reads a name, calls rename with the id, and refreshes in place
+without popping a result buffer over the dashboard."
+  (let (called (refreshes 0) (shown 0))
+    (cl-letf (((symbol-function 'safeslop-portal--session-at-point)
+               (lambda () '((session_id . "sess-x") (name . "old"))))
+              ((symbol-function 'read-string) (lambda (&rest _) "new label"))
+              ((symbol-function 'safeslop--call-json-async)
+               (lambda (args cb)
+                 (setq called args)
+                 (funcall cb (safeslop-contract-parse-string
+                              "{\"schema_version\":1,\"ok\":true,\"data\":{\"session_id\":\"sess-x\",\"name\":\"new label\"},\"warnings\":[],\"errors\":[]}"))))
+              ((symbol-function 'safeslop--show-envelope-buffer)
+               (lambda (&rest _) (setq shown (1+ shown))))
+              ((symbol-function 'safeslop-portal-refresh)
+               (lambda () (setq refreshes (1+ refreshes)))))
+      (safeslop-portal-rename))
+    (should (equal called '("session" "rename" "--session-id" "sess-x"
+                            "--name" "new label" "--output" "json")))
+    (should (= refreshes 1))
+    (should (= shown 0))))
+
+(ert-deftest safeslop-test-session-detail-name-line ()
+  "The detail view renders a Name: line only when the record has a name."
+  (let ((with-name (safeslop-session--detail-format
+                    '((session_id . "sess-1") (agent . "claude")
+                      (name . "prod-fix") (status . "running") (workspace . "/w"))))
+        (no-name (safeslop-session--detail-format
+                  '((session_id . "sess-1") (agent . "claude")
+                    (status . "running") (workspace . "/w")))))
+    (should (string-match-p "Name:" with-name))
+    (should (string-match-p "prod-fix" with-name))
+    (should-not (string-match-p "Name:" no-name))))
+
+(ert-deftest safeslop-test-portal-session-cell-shows-name ()
+  "The Session cell suffixes the display name inline (specs/0065 N2) without
+adding an 11th column; a name-less row keeps the plain short id."
+  (let* ((named '((session_id . "sess-abc") (agent . "claude")
+                  (environment . "host") (network . "deny")
+                  (status . "running") (workspace . "/w") (name . "prod")))
+         (rows (safeslop-portal--rows (list named)))
+         (cols (cadr (car rows))))
+    (should (= (length cols) 10))                 ; no 11th column
+    (should (string-match-p "prod" (aref cols 0)))
+    (should (string-match-p "sess-abc" (aref cols 0))))
+  (should (equal (safeslop-portal--session-cell '((session_id . "sess-xyz")))
+                 (safeslop-portal--short-id "sess-xyz"))))

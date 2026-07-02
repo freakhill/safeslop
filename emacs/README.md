@@ -74,12 +74,22 @@ network, status, PID, age, recipe/image, workspace — that you act on in place:
 | `x` | remove one stopped/created session record from the list |
 | `X` | prune — remove every stopped session at once |
 | `c` | new session |
+| `N` | rename — set or clear the session's display label (empty input clears it) |
 | `^` | jump to the backing profile when present |
 | `g` (Evil: `gr`) | refresh now |
 | `a` (Evil: `ga`) | pause/resume auto-refresh |
 
 Rows are lifecycle-ordered — running, then created, then stopped, then failed —
 so the actionable sessions sit at the top regardless of id or age.
+
+A session can carry an optional human **display name** (specs/0065): set it at
+create time with `safeslop session create … --name <name>`, or change/clear it
+later with `N` in the portal (`safeslop session rename --session-id <id> --name
+<name> --output json` under the hood — an empty name clears the label).  The name
+is a pure label: it never replaces the `sess-<hex>` id as the addressing handle,
+and rename is allowed in any status.  When set, it rides inside the Session cell
+as a suffix (`sess-abcd… my-label`, truncated to the cell) and in the annotated
+session pickers — never in its own column.
 
 A session that has exited stays listed as `stopped` so you can read its exit code
 and last error; `x` clears one such record and `X` clears them all in one call, so

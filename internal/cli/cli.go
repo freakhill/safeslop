@@ -429,19 +429,26 @@ func sweepManagedOrphans(ctx context.Context) error {
 
 func cmdSession() *cobra.Command {
 	c := &cobra.Command{Use: "session", Short: "Manage Emacs-visible safeslop sessions"}
-	c.AddCommand(cmdSessionCreate(), cmdSessionRun(), cmdSessionStatus(), cmdSessionStop(), cmdSessionList(), cmdSessionRemove(), cmdSessionPrune(), cmdSessionSupervise(), cmdSessionAttach())
+	c.AddCommand(cmdSessionCreate(), cmdSessionRun(), cmdSessionStatus(), cmdSessionStop(), cmdSessionList(), cmdSessionRemove(), cmdSessionRename(), cmdSessionPrune(), cmdSessionSupervise(), cmdSessionAttach())
 	return c
 }
 
 func cmdSessionCreate() *cobra.Command {
-	var agent, workspace, output, environment, network, profile string
+	var agent, workspace, output, environment, network, profile, name string
 	c := &cobra.Command{
-		Use:   "create (--profile <name> | --agent <claude|pi|fish|zsh> --environment <host|container> --workspace <dir>) --output json",
+		Use:   "create (--profile <name> | --agent <claude|pi|fish|zsh> --environment <host|container> --workspace <dir>) [--name <label>] --output json",
 		Short: "Create a safeslop session record",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if output != "json" {
 				return fmt.Errorf("session create requires --output json")
+			}
+			// Validate the optional display name once, up front, so the identical rule
+			// applies to both the --profile and explicit-flag creation paths (specs/0065
+			// S2). An empty/whitespace name is allowed and means "no name".
+			validName, err := engsession.ValidateName(name)
+			if err != nil {
+				return emitContractError(jsoncontract.CodeInvalidArgument, err.Error(), map[string]any{"name": name})
 			}
 			store := sessionStore()
 			if profile != "" {
@@ -451,6 +458,12 @@ func cmdSessionCreate() *cobra.Command {
 				sess, err := createSessionFromProfile(store, profile)
 				if err != nil {
 					return err
+				}
+				if validName != "" {
+					sess.Name = validName
+					if err := store.Save(sess); err != nil {
+						return emitContractError(jsoncontract.CodeIOError, "save session", map[string]any{"error": err.Error()})
+					}
 				}
 				emitContract(jsoncontract.OK(sessionData(sess)))
 				return nil
@@ -488,8 +501,15 @@ func cmdSessionCreate() *cobra.Command {
 			if err != nil {
 				return emitContractError(jsoncontract.CodeIOError, "create session", map[string]any{"error": err.Error()})
 			}
-			if network != "" {
-				sess.Network = network
+			// Persist post-create mutations (network override and display name) in a
+			// single Save so the record is written exactly once (specs/0065 S2).
+			if network != "" || validName != "" {
+				if network != "" {
+					sess.Network = network
+				}
+				if validName != "" {
+					sess.Name = validName
+				}
 				if err := store.Save(sess); err != nil {
 					return emitContractError(jsoncontract.CodeIOError, "save session", map[string]any{"error": err.Error()})
 				}
@@ -504,6 +524,50 @@ func cmdSessionCreate() *cobra.Command {
 	c.Flags().StringVar(&output, "output", "", "output format: json")
 	c.Flags().StringVar(&environment, "environment", "", "isolation environment (required): host or container")
 	c.Flags().StringVar(&network, "network", "", "network policy: deny or allow (overrides profile default)")
+	c.Flags().StringVar(&name, "name", "", "optional human display name for the session (combinable with --profile)")
+	return c
+}
+
+// cmdSessionRename sets or clears a session's human display name. A label touches
+// no boundary, credential, or process state, so the engine allows it in any
+// status (specs/0065 D5). This mirrors the flag/output/error shape of the sibling
+// session commands: --output json is mandatory, an empty --session-id is rejected
+// before the store is touched, and an empty --name is a deliberate clear.
+func cmdSessionRename() *cobra.Command {
+	var id, name, output string
+	c := &cobra.Command{
+		Use:   "rename --session-id <id> --name <name> --output json",
+		Short: "Set or clear a session's human display name",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if output != "json" {
+				return fmt.Errorf("session rename requires --output json")
+			}
+			if id == "" {
+				return emitContractError(jsoncontract.CodeInvalidArgument, "--session-id is required", nil)
+			}
+			sess, err := sessionStore().Rename(id, name, time.Now())
+			if err != nil {
+				switch {
+				case errors.Is(err, engsession.ErrNotFound):
+					return emitContractError(jsoncontract.CodeSessionNotFound, "session not found", map[string]any{"session_id": id})
+				default:
+					// ValidateName returns a plain (non-sentinel) error, so re-run the pure
+					// validator to distinguish a rejected name (INVALID_ARGUMENT) from a
+					// Save/IO failure (IO_ERROR) — specs/0065 S2.
+					if _, verr := engsession.ValidateName(name); verr != nil {
+						return emitContractError(jsoncontract.CodeInvalidArgument, verr.Error(), map[string]any{"name": name})
+					}
+					return emitContractError(jsoncontract.CodeIOError, "rename session", map[string]any{"error": err.Error()})
+				}
+			}
+			emitContract(jsoncontract.OK(sessionData(sess)))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&id, "session-id", "", "session id to rename")
+	c.Flags().StringVar(&name, "name", "", "new display name (empty clears it)")
+	c.Flags().StringVar(&output, "output", "", "output format: json")
 	return c
 }
 
@@ -1024,6 +1088,9 @@ func sessionData(sess engsession.Session) map[string]any {
 	}
 	if sess.Profile != "" {
 		out["profile"] = sess.Profile
+	}
+	if sess.Name != "" {
+		out["name"] = sess.Name
 	}
 	if sess.RecipeID != "" {
 		out["recipeID"] = sess.RecipeID

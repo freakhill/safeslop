@@ -17,6 +17,7 @@
 ;;; Code:
 
 (require 'subr-x)
+(require 'seq)
 (require 'term)
 (require 'safeslop-contract)
 (require 'safeslop-client)
@@ -415,6 +416,13 @@ portal so row actions refresh in place instead of stealing the operator window."
   "Return exact argv for pruning all stopped session records."
   (list "session" "prune" "--output" "json"))
 
+(defun safeslop-session--rename-args (session-id name)
+  "Return exact argv for renaming SESSION-ID to NAME (empty NAME clears it).
+Name is a pure label (specs/0065 D1): the id stays the sole addressing
+handle, so this only ever carries --session-id, never a name-as-selector."
+  (list "session" "rename" "--session-id" session-id "--name" name
+        "--output" "json"))
+
 ;;;###autoload
 (defun safeslop-session-remove (&optional session-id callback quiet)
   "Remove SESSION-ID's record, asynchronously, and show the envelope.
@@ -461,6 +469,36 @@ JSONL status fallback (`safeslop-session-status-fallback')."
   (interactive (list (safeslop-session--read-id "Reattach session: ")))
   (safeslop-session--launch-term session-id (safeslop-session--attach-args session-id)))
 
+(defun safeslop-session--name-for (session-id)
+  "Return SESSION-ID's current display name, or an empty string when unset.
+Used only to seed the rename prompt's default; a fresh `session list' is
+cheap and keeps the default honest even when no portal cache is at hand."
+  (let ((sess (seq-find (lambda (s) (equal (alist-get 'session_id s) session-id))
+                        (safeslop-session--sessions))))
+    (or (alist-get 'name sess) "")))
+
+;;;###autoload
+(defun safeslop-session-rename (&optional session-id name callback quiet)
+  "Set SESSION-ID's display NAME, asynchronously, and show the envelope.
+The name is a pure label (specs/0065): renaming touches nothing derived
+from the id, so it works in any status and never becomes an addressing
+handle.  Empty NAME clears the label.  CALLBACK, when given, receives the
+envelope once it arrives (used by the portal to refresh, and by tests).
+When QUIET is non-nil, do not pop the JSON envelope buffer; this is used by
+the portal so row actions refresh in place instead of stealing the window."
+  (interactive
+   (let* ((id (safeslop-session--read-id "Rename session: "))
+          (name (read-string (format "Name for %s (empty clears): " id)
+                             (safeslop-session--name-for id))))
+     (list id name nil nil)))
+  (let ((args (safeslop-session--rename-args session-id (or name ""))))
+    (safeslop--call-json-async
+     args
+     (lambda (envelope)
+       (unless quiet
+         (safeslop--show-envelope-buffer "*safeslop session rename*" args envelope))
+       (when callback (funcall callback envelope))))))
+
 (defun safeslop-session--detail-format (data)
   "Return a human-readable, faced detail view for session DATA."
   (cl-labels ((field (k) (let ((v (alist-get k data)))
@@ -477,6 +515,9 @@ JSONL status fallback (`safeslop-session-status-fallback')."
        #'identity
        (delq nil
              (list (line "Session:" (field 'session_id))
+                   ;; specs/0065: the optional display name rides right under the
+                   ;; id it labels, shown only when the record actually has one.
+                   (unless (string-empty-p (field 'name)) (line "Name:" (field 'name)))
                    (line "Agent:" (field 'agent))
                    (unless (string-empty-p (field 'profile)) (line "Profile:" (field 'profile)))
                    (line "Workspace:" (abbreviate-file-name (field 'workspace)))
