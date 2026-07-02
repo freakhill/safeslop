@@ -39,11 +39,13 @@
 
 (declare-function safeslop-portal "safeslop-portal" ())
 (declare-function safeslop-profiles "safeslop-profiles" ())
+(declare-function safeslop-credentials "safeslop-credentials" ())
 (declare-function safeslop-doctor "safeslop" ())
 
 (defconst safeslop-surface--order
   '((sessions "Sessions" "P" safeslop-portal)
-    (profiles "Profiles" "F" safeslop-profiles))
+    (profiles "Profiles" "F" safeslop-profiles)
+    (credentials "Credentials" "K" safeslop-credentials))
   "Ordered surfaces: (SYMBOL LABEL KEY COMMAND).
 KEY is the direct switch key shown in the tab strip (also bound in every surface
 map).  Drives the tab strip and `[' / `]' / TAB cycling.  Keep in step with the
@@ -56,7 +58,8 @@ modes that set `safeslop-surface-mode-map' as their parent.")
 (defun safeslop-surface--current-sym ()
   "Return the surface symbol for the current buffer's major mode, or nil."
   (cond ((derived-mode-p 'safeslop-portal-mode) 'sessions)
-        ((derived-mode-p 'safeslop-profiles-mode) 'profiles)))
+        ((derived-mode-p 'safeslop-profiles-mode) 'profiles)
+        ((derived-mode-p 'safeslop-credentials-mode) 'credentials)))
 
 (defun safeslop-surface--tab-strip (active)
   "Return the `Sessions | Profiles' tab strip for ACTIVE surface.
@@ -411,6 +414,7 @@ the first row."
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "P") #'safeslop-portal)
     (define-key map (kbd "F") #'safeslop-profiles)
+    (define-key map (kbd "K") #'safeslop-credentials)
     (define-key map (kbd "[") #'safeslop-surface-prev)
     (define-key map (kbd "]") #'safeslop-surface-next)
     (define-key map (kbd "TAB") #'safeslop-surface-next)

@@ -26,7 +26,7 @@ test:
 test-emacs:
 	@$(EMACS) --batch --eval '(princ (format "emacs %s\n" emacs-version))'
 	@$(EMACS) --batch --eval '(if (version< emacs-version "$(EMACS_MIN)") (progn (princ (format "emacs %s is older than required $(EMACS_MIN)\n" emacs-version)) (kill-emacs 1)))'
-	$(EMACS) --batch -L emacs -l ert -l emacs/test/safeslop-test.el -l emacs/test/safeslop-contract-test.el -l emacs/test/safeslop-profiles-test.el -f ert-run-tests-batch-and-exit
+	$(EMACS) --batch -L emacs -l ert -l emacs/test/safeslop-test.el -l emacs/test/safeslop-contract-test.el -l emacs/test/safeslop-profiles-test.el -l emacs/test/safeslop-credentials-test.el -f ert-run-tests-batch-and-exit
 	$(EMACS) --batch -L emacs -l emacs/safeslop.el -l emacs/safeslop-doom.el -l emacs/safeslop-session.el --eval '(message "safeslop emacs ok")'
 	## Byte-compile gate (specs/0063 F10): fails on ERRORS; warnings stay advisory
 	## because warning sets differ across the local floor vs CI-pinned Emacs.

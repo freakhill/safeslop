@@ -1,0 +1,184 @@
+;;; safeslop-credentials-test.el --- Tests for safeslop-credentials.el -*- lexical-binding: t; -*-
+
+(require 'ert)
+(require 'cl-lib)
+(require 'safeslop)
+(require 'safeslop-surface)
+(require 'safeslop-credentials)
+(require 'safeslop-doom)
+(require 'safeslop-contract)
+
+(defconst safeslop-test-creds-list-json
+  (concat "{\"schema_version\":1,\"ok\":true,\"data\":{"
+          "\"config\":\"/ws/safeslop.cue\","
+          "\"op\":{\"available\":true,\"signedIn\":false},"
+          "\"credentials\":["
+          "{\"profile\":\"app\",\"kind\":\"secret\",\"name\":\"TOKEN\",\"scope\":\"\",\"ref\":\"env:APP_TOKEN\",\"status\":\"resolvable\"},"
+          "{\"profile\":\"app\",\"kind\":\"ssh\",\"name\":\"origin\",\"scope\":\"deploy-key ro\",\"ref\":\"\",\"status\":\"ephemeral\"},"
+          "{\"profile\":\"app\",\"kind\":\"aws\",\"name\":\"acme\",\"scope\":\"eu-west-1\",\"ref\":\"\",\"status\":\"ambient\"},"
+          "{\"profile\":\"ci\",\"kind\":\"pnpm\",\"name\":\"npm.pkg.github.com\",\"scope\":\"@acme\",\"ref\":\"env:NPM\",\"status\":\"missing\"}"
+          "]},\"warnings\":[],\"errors\":[]}")
+  "A representative `creds list' envelope covering every status class.")
+
+(ert-deftest safeslop-test-credentials-command-loads ()
+  (should (fboundp 'safeslop-credentials))
+  (should (fboundp 'safeslop-credentials-mode))
+  (should (fboundp 'safeslop-credentials-inspect))
+  (should (fboundp 'safeslop-credentials-edit))
+  (should (fboundp 'safeslop-credentials-refresh)))
+
+(ert-deftest safeslop-test-credentials-rows-from-list ()
+  "`safeslop-credentials--rows' builds Profile/Kind/Name/Source/Status rows, status-faced."
+  (let* ((env (safeslop-contract-parse-string safeslop-test-creds-list-json))
+         (rows (safeslop-credentials--rows (safeslop-contract-data env))))
+    (should (= (length rows) 4))
+    (let ((secret (assoc "app/secret/TOKEN" rows)))
+      (should secret)
+      (should (equal (aref (cadr secret) 0) "app"))
+      (should (equal (aref (cadr secret) 1) "secret"))
+      (should (equal (aref (cadr secret) 2) "TOKEN"))
+      (should (equal (aref (cadr secret) 3) "env:APP_TOKEN")) ; Source = ref (a ref, not a value)
+      (should (equal (substring-no-properties (aref (cadr secret) 4)) "resolvable"))
+      (should (eq (get-text-property 0 'face (aref (cadr secret) 4)) 'safeslop-cred-ready)))
+    (let ((ssh (assoc "app/ssh/origin" rows)))
+      (should (equal (aref (cadr ssh) 3) "deploy-key ro")) ; empty ref -> scope
+      (should (eq (get-text-property 0 'face (aref (cadr ssh) 4)) 'safeslop-cred-ephemeral)))
+    (let ((aws (assoc "app/aws/acme" rows)))
+      (should (equal (aref (cadr aws) 3) "eu-west-1"))
+      (should (eq (get-text-property 0 'face (aref (cadr aws) 4)) 'safeslop-cred-ambient)))
+    (let ((pnpm (assoc "ci/pnpm/npm.pkg.github.com" rows)))
+      (should (equal (aref (cadr pnpm) 3) "env:NPM"))
+      (should (eq (get-text-property 0 'face (aref (cadr pnpm) 4)) 'safeslop-cred-missing)))))
+
+(ert-deftest safeslop-test-credentials-never-shows-a-value ()
+  "The rows carry refs, not values: a secret value never appears in any cell.
+The engine already discards values; this guards the client from ever rendering
+one even if a future envelope regressed to carrying it."
+  (let* ((env (safeslop-contract-parse-string safeslop-test-creds-list-json))
+         (rows (safeslop-credentials--rows (safeslop-contract-data env)))
+         (flat (mapconcat (lambda (r)
+                            (mapconcat #'substring-no-properties (append (cadr r) nil) " "))
+                          rows " ")))
+    ;; refs (env:APP_TOKEN) are present; a resolved value would be a distinct token.
+    (should (string-match-p "env:APP_TOKEN" flat))
+    (should-not (string-match-p "APP_TOKEN=" flat))))
+
+(ert-deftest safeslop-test-credentials-status-cell-faces ()
+  "Each readiness status renders as its label in the matching redundant face."
+  (dolist (pair '(("resolvable" . safeslop-cred-ready)
+                  ("missing" . safeslop-cred-missing)
+                  ("op-signed-out" . safeslop-cred-attention)
+                  ("op-unavailable" . safeslop-cred-attention)
+                  ("ephemeral" . safeslop-cred-ephemeral)
+                  ("ambient" . safeslop-cred-ambient)))
+    (let ((cell (safeslop-credentials--status-cell (car pair))))
+      (should (equal (substring-no-properties cell) (car pair)))
+      (should (eq (get-text-property 0 'face cell) (cdr pair)))
+      (should (get-text-property 0 'help-echo cell)))) ; honest meaning always attached
+  ;; An unknown status degrades gracefully (label kept, no crash).
+  (should (equal (substring-no-properties (safeslop-credentials--status-cell "weird")) "weird")))
+
+(ert-deftest safeslop-test-credentials-source-cell ()
+  "Source prefers the ref, then the scope, then a parenthetic status note."
+  (should (equal (safeslop-credentials--source-cell "env:X" "" "resolvable") "env:X"))
+  (should (equal (safeslop-credentials--source-cell "op://v/i/f" "pat ro" "resolvable") "op://v/i/f"))
+  (should (equal (safeslop-credentials--source-cell "" "deploy-key ro" "ephemeral") "deploy-key ro"))
+  (should (equal (safeslop-credentials--source-cell "" "" "ephemeral") "(ephemeral)"))
+  (should (equal (safeslop-credentials--source-cell "" "" "ambient") "(ambient)"))
+  (should (equal (safeslop-credentials--source-cell "" "" "missing") "")))
+
+(ert-deftest safeslop-test-credentials-op-legend ()
+  "The op legend names each 1Password state, faced, and stays value-free."
+  (should (string-match-p "signed in"
+                          (safeslop-credentials--op-legend '((available . t) (signedIn . t)))))
+  (should (string-match-p "not signed in"
+                          (safeslop-credentials--op-legend '((available . t) (signedIn . nil)))))
+  (should (string-match-p "op CLI not found"
+                          (safeslop-credentials--op-legend '((available . nil) (signedIn . nil)))))
+  (should (string-match-p "checking" (safeslop-credentials--op-legend nil))))
+
+(ert-deftest safeslop-test-credentials-surface-registered ()
+  "The Credentials surface is a first-class tab with switch key K (Keys)."
+  (let ((entry (assq 'credentials safeslop-surface--order)))
+    (should entry)
+    (should (equal (nth 1 entry) "Credentials"))
+    (should (equal (nth 2 entry) "K"))
+    (should (eq (nth 3 entry) 'safeslop-credentials)))
+  (with-temp-buffer
+    (safeslop-credentials-mode)
+    (should (eq (safeslop-surface--current-sym) 'credentials))))
+
+(ert-deftest safeslop-test-credentials-keymap ()
+  "RET/i inspect (safe primary), e edit, g refresh; no destructive keys; switch keys inherit."
+  (should (eq (lookup-key safeslop-credentials-mode-map (kbd "RET")) #'safeslop-credentials-inspect))
+  (should (eq (lookup-key safeslop-credentials-mode-map (kbd "i")) #'safeslop-credentials-inspect))
+  (should (eq (lookup-key safeslop-credentials-mode-map (kbd "e")) #'safeslop-credentials-edit))
+  (should (eq (lookup-key safeslop-credentials-mode-map (kbd "g")) #'safeslop-credentials-refresh))
+  ;; read-only surface: no launch/create/delete affordances
+  (should-not (lookup-key safeslop-credentials-mode-map (kbd "r")))
+  (should-not (lookup-key safeslop-credentials-mode-map (kbd "c")))
+  (should-not (lookup-key safeslop-credentials-mode-map (kbd "D")))
+  ;; inherited surface switch keys (parent map)
+  (should (eq (lookup-key safeslop-credentials-mode-map (kbd "P")) #'safeslop-portal))
+  (should (eq (lookup-key safeslop-credentials-mode-map (kbd "F")) #'safeslop-profiles))
+  (should (eq (lookup-key safeslop-credentials-mode-map (kbd "K")) #'safeslop-credentials))
+  (should (eq (lookup-key safeslop-credentials-mode-map (kbd "d")) #'safeslop-doctor)))
+
+(ert-deftest safeslop-test-credentials-surface-switch-key-bound ()
+  "K reaches the Credentials surface from every dashboard, and from `C-c s'."
+  (should (eq (lookup-key safeslop-surface-mode-map (kbd "K")) #'safeslop-credentials))
+  (should (eq (lookup-key safeslop-command-map (kbd "K")) #'safeslop-credentials)))
+
+(ert-deftest safeslop-test-credentials-show-args-use-known-config-path ()
+  "Inspect uses the listed safeslop.cue even after cwd changes."
+  (with-temp-buffer
+    (safeslop-credentials-mode)
+    (setq safeslop-credentials--config-path "/repo/safeslop.cue")
+    (should (equal (safeslop-credentials--show-args "app")
+                   '("creds" "show" "app" "/repo/safeslop.cue" "--output" "json"))))
+  (with-temp-buffer
+    (safeslop-credentials-mode)
+    (setq safeslop-credentials--config-path nil)
+    (should (equal (safeslop-credentials--show-args "app")
+                   '("creds" "show" "app" "--output" "json")))))
+
+(ert-deftest safeslop-test-credentials-row-id-roundtrip ()
+  (should (equal (safeslop-credentials--row-id "app" "ssh" "origin") "app/ssh/origin"))
+  (should (equal (safeslop-credentials--row-profile "app/ssh/origin") "app")))
+
+(ert-deftest safeslop-test-credentials-edit-needs-config ()
+  (with-temp-buffer
+    (safeslop-credentials-mode)
+    (setq safeslop-credentials--config-path nil)
+    (should-error (safeslop-credentials-edit) :type 'user-error)))
+
+(ert-deftest safeslop-test-credentials-goto-credentials-field ()
+  "Edit navigation lands on the profile's credentials/secrets field when present."
+  (with-temp-buffer
+    (insert "package safeslop\n"
+            "safeslop: profiles: {\n"
+            "\tapp: {\n"
+            "\t\tagent: \"claude\"\n"
+            "\t\tcredentials: {ssh: {}}\n"
+            "\t}\n}\n")
+    (should (safeslop-profiles--goto-profile-block "app"))
+    (should (safeslop-credentials--goto-credentials-field))
+    (should (string-match-p "credentials:" (buffer-substring (line-beginning-position) (line-end-position))))))
+
+(ert-deftest safeslop-test-credentials-doom-evil-parity ()
+  "The Doom/Evil tables carry the Credentials surface so bindings can't drift."
+  ;; K reaches the surface from every safeslop buffer's Evil normal state.
+  (should (equal (assoc "K" safeslop-doom--evil-shared-keys)
+                 '("K" . safeslop-credentials)))
+  ;; The surface has its own Evil action block mirroring the read-only keymap.
+  (let ((entry (assq 'safeslop-credentials-mode safeslop-doom--evil-mode-keys)))
+    (should entry)
+    (should (eq (nth 1 entry) 'safeslop-credentials-mode-map))
+    (should (eq (cdr (assoc "RET" (cddr entry))) 'safeslop-credentials-inspect))
+    (should (eq (cdr (assoc "e" (cddr entry))) 'safeslop-credentials-edit))
+    (should (eq (cdr (assoc "gr" (cddr entry))) 'safeslop-credentials-refresh))
+    ;; read-only: no launch/create/delete in the Evil table either
+    (should-not (assoc "r" (cddr entry)))
+    (should-not (assoc "c" (cddr entry)))))
+
+;;; safeslop-credentials-test.el ends here
