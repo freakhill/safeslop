@@ -36,24 +36,35 @@
               (memq (safeslop-doom-bind-leader) '(t nil)))))
 
 (ert-deftest safeslop-test-output-mode-has-evil-normal-bindings ()
-  (let (initial-states)
+  "Evil tables enter normal state, carry gr/ga, and never shadow motions.
+The evil-define-key* stub RECORDS bindings instead of defining them into the
+real maps: defining `gr' would turn the raw `g' refresh binding into a prefix."
+  (let (initial-states bindings)
     (cl-letf (((symbol-function 'evil-set-initial-state)
                (lambda (mode state) (push (list mode state) initial-states)))
               ((symbol-function 'evil-define-key*)
-               (lambda (_state keymap key def &rest bindings)
-                 (define-key keymap key def)
-                 (while bindings
-                   (define-key keymap (pop bindings) (pop bindings))))))
+               (lambda (_state keymap key def &rest more)
+                 (push (list keymap (key-description key) def) bindings)
+                 (while more
+                   (push (list keymap (key-description (pop more)) (pop more))
+                         bindings)))))
       (unless (featurep 'evil)
         (provide 'evil))
       ;; Both the output buffers and the portal dashboard enter Evil normal state.
       (should (member '(safeslop-output-mode normal) initial-states))
       (should (member '(safeslop-portal-mode normal) initial-states))
-      (should (eq (lookup-key safeslop-output-mode-map (kbd "g")) #'safeslop-output-refresh))
-      (should (eq (lookup-key safeslop-output-mode-map (kbd "d")) #'safeslop-doctor))
-      (should (eq (lookup-key safeslop-output-mode-map (kbd "E")) #'safeslop-show-last-error))
-      (should (eq (lookup-key safeslop-output-mode-map (kbd "q")) #'quit-window))
-      (should (eq (lookup-key safeslop-portal-mode-map (kbd "k")) #'safeslop-portal-stop)))))
+      ;; Refresh rides gr, the portal auto-toggle ga (evil-collection style);
+      ;; the shared keys are still applied through Evil.
+      (should (member (list safeslop-output-mode-map "g r" #'safeslop-output-refresh) bindings))
+      (should (member (list safeslop-portal-mode-map "g r" #'safeslop-portal-refresh) bindings))
+      (should (member (list safeslop-portal-mode-map "g a" #'safeslop-portal-toggle-auto-refresh) bindings))
+      (should (member (list safeslop-portal-mode-map "s" #'safeslop-portal-stop) bindings))
+      (should (member (list safeslop-output-mode-map "d" #'safeslop-doctor) bindings))
+      (should (member (list safeslop-output-mode-map "E" #'safeslop-show-last-error) bindings))
+      (should (member (list safeslop-output-mode-map "q" #'quit-window) bindings))
+      ;; specs/0063 F1: no Evil table binds a bare motion/search key.
+      (dolist (motion '("j" "k" "g" "n" "f" "a"))
+        (should-not (cl-find-if (lambda (b) (equal (nth 1 b) motion)) bindings))))))
 
 ;;; safeslop-test.el ends here
 
@@ -72,12 +83,21 @@
 
 (ert-deftest safeslop-test-portal-keymap-actions ()
   (should (eq (lookup-key safeslop-portal-mode-map (kbd "RET")) #'safeslop-portal-open))
-  (should (eq (lookup-key safeslop-portal-mode-map (kbd "k")) #'safeslop-portal-stop))
+  (should (eq (lookup-key safeslop-portal-mode-map (kbd "s")) #'safeslop-portal-stop))
   (should (eq (lookup-key safeslop-portal-mode-map (kbd "g")) #'safeslop-portal-refresh))
   (should (eq (lookup-key safeslop-portal-mode-map (kbd "a")) #'safeslop-portal-toggle-auto-refresh))
-  (should (eq (lookup-key safeslop-portal-mode-map (kbd "D")) #'safeslop-portal-run-detached))
-  (should (eq (lookup-key safeslop-portal-mode-map (kbd "f")) #'safeslop-portal-follow-profile))
-  (should (eq (lookup-key safeslop-portal-mode-map (kbd "L")) #'safeslop-debug-log)))
+  (should (eq (lookup-key safeslop-portal-mode-map (kbd "r")) #'safeslop-portal-run))
+  (should (eq (lookup-key safeslop-portal-mode-map (kbd "R")) #'safeslop-portal-run-detached))
+  (should (eq (lookup-key safeslop-portal-mode-map (kbd "A")) #'safeslop-portal-reattach))
+  (should (eq (lookup-key safeslop-portal-mode-map (kbd "c")) #'safeslop-portal-new))
+  (should (eq (lookup-key safeslop-portal-mode-map (kbd "^")) #'safeslop-portal-follow-profile))
+  (should (eq (lookup-key safeslop-portal-mode-map (kbd "L")) #'safeslop-debug-log))
+  ;; specs/0063 F1/F2: freed keys are really free — k/n/f fall through (Evil
+  ;; motions), D no longer detaches on this surface.
+  (should-not (lookup-key safeslop-portal-mode-map (kbd "k")))
+  (should-not (lookup-key safeslop-portal-mode-map (kbd "n")))
+  (should-not (lookup-key safeslop-portal-mode-map (kbd "f")))
+  (should-not (lookup-key safeslop-portal-mode-map (kbd "D"))))
 
 (ert-deftest safeslop-test-portal-legend-lists-auto ()
   "The in-buffer legend advertises the auto-refresh toggle."
@@ -406,7 +426,7 @@ fix."
   (should (eq (lookup-key safeslop-portal-mode-map (kbd "F")) #'safeslop-profiles))
   (should (eq (lookup-key safeslop-portal-mode-map (kbd "]")) #'safeslop-surface-next))
   ;; the portal's own keys still win over the parent
-  (should (eq (lookup-key safeslop-portal-mode-map (kbd "k")) #'safeslop-portal-stop)))
+  (should (eq (lookup-key safeslop-portal-mode-map (kbd "s")) #'safeslop-portal-stop)))
 
 ;;; Isolation-tier colour (specs/0052 #5) ------------------------------------
 
@@ -494,7 +514,7 @@ fix."
   (let (removed-id)
     (cl-letf (((symbol-function 'safeslop-portal--session-at-point)
                (lambda () '((session_id . "sess-dead") (status . "stopped"))))
-              ((symbol-function 'yes-or-no-p) (lambda (&rest _) t))
+              ((symbol-function 'y-or-n-p) (lambda (&rest _) t))
               ((symbol-function 'safeslop-session-remove)
                (lambda (id &optional _cb _quiet) (setq removed-id id))))
       (safeslop-portal-remove)
@@ -505,7 +525,7 @@ fix."
   (let (removed)
     (cl-letf (((symbol-function 'safeslop-portal--session-at-point)
                (lambda () '((session_id . "sess-dead") (status . "stopped"))))
-              ((symbol-function 'yes-or-no-p) (lambda (&rest _) nil))
+              ((symbol-function 'y-or-n-p) (lambda (&rest _) nil))
               ((symbol-function 'safeslop-session-remove)
                (lambda (&rest _) (setq removed t))))
       (safeslop-portal-remove)
@@ -514,7 +534,7 @@ fix."
 (ert-deftest safeslop-test-portal-prune-confirms-then-calls ()
   "`X' confirms once, then calls prune."
   (let (pruned)
-    (cl-letf (((symbol-function 'yes-or-no-p) (lambda (&rest _) t))
+    (cl-letf (((symbol-function 'y-or-n-p) (lambda (&rest _) t))
               ((symbol-function 'safeslop-session-prune)
                (lambda (&optional _cb _quiet) (setq pruned t))))
       (safeslop-portal-prune)
@@ -532,6 +552,7 @@ the standalone `safeslop-session-*' commands may still show their envelope buffe
                   (cl-letf (((symbol-function 'safeslop-portal--session-at-point)
                              (lambda () '((session_id . "sess-dead") (status . "stopped"))))
                             ((symbol-function 'yes-or-no-p) (lambda (&rest _) t))
+                            ((symbol-function 'y-or-n-p) (lambda (&rest _) t))
                             ((symbol-function 'safeslop--call-json-async)
                              (lambda (args cb) (push args calls) (funcall cb ok)))
                             ((symbol-function 'safeslop--show-envelope-buffer)
@@ -673,3 +694,107 @@ flight, so slow `session list' calls can't stack up."
               (safeslop-portal--auto-refresh)
               (should-not refreshed))))
       (when (get-buffer buf) (kill-buffer buf)))))
+
+;;; specs/0063: lifecycle sort + unified run confirm ---------------------------
+
+(ert-deftest safeslop-test-portal-status-rank-orders-lifecycle ()
+  "Rows sort running < created < stopped < failed-ish < unknown, id tie-break."
+  (let* ((mk (lambda (id status) (list (cons 'session_id id) (cons 'status status))))
+         (rows (safeslop-portal--rows
+                (list (funcall mk "sess-b" "stopped")
+                      (funcall mk "sess-a" "failed")
+                      (funcall mk "sess-d" "running")
+                      (funcall mk "sess-c" "created")
+                      (funcall mk "sess-e" "running")))))
+    (should (equal (mapcar #'car rows)
+                   '("sess-d" "sess-e" "sess-c" "sess-b" "sess-a")))))
+
+(ert-deftest safeslop-test-portal-run-confirms-with-danger-summary ()
+  "The portal run path shows the same isolation/network summary as Profiles (F4)."
+  (let (prompt attached)
+    (cl-letf (((symbol-function 'safeslop-portal--session-at-point)
+               (lambda () '((session_id . "sess-new") (status . "created")
+                            (agent . "pi") (environment . "container")
+                            (network . "deny"))))
+              ((symbol-function 'yes-or-no-p)
+               (lambda (p) (setq prompt p) t))
+              ((symbol-function 'safeslop-session-attach)
+               (lambda (id) (setq attached id))))
+      (safeslop-portal-run)
+      (should (equal attached "sess-new"))
+      (should (string-match-p "container" prompt))
+      (should (string-match-p "deny" prompt)))))
+
+(ert-deftest safeslop-test-portal-open-run-branch-confirms ()
+  "RET on a created session confirms before attaching; declining aborts (F4)."
+  (let (attached)
+    (cl-letf (((symbol-function 'safeslop-portal--session-at-point)
+               (lambda () '((session_id . "sess-new") (status . "created")
+                            (agent . "pi") (environment . "container")
+                            (network . "deny"))))
+              ((symbol-function 'yes-or-no-p) (lambda (&rest _) nil))
+              ((symbol-function 'safeslop-session-attach)
+               (lambda (id) (setq attached id))))
+      (safeslop-portal-open)
+      (should-not attached))))
+
+;;; specs/0063: annotated completion, stderr separation, buffer switcher, help
+
+(ert-deftest safeslop-test-session-annotation-includes-agent-status-workspace ()
+  (let ((ann (safeslop-session--annotate
+              '((session_id . "sess-1") (agent . "pi") (status . "created")
+                (workspace . "/tmp/ws")))))
+    (should (string-match-p "pi" ann))
+    (should (string-match-p "created" ann))
+    (should (string-match-p "ws" ann)))
+  ;; specs/0065 forward-compat: a name field, when present, is shown too.
+  (should (string-match-p "myname"
+                          (safeslop-session--annotate
+                           '((name . "myname") (agent . "pi"))))))
+
+(ert-deftest safeslop-test-call-json-async-stderr-noise-keeps-json-parse ()
+  "F9: stderr noise must not corrupt the stdout envelope parse."
+  (let ((safeslop-program "/bin/sh") env done)
+    (safeslop--call-json-async
+     (list "-c" "echo noisy-stderr >&2; printf '{\"schema_version\":1,\"ok\":true,\"data\":{},\"warnings\":[],\"errors\":[]}'")
+     (lambda (e) (setq env e done t)))
+    (with-timeout (10 (ert-fail "async call timed out"))
+      (while (not done) (accept-process-output nil 0.05)))
+    (should (safeslop-contract-ok-p env))))
+
+(ert-deftest safeslop-test-call-json-async-reports-stderr-on-failure ()
+  "F9: when the CLI fails without JSON, the first stderr line is surfaced."
+  (let ((safeslop-program "/bin/sh") env done)
+    (safeslop--call-json-async
+     (list "-c" "echo boom-details >&2; exit 3")
+     (lambda (e) (setq env e done t)))
+    (with-timeout (10 (ert-fail "async call timed out"))
+      (while (not done) (accept-process-output nil 0.05)))
+    (should-not (safeslop-contract-ok-p env))
+    (should (string-match-p "boom-details"
+                            (alist-get 'message
+                                       (car (safeslop-contract-errors env)))))))
+
+(ert-deftest safeslop-test-switch-to-session-buffer-offers-all-safeslop-buffers ()
+  (let ((b1 (get-buffer-create "*safeslop portal*"))
+        (b2 (get-buffer-create "*safeslop doctor*"))
+        collection)
+    (unwind-protect
+        (cl-letf (((symbol-function 'completing-read)
+                   (lambda (_p coll &rest _) (setq collection coll) "*safeslop doctor*"))
+                  ((symbol-function 'pop-to-buffer) (lambda (b) b)))
+          (safeslop-switch-to-session-buffer)
+          (should (member "*safeslop portal*" collection))
+          (should (member "*safeslop doctor*" collection)))
+      (kill-buffer b1)
+      (kill-buffer b2))))
+
+(ert-deftest safeslop-test-help-reflects-command-map ()
+  "F8: the help line is generated from the live command map, so it can't drift."
+  (let (msg)
+    (cl-letf (((symbol-function 'message)
+               (lambda (fmt &rest a) (setq msg (apply #'format fmt a)))))
+      (safeslop-help))
+    (should (string-match-p "P portal" msg))
+    (should (string-match-p "b switch-to-session-buffer" msg))
+    (should (string-match-p "L debug-log" msg))))

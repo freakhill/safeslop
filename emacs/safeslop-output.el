@@ -27,16 +27,26 @@
 (defvar-local safeslop-output--buffer-name nil
   "Name to reuse when refreshing this output buffer.")
 
+(defvar-local safeslop-output--rerender nil
+  "When non-nil, a function taking the parsed envelope that re-renders this buffer.
+Detail and inspect buffers set it so a refresh (raw \\`g' or Evil \\`gr')
+re-draws their faced view instead of degrading to the raw envelope dump
+(specs/0063 F5).  Only consulted for a successful envelope; failures fall back
+to the generic dump, which renders the error fields.")
+
 (defun safeslop-output-refresh ()
   "Refresh this output buffer when its original command is read-only."
   (interactive)
   (if (safeslop--safe-rerun-p safeslop-output--args)
       (let ((args safeslop-output--args)
-            (name (or safeslop-output--buffer-name (buffer-name))))
+            (name (or safeslop-output--buffer-name (buffer-name)))
+            (rerender safeslop-output--rerender))
         (safeslop--call-json-async
          args
          (lambda (env)
-           (safeslop--show-envelope-buffer name args env))))
+           (if (and rerender (safeslop-contract-ok-p env))
+               (funcall rerender env)
+             (safeslop--show-envelope-buffer name args env)))))
     (message "safeslop: this result came from a mutating command; rerun it from its surface so confirmation runs.")))
 
 (defvar safeslop-output-mode-map

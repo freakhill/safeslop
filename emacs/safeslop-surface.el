@@ -246,6 +246,18 @@ sole signal (specs/0031).  An unknown env renders plainly."
           (safeslop-surface--net-cell "deny") "=guarded  "
           (safeslop-surface--net-cell "allow") "=open\n"))
 
+(defun safeslop-surface--danger-summary (agent environment network)
+  "Return a one-line isolation/network risk summary for a launch/run confirm.
+Shared by the Profiles launch confirm and the portal run confirm (specs/0063
+F4), so the same world-changing action carries the same safety affordance on
+every surface."
+  (let ((note (or (nth 3 (assoc environment safeslop-surface--env-tiers))
+                  "unknown isolation"))
+        (net (if (equal network "allow")
+                 "network ALLOW (egress reachable)"
+               "network deny (default-deny egress)")))
+    (format "%s · %s · %s" agent note net)))
+
 (defun safeslop-surface--legend (hints)
   "Render HINTS — an alist of (KEY . ACTION) strings — as one shortcut legend line.
 Keys are faced as bindings; ends with a blank separator line."

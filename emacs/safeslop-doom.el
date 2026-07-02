@@ -14,6 +14,11 @@
 ;; not consult the keymap parent, and normal state would otherwise interpret
 ;; the action keys as motions/edits).  The four hand-maintained binding blocks
 ;; this replaces drifted more than once — edit the tables, not copies.
+;;
+;; Motion discipline (specs/0063 F1): the tables never bind keys Evil users
+;; read as motions/searches — j k g n f a stay free (so j/k, gg/G, /-then-n,
+;; f, and a all work); refresh rides `gr' and the portal auto-refresh toggle
+;; `ga', per evil-collection convention.
 
 ;;; Code:
 
@@ -57,39 +62,42 @@ Applied to each mode in `safeslop-doom--evil-mode-keys' after its own keys.")
 
 (defconst safeslop-doom--evil-mode-keys
   '((safeslop-output-mode safeslop-output-mode-map
-     ("g" . safeslop-output-refresh)
+     ("gr" . safeslop-output-refresh)
      ("e" . safeslop-show-last-error))
     (safeslop-portal-mode safeslop-portal-mode-map
      ("RET" . safeslop-portal-open)
      ("o"   . safeslop-portal-open)
-     ("D"   . safeslop-portal-run-detached)
-     ("R"   . safeslop-portal-reattach)
+     ("r"   . safeslop-portal-run)
+     ("R"   . safeslop-portal-run-detached)
+     ("A"   . safeslop-portal-reattach)
      ("i"   . safeslop-portal-status)
-     ("k"   . safeslop-portal-stop)
+     ("s"   . safeslop-portal-stop)
      ("x"   . safeslop-portal-remove)
      ("X"   . safeslop-portal-prune)
-     ("n"   . safeslop-portal-new)
-     ("f"   . safeslop-portal-follow-profile)
-     ("g"   . safeslop-portal-refresh)
-     ("a"   . safeslop-portal-toggle-auto-refresh))
+     ("c"   . safeslop-portal-new)
+     ("^"   . safeslop-portal-follow-profile)
+     ("gr"  . safeslop-portal-refresh)
+     ("ga"  . safeslop-portal-toggle-auto-refresh))
     (safeslop-install-mode safeslop-install-mode-map
-     ("g" . safeslop-install-refresh)
+     ("gr" . safeslop-install-refresh)
      ("p" . safeslop-install-plan)
-     ("x" . safeslop-install-apply)
-     ("D" . safeslop-install-dry-run)
-     ("b" . safeslop-install-rollback))
+     ("r" . safeslop-install-apply)
+     ("v" . safeslop-install-dry-run)
+     ("u" . safeslop-install-rollback))
     (safeslop-profiles-mode safeslop-profiles-mode-map
      ("RET" . safeslop-profiles-inspect)
      ("i"   . safeslop-profiles-inspect)
-     ("x"   . safeslop-profiles-launch)
+     ("r"   . safeslop-profiles-launch)
      ("e"   . safeslop-profiles-edit)
-     ("n"   . safeslop-profiles-create)
-     ("c"   . safeslop-profiles-clone)
+     ("c"   . safeslop-profiles-create)
+     ("C"   . safeslop-profiles-clone)
      ("v"   . safeslop-profiles-validate)
      ("D"   . safeslop-profiles-delete)
-     ("g"   . safeslop-profiles-refresh)))
+     ("gr"  . safeslop-profiles-refresh)))
   "Per-mode Evil normal-state actions: (MODE MAP-SYMBOL (KEY . COMMAND)...).
-Every listed mode also receives `safeslop-doom--evil-shared-keys'.")
+Every listed mode also receives `safeslop-doom--evil-shared-keys'.  Keys that
+would shadow Evil motions (j k g n f a) are deliberately absent (specs/0063
+F1); `gr'/`ga' carry refresh and the portal auto-refresh toggle instead.")
 
 (with-eval-after-load 'evil
   (dolist (entry safeslop-doom--evil-mode-keys)

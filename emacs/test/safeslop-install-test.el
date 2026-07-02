@@ -37,9 +37,14 @@
   (should (eq (get-text-property 0 'face (safeslop-install--present-cell nil)) 'shadow)))
 
 (ert-deftest safeslop-test-install-keymap ()
-  (should (eq (lookup-key safeslop-install-mode-map (kbd "x")) #'safeslop-install-apply))
-  (should (eq (lookup-key safeslop-install-mode-map (kbd "b")) #'safeslop-install-rollback))
+  (should (eq (lookup-key safeslop-install-mode-map (kbd "r")) #'safeslop-install-apply))
+  (should (eq (lookup-key safeslop-install-mode-map (kbd "v")) #'safeslop-install-dry-run))
+  (should (eq (lookup-key safeslop-install-mode-map (kbd "u")) #'safeslop-install-rollback))
   (should (eq (lookup-key safeslop-install-mode-map (kbd "g")) #'safeslop-install-refresh))
+  ;; specs/0063 F2: x/D/b freed (apply moved to r, dry-run to v, rollback to u).
+  (should-not (lookup-key safeslop-install-mode-map (kbd "x")))
+  (should-not (lookup-key safeslop-install-mode-map (kbd "b")))
+  (should-not (lookup-key safeslop-install-mode-map (kbd "D")))
   ;; inherited surface switch keys
   (should (eq (lookup-key safeslop-install-mode-map (kbd "P")) #'safeslop-portal))
   (should (eq (lookup-key safeslop-install-mode-map (kbd "F")) #'safeslop-profiles)))
