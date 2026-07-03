@@ -11,6 +11,7 @@ import (
 
 	"github.com/freakhill/safeslop/internal/engine/policy"
 	"github.com/freakhill/safeslop/internal/engine/secrets"
+	"github.com/freakhill/safeslop/internal/engine/userconfig"
 )
 
 // repoSlug turns "owner/name" into a filesystem- and SSH-alias-safe "owner-name".
@@ -113,7 +114,7 @@ func renderAliasSSHConfig(hostName, port, knownHostsPath string, entries []alias
 // instance host comes from fc.URL (required here — no single origin to infer it from) and the git
 // SSH port from fc.SSHPort (default 22); the host key is pinned once via ssh-keyscan. revoke-info
 // gets one "<base> <owner>/<repo> <id> <token-ref>" line per key (the token REF, never its value).
-func stageForgejoMulti(ctx context.Context, fc *policy.ForgejoCreds, stageDir string) ([]string, error) {
+func stageForgejoMulti(ctx context.Context, fc *policy.ForgejoCreds, stageDir string, accounts *userconfig.Accounts) ([]string, error) {
 	if fc.URL == "" {
 		return nil, fmt.Errorf("forgejo multi-repo (repos) requires `url` (the instance base, e.g. https://codeberg.org)")
 	}
@@ -125,11 +126,12 @@ func stageForgejoMulti(ctx context.Context, fc *policy.ForgejoCreds, stageDir st
 	if fc.SSHPort != 0 {
 		port = strconv.Itoa(fc.SSHPort)
 	}
-	token, err := secrets.Resolve(ctx, fc.Token)
-	if err != nil {
-		return nil, fmt.Errorf("forgejo token: %w", err)
-	}
 	base := strings.TrimRight(fc.URL, "/")
+	// The account token that registers each deploy key comes from the accounts link for that repo's
+	// owner (specs/0069 T6): resolved into host memory, cached per owner, never written. revoke-info
+	// stores the token REF only.
+	tokenByOwner := map[string]string{}
+	refByOwner := map[string]string{}
 
 	sshDir := filepath.Join(stageDir, ".ssh")
 	if err := os.MkdirAll(sshDir, 0o700); err != nil {
@@ -147,6 +149,18 @@ func stageForgejoMulti(ctx context.Context, fc *policy.ForgejoCreds, stageDir st
 			return nil, err
 		}
 		slug := repoSlug(rc.Repo)
+		tok, ok := tokenByOwner[owner]
+		if !ok {
+			link := accounts.Lookup(host, owner)
+			if link == nil || link.Forgejo == nil {
+				return nil, fmt.Errorf("no forgejo account link for %s/%s — run: safeslop creds link forgejo", host, owner)
+			}
+			resolved, rerr := secrets.Resolve(ctx, link.Forgejo.TokenRef)
+			if rerr != nil {
+				return nil, fmt.Errorf("forgejo token for %s: %w", owner, rerr)
+			}
+			tokenByOwner[owner], refByOwner[owner], tok = resolved, link.Forgejo.TokenRef, resolved
+		}
 		keyPath := filepath.Join(sshDir, "id_"+slug)
 		title := "safeslop-" + owner + "-" + repo
 		if _, err := runSSHCmd(ctx, keygenArgv(keyPath, title), "is ssh-keygen on PATH?"); err != nil {
@@ -157,7 +171,7 @@ func stageForgejoMulti(ctx context.Context, fc *policy.ForgejoCreds, stageDir st
 			return nil, fmt.Errorf("read generated public key for %s: %w", rc.Repo, err)
 		}
 		body := forgejoKeyBody(title, strings.TrimSpace(string(pub)), rc.Write)
-		respBody, code, err := forgejoDo(ctx, http.MethodPost, forgejoKeysURL(base, owner, repo), token, body)
+		respBody, code, err := forgejoDo(ctx, http.MethodPost, forgejoKeysURL(base, owner, repo), tok, body)
 		if err != nil {
 			return nil, fmt.Errorf("forgejo deploy-key register (%s): %w", rc.Repo, err)
 		}
@@ -173,7 +187,7 @@ func stageForgejoMulti(ctx context.Context, fc *policy.ForgejoCreds, stageDir st
 			return nil, err
 		}
 		entries = append(entries, aliasEntry{slug: slug, owner: owner, repo: repo, keyPath: keyPath})
-		fmt.Fprintf(&revoke, "%s %s/%s %s %s\n", base, owner, repo, keyID, fc.Token)
+		fmt.Fprintf(&revoke, "%s %s/%s %s %s\n", base, owner, repo, keyID, refByOwner[owner])
 	}
 	if err := os.WriteFile(filepath.Join(sshDir, "revoke-info"), []byte(revoke.String()), 0o600); err != nil {
 		return nil, err

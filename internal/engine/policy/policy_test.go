@@ -204,7 +204,6 @@ safeslop: profiles: deploy: {
 	network: "deny"
 	credentials: {
 		github: {mode: "pat", pat: "env:GITHUB_PAT", repos: [{repo: "acme/web"}, {repo: "acme/api"}]}
-		forgejo: {mode: "pat", url: "https://codeberg.org", pat: "env:CODEBERG_PAT", token: "env:CODEBERG_ADMIN", repos: [{repo: "jojo/web"}]}
 	}
 }`)
 	if err != nil {
@@ -214,8 +213,19 @@ safeslop: profiles: deploy: {
 	if c.Github.Mode != "pat" || c.Github.Pat != "env:GITHUB_PAT" || len(c.Github.Repos) != 2 {
 		t.Fatalf("github PAT creds = %+v", c.Github)
 	}
-	if c.Forgejo.Mode != "pat" || c.Forgejo.Pat != "env:CODEBERG_PAT" || c.Forgejo.URL != "https://codeberg.org" {
-		t.Fatalf("forgejo PAT creds = %+v", c.Forgejo)
+}
+
+// The forgejo token/mode/pat fields were removed in specs/0069 (token moved to accounts.cue); the
+// closed schema must reject them.
+func TestLoadRejectsRemovedForgejoFields(t *testing.T) {
+	for _, field := range []string{
+		`forgejo: {token: "env:T"}`,
+		`forgejo: {mode: "deploy-key", token: "env:T"}`,
+		`forgejo: {pat: "env:T"}`,
+	} {
+		if _, err := loadStr(t, "package safeslop\nsafeslop: profiles: deploy: {agent: \"claude\", credentials: "+field+"}"); err == nil {
+			t.Fatalf("removed forgejo field must be rejected: %s", field)
+		}
 	}
 }
 
@@ -274,14 +284,14 @@ safeslop: profiles: deploy: {agent: "claude", credentials: github: {mode: "deplo
 
 func TestLoadRejectsForgejoApiWithoutAck(t *testing.T) {
 	if _, err := loadStr(t, `package safeslop
-safeslop: profiles: deploy: {agent: "claude", environment: "container", network: "deny", credentials: forgejo: {mode: "deploy-key", token: "env:T", api: {enabled: true}}}`); err == nil {
+safeslop: profiles: deploy: {agent: "claude", environment: "container", network: "deny", credentials: forgejo: {api: {enabled: true}}}`); err == nil {
 		t.Fatal("expected forgejo api.enabled without ackAccountWide to be rejected (specs/0068 F5)")
 	}
 }
 
 func TestLoadAcceptsForgejoApiWithAck(t *testing.T) {
 	if _, err := loadStr(t, `package safeslop
-safeslop: profiles: deploy: {agent: "claude", environment: "container", network: "deny", credentials: forgejo: {mode: "deploy-key", token: "env:T", api: {enabled: true, ackAccountWide: true}}}`); err != nil {
+safeslop: profiles: deploy: {agent: "claude", environment: "container", network: "deny", credentials: forgejo: {api: {enabled: true, ackAccountWide: true}}}`); err != nil {
 		t.Fatalf("forgejo api with ack must load: %v", err)
 	}
 }

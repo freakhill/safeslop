@@ -138,16 +138,13 @@ func inspectProfile(ctx context.Context, profile string, prof policy.Profile, op
 		}
 	}
 
-	// forgejo: unlike GitHub, minting REQUIRES a resolvable API token, so its readiness IS the
-	// token ref's (pat mode probes the pat instead). A missing token ref => the key can't be minted.
+	// forgejo: the deploy-key registration token now lives in ~/.config/safeslop/accounts.cue
+	// (safeslop creds link forgejo), not in safeslop.cue, so readiness is link-dependent and resolved
+	// per session — like GitHub app mode. inspect reports it value-free as ephemeral; probing the
+	// linked token is `safeslop creds status` (specs/0069 T5/T6).
 	if f := c.Forgejo; f != nil {
-		ref := f.Token
-		mode := "deploy-key"
-		if f.Mode == "pat" {
-			ref, mode = f.Pat, "pat"
-		}
 		for _, name := range repoNames(f.Repos) {
-			row("forgejo", name, mode+" "+access(f.Write)+ttl(f.Ttl), ref, probeRef(ctx, ref, op, p))
+			row("forgejo", name, "deploy-key "+access(f.Write)+ttl(f.Ttl), "", StatusEphemeral)
 		}
 	}
 

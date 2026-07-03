@@ -6,7 +6,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/freakhill/safeslop/internal/engine/policy"
@@ -31,33 +30,6 @@ func stageGitHubPAT(ctx context.Context, sc *policy.GithubCreds, stageDir string
 		return nil, fmt.Errorf("github pat: %w", err)
 	}
 	return stageHTTPSPAT(stageDir, "https://github.com", "github.com", "22", token, sc.Repos)
-}
-
-// stageForgejoPAT is the Forgejo/Gitea PAT sibling of stageGitHubPAT. URL is required because PAT
-// mode is repo-list driven (there is no single origin remote to infer the instance from).
-func stageForgejoPAT(ctx context.Context, fc *policy.ForgejoCreds, stageDir string) ([]string, error) {
-	if fc.URL == "" {
-		return nil, fmt.Errorf("forgejo mode:pat requires `url` (the instance base, e.g. https://codeberg.org)")
-	}
-	if fc.Pat == "" {
-		return nil, fmt.Errorf("forgejo mode:pat requires `pat` (an env: or op:// secret ref)")
-	}
-	if len(fc.Repos) == 0 {
-		return nil, fmt.Errorf("forgejo mode:pat requires repos (one fine-grained token staged for explicit repos)")
-	}
-	host := hostFromURL(fc.URL)
-	if host == "" {
-		return nil, fmt.Errorf("could not parse host from forgejo url %q", fc.URL)
-	}
-	port := "22"
-	if fc.SSHPort != 0 {
-		port = strconv.Itoa(fc.SSHPort)
-	}
-	token, err := secrets.Resolve(ctx, fc.Pat)
-	if err != nil {
-		return nil, fmt.Errorf("forgejo pat: %w", err)
-	}
-	return stageHTTPSPAT(stageDir, strings.TrimRight(fc.URL, "/"), host, port, token, fc.Repos)
 }
 
 func stageHTTPSPAT(stageDir, baseURL, hostName, sshPort, token string, repos []policy.RepoCred) ([]string, error) {

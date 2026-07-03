@@ -14,6 +14,7 @@ import (
 
 	"github.com/freakhill/safeslop/internal/engine/policy"
 	"github.com/freakhill/safeslop/internal/engine/secrets"
+	"github.com/freakhill/safeslop/internal/engine/userconfig"
 )
 
 // ---- url + body builders (pure) ----
@@ -174,18 +175,18 @@ func forgejoKeyscan(ctx context.Context, host, port string) ([]byte, error) {
 // (which records the token *ref*, never its value), and returns GIT_SSH_COMMAND as a non-secret
 // path env. owner/repo/host come from the cwd's `origin` remote; the API base is creds.URL or
 // https://<host>. Like StageGithub, no revoke is relied upon — the stageDir wipe destroys the key.
-func StageForgejo(ctx context.Context, creds *policy.Credentials, stageDir string) ([]string, error) {
+func StageForgejo(ctx context.Context, creds *policy.Credentials, stageDir string, accounts *userconfig.Accounts) ([]string, error) {
 	if creds == nil || creds.Forgejo == nil {
 		return nil, nil
 	}
 	fc := creds.Forgejo
-	if fc.Mode == "pat" {
-		return stageForgejoPAT(ctx, fc, stageDir)
+	if fc.Api != nil && fc.Api.Enabled {
+		return nil, fmt.Errorf("forge API staging lands in P2 (specs/0068 F5)")
 	}
 
 	// Multi-repo: one deploy key per named repo, staged with SSH aliases + insteadOf (specs/0047 P2).
 	if len(fc.Repos) > 0 {
-		return stageForgejoMulti(ctx, fc, stageDir)
+		return stageForgejoMulti(ctx, fc, stageDir, accounts)
 	}
 
 	rOut, err := runSSHCmd(ctx, []string{"git", "remote", "get-url", "origin"}, "run safeslop from a repo with a Forgejo origin")
@@ -202,10 +203,9 @@ func StageForgejo(ctx context.Context, creds *policy.Credentials, stageDir strin
 		Write:   fc.Write,
 		Ttl:     fc.Ttl,
 		URL:     base,
-		Token:   fc.Token,
 		Repos:   []policy.RepoCred{{Repo: owner + "/" + repo, Write: fc.Write}},
 		SSHPort: atoiOrZero(port),
-	}, stageDir)
+	}, stageDir, accounts)
 }
 
 // RevokeForgejo best-effort revokes the staged Forgejo deploy key (reads stageDir/.ssh/revoke-info,

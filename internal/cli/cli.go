@@ -1903,10 +1903,11 @@ func stageProfile(ctx context.Context, prof policy.Profile, stageDir string) (se
 	if prof.Credentials != nil && prof.Credentials.Github != nil && prof.Credentials.Forgejo != nil {
 		return nil, nil, fmt.Errorf("credentials: set either github or forgejo, not both")
 	}
-	// App-mode github staging needs the host account links; load them only when github creds are set
-	// so a malformed accounts.cue never breaks a run that does not use github (specs/0069 T2/T4).
+	// GitHub App staging and Forgejo deploy-key staging both read the host account links; load them
+	// only when a forge creds block is present so a malformed accounts.cue never breaks a run that
+	// uses no forge creds (specs/0069 T2/T4/T6).
 	var accounts *userconfig.Accounts
-	if prof.Credentials != nil && prof.Credentials.Github != nil {
+	if prof.Credentials != nil && (prof.Credentials.Github != nil || prof.Credentials.Forgejo != nil) {
 		accPath, err := userconfig.DefaultAccountsPath()
 		if err != nil {
 			return nil, nil, err
@@ -1920,7 +1921,7 @@ func stageProfile(ctx context.Context, prof policy.Profile, stageDir string) (se
 	if err != nil {
 		return nil, nil, err
 	}
-	forgejoEnv, err := creds.StageForgejo(ctx, prof.Credentials, stageDir)
+	forgejoEnv, err := creds.StageForgejo(ctx, prof.Credentials, stageDir, accounts)
 	if err != nil {
 		return nil, nil, err
 	}

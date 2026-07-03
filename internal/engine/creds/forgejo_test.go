@@ -12,7 +12,35 @@ import (
 	"testing"
 
 	"github.com/freakhill/safeslop/internal/engine/policy"
+	"github.com/freakhill/safeslop/internal/engine/userconfig"
 )
+
+// forgejoAcc builds an in-memory accounts store with one forgejo link (specs/0069 T6: the deploy-key
+// registration token comes from accounts.cue, not policy).
+func forgejoAcc(host, owner, ref string, sshPort int) *userconfig.Accounts {
+	fa := &userconfig.ForgejoAccount{TokenRef: ref}
+	if sshPort != 0 {
+		fa.SSHPort = sshPort
+	}
+	acc := &userconfig.Accounts{Accounts: map[string]userconfig.Account{}}
+	acc.Upsert(userconfig.Account{Forge: "forgejo", Host: host, Owner: owner, Forgejo: fa})
+	return acc
+}
+
+func TestStageForgejoDenyWithoutLink(t *testing.T) {
+	binDir := t.TempDir()
+	fakeStub(t, binDir, "ssh-keygen", `eval "p=\${$#}"; echo PRIV > "$p"; echo "ssh-ed25519 AAAAPUB" > "$p.pub"`)
+	fakeStub(t, binDir, "ssh-keyscan", `eval "h=\${$#}"; echo "$h ssh-ed25519 AAAAHOSTKEY"`)
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+	creds := &policy.Credentials{Forgejo: &policy.ForgejoCreds{
+		URL:   "https://git.example.org",
+		Repos: []policy.RepoCred{{Repo: "jojo/web"}},
+	}}
+	_, err := StageForgejo(context.Background(), creds, t.TempDir(), &userconfig.Accounts{Accounts: map[string]userconfig.Account{}})
+	if err == nil || !strings.Contains(err.Error(), "safeslop creds link forgejo") {
+		t.Fatalf("missing forgejo link must hard-deny, got %v", err)
+	}
+}
 
 func TestParseForgejoRemote(t *testing.T) {
 	type want struct{ host, port, owner, repo string }
@@ -79,8 +107,9 @@ func TestStageForgejoMintsAndStages(t *testing.T) {
 	t.Setenv("FORGEJO_TOKEN", "secret-tok")
 
 	stage := t.TempDir()
-	creds := &policy.Credentials{Forgejo: &policy.ForgejoCreds{URL: srv.URL, Token: "env:FORGEJO_TOKEN"}}
-	env, err := StageForgejo(context.Background(), creds, stage)
+	creds := &policy.Credentials{Forgejo: &policy.ForgejoCreds{URL: srv.URL}}
+	acc := forgejoAcc(hostFromURL(srv.URL), "acme", "env:FORGEJO_TOKEN", 0)
+	env, err := StageForgejo(context.Background(), creds, stage, acc)
 	if err != nil {
 		t.Fatalf("StageForgejo: %v", err)
 	}
@@ -117,7 +146,7 @@ func TestStageForgejoMintsAndStages(t *testing.T) {
 }
 
 func TestStageForgejoNilIsNoop(t *testing.T) {
-	env, err := StageForgejo(context.Background(), &policy.Credentials{}, t.TempDir())
+	env, err := StageForgejo(context.Background(), &policy.Credentials{}, t.TempDir(), nil)
 	if err != nil || env != nil {
 		t.Fatalf("nil forgejo creds must be a no-op: env=%v err=%v", env, err)
 	}
@@ -185,10 +214,11 @@ func TestStageForgejoMultiRepo(t *testing.T) {
 
 	host := hostFromURL(srv.URL)
 	creds := &policy.Credentials{Forgejo: &policy.ForgejoCreds{
-		URL: srv.URL, Token: "env:FORGEJO_TOKEN", SSHPort: 2222,
+		URL: srv.URL, SSHPort: 2222,
 		Repos: []policy.RepoCred{{Repo: "jojo/web"}, {Repo: "jojo/api", Write: true}},
 	}}
-	env, err := StageForgejo(context.Background(), creds, stage)
+	acc := forgejoAcc(host, "jojo", "env:FORGEJO_TOKEN", 0)
+	env, err := StageForgejo(context.Background(), creds, stage, acc)
 	if err != nil {
 		t.Fatalf("StageForgejo multi: %v", err)
 	}

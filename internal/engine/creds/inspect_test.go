@@ -134,16 +134,17 @@ func TestInspectSshPatProbed(t *testing.T) {
 	}
 }
 
-func TestInspectForgejoTokenProbed(t *testing.T) {
-	cfg := cfgWith(policy.Profile{Credentials: &policy.Credentials{Forgejo: &policy.ForgejoCreds{Token: "env:FTOK"}}})
+func TestInspectForgejoEphemeral(t *testing.T) {
+	cfg := cfgWith(policy.Profile{Credentials: &policy.Credentials{Forgejo: &policy.ForgejoCreds{}}})
 	rep := Inspect(context.Background(), cfg, fakeProber(map[string]string{}, false, false, nil, nil))
 	r, ok := rowFor(rep.Rows, "forgejo", "origin")
 	if !ok {
 		t.Fatalf("no forgejo row: %+v", rep.Rows)
 	}
-	// Forgejo deploy-key minting REQUIRES a resolvable API token, so its readiness is the token's.
-	if r.Status != StatusMissing || r.Ref != "env:FTOK" {
-		t.Fatalf("forgejo readiness is its token ref: status=%q ref=%q", r.Status, r.Ref)
+	// The registration token now lives in accounts.cue, resolved per session (specs/0069 T6), so
+	// inspect reports forgejo value-free as ephemeral — no policy-level token ref to probe.
+	if r.Status != StatusEphemeral || r.Ref != "" {
+		t.Fatalf("forgejo readiness must be ephemeral + value-free: status=%q ref=%q", r.Status, r.Ref)
 	}
 }
 

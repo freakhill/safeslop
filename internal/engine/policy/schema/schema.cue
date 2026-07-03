@@ -127,31 +127,17 @@ package safeslop
 // instance base (e.g. "https://codeberg.org"); when omitted the host is inferred from the cwd
 // origin remote. The SSH host key is pinned per run via ssh-keyscan at stage time.
 #ForgejoCreds: {
-	mode:   "deploy-key" | "pat" | *"deploy-key"
 	write?: bool | *false
 	ttl?:   string | *"1h"
 	url?:   string
-	// Deploy-key mode API token, used to register/revoke ephemeral keys. PAT mode does not need it.
-	token?: #SecretRef
-	// PAT opt-in (specs/0047 P2.3): stage one existing fine-grained Forgejo/Gitea token from this
-	// secret ref as an HTTPS credential for every repo below. The token value is never embedded in git config.
-	// safeslop does not mint or revoke account tokens; rotate/revoke PATs at the forge.
-	pat?: #SecretRef
-	// Multi-repo: deploy-key mode mints one deploy key per entry; PAT mode uses the same repo list
-	// for HTTPS rewrites. `url` is required in multi-repo/PAT mode (no single origin to infer the instance from).
+	// Multi-repo: one deploy key per entry. `url` is required in multi-repo mode (no single origin to
+	// infer the instance from). The account token that registers each key comes from
+	// ~/.config/safeslop/accounts.cue (safeslop creds link forgejo), never from this file (specs/0069).
 	repos?:      [...#RepoCred]
 	"ssh-port"?: int | *22
 	// Opt-in staged API token (P2 staging). Forgejo tokens are account-wide, so enabling requires
 	// an explicit ackAccountWide (enforced at load, specs/0068 F5).
 	api?: #ForgejoApi
-	if mode == "deploy-key" {
-		token: #SecretRef
-	}
-	if mode == "pat" {
-		url:   string
-		pat:   #SecretRef
-		repos: [...#RepoCred] & [_, ...]
-	}
 }
 
 #ForgejoApi: {

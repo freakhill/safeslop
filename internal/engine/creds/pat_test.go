@@ -71,51 +71,8 @@ func TestStageGitHubPATMultiRepo(t *testing.T) {
 	}
 }
 
-func TestStageForgejoPATMultiRepoWithSSHPort(t *testing.T) {
-	stage := t.TempDir()
-	t.Setenv("FORGEJO_FINE_GRAINED_PAT", "fj_dummy_secret")
-
-	env, err := StageForgejo(context.Background(), &policy.Credentials{Forgejo: &policy.ForgejoCreds{
-		Mode:    "pat",
-		URL:     "https://forgejojo.lucyjojo.me",
-		SSHPort: 2222,
-		Pat:     "env:FORGEJO_FINE_GRAINED_PAT",
-		Repos: []policy.RepoCred{
-			{Repo: "jojo/web"},
-			{Repo: "jojo/api"},
-		},
-	}}, stage)
-	if err != nil {
-		t.Fatalf("StageForgejo PAT: %v", err)
-	}
-	joined := strings.Join(env, "\n")
-	if !strings.Contains(joined, "GIT_CONFIG_GLOBAL="+filepath.Join(stage, ".gitconfig")) || strings.Contains(joined, "GIT_SSH_COMMAND") {
-		t.Fatalf("env = %v", env)
-	}
-
-	gc, _ := os.ReadFile(filepath.Join(stage, ".gitconfig"))
-	cfg := string(gc)
-	for _, want := range []string{
-		`[credential "https://forgejojo.lucyjojo.me/jojo/web.git"]`,
-		`[url "https://forgejojo.lucyjojo.me/jojo/web.git"]`,
-		"insteadOf = git@forgejojo.lucyjojo.me:jojo/web.git",
-		"insteadOf = ssh://git@forgejojo.lucyjojo.me:2222/jojo/web.git",
-		`[credential "https://forgejojo.lucyjojo.me/jojo/api.git"]`,
-	} {
-		if !strings.Contains(cfg, want) {
-			t.Fatalf("gitconfig missing %q:\n%s", want, cfg)
-		}
-	}
-	if strings.Contains(cfg, "fj_dummy_secret") {
-		t.Fatal("token value must not be embedded in gitconfig")
-	}
-}
-
 func TestStagePATRequiresTokenAndRepos(t *testing.T) {
 	if _, err := StageGithub(context.Background(), &policy.Credentials{Github: &policy.GithubCreds{Mode: "pat", Repos: []policy.RepoCred{{Repo: "acme/web"}}}}, t.TempDir(), nil); err == nil {
 		t.Fatal("GitHub PAT mode without pat ref must fail")
-	}
-	if _, err := StageForgejo(context.Background(), &policy.Credentials{Forgejo: &policy.ForgejoCreds{Mode: "pat", URL: "https://codeberg.org", Pat: "env:MISSING", Repos: []policy.RepoCred{{Repo: "acme/web"}}}}, t.TempDir()); err == nil {
-		t.Fatal("unresolvable PAT secret must fail")
 	}
 }

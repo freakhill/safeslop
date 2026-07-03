@@ -106,15 +106,14 @@ type GithubApi struct {
 // instance base (e.g. "https://codeberg.org"); when empty the host is inferred from the cwd
 // origin remote (specs/0047).
 type ForgejoCreds struct {
-	Mode    string      `json:"mode,omitempty"` // "deploy-key" (default) or "pat" (stage an existing fine-grained token)
 	Write   bool        `json:"write,omitempty"`
 	Ttl     string      `json:"ttl,omitempty"`
 	URL     string      `json:"url,omitempty"`
-	Token   string      `json:"token,omitempty"`    // API token ref for deploy-key registration/revocation
-	Pat     string      `json:"pat,omitempty"`      // secret ref for mode:"pat"; token value is staged 0600, never embedded in config
-	Repos   []RepoCred  `json:"repos,omitempty"`    // multi-repo: one deploy key/PAT scope per entry (specs/0047 P2/P2.3)
+	Repos   []RepoCred  `json:"repos,omitempty"`    // multi-repo: one deploy key per entry (specs/0047 P2)
 	SSHPort int         `json:"ssh-port,omitempty"` // instance git SSH port for multi-repo rewrites (default 22)
 	Api     *ForgejoApi `json:"api,omitempty"`      // opt-in staged API token (P2; enabling requires AckAccountWide, specs/0068 F5)
+	// The account token that registers/revokes deploy keys now lives in ~/.config/safeslop/accounts.cue
+	// (safeslop creds link forgejo), never in policy — Mode/Token/Pat were removed in specs/0069.
 }
 
 // ForgejoApi opts a profile into a staged Forgejo API token. Forgejo tokens are account-wide (not
@@ -274,6 +273,12 @@ func migrationHint(src []byte, errText string) string {
 	}
 	if strings.Contains(errText, "github.mode") {
 		hints = append(hints, `credentials.github.mode must be "app" (default) or "pat"; the "deploy-key" mode was removed (specs/0069)`)
+	}
+	if strings.Contains(errText, "forgejo.token") {
+		hints = append(hints, `credentials.forgejo.token moved to ~/.config/safeslop/accounts.cue — run: safeslop creds link forgejo (specs/0069)`)
+	}
+	if strings.Contains(errText, "forgejo.mode") || strings.Contains(errText, "forgejo.pat") {
+		hints = append(hints, `credentials.forgejo.mode and .pat were removed; deploy keys are the only forgejo staging and the token comes from accounts.cue (specs/0069)`)
 	}
 	if len(hints) == 0 {
 		return ""
