@@ -24,6 +24,12 @@ Credential staging is driven by `safeslop run <profile>` from the profile's
 a future `safeslop creds gc` sweep is the only planned *mutating* credential
 command.
 
+Forge account links are managed out of band with `safeslop creds
+link|unlink|status`: they live in `~/.config/safeslop/accounts.cue` (0600,
+host-only) and hold non-secret ids + secret *refs* only. `link` probes the forge
+(no token minted) and never prompts for a password/OTP; `status [--json]` shows a
+value-free probe result + TTL model per link.
+
 Read-only posture inspection exists (specs/0067): `safeslop creds list
 [safeslop.cue] --output json` and `safeslop creds show <profile> --output json`
 enumerate every declared secret/credential across profiles with a value-free
@@ -42,51 +48,64 @@ staged private keys.
 
 ## GitHub
 
-Use `credentials.ssh` for GitHub:
+First link the GitHub App installation (once per owner; stores ids + a key ref,
+never the key value):
+
+```
+safeslop creds link github --app-id N --installation-id N --key-ref op://Vault/gh-app/private-key
+```
+
+Then declare `credentials.github`:
 
 ```cue
-credentials: ssh: {
-	mode: "deploy-key"
+credentials: github: {
 	repos: [{repo: "owner/web"}, {repo: "owner/api", write: true}]
 }
 ```
 
-Omit `repos` to infer a single repository from the current `origin` remote.
-When `repos` is present, safeslop mints one deploy key per repo and stages
-per-repo SSH aliases plus git URL rewrites.
+Omit `repos` to infer a single repository from the current `origin` remote. In
+the default `app` mode safeslop mints an ephemeral, repo-scoped App installation
+token per owner (partitioned by `write`) and stages it over HTTPS — no deploy
+keys, no `gh` CLI. An owner with no account link is a hard error. The P1 token
+lifetime is ~1h with no renewal (renewal is P2).
 
-PAT opt-in:
+PAT fallback (an existing fine-grained token, staged in a wipe-on-exit file, not
+embedded in git config or the environment):
 
 ```cue
-credentials: ssh: {
+credentials: github: {
 	mode: "pat"
 	pat:  "env:GITHUB_FINE_GRAINED_PAT"
 	repos: [{repo: "owner/web"}, {repo: "owner/api"}]
 }
 ```
 
-PAT values are staged in a wipe-on-exit file, not embedded in git config or
-process environment. safeslop does not mint or revoke account PATs.
-
 ## Forgejo/Gitea
 
-Use `credentials.forgejo`:
+First link the Forgejo account token (stores the token ref, never the value):
+
+```
+safeslop creds link forgejo --host forgejo.example.com --owner owner --token-ref op://Vault/forgejo/token
+```
+
+Then declare `credentials.forgejo` (deploy keys; the registration token comes
+from the account link, not from `safeslop.cue`):
 
 ```cue
 credentials: forgejo: {
-	mode:       "deploy-key"
 	url:        "https://forgejo.example.com"
-	token:      "env:FORGEJO_ADMIN_TOKEN"
 	"ssh-port": 2222
 	repos:      [{repo: "owner/web"}]
 }
 ```
 
-PAT opt-in uses `mode: "pat"`, `pat: <secret-ref>`, `url`, and explicit `repos`.
+safeslop mints one deploy key per repo and stages per-repo SSH aliases plus git
+URL rewrites. Each declared owner needs a forgejo account link; Forgejo tokens
+are account-wide, so prefer a dedicated bot account.
 
 ## Safety checklist
 
-- Prefer deploy keys over account PATs.
+- Prefer minted App tokens (GitHub) and dedicated bot accounts (Forgejo) over personal PATs.
 - Keep write access rare and profile-specific.
 - Keep credentialed profiles on `network: "deny"` or a constrained container/VM path.
 - Never commit token values; use `env:` or `op://` secret refs.

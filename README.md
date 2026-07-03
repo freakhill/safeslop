@@ -211,22 +211,21 @@ safeslop: {
 			}
 
 			credentials: {
-				// GitHub deploy keys: omit repos to infer the current origin, or declare
-				// repos for one deploy key per repo.
-				ssh: {
-					mode:  "deploy-key"
+				// GitHub App tokens over HTTPS: omit repos to infer the current origin, or
+				// declare repos (one token per owner, partitioned by write). Each owner needs
+				// a link: safeslop creds link github --app-id N --installation-id N --key-ref op://…
+				github: {
 					repos: [{repo: "owner/web"}, {repo: "owner/api", write: true}]
 				}
 
-				// GitHub PAT opt-in: one existing fine-grained HTTPS token for repos.
+				// GitHub PAT fallback: one existing fine-grained HTTPS token for repos.
 				// The token is staged in a wipe-on-exit file, not embedded in config.
-				// ssh: {mode: "pat", pat: "env:GITHUB_FINE_GRAINED_PAT", repos: [{repo: "owner/web"}]}
+				// github: {mode: "pat", pat: "env:GITHUB_FINE_GRAINED_PAT", repos: [{repo: "owner/web"}]}
 
-				// Forgejo/Gitea deploy keys or PATs. url is required for multi-repo/PAT.
+				// Forgejo/Gitea deploy keys. url is required for multi-repo. The registration
+				// token comes from accounts.cue: safeslop creds link forgejo --host H --owner O --token-ref op://…
 				forgejo: {
-					mode:       "deploy-key"
 					url:        "https://forgejo.example.com"
-					token:      "env:FORGEJO_ADMIN_TOKEN"
 					"ssh-port": 2222
 					repos:      [{repo: "owner/web"}]
 				}
@@ -381,16 +380,29 @@ and `host` only when you accept no isolation.
 ## Credentials
 
 Credentials are staged under the run's runtime directory and wiped on exit.
-Deploy-key revocation is best-effort; private-key deletion is the decay-first
-safety guarantee.
+Token revocation is best-effort; deletion of the staged token/key on exit is the
+decay-first safety guarantee.
 
-- GitHub deploy keys use `credentials.ssh`.
-- Forgejo/Gitea deploy keys use `credentials.forgejo` with an API token ref.
-- Multi-repo deploy-key mode creates one key per repo and uses per-repo SSH host
-  aliases plus git URL rewrites so git chooses the correct key.
-- PAT mode (`mode: "pat"`) stages one existing fine-grained token for explicit
-  repos. safeslop does not mint or revoke account PATs; rotate/revoke them at
-  the forge.
+- GitHub uses `credentials.github`. In the default `app` mode safeslop mints an
+  ephemeral, repo-scoped GitHub App installation token (contents + metadata) and
+  stages it as a git-over-HTTPS credential — no deploy keys, no `gh` CLI. Each
+  owner needs an account link (`safeslop creds link github`); repos are
+  partitioned by `write` so a read-only repo never gets a write token. The P1
+  token lifetime is capped at ~1h (no renewal yet; renewal lands in P2). PAT mode
+  (`mode: "pat"`, `pat: <ref>`) stages one existing fine-grained token instead.
+- Forgejo/Gitea uses `credentials.forgejo` (deploy keys, one per repo, with
+  per-repo SSH host aliases + git URL rewrites). The account token that registers
+  each key comes from `~/.config/safeslop/accounts.cue`
+  (`safeslop creds link forgejo`), never from `safeslop.cue`. Forgejo account
+  tokens are account-wide — prefer a dedicated bot account.
+- Account links live in `~/.config/safeslop/accounts.cue` (0600, host-only): they
+  hold non-secret ids + secret *refs* only, never a token or key value, and are
+  never serialized into a container or stage dir. Manage them with `safeslop creds
+  link|unlink|status`.
+- When github creds are staged on a `network: "deny"` profile, the egress
+  allowlist gains `github.com`, `codeload.github.com`, and
+  `objects.githubusercontent.com` (clone + LFS). `api.github.com` is not added in
+  P1 (API-token staging is P2).
 
 ### Inspecting credential posture (Emacs `C-c s K`, `safeslop creds`)
 
