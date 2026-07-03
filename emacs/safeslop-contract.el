@@ -46,7 +46,8 @@
     "TIMEOUT"
     "RATE_LIMITED"
     "IO_ERROR"
-    "INTERNAL")
+    "INTERNAL"
+    "TRUST_REQUIRED")
   "Append-only v1 safeslop JSON contract error-code registry.")
 
 (define-error 'safeslop-contract-error "safeslop JSON contract error")

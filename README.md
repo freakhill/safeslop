@@ -13,8 +13,10 @@ staged state down on exit.
 - **Honest isolation tiers**: `host` and `container`, with the active tier
   printed by `run`/`doctor`. `environment` is required — there is no default, so a
   profile always states its isolation explicitly.
-- **Fail-closed policy trust**: `safeslop run` refuses an unapproved or changed
-  `safeslop.cue` until you review and trust it.
+- **Fail-closed policy trust**: every launch lane — `safeslop run`, `safeslop
+  session run`, and the Emacs client — refuses an unapproved or changed
+  `safeslop.cue` until you review and trust it; an ad-hoc host session requires an
+  explicit `--trust-host` acknowledgement.
 - **Scrubbed child environments**: ambient host credentials are not inherited;
   only policy-declared secrets/credentials cross the boundary.
 - **Ephemeral credentials**: staged deploy keys, registry tokens, cloud tokens,
@@ -73,7 +75,7 @@ safeslop lock [profile] --output json              write repo-root safeslop.lock
 safeslop trust [safeslop.cue]       approve this policy's exact bytes
 safeslop run <profile> [--dry-run]  launch a trusted profile
 safeslop session create --profile <name> [--name <label>] --output json
-safeslop session create --agent <claude|pi|fish|zsh> --environment <host|container> --workspace <dir> [--name <label>] --output json
+safeslop session create --agent <claude|pi|fish|zsh> --environment <host|container> --workspace <dir> [--name <label>] [--trust-host] --output json
 safeslop session run --session-id <id> [--detach]
 safeslop session attach --session-id <id>
 safeslop session status --session-id <id> --output <json|jsonl>
@@ -341,15 +343,26 @@ has useful local rows immediately.
 ### Trust model
 
 `validate`, `list`, and `run --dry-run` are inspection commands and do not require
-trust. A real launch requires the exact current policy bytes to be trusted:
+trust. Every real launch — `safeslop run`, `safeslop session run`, and the Emacs
+client (which launches only through sessions) — requires the exact current policy
+bytes to be trusted:
 
 ```bash
 safeslop trust
 safeslop run work
 ```
 
-If an agent or editor changes the policy, launch is blocked until you review and
-trust the new bytes.
+For sessions the approval is checked when the session is created from a profile and
+recorded on the session, then re-verified before the agent starts; if an agent or
+editor changes the policy — or trust is revoked — in between, launch is blocked until
+you review and trust the new bytes. An ad-hoc host session (`session create --agent
+… --environment host`) has no `safeslop.cue` to approve and instead requires an
+explicit `--trust-host` acknowledgement that the agent runs unconfined with your
+host credentials.
+
+Staged credentials never live under the agent-writable workspace: they are written
+to a host-only stage dir under your user cache dir (`~/Library/Caches/safeslop` on
+macOS, `~/.cache/safeslop` on Linux) and bind-mounted read-only into the container.
 
 ### Isolation tiers
 

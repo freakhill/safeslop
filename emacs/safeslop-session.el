@@ -158,7 +158,12 @@ need a slow lazy first image build."
       (when (fboundp 'safeslop-portal--reveal-session)
         (safeslop-portal--reveal-session id))
       (when (null callback)
-        (safeslop-session--offer-open id))))
+        (safeslop-session--offer-open id)))
+    ;; A TRUST_REQUIRED refusal is recoverable: the session lane now gates on a
+    ;; host-recorded approval of the safeslop.cue bytes (specs/0072 F1), so offer
+    ;; to approve and retry rather than leaving the operator at a raw error.
+    (unless (safeslop-contract-ok-p envelope)
+      (safeslop-session--maybe-offer-trust args callback envelope)))
   (when callback (funcall callback envelope)))
 
 ;;;###autoload
@@ -210,6 +215,42 @@ This is the noninteractive/testable profile-picker bridge used by
   "Offer to open (attach) the freshly created session ID right now."
   (when (y-or-n-p (format "Open session %s now? " id))
     (safeslop-session-attach id)))
+
+(defun safeslop-session--trust-args (path)
+  "Return exact argv for host-approving the safeslop.cue at PATH."
+  (list "trust" path))
+
+(defun safeslop-session--create-progress-p (args)
+  "Return non-nil when a create with ARGS resolves/pulls an image (spinner-worthy).
+Profile and container ad-hoc creates do; host ad-hoc creates do not.  Derived from
+ARGS so a trust-retry re-dispatches with the same progress behaviour as the first try."
+  (or (and (member "--profile" args) t)
+      (let ((env (cadr (member "--environment" args))))
+        (or (null env) (equal env "container")))))
+
+(defun safeslop-session--maybe-offer-trust (args callback envelope)
+  "Offer to approve the policy and retry when ENVELOPE is a TRUST_REQUIRED refusal.
+`session create --profile' is gated on a host-recorded approval of the safeslop.cue
+bytes (specs/0072 F1); the client offers `safeslop trust <path>' then re-dispatches
+the create with ARGS.  Interactive only (CALLBACK nil), so tests see the raw refusal.
+Returns non-nil when a retry was launched."
+  (when (and (null callback)
+             (equal (safeslop-contract-first-error-code envelope) "TRUST_REQUIRED"))
+    (let* ((err (car (safeslop-contract-errors envelope)))
+           (path (alist-get 'path (alist-get 'details err))))
+      (when (and path
+                 (y-or-n-p
+                  (format "safeslop.cue at %s is not host-approved; review, trust, and retry? "
+                          path)))
+        (if (safeslop-contract-ok-p
+             (safeslop--call-json (safeslop-session--trust-args path)))
+            (progn
+              (safeslop-session--create-async
+               args (safeslop-session--create-progress-p args)
+               (lambda (env) (safeslop-session--handle-create-result args callback env)))
+              t)
+          (message "safeslop trust failed; not retrying")
+          nil)))))
 
 (defun safeslop-session--run-args (session-id)
   "Return exact argv for running SESSION-ID."

@@ -51,7 +51,7 @@ func TestSessionCreateAdhocHostWithTrustAck(t *testing.T) {
 }
 
 // TestSessionCreateAdhocContainerUngated proves the trust ack is a host-only concern: a
-// container ad-hoc session (the Emacs cockpit default) is unaffected by 0072.
+// container ad-hoc session (the Emacs client default) is unaffected by 0072.
 func TestSessionCreateAdhocContainerUngated(t *testing.T) {
 	ws := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
@@ -72,7 +72,7 @@ func TestSessionCreateAdhocContainerUngated(t *testing.T) {
 
 // TestSessionCreateFromProfileRefusesUntrusted pins the core of 0070 B1 (specs/0072 F1):
 // creating a session from a profile whose safeslop.cue is not host-approved is refused with
-// CodeTrustRequired — the Emacs cockpit launches on this lane, which previously skipped the gate.
+// CodeTrustRequired — the Emacs client launches on this lane, which previously skipped the gate.
 func TestSessionCreateFromProfileRefusesUntrusted(t *testing.T) {
 	ws := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
