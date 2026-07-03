@@ -131,6 +131,24 @@ func forgejoDo(ctx context.Context, method, url, token string, body []byte) ([]b
 	return b, resp.StatusCode, nil
 }
 
+// ProbeForgejo verifies a Forgejo/Gitea account token by listing one repo
+// (GET /api/v1/user/repos?limit=1) against the instance base. It returns only an error class; the
+// token value is never logged (specs/0069 T5, value-free probes). base is the instance base URL.
+func ProbeForgejo(ctx context.Context, base, token string) error {
+	u := strings.TrimRight(base, "/") + "/api/v1/user/repos?limit=1"
+	_, code, err := forgejoDo(ctx, http.MethodGet, u, token, nil)
+	if err != nil {
+		return fmt.Errorf("forgejo probe transport error: %w", err)
+	}
+	if code == http.StatusUnauthorized || code == http.StatusForbidden {
+		return fmt.Errorf("forgejo token rejected (HTTP %d) \u2014 check the token and its scopes", code)
+	}
+	if code/100 != 2 {
+		return fmt.Errorf("forgejo probe failed (HTTP %d)", code)
+	}
+	return nil
+}
+
 // forgejoKeyscan pins the instance's ed25519 host key for this run (StrictHostKeyChecking=yes, no
 // TOFU inside the boundary). For non-22 ports ssh-keyscan emits a "[host]:port" entry that the
 // staged GIT_SSH_COMMAND's ssh matches automatically.
