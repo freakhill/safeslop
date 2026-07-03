@@ -108,7 +108,7 @@ func renderAliasSSHConfig(hostName, port, knownHostsPath string, entries []alias
 	return cfg.String()
 }
 
-func stageGitHubMulti(ctx context.Context, sc *policy.SshCreds, stageDir string) ([]string, error) {
+func stageGitHubMulti(ctx context.Context, sc *policy.GithubCreds, stageDir string) ([]string, error) {
 	sshDir := filepath.Join(stageDir, ".ssh")
 	if err := os.MkdirAll(sshDir, 0o700); err != nil {
 		return nil, err

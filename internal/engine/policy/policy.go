@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"cuelang.org/go/cue"
 	"cuelang.org/go/cue/cuecontext"
@@ -77,42 +78,61 @@ type RepoCred struct {
 	Write bool   `json:"write,omitempty"` // rw deploy key for this repo (default ro)
 }
 
-// SshCreds stages a per-run repo-scoped ephemeral SSH deploy key (read-only unless Write).
-// The host mints it; only the private key crosses the boundary (specs/0001 §7.1, specs/0011).
-// When Repos is non-empty, one key is minted per repo and staged with per-repo SSH aliases +
-// git insteadOf rewrites (specs/0047 P2); otherwise the single repo is inferred from origin.
-type SshCreds struct {
-	Mode  string     `json:"mode,omitempty"` // "deploy-key" (default) or "pat" (stage an existing fine-grained token)
+// GithubCreds stages per-run repo-scoped ephemeral GitHub credentials over HTTPS. In "app" mode
+// (default) the host mints a short-lived installation token from a linked GitHub App account
+// (~/.config/safeslop/accounts.cue); in "pat" mode an existing fine-grained token is staged from
+// Pat. Only the token crosses the boundary; git talks HTTPS via per-URL credential helpers
+// (specs/0069, generalizing the specs/0047 PAT renderer). App-token permissions are token-wide, so
+// Repos partition into ro/rw scopes by Write and one token is minted per partition (specs/0068 F1).
+type GithubCreds struct {
+	Mode  string     `json:"mode,omitempty"` // "app" (default) or "pat" (stage an existing fine-grained token)
 	Write bool       `json:"write,omitempty"`
 	Ttl   string     `json:"ttl,omitempty"`
 	Pat   string     `json:"pat,omitempty"` // secret ref for mode:"pat"; token value is staged 0600, never embedded in config
 	Repos []RepoCred `json:"repos,omitempty"`
+	Api   *GithubApi `json:"api,omitempty"` // opt-in staged API token (P2; staging with Enabled errors in P1)
 }
 
-// ForgejoCreds is the Forgejo/Gitea sibling of SshCreds: a per-run repo-scoped ephemeral deploy
+// GithubApi opts a profile into a staged GitHub API token whose permission set is token-wide
+// (specs/0068 F5). P1 lands the struct for schema stability; staging with Enabled is a P2 error.
+type GithubApi struct {
+	Enabled     bool     `json:"enabled,omitempty"`
+	Permissions []string `json:"permissions,omitempty"`
+}
+
+// ForgejoCreds is the Forgejo/Gitea sibling of GithubCreds: a per-run repo-scoped ephemeral deploy
 // key on a non-GitHub forge (Codeberg, self-hosted, etc.). Forgejo has no `gh`-style ambient
 // auth, so Token is an explicit secret ref (op://... or env:NAME) for the API call. URL is the
 // instance base (e.g. "https://codeberg.org"); when empty the host is inferred from the cwd
 // origin remote (specs/0047).
 type ForgejoCreds struct {
-	Mode    string     `json:"mode,omitempty"` // "deploy-key" (default) or "pat" (stage an existing fine-grained token)
-	Write   bool       `json:"write,omitempty"`
-	Ttl     string     `json:"ttl,omitempty"`
-	URL     string     `json:"url,omitempty"`
-	Token   string     `json:"token,omitempty"`    // API token ref for deploy-key registration/revocation
-	Pat     string     `json:"pat,omitempty"`      // secret ref for mode:"pat"; token value is staged 0600, never embedded in config
-	Repos   []RepoCred `json:"repos,omitempty"`    // multi-repo: one deploy key/PAT scope per entry (specs/0047 P2/P2.3)
-	SSHPort int        `json:"ssh-port,omitempty"` // instance git SSH port for multi-repo rewrites (default 22)
+	Mode    string      `json:"mode,omitempty"` // "deploy-key" (default) or "pat" (stage an existing fine-grained token)
+	Write   bool        `json:"write,omitempty"`
+	Ttl     string      `json:"ttl,omitempty"`
+	URL     string      `json:"url,omitempty"`
+	Token   string      `json:"token,omitempty"`    // API token ref for deploy-key registration/revocation
+	Pat     string      `json:"pat,omitempty"`      // secret ref for mode:"pat"; token value is staged 0600, never embedded in config
+	Repos   []RepoCred  `json:"repos,omitempty"`    // multi-repo: one deploy key/PAT scope per entry (specs/0047 P2/P2.3)
+	SSHPort int         `json:"ssh-port,omitempty"` // instance git SSH port for multi-repo rewrites (default 22)
+	Api     *ForgejoApi `json:"api,omitempty"`      // opt-in staged API token (P2; enabling requires AckAccountWide, specs/0068 F5)
+}
+
+// ForgejoApi opts a profile into a staged Forgejo API token. Forgejo tokens are account-wide (not
+// repo-scoped), so Enabled requires AckAccountWide (enforced at load). P1 lands the struct for
+// schema stability; staging with Enabled is a P2 error.
+type ForgejoApi struct {
+	Enabled        bool `json:"enabled,omitempty"`
+	AckAccountWide bool `json:"ackAccountWide,omitempty"`
 }
 
 // Credentials groups the credential providers a profile uses (SP2; aws/gcp SP/0009; kube SP/0010;
-// ssh SP/0011; forgejo specs/0047).
+// github SP/0011, specs/0069; forgejo specs/0047).
 type Credentials struct {
 	Pnpm    []PnpmRegistry `json:"pnpm,omitempty"`
 	Aws     *AwsSso        `json:"aws,omitempty"`
 	Gcp     *GcpAdc        `json:"gcp,omitempty"`
 	Kube    *KubeCluster   `json:"kube,omitempty"`
-	Ssh     *SshCreds      `json:"ssh,omitempty"`
+	Github  *GithubCreds   `json:"github,omitempty"`
 	Forgejo *ForgejoCreds  `json:"forgejo,omitempty"`
 }
 
@@ -212,14 +232,17 @@ func LoadBytes(data []byte) (*Config, error) {
 		return nil, fmt.Errorf("no CUE instance produced")
 	}
 	if insts[0].Err != nil {
-		return nil, fmt.Errorf("load:\n%s", errors.Details(insts[0].Err, nil))
+		d := errors.Details(insts[0].Err, nil)
+		return nil, fmt.Errorf("load:\n%s%s", d, migrationHint(data, d))
 	}
 	val := ctx.BuildInstance(insts[0])
 	if err := val.Err(); err != nil {
-		return nil, fmt.Errorf("build:\n%s", errors.Details(err, nil))
+		d := errors.Details(err, nil)
+		return nil, fmt.Errorf("build:\n%s%s", d, migrationHint(data, d))
 	}
 	if err := val.Validate(cue.Concrete(true)); err != nil {
-		return nil, fmt.Errorf("invalid:\n%s", errors.Details(err, nil))
+		d := errors.Details(err, nil)
+		return nil, fmt.Errorf("invalid:\n%s%s", d, migrationHint(data, d))
 	}
 	var cfg Config
 	if err := val.LookupPath(cue.ParsePath("safeslop")).Decode(&cfg); err != nil {
@@ -228,8 +251,34 @@ func LoadBytes(data []byte) (*Config, error) {
 	for name, prof := range cfg.Profiles {
 		prof.Agent = NormalizeAgent(prof.Agent)
 		cfg.Profiles[name] = prof
+		// Forgejo API tokens are account-wide, not repo-scoped: enabling API staging must be an
+		// explicit, acknowledged decision (specs/0068 F5). Enforced here (post-decode) rather than in
+		// CUE because "required-only-when-enabled, no silent default" is awkward with CUE defaults.
+		// Staging with api.enabled still errors as P2 (see StageForgejo).
+		if c := prof.Credentials; c != nil && c.Forgejo != nil && c.Forgejo.Api != nil &&
+			c.Forgejo.Api.Enabled && !c.Forgejo.Api.AckAccountWide {
+			return nil, fmt.Errorf("profile %q: credentials.forgejo.api.enabled requires api.ackAccountWide: true — Forgejo API tokens are account-wide, not repo-scoped (specs/0068 F5)", name)
+		}
 	}
 	return &cfg, nil
+}
+
+// migrationHint appends pointed specs/0069 guidance when a failing load looks like a pre-0069
+// credentials shape (credentials.ssh, or github.mode:"deploy-key"), so an operator editing an old
+// safeslop.cue gets the rename rather than a bare "field not allowed". Best-effort and additive: it
+// inspects the source bytes + rendered error and returns "" when nothing matches.
+func migrationHint(src []byte, errText string) string {
+	var hints []string
+	if strings.Contains(string(src), "ssh:") {
+		hints = append(hints, `credentials.ssh was renamed to credentials.github (specs/0069); GitHub now stages an app or pat token over HTTPS, not an SSH deploy key`)
+	}
+	if strings.Contains(errText, "github.mode") {
+		hints = append(hints, `credentials.github.mode must be "app" (default) or "pat"; the "deploy-key" mode was removed (specs/0069)`)
+	}
+	if len(hints) == 0 {
+		return ""
+	}
+	return "\n\nspecs/0069 migration:\n  - " + strings.Join(hints, "\n  - ")
 }
 
 // EnvTier returns an honest one-line characterization of an environment's isolation strength so

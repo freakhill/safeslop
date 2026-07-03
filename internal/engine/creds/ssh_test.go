@@ -101,7 +101,7 @@ func TestStageSSHMintsReadOnly(t *testing.T) {
 	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
 
 	stage := t.TempDir()
-	env, err := StageSSH(context.Background(), &policy.Credentials{Ssh: &policy.SshCreds{}}, stage)
+	env, err := StageSSH(context.Background(), &policy.Credentials{Github: &policy.GithubCreds{}}, stage)
 	if err != nil {
 		t.Fatalf("StageSSH: %v", err)
 	}

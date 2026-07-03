@@ -14,7 +14,7 @@ safeslop: profiles: {
 				{host: "registry.npmjs.org", token: "op://dev/npm/token"},
 				{host: "npm.pkg.github.com", token: "env:GH_NPM_TOKEN", scope: "@myorg"},
 			]
-			ssh: repos: [
+			github: repos: [
 				{repo: "acme/web"},
 				{repo: "acme/api", write: true},
 			]

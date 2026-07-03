@@ -43,7 +43,7 @@ func TestRiskSummaryListsSecretsAndCreds(t *testing.T) {
 	r := RiskSummary(Profile{
 		Environment: "container", Network: "deny",
 		Secrets:     map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "op://x/y/z", "FOO": "env:FOO"},
-		Credentials: &Credentials{Ssh: &SshCreds{Write: true}},
+		Credentials: &Credentials{Github: &GithubCreds{Write: true}},
 	})
 	joined := strings.Join(r.Lines, "\n")
 	if !strings.Contains(joined, "CLAUDE_CODE_OAUTH_TOKEN") || !strings.Contains(joined, "FOO") {

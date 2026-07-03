@@ -4,7 +4,7 @@ import "testing"
 
 func TestLintIsDeterministicAndStable(t *testing.T) {
 	mk := func() Profile {
-		return Profile{Environment: "container", Network: "allow", Credentials: &Credentials{Ssh: &SshCreds{Write: true}}}
+		return Profile{Environment: "container", Network: "allow", Credentials: &Credentials{Github: &GithubCreds{Write: true}}}
 	}
 	cfg := &Config{Profiles: map[string]Profile{"b": mk(), "a": mk()}}
 	ws := Lint(cfg)
@@ -15,17 +15,17 @@ func TestLintIsDeterministicAndStable(t *testing.T) {
 
 func TestLintSshWriteOpenEgress(t *testing.T) {
 	cfg := &Config{Profiles: map[string]Profile{
-		"push_open": {Environment: "container", Network: "allow", Credentials: &Credentials{Ssh: &SshCreds{Write: true}}},
-		"push_deny": {Environment: "container", Network: "deny", Credentials: &Credentials{Ssh: &SshCreds{Write: true}}},
-		"ro_open":   {Environment: "container", Network: "allow", Credentials: &Credentials{Ssh: &SshCreds{Write: false}}},
+		"push_open": {Environment: "container", Network: "allow", Credentials: &Credentials{Github: &GithubCreds{Write: true}}},
+		"push_deny": {Environment: "container", Network: "deny", Credentials: &Credentials{Github: &GithubCreds{Write: true}}},
+		"ro_open":   {Environment: "container", Network: "allow", Credentials: &Credentials{Github: &GithubCreds{Write: false}}},
 	}}
 	codes := map[string]string{}
 	for _, w := range Lint(cfg) {
-		if w.Code == "ssh-write-open-egress" {
+		if w.Code == "github-write-open-egress" {
 			codes[w.Profile] = w.Code
 		}
 	}
-	if codes["push_open"] != "ssh-write-open-egress" {
+	if codes["push_open"] != "github-write-open-egress" {
 		t.Fatalf("write+allow must be flagged: %+v", codes)
 	}
 	if _, bad := codes["push_deny"]; bad {

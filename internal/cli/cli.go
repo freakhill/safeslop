@@ -1904,7 +1904,7 @@ func stageProfile(ctx context.Context, prof policy.Profile, stageDir string) (se
 	}
 	// ssh (GitHub) and forgejo both deliver a single GIT_SSH_COMMAND into the same stage; one forge
 	// per profile until specs/0047 P2 unifies them via per-repo SSH aliases + insteadOf rewrites.
-	if prof.Credentials != nil && prof.Credentials.Ssh != nil && prof.Credentials.Forgejo != nil {
+	if prof.Credentials != nil && prof.Credentials.Github != nil && prof.Credentials.Forgejo != nil {
 		return nil, nil, fmt.Errorf("credentials: set either ssh (GitHub) or forgejo, not both (multi-forge lands in specs/0047 P2)")
 	}
 	forgejoEnv, err := creds.StageForgejo(ctx, prof.Credentials, stageDir)
@@ -1976,7 +1976,7 @@ func runProfileCtx(ctx context.Context, name string, prof policy.Profile, argv [
 	}
 	// Best-effort revoke runs before the stageDir wipe (deferred after the top-of-func wipe, so
 	// LIFO orders it first).
-	if prof.Credentials != nil && prof.Credentials.Ssh != nil {
+	if prof.Credentials != nil && prof.Credentials.Github != nil {
 		defer creds.RevokeSSH(context.Background(), stageDir)
 	}
 	if prof.Credentials != nil && prof.Credentials.Forgejo != nil {

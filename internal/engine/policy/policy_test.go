@@ -3,6 +3,7 @@ package policy
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -87,12 +88,12 @@ func TestLoadDecodesSecretsAndCredentials(t *testing.T) {
 	if gh.Host != "npm.pkg.github.com" || gh.Token != "env:GH_NPM_TOKEN" || gh.Scope != "@myorg" {
 		t.Errorf("pnpm[1] = %+v", gh)
 	}
-	// Multi-repo ssh credential decodes through the embedded schema (specs/0047 P2).
-	if work.Credentials.Ssh == nil || len(work.Credentials.Ssh.Repos) != 2 {
-		t.Fatalf("expected 2 ssh repos, got %+v", work.Credentials.Ssh)
+	// Multi-repo github credential decodes through the embedded schema (specs/0047 P2, specs/0069).
+	if work.Credentials.Github == nil || len(work.Credentials.Github.Repos) != 2 {
+		t.Fatalf("expected 2 github repos, got %+v", work.Credentials.Github)
 	}
-	if r := work.Credentials.Ssh.Repos; r[0].Repo != "acme/web" || r[1].Repo != "acme/api" || r[0].Write || !r[1].Write {
-		t.Errorf("ssh repos = %+v", r)
+	if r := work.Credentials.Github.Repos; r[0].Repo != "acme/web" || r[1].Repo != "acme/api" || r[0].Write || !r[1].Write {
+		t.Errorf("github repos = %+v", r)
 	}
 }
 
@@ -178,20 +179,20 @@ safeslop: profiles: deploy: {
 	}
 }
 
-func TestLoadSshCredentials(t *testing.T) {
+func TestLoadGithubCredentials(t *testing.T) {
 	cfg, err := loadStr(t, `package safeslop
 safeslop: profiles: deploy: {
 	agent: "claude"
 	environment: "container"
 	network: "deny"
-	credentials: ssh: {write: true, ttl: "30m"}
+	credentials: github: {write: true, ttl: "30m"}
 }`)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	s := cfg.Profiles["deploy"].Credentials.Ssh
+	s := cfg.Profiles["deploy"].Credentials.Github
 	if s == nil || !s.Write || s.Ttl != "30m" {
-		t.Fatalf("ssh creds = %+v", s)
+		t.Fatalf("github creds = %+v", s)
 	}
 }
 
@@ -202,7 +203,7 @@ safeslop: profiles: deploy: {
 	environment: "container"
 	network: "deny"
 	credentials: {
-		ssh: {mode: "pat", pat: "env:GITHUB_PAT", repos: [{repo: "acme/web"}, {repo: "acme/api"}]}
+		github: {mode: "pat", pat: "env:GITHUB_PAT", repos: [{repo: "acme/web"}, {repo: "acme/api"}]}
 		forgejo: {mode: "pat", url: "https://codeberg.org", pat: "env:CODEBERG_PAT", token: "env:CODEBERG_ADMIN", repos: [{repo: "jojo/web"}]}
 	}
 }`)
@@ -210,8 +211,8 @@ safeslop: profiles: deploy: {
 		t.Fatalf("Load: %v", err)
 	}
 	c := cfg.Profiles["deploy"].Credentials
-	if c.Ssh.Mode != "pat" || c.Ssh.Pat != "env:GITHUB_PAT" || len(c.Ssh.Repos) != 2 {
-		t.Fatalf("ssh PAT creds = %+v", c.Ssh)
+	if c.Github.Mode != "pat" || c.Github.Pat != "env:GITHUB_PAT" || len(c.Github.Repos) != 2 {
+		t.Fatalf("github PAT creds = %+v", c.Github)
 	}
 	if c.Forgejo.Mode != "pat" || c.Forgejo.Pat != "env:CODEBERG_PAT" || c.Forgejo.URL != "https://codeberg.org" {
 		t.Fatalf("forgejo PAT creds = %+v", c.Forgejo)
@@ -220,8 +221,8 @@ safeslop: profiles: deploy: {
 
 func TestLoadRejectsBadCredentialMode(t *testing.T) {
 	if _, err := loadStr(t, `package safeslop
-safeslop: profiles: deploy: {agent: "claude", credentials: ssh: {mode: "oauth"}}`); err == nil {
-		t.Fatal("expected bad ssh mode to fail validation")
+safeslop: profiles: deploy: {agent: "claude", credentials: github: {mode: "oauth"}}`); err == nil {
+		t.Fatal("expected bad github mode to fail validation")
 	}
 	if _, err := loadStr(t, `package safeslop
 safeslop: profiles: deploy: {agent: "claude", credentials: forgejo: {mode: "oauth", token: "env:T"}}`); err == nil {
@@ -231,12 +232,12 @@ safeslop: profiles: deploy: {agent: "claude", credentials: forgejo: {mode: "oaut
 
 func TestLoadRejectsIncompletePATCredentials(t *testing.T) {
 	if _, err := loadStr(t, `package safeslop
-safeslop: profiles: deploy: {agent: "claude", credentials: ssh: {mode: "pat", repos: [{repo: "acme/web"}]}}`); err == nil {
-		t.Fatal("expected ssh PAT mode without pat to fail validation")
+safeslop: profiles: deploy: {agent: "claude", credentials: github: {mode: "pat", repos: [{repo: "acme/web"}]}}`); err == nil {
+		t.Fatal("expected github PAT mode without pat to fail validation")
 	}
 	if _, err := loadStr(t, `package safeslop
-safeslop: profiles: deploy: {agent: "claude", credentials: ssh: {mode: "pat", pat: "env:GITHUB_PAT"}}`); err == nil {
-		t.Fatal("expected ssh PAT mode without repos to fail validation")
+safeslop: profiles: deploy: {agent: "claude", credentials: github: {mode: "pat", pat: "env:GITHUB_PAT"}}`); err == nil {
+		t.Fatal("expected github PAT mode without repos to fail validation")
 	}
 	if _, err := loadStr(t, `package safeslop
 safeslop: profiles: deploy: {agent: "claude", credentials: forgejo: {mode: "deploy-key", url: "https://codeberg.org"}}`); err == nil {
@@ -248,19 +249,51 @@ safeslop: profiles: deploy: {agent: "claude", credentials: forgejo: {mode: "pat"
 	}
 }
 
-func TestLoadSshDefaultsReadOnly(t *testing.T) {
+func TestLoadGithubDefaultsReadOnly(t *testing.T) {
 	cfg, err := loadStr(t, `package safeslop
 safeslop: profiles: review: {
 	agent: "claude"
 	environment: "container"
-	credentials: ssh: {}
+	credentials: github: {}
 }`)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	s := cfg.Profiles["review"].Credentials.Ssh
+	s := cfg.Profiles["review"].Credentials.Github
 	if s == nil || s.Write {
-		t.Fatalf("ssh write must default false: %+v", s)
+		t.Fatalf("github write must default false: %+v", s)
+	}
+}
+
+func TestLoadRejectsGithubDeployKeyMode(t *testing.T) {
+	if _, err := loadStr(t, `package safeslop
+safeslop: profiles: deploy: {agent: "claude", credentials: github: {mode: "deploy-key"}}`); err == nil {
+		t.Fatal("expected github mode:deploy-key to be rejected (removed in specs/0069)")
+	}
+}
+
+func TestLoadRejectsForgejoApiWithoutAck(t *testing.T) {
+	if _, err := loadStr(t, `package safeslop
+safeslop: profiles: deploy: {agent: "claude", environment: "container", network: "deny", credentials: forgejo: {mode: "deploy-key", token: "env:T", api: {enabled: true}}}`); err == nil {
+		t.Fatal("expected forgejo api.enabled without ackAccountWide to be rejected (specs/0068 F5)")
+	}
+}
+
+func TestLoadAcceptsForgejoApiWithAck(t *testing.T) {
+	if _, err := loadStr(t, `package safeslop
+safeslop: profiles: deploy: {agent: "claude", environment: "container", network: "deny", credentials: forgejo: {mode: "deploy-key", token: "env:T", api: {enabled: true, ackAccountWide: true}}}`); err != nil {
+		t.Fatalf("forgejo api with ack must load: %v", err)
+	}
+}
+
+func TestLoadRejectsLegacySshWithHint(t *testing.T) {
+	_, err := loadStr(t, `package safeslop
+safeslop: profiles: deploy: {agent: "claude", environment: "container", credentials: ssh: {write: true}}`)
+	if err == nil {
+		t.Fatal("expected legacy credentials.ssh to be rejected")
+	}
+	if !strings.Contains(err.Error(), "renamed to credentials.github") {
+		t.Fatalf("expected specs/0069 rename hint, got: %v", err)
 	}
 }
 

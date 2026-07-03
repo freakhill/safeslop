@@ -95,15 +95,15 @@ func runSSHCmd(ctx context.Context, argv []string, hint string) ([]byte, error) 
 // owner/repo come from the process cwd's `origin` remote. No revoke is relied upon (best
 // effort via RevokeSSH); the stageDir wipe destroys the private key (decay-first).
 func StageSSH(ctx context.Context, creds *policy.Credentials, stageDir string) ([]string, error) {
-	if creds == nil || creds.Ssh == nil {
+	if creds == nil || creds.Github == nil {
 		return nil, nil
 	}
-	if creds.Ssh.Mode == "pat" {
-		return stageGitHubPAT(ctx, creds.Ssh, stageDir)
+	if creds.Github.Mode == "pat" {
+		return stageGitHubPAT(ctx, creds.Github, stageDir)
 	}
 	// Multi-repo: one deploy key per named repo, staged with SSH aliases + insteadOf (specs/0047 P2).
-	if len(creds.Ssh.Repos) > 0 {
-		return stageGitHubMulti(ctx, creds.Ssh, stageDir)
+	if len(creds.Github.Repos) > 0 {
+		return stageGitHubMulti(ctx, creds.Github, stageDir)
 	}
 	rOut, err := runSSHCmd(ctx, []string{"git", "remote", "get-url", "origin"}, "run safeslop from a repo with a github.com origin")
 	if err != nil {
@@ -114,7 +114,7 @@ func StageSSH(ctx context.Context, creds *policy.Credentials, stageDir string) (
 		return nil, err
 	}
 
-	return stageGitHubMulti(ctx, &policy.SshCreds{Repos: []policy.RepoCred{{Repo: owner + "/" + repo, Write: creds.Ssh.Write}}}, stageDir)
+	return stageGitHubMulti(ctx, &policy.GithubCreds{Repos: []policy.RepoCred{{Repo: owner + "/" + repo, Write: creds.Github.Write}}}, stageDir)
 }
 
 // RevokeSSH best-effort revokes the staged deploy key (reads stageDir/.ssh/revoke-info).

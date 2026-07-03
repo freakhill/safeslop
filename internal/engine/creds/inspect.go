@@ -124,15 +124,16 @@ func inspectProfile(ctx context.Context, profile string, prof policy.Profile, op
 		row("pnpm", hostOrElse(r.Host, "registry.npmjs.org"), r.Scope, r.Token, probeRef(ctx, r.Token, op, p))
 	}
 
-	// ssh: pat mode probes its token ref; deploy-key mode is ephemeral (minted per session).
-	if s := c.Ssh; s != nil {
+	// github: pat mode probes its token ref; app mode is ephemeral (minted per session). The row
+	// kind stays "ssh" until the specs/0069 T4 inspect rework; the provider is credentials.github.
+	if s := c.Github; s != nil {
 		if s.Mode == "pat" {
 			for _, name := range repoNames(s.Repos) {
 				row("ssh", name, "pat "+access(s.Write), s.Pat, probeRef(ctx, s.Pat, op, p))
 			}
 		} else {
 			for _, name := range repoNames(s.Repos) {
-				row("ssh", name, "deploy-key "+access(s.Write)+ttl(s.Ttl), "", StatusEphemeral)
+				row("ssh", name, "app "+access(s.Write)+ttl(s.Ttl), "", StatusEphemeral)
 			}
 		}
 	}

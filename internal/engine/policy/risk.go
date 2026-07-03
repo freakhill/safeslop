@@ -213,12 +213,12 @@ func credLines(c *Credentials) []string {
 	if c.Kube != nil {
 		out = append(out, "kubeconfig")
 	}
-	if c.Ssh != nil {
+	if c.Github != nil {
 		w := "read-only"
-		if c.Ssh.Write {
+		if c.Github.Write {
 			w = "read-WRITE"
 		}
-		out = append(out, "SSH deploy key ("+w+")")
+		out = append(out, "GitHub token ("+w+")")
 	}
 	return out
 }

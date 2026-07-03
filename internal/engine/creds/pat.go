@@ -19,7 +19,7 @@ const patTokenFile = ".git-pat-token"
 // declared repos. It deliberately avoids putting the token value in .gitconfig or an env var: the
 // credential helper reads it from a 0600 file inside stageDir, which is wiped on exit. safeslop does
 // not mint or revoke account PATs; rotate/revoke them at the forge.
-func stageGitHubPAT(ctx context.Context, sc *policy.SshCreds, stageDir string) ([]string, error) {
+func stageGitHubPAT(ctx context.Context, sc *policy.GithubCreds, stageDir string) ([]string, error) {
 	if sc.Pat == "" {
 		return nil, fmt.Errorf("github ssh mode:pat requires `pat` (an env: or op:// secret ref)")
 	}

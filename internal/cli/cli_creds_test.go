@@ -17,7 +17,7 @@ safeslop: profiles: {
 		environment: "container"
 		network: "deny"
 		secrets: {TOKEN: "env:APP_TOKEN"}
-		credentials: {ssh: {}, aws: {profile: "acme", region: "eu-west-1"}}
+		credentials: {github: {}, aws: {profile: "acme", region: "eu-west-1"}}
 	}
 	other: {
 		agent: "pi"

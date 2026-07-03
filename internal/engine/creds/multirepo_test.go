@@ -25,7 +25,7 @@ func TestStageSSHMultiRepo(t *testing.T) {
 	fakeStub(t, binDir, "gh", `echo "$*" >> `+ghCalls+`; if echo "$*" | grep -q repo2; then echo '{"id":9002}'; else echo '{"id":9001}'; fi`)
 	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
 
-	creds := &policy.Credentials{Ssh: &policy.SshCreds{Repos: []policy.RepoCred{
+	creds := &policy.Credentials{Github: &policy.GithubCreds{Repos: []policy.RepoCred{
 		{Repo: "acme/repo1"},
 		{Repo: "acme/repo2", Write: true},
 	}}}

@@ -97,25 +97,32 @@ package safeslop
 	write?: bool | *false
 }
 
-#SshCreds: {
-	mode:   "deploy-key" | "pat" | *"deploy-key"
+#GithubCreds: {
+	mode:   "app" | "pat" | *"app"
 	write?: bool | *false
 	ttl?:   string | *"1h"
-	// PAT opt-in (specs/0047 P2.3): stage one existing fine-grained token from this secret ref
-	// as an HTTPS credential for every repo below. The token value is never embedded in git config.
-	// safeslop does not mint or revoke account tokens; rotate/revoke PATs at the forge.
+	// PAT opt-in: stage one existing fine-grained token from this secret ref as an HTTPS credential
+	// for every repo below. The token value is never embedded in git config. safeslop does not mint
+	// or revoke account PATs; rotate/revoke them at the forge (specs/0047 P2.3).
 	pat?: #SecretRef
-	// Multi-repo: deploy-key mode mints one ephemeral key per entry, staged with distinct SSH host
-	// aliases + git insteadOf rewrites. PAT mode uses the same repo list for HTTPS rewrites.
-	// Omit to infer the single repo from the cwd origin in deploy-key mode.
+	// App/PAT both stage over HTTPS via per-URL credential helpers (specs/0069, generalizing the
+	// specs/0047 renderer). App-token permissions are token-wide, so repos partition into ro/rw
+	// scopes by write. Omit repos in app mode to infer the single repo from the cwd origin.
 	repos?: [...#RepoCred]
+	// Opt-in staged API token; permissions are token-wide (specs/0068 F5). Staging errors in P1.
+	api?: #GithubApi
 	if mode == "pat" {
 		pat:   #SecretRef
 		repos: [...#RepoCred] & [_, ...]
 	}
 }
 
-// Forgejo/Gitea ephemeral deploy key — the non-GitHub-forge sibling of #SshCreds (specs/0047). The
+#GithubApi: {
+	enabled?:     bool | *false
+	permissions?: [...string]
+}
+
+// Forgejo/Gitea ephemeral deploy key — the non-GitHub-forge sibling of #GithubCreds (specs/0047). The
 // instance has no `gh`-style ambient auth, so `token` is an explicit secret ref. `url` is the
 // instance base (e.g. "https://codeberg.org"); when omitted the host is inferred from the cwd
 // origin remote. The SSH host key is pinned per run via ssh-keyscan at stage time.
@@ -134,6 +141,9 @@ package safeslop
 	// for HTTPS rewrites. `url` is required in multi-repo/PAT mode (no single origin to infer the instance from).
 	repos?:      [...#RepoCred]
 	"ssh-port"?: int | *22
+	// Opt-in staged API token (P2 staging). Forgejo tokens are account-wide, so enabling requires
+	// an explicit ackAccountWide (enforced at load, specs/0068 F5).
+	api?: #ForgejoApi
 	if mode == "deploy-key" {
 		token: #SecretRef
 	}
@@ -144,14 +154,19 @@ package safeslop
 	}
 }
 
-// Credential providers a profile uses (SP2: pnpm; SP/0009: aws/gcp; SP/0010: kube; SP/0011: ssh;
-// specs/0047: forgejo).
+#ForgejoApi: {
+	enabled?:        bool | *false
+	ackAccountWide?: bool | *false
+}
+
+// Credential providers a profile uses (SP2: pnpm; SP/0009: aws/gcp; SP/0010: kube; SP/0011: github,
+// specs/0069; specs/0047: forgejo).
 #Credentials: {
 	pnpm?:    [...#PnpmRegistry]
 	aws?:     #AwsSso
 	gcp?:     #GcpAdc
 	kube?:    #KubeCluster
-	ssh?:     #SshCreds
+	github?:  #GithubCreds
 	forgejo?: #ForgejoCreds
 }
 
