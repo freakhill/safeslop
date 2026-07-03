@@ -35,6 +35,7 @@ func TestAllErrorCodesAreTheAppendOnlyV1Set(t *testing.T) {
 		CodeRateLimited,
 		CodeIOError,
 		CodeInternal,
+		CodeTrustRequired,
 	}
 	got := AllErrorCodes()
 	if !reflect.DeepEqual(got, want) {

@@ -52,6 +52,12 @@ func Supervise(ctx context.Context, store engsession.Store, id string, now func(
 	if err != nil {
 		return 1, err
 	}
+	// Re-verify host approval at the supervisor's own start (specs/0072 F1): a detached
+	// supervisor is re-exec'd, so it must independently confirm the policy is still trusted
+	// rather than rely on the issuing process's earlier check.
+	if err := verifySessionTrust(sess); err != nil {
+		return 1, err
+	}
 	prof := sessionProfile(sess)
 	argv, err := agentArgv(prof)
 	if err != nil {

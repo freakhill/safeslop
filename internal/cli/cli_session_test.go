@@ -49,6 +49,18 @@ func nowForTest(t *testing.T) time.Time {
 	return time.Date(2026, 6, 26, 0, 0, 0, 0, time.UTC)
 }
 
+// trustFixtureForTest isolates the trust store into a temp HOME and host-approves the safeslop.cue
+// at ws, so `session create --profile` passes the specs/0072 F1 trust gate — mirroring an operator
+// running `safeslop trust` before launching from the Emacs client. HOME must be set before the create
+// call so both the approval here and the gate inside runRootForTest read the same isolated store.
+func trustFixtureForTest(t *testing.T, ws string) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir()) // trust store -> {home}/.config/safeslop/trust.json, off the real one
+	if err := enforceTrust(filepath.Join(ws, "safeslop.cue"), true); err != nil {
+		t.Fatalf("approve fixture policy: %v", err)
+	}
+}
+
 func parseEnvelopeForTest(t *testing.T, out string) jsoncontract.Envelope {
 	t.Helper()
 	env, err := jsoncontract.Unmarshal([]byte(out))
@@ -92,7 +104,7 @@ func TestSessionCreateEmitsContractAndPersistsSafeDefaults(t *testing.T) {
 	state := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", state)
 
-	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--workspace", ws, "--output", "json")
+	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
 	if err != nil {
 		t.Fatalf("session create: %v\nout=%s", err, out)
 	}
@@ -125,7 +137,7 @@ func TestSessionCreateAcceptsClaudeCodeAlias(t *testing.T) {
 	ws := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
 
-	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude-code", "--environment", "host", "--workspace", ws, "--output", "json")
+	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude-code", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
 	if err != nil {
 		t.Fatalf("session create claude-code: %v\nout=%s", err, out)
 	}
@@ -164,6 +176,7 @@ safeslop: {
 		t.Fatalf("write safeslop.cue: %v", err)
 	}
 
+	trustFixtureForTest(t, ws)
 	out, err := runRootForTest(t, ws, "session", "create", "--profile", "review", "--output", "json")
 	if err != nil {
 		t.Fatalf("session create --profile: %v\nout=%s", err, out)
@@ -270,6 +283,7 @@ safeslop: {
 		t.Fatalf("write safeslop.cue: %v", err)
 	}
 
+	trustFixtureForTest(t, ws)
 	out, err := runRootForTest(t, ws, "session", "create", "--profile", "dev", "--output", "json")
 	if err != nil {
 		t.Fatalf("session create --profile shell: %v\nout=%s", err, out)
@@ -284,7 +298,7 @@ func TestSessionCreateRejectsUnsupportedAgentAsContract(t *testing.T) {
 	ws := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
 
-	out, err := runRootForTest(t, ws, "session", "create", "--agent", "shell", "--environment", "host", "--workspace", ws, "--output", "json")
+	out, err := runRootForTest(t, ws, "session", "create", "--agent", "shell", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
 	if err == nil {
 		t.Fatalf("unsupported agent unexpectedly succeeded: %s", out)
 	}
@@ -300,7 +314,7 @@ func TestSessionCreateAcceptsFishAgent(t *testing.T) {
 	ws := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
 
-	out, err := runRootForTest(t, ws, "session", "create", "--agent", "fish", "--environment", "host", "--workspace", ws, "--output", "json")
+	out, err := runRootForTest(t, ws, "session", "create", "--agent", "fish", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
 	if err != nil {
 		t.Fatalf("fish agent create failed: %v (%s)", err, out)
 	}
@@ -313,7 +327,7 @@ func TestSessionStatusJSONLEmitsSingleLineContract(t *testing.T) {
 	ws := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
 
-	out, err := runRootForTest(t, ws, "session", "create", "--agent", "pi", "--environment", "host", "--workspace", ws, "--output", "json")
+	out, err := runRootForTest(t, ws, "session", "create", "--agent", "pi", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -342,7 +356,7 @@ func TestSessionStopRevokesBeforeKillAndIsIdempotent(t *testing.T) {
 	sessionKillProcess = func(_ int) error { order = append(order, "kill"); return nil }
 	defer func() { sessionRevokeCredentials, sessionKillProcess = oldRevoke, oldKill }()
 
-	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--workspace", ws, "--output", "json")
+	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -380,7 +394,7 @@ func TestSessionStatusReportsReconciledState(t *testing.T) {
 	sessionProcessAlive = func(int) bool { return false } // run wrapper is gone
 	defer func() { sessionProcessAlive = oldAlive }()
 
-	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--workspace", ws, "--output", "json")
+	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -419,7 +433,7 @@ func TestSessionContractOutputDoesNotLeakSecretRefs(t *testing.T) {
 	ws := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
 	t.Setenv("ANTHROPIC_API_KEY", "super-secret-value")
-	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--workspace", ws, "--output", "json")
+	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -550,7 +564,7 @@ func TestSessionCreateEnvironmentOnlyOverride(t *testing.T) {
 
 	out, err := runRootForTest(t, ws, "session", "create",
 		"--agent", "claude", "--workspace", ws, "--output", "json",
-		"--environment", "host",
+		"--environment", "host", "--trust-host",
 	)
 	if err != nil {
 		t.Fatalf("session create: %v\nout=%s", err, out)
@@ -637,7 +651,7 @@ func TestSessionCreateRejectsInvalidNetwork(t *testing.T) {
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
 
 	out, err := runRootForTest(t, ws, "session", "create",
-		"--agent", "claude", "--environment", "host", "--workspace", ws, "--output", "json",
+		"--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json",
 		"--network", "open",
 	)
 	if err == nil {
@@ -663,7 +677,7 @@ func TestSessionRemoveDeletesStoppedRecordAndRevokes(t *testing.T) {
 	sessionRevokeCredentials = func(_ engsession.Session) error { revoked++; return nil }
 	defer func() { sessionRevokeCredentials = oldRevoke }()
 
-	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--workspace", ws, "--output", "json")
+	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
 	if err != nil {
 		t.Fatalf("create: %v\n%s", err, out)
 	}
@@ -698,7 +712,7 @@ func TestSessionRemoveRefusesRunning(t *testing.T) {
 	ws := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
 
-	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--workspace", ws, "--output", "json")
+	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
 	if err != nil {
 		t.Fatalf("create: %v\n%s", err, out)
 	}
@@ -743,7 +757,7 @@ func TestSessionPruneRemovesStoppedIncludingCrashed(t *testing.T) {
 	defer func() { sessionProcessAlive = oldAlive }()
 
 	mk := func(agent string) string {
-		out, err := runRootForTest(t, ws, "session", "create", "--agent", agent, "--environment", "host", "--workspace", ws, "--output", "json")
+		out, err := runRootForTest(t, ws, "session", "create", "--agent", agent, "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
 		if err != nil {
 			t.Fatalf("create %s: %v\n%s", agent, err, out)
 		}
@@ -797,7 +811,7 @@ func TestSessionRmAndPruneRegistered(t *testing.T) {
 // the rename tests can exercise the CLI surface without reaching into the store.
 func createSessionForRename(t *testing.T, ws string) string {
 	t.Helper()
-	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--workspace", ws, "--output", "json")
+	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
 	if err != nil {
 		t.Fatalf("create session: %v\nout=%s", err, out)
 	}
@@ -811,7 +825,7 @@ func TestSessionCreateAppliesName(t *testing.T) {
 	state := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", state)
 
-	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--workspace", ws, "--name", "Foo", "--output", "json")
+	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--name", "Foo", "--output", "json")
 	if err != nil {
 		t.Fatalf("session create --name: %v\nout=%s", err, out)
 	}
@@ -839,7 +853,7 @@ func TestSessionCreateRejectsControlName(t *testing.T) {
 	ws := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
 
-	out, _ := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--workspace", ws, "--name", "a\nb", "--output", "json")
+	out, _ := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--name", "a\nb", "--output", "json")
 	env := parseEnvelopeForTest(t, out)
 	if env.OK || len(env.Errors) == 0 || env.Errors[0].Code != jsoncontract.CodeInvalidArgument {
 		t.Fatalf("expected CodeInvalidArgument error envelope, got: %+v", env)
@@ -873,6 +887,7 @@ safeslop: {
 		t.Fatalf("write safeslop.cue: %v", err)
 	}
 
+	trustFixtureForTest(t, ws)
 	out, err := runRootForTest(t, ws, "session", "create", "--profile", "review", "--name", "Foo", "--output", "json")
 	if err != nil {
 		t.Fatalf("session create --profile --name: %v\nout=%s", err, out)
