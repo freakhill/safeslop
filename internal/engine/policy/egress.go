@@ -29,3 +29,17 @@ func AgentEgress(agent string) []string {
 		return nil
 	}
 }
+
+// CredsEgress returns the egress hosts a profile needs because its git credentials are staged.
+// GitHub over HTTPS reaches github.com plus the CDN hosts that clones and LFS objects redirect to
+// (specs/0068 FIX-b); api.github.com is intentionally excluded in P1 because API-token staging is
+// P2. These are exact-host entries (no leading dot). They are unioned with AgentEgress + the
+// per-profile egress: at allowlist materialization (network:deny profiles only, specs/0046).
+// Forgejo rides SSH deploy keys whose egress is handled elsewhere (specs/0008/0046) and is
+// unchanged here; Forgejo host:443 also waits for P2 API staging.
+func CredsEgress(prof *Profile) []string {
+	if prof == nil || prof.Credentials == nil || prof.Credentials.Github == nil {
+		return nil
+	}
+	return []string{"github.com", "codeload.github.com", "objects.githubusercontent.com"}
+}

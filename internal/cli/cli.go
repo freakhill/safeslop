@@ -2024,6 +2024,8 @@ func runProfileCtx(ctx context.Context, name string, prof policy.Profile, argv [
 		// egress = the agent's built-in providers + the resolved packages' runtimeEgress +
 		// the profile's egress: list (specs/0046 + 0058 N2).
 		egress := append(append([]string{}, policy.AgentEgress(prof.Agent)...), resolved.RuntimeEgress...)
+		// Union the hosts the staged git credentials need to reach (GitHub HTTPS + CDN, specs/0069 T7).
+		egress = append(egress, policy.CredsEgress(&prof)...)
 		egress = append(egress, prof.Egress...)
 		// A detached supervisor passes a PTY slave it owns (rio set); forward it so the
 		// container's tty bridges to the supervisor's PTY for attach. Coupled (rio zero)

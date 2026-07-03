@@ -42,3 +42,24 @@ func TestAgentEgressPiHasProvidersOthersNil(t *testing.T) {
 		}
 	}
 }
+
+func TestCredsEgressGithub(t *testing.T) {
+	// No github creds -> no extra egress.
+	if got := CredsEgress(&Profile{}); got != nil {
+		t.Errorf("no-creds profile must add no egress, got %v", got)
+	}
+	if got := CredsEgress(nil); got != nil {
+		t.Errorf("nil profile must add no egress, got %v", got)
+	}
+	// With github creds -> the HTTPS + CDN hosts, but NOT api.github.com (P2).
+	p := &Profile{Credentials: &Credentials{Github: &GithubCreds{}}}
+	got := CredsEgress(p)
+	for _, want := range []string{"github.com", "codeload.github.com", "objects.githubusercontent.com"} {
+		if !egHas(got, want) {
+			t.Errorf("github creds egress must include %q, got %v", want, got)
+		}
+	}
+	if egHas(got, "api.github.com") {
+		t.Errorf("api.github.com must NOT be added in P1 (API staging is P2): %v", got)
+	}
+}
