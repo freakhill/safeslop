@@ -84,7 +84,18 @@ func stageHTTPSPAT(stageDir, baseURL, hostName, sshPort, token string, repos []p
 	return []string{"GIT_CONFIG_GLOBAL=" + gcPath, "GIT_TERMINAL_PROMPT=0"}, nil
 }
 
+// renderPATGitConfig is the single-token specialization of renderGitCredsConfig: every repo reads
+// the same staged token file (PAT mode). Behavior is unchanged from before the T4a generalization.
 func renderPATGitConfig(baseURL, hostName, sshPort, tokenPath string, repos []policy.RepoCred) string {
+	return renderGitCredsConfig(baseURL, hostName, sshPort, repos, func(string) string { return tokenPath })
+}
+
+// renderGitCredsConfig renders a git-over-HTTPS credential config for repos, pointing each repo at
+// its own token file via tokenPathFor("owner/name"). Per-URL credential helpers `cat` the token at
+// credential time (renewal-transparent by construction); useHttpPath keeps helpers repo-scoped;
+// ssh->HTTPS insteadOf rewrites let agents keep git@ remotes. Generalized in specs/0069 T4a so App
+// mode can point different repos at different owner/partition tokens; PAT mode passes one path.
+func renderGitCredsConfig(baseURL, hostName, sshPort string, repos []policy.RepoCred, tokenPathFor func(string) string) string {
 	base := strings.TrimRight(baseURL, "/")
 	var b strings.Builder
 	b.WriteString("[include]\n\tpath = ~/.gitconfig\n")
@@ -92,9 +103,10 @@ func renderPATGitConfig(baseURL, hostName, sshPort, tokenPath string, repos []po
 	for _, rc := range repos {
 		owner, repo, err := splitOwnerRepo(rc.Repo)
 		if err != nil {
-			// Validation happens before this pure renderer in stageHTTPSPAT; skip impossible bad entries here.
+			// Validation happens before this pure renderer; skip impossible bad entries here.
 			continue
 		}
+		tokenPath := tokenPathFor(rc.Repo)
 		httpsURL := base + "/" + owner + "/" + repo + ".git"
 		writeCredentialHelper(&b, httpsURL, tokenPath)
 		writeCredentialHelper(&b, base+"/"+owner+"/"+repo, tokenPath)

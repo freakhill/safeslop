@@ -87,9 +87,9 @@ func stageRepoSSH(stageDir, hostName, port string, knownHosts []byte, entries []
 	}, nil
 }
 
-// stageGitHubMulti mints one ephemeral GitHub deploy key per repo in sc.Repos and stages them with
-// per-repo SSH aliases + insteadOf rewrites (specs/0047 P2). revoke-info gets one "owner/repo id"
-// line per key, which RevokeSSH revokes in a loop.
+// renderAliasSSHConfig renders one "Host <hostName>-<slug>" SSH block per entry, each pinned to its
+// own IdentityFile plus the shared known_hosts. keyPath maps a staged key path into the host or
+// container view. Used by the Forgejo per-repo deploy-key staging (specs/0047 P2).
 func renderAliasSSHConfig(hostName, port, knownHostsPath string, entries []aliasEntry, keyPath func(string) string) string {
 	var cfg strings.Builder
 	for _, e := range entries {
@@ -106,49 +106,6 @@ func renderAliasSSHConfig(hostName, port, knownHostsPath string, entries []alias
 		fmt.Fprintf(&cfg, "  UserKnownHostsFile %s\n\n", knownHostsPath)
 	}
 	return cfg.String()
-}
-
-func stageGitHubMulti(ctx context.Context, sc *policy.GithubCreds, stageDir string) ([]string, error) {
-	sshDir := filepath.Join(stageDir, ".ssh")
-	if err := os.MkdirAll(sshDir, 0o700); err != nil {
-		return nil, err
-	}
-	entries := make([]aliasEntry, 0, len(sc.Repos))
-	var revoke strings.Builder
-	for _, rc := range sc.Repos {
-		owner, repo, err := splitOwnerRepo(rc.Repo)
-		if err != nil {
-			return nil, err
-		}
-		slug := repoSlug(rc.Repo)
-		keyPath := filepath.Join(sshDir, "id_"+slug)
-		title := "safeslop-" + owner + "-" + repo
-		if _, err := runSSHCmd(ctx, keygenArgv(keyPath, title), "is ssh-keygen on PATH?"); err != nil {
-			return nil, err
-		}
-		pub, err := os.ReadFile(keyPath + ".pub")
-		if err != nil {
-			return nil, fmt.Errorf("read generated public key for %s: %w", rc.Repo, err)
-		}
-		regOut, err := runSSHCmd(ctx, ghRegisterArgv(owner, repo, title, strings.TrimSpace(string(pub)), rc.Write), "is `gh auth login` current with repo admin?")
-		if err != nil {
-			return nil, err
-		}
-		keyID, err := parseKeyID(regOut)
-		if err != nil {
-			return nil, err
-		}
-		_ = os.Remove(keyPath + ".pub")
-		if err := os.Chmod(keyPath, 0o600); err != nil {
-			return nil, err
-		}
-		entries = append(entries, aliasEntry{slug: slug, owner: owner, repo: repo, keyPath: keyPath})
-		fmt.Fprintf(&revoke, "%s/%s %s\n", owner, repo, keyID)
-	}
-	if err := os.WriteFile(filepath.Join(sshDir, "revoke-info"), []byte(revoke.String()), 0o600); err != nil {
-		return nil, err
-	}
-	return stageRepoSSH(stageDir, "github.com", "22", []byte(githubKnownHosts), entries)
 }
 
 // stageForgejoMulti mints one ephemeral Forgejo/Gitea deploy key per repo in fc.Repos (all on the

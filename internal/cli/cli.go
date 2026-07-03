@@ -326,7 +326,7 @@ var sessionRevokeCredentials = func(sess engsession.Session) error {
 	if err != nil {
 		return err
 	}
-	creds.RevokeSSH(context.Background(), stageDir)
+	creds.RevokeGithub(context.Background(), stageDir)
 	creds.RevokeForgejo(context.Background(), stageDir)
 	return nil
 }
@@ -1862,7 +1862,7 @@ func launchProfile(name, configPath string) (int, error) {
 // returns secretEnv (sensitive KEY=VAL — the resolved secrets plus aws/gcp env creds, destined
 // for the secrets.env channel / the process env) and pathEnv (non-secret NPM_CONFIG_USERCONFIG /
 // KUBECONFIG / GIT_SSH_COMMAND host paths into stageDir, for the host process env). The
-// caller owns the stageDir lifecycle (creation, the on-exit wipe, and creds.RevokeSSH if an ssh
+// caller owns the stageDir lifecycle (creation, the on-exit wipe, and creds.RevokeGithub if github
 // key was staged).
 func stageProfile(ctx context.Context, prof policy.Profile, stageDir string) (secretEnv, pathEnv []string, err error) {
 	if len(prof.Secrets) > 0 {
@@ -1898,14 +1898,27 @@ func stageProfile(ctx context.Context, prof policy.Profile, stageDir string) (se
 	if err != nil {
 		return nil, nil, err
 	}
-	sshEnv, err := creds.StageSSH(ctx, prof.Credentials, stageDir)
+	// One forge per profile: github (App tokens / PAT over HTTPS) and forgejo (deploy keys) both
+	// stage git credentials into the same dir; cross-forge unification is out of specs/0068 scope.
+	if prof.Credentials != nil && prof.Credentials.Github != nil && prof.Credentials.Forgejo != nil {
+		return nil, nil, fmt.Errorf("credentials: set either github or forgejo, not both")
+	}
+	// App-mode github staging needs the host account links; load them only when github creds are set
+	// so a malformed accounts.cue never breaks a run that does not use github (specs/0069 T2/T4).
+	var accounts *userconfig.Accounts
+	if prof.Credentials != nil && prof.Credentials.Github != nil {
+		accPath, err := userconfig.DefaultAccountsPath()
+		if err != nil {
+			return nil, nil, err
+		}
+		accounts, err = userconfig.LoadAccounts(accPath)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	githubEnv, err := creds.StageGithub(ctx, prof.Credentials, stageDir, accounts)
 	if err != nil {
 		return nil, nil, err
-	}
-	// ssh (GitHub) and forgejo both deliver a single GIT_SSH_COMMAND into the same stage; one forge
-	// per profile until specs/0047 P2 unifies them via per-repo SSH aliases + insteadOf rewrites.
-	if prof.Credentials != nil && prof.Credentials.Github != nil && prof.Credentials.Forgejo != nil {
-		return nil, nil, fmt.Errorf("credentials: set either ssh (GitHub) or forgejo, not both (multi-forge lands in specs/0047 P2)")
 	}
 	forgejoEnv, err := creds.StageForgejo(ctx, prof.Credentials, stageDir)
 	if err != nil {
@@ -1913,7 +1926,7 @@ func stageProfile(ctx context.Context, prof policy.Profile, stageDir string) (se
 	}
 	pathEnv = append(pathEnv, npmrcEnv...)
 	pathEnv = append(pathEnv, kubeEnv...)
-	pathEnv = append(pathEnv, sshEnv...)
+	pathEnv = append(pathEnv, githubEnv...)
 	pathEnv = append(pathEnv, forgejoEnv...)
 	return secretEnv, pathEnv, nil
 }
@@ -1977,7 +1990,7 @@ func runProfileCtx(ctx context.Context, name string, prof policy.Profile, argv [
 	// Best-effort revoke runs before the stageDir wipe (deferred after the top-of-func wipe, so
 	// LIFO orders it first).
 	if prof.Credentials != nil && prof.Credentials.Github != nil {
-		defer creds.RevokeSSH(context.Background(), stageDir)
+		defer creds.RevokeGithub(context.Background(), stageDir)
 	}
 	if prof.Credentials != nil && prof.Credentials.Forgejo != nil {
 		defer creds.RevokeForgejo(context.Background(), stageDir)

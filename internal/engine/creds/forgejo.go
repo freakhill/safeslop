@@ -155,7 +155,7 @@ func forgejoKeyscan(ctx context.Context, host, port string) ([]byte, error) {
 // host key via ssh-keyscan, stages ONLY the 0600 private key + known_hosts + a revoke-info file
 // (which records the token *ref*, never its value), and returns GIT_SSH_COMMAND as a non-secret
 // path env. owner/repo/host come from the cwd's `origin` remote; the API base is creds.URL or
-// https://<host>. Like StageSSH, no revoke is relied upon — the stageDir wipe destroys the key.
+// https://<host>. Like StageGithub, no revoke is relied upon — the stageDir wipe destroys the key.
 func StageForgejo(ctx context.Context, creds *policy.Credentials, stageDir string) ([]string, error) {
 	if creds == nil || creds.Forgejo == nil {
 		return nil, nil

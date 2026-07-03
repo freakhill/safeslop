@@ -14,16 +14,16 @@ func TestStageGitHubPATMultiRepo(t *testing.T) {
 	stage := t.TempDir()
 	t.Setenv("GH_FINE_GRAINED_PAT", "ghp_dummy_secret")
 
-	env, err := StageSSH(context.Background(), &policy.Credentials{Github: &policy.GithubCreds{
+	env, err := StageGithub(context.Background(), &policy.Credentials{Github: &policy.GithubCreds{
 		Mode: "pat",
 		Pat:  "env:GH_FINE_GRAINED_PAT",
 		Repos: []policy.RepoCred{
 			{Repo: "acme/web"},
 			{Repo: "acme/api", Write: true},
 		},
-	}}, stage)
+	}}, stage, nil)
 	if err != nil {
-		t.Fatalf("StageSSH PAT: %v", err)
+		t.Fatalf("StageGithub PAT: %v", err)
 	}
 
 	joined := strings.Join(env, "\n")
@@ -112,7 +112,7 @@ func TestStageForgejoPATMultiRepoWithSSHPort(t *testing.T) {
 }
 
 func TestStagePATRequiresTokenAndRepos(t *testing.T) {
-	if _, err := StageSSH(context.Background(), &policy.Credentials{Github: &policy.GithubCreds{Mode: "pat", Repos: []policy.RepoCred{{Repo: "acme/web"}}}}, t.TempDir()); err == nil {
+	if _, err := StageGithub(context.Background(), &policy.Credentials{Github: &policy.GithubCreds{Mode: "pat", Repos: []policy.RepoCred{{Repo: "acme/web"}}}}, t.TempDir(), nil); err == nil {
 		t.Fatal("GitHub PAT mode without pat ref must fail")
 	}
 	if _, err := StageForgejo(context.Background(), &policy.Credentials{Forgejo: &policy.ForgejoCreds{Mode: "pat", URL: "https://codeberg.org", Pat: "env:MISSING", Repos: []policy.RepoCred{{Repo: "acme/web"}}}}, t.TempDir()); err == nil {
