@@ -157,9 +157,9 @@ func provision(ctx context.Context, sessionID string, agentArgv []string, worksp
 
 // Launch runs spec.Argv in the agent container. secretEnv (the resolved profile secrets) is
 // written to secrets.env and sourced by the entrypoint — never passed via -e, so it stays out
-// of host `ps` and `docker inspect`. stageDir is the host .safeslop/runtime/<profile> dir (already
-// holds .npmrc when pnpm creds were staged); it is bind-mounted ro at /safeslop/runtime and wiped
-// on exit by the caller. The agent runs interactively through a PTY (design §6.2).
+// of host `ps` and `docker inspect`. stageDir is the host stage dir (under the user cache dir,
+// outside the agent-writable workspace — specs/0072 F2; already holds .npmrc when pnpm creds were
+// staged); it is bind-mounted ro at /safeslop/runtime and wiped on exit by the caller. The agent runs interactively through a PTY (design §6.2).
 // enabled is the profile's resolved package identity set (specs/0058): it selects the agent
 // image (ENABLE_<pkg> build args) so a profile gets exactly the tools it declared.
 func Launch(ctx context.Context, spec exec.LaunchSpec, workspace, network string, egress []string, secretEnv []string, stageDir string, enabled []string) (int, error) {

@@ -36,6 +36,10 @@ const (
 	CodeRateLimited            ErrorCode = "RATE_LIMITED"
 	CodeIOError                ErrorCode = "IO_ERROR"
 	CodeInternal               ErrorCode = "INTERNAL"
+	// CodeTrustRequired marks a launch refused because the profile's safeslop.cue is not
+	// host-approved (or changed since approval). Clients (the Emacs client) branch on it to
+	// offer `safeslop trust <path>` then retry (specs/0072 F1, closing 0070 B1/B3).
+	CodeTrustRequired ErrorCode = "TRUST_REQUIRED"
 )
 
 // allErrorCodes is the canonical ordered v1 registry.
@@ -64,6 +68,7 @@ var allErrorCodes = []ErrorCode{
 	CodeRateLimited,
 	CodeIOError,
 	CodeInternal,
+	CodeTrustRequired,
 }
 
 // AllErrorCodes returns a copy of the v1 error-code registry in canonical order.

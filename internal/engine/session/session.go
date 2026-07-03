@@ -67,6 +67,14 @@ type Session struct {
 	PID                int               `json:"pid,omitempty"`
 	ExitCode           *int              `json:"exit_code,omitempty"`
 	LastError          string            `json:"last_error,omitempty"`
+	// PolicyPath/PolicyHash pin the safeslop.cue that was host-approved when a profile
+	// session was created: the canonical (symlink-free, absolute) path and the sha256 of the
+	// approved bytes. run/supervise rebuild the profile from this record and never re-read the
+	// cue, so they re-verify this exact approval is still current before launch — a create-time
+	// trust can't be defeated by editing or revoking the policy afterward (specs/0072 F1, 0070
+	// B1/B3). Both empty for ad-hoc (--agent) sessions, which carry no policy file. Non-secret.
+	PolicyPath string `json:"policy_path,omitempty"`
+	PolicyHash string `json:"policy_hash,omitempty"`
 	// Detached marks a session whose recorded PID is a detached supervisor that
 	// leads its own process group, so `stop` signals the group, not a bare PID
 	// (specs/0051 D4). Internal routing state; not surfaced in the JSON envelope.

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"net"
 	"os"
@@ -321,10 +322,38 @@ func canonicalPolicyPath(p string) string {
 var errOutputEmitted = errors.New("machine-readable error already emitted")
 
 var sessionRevokeCredentials = func(sess engsession.Session) error {
-	stageDir := filepath.Join(sess.Workspace, ".safeslop", "runtime", "session-"+sess.ID)
+	stageDir, err := stageDirFor("session-"+sess.ID, sess.Workspace)
+	if err != nil {
+		return err
+	}
 	creds.RevokeSSH(context.Background(), stageDir)
 	creds.RevokeForgejo(context.Background(), stageDir)
 	return nil
+}
+
+// stageDirFor returns the host directory where a run's credentials/squid config are
+// staged, OUTSIDE the agent-writable workspace (specs/0072 F2, closing 0070 B2). The
+// stage tree used to live at <ws>/.safeslop/runtime/<name>, so the agent saw every
+// staged bearer at a predictable /workspace path and could rewrite the ":ro" mount via
+// the rw workspace path. It now lives under os.UserCacheDir()/safeslop/runtime, with an
+// 8-hex fnv(ws) suffix so concurrent coupled runs of the same profile name in different
+// workspaces (previously separated by living under each ws) stay distinct. The base is
+// created 0700; a UserCacheDir failure is fail-closed (no /tmp fallback — the predictable
+// path under $HOME and its 0700 ancestry are part of the boundary, and match what Lima/
+// Colima already share rw). The path is deterministic, so the revoke/wipe paths
+// reconstruct it without persisting anything.
+func stageDirFor(name, ws string) (string, error) {
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve user cache dir for credential staging: %w", err)
+	}
+	base := filepath.Join(cache, "safeslop", "runtime")
+	if err := os.MkdirAll(base, 0o700); err != nil {
+		return "", fmt.Errorf("create credential staging root: %w", err)
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(ws))
+	return filepath.Join(base, fmt.Sprintf("%s-%08x", name, h.Sum32())), nil
 }
 
 // stopGraceTimeout bounds the graceful SIGTERM wait before a detached supervisor's
@@ -442,6 +471,7 @@ func cmdSession() *cobra.Command {
 
 func cmdSessionCreate() *cobra.Command {
 	var agent, workspace, output, environment, network, profile, name string
+	var trustHost bool
 	c := &cobra.Command{
 		Use:   "create (--profile <name> | --agent <claude|pi|fish|zsh> --environment <host|container> --workspace <dir>) [--name <label>] --output json",
 		Short: "Create a safeslop session record",
@@ -486,7 +516,17 @@ func cmdSessionCreate() *cobra.Command {
 				return emitContractError(jsoncontract.CodeInvalidArgument, "--workspace must name an existing directory", map[string]any{"workspace": workspace})
 			}
 			switch environment {
-			case "container", "host":
+			case "container":
+			case "host":
+				// An ad-hoc host launch has no safeslop.cue to approve, yet it runs the agent
+				// unconfined with your real host credentials. Require an explicit ack so the
+				// session lane can't silently launch a host agent (specs/0072 F1, closing the
+				// ad-hoc arm of 0070 B1). Profile host launches are gated by policy-byte trust.
+				if !trustHost {
+					return emitContractError(jsoncontract.CodeTrustRequired,
+						"host sessions run the agent unconfined with your host credentials; pass --trust-host to acknowledge",
+						map[string]any{"environment": "host", "hint": "add --trust-host"})
+				}
 			case "":
 				return emitContractError(jsoncontract.CodeInvalidArgument,
 					"--environment is required; must be one of: host, container", nil)
@@ -532,6 +572,7 @@ func cmdSessionCreate() *cobra.Command {
 	c.Flags().StringVar(&environment, "environment", "", "isolation environment (required): host or container")
 	c.Flags().StringVar(&network, "network", "", "network policy: deny or allow (overrides profile default)")
 	c.Flags().StringVar(&name, "name", "", "optional human display name for the session (combinable with --profile)")
+	c.Flags().BoolVar(&trustHost, "trust-host", false, "acknowledge that an ad-hoc host session runs the agent unconfined with your host credentials")
 	return c
 }
 
@@ -587,6 +628,17 @@ func createSessionFromProfile(store engsession.Store, profile string) (engsessio
 	if err != nil {
 		return engsession.Session{}, emitContractError(jsoncontract.CodeSchemaViolation, "load safeslop.cue", map[string]any{"path": path, "error": err.Error()})
 	}
+	// Gate the session lane on the same host-approval `safeslop run` requires (specs/0072 F1,
+	// closing 0070 B1): the Emacs client launches exclusively through session create, so without
+	// this every session launch skipped policy-byte approval. The approved hash is recorded on the
+	// session below and re-verified at run time (verifySessionTrust).
+	approvedPath, approvedHash, status, err := checkTrust(path)
+	if err != nil {
+		return engsession.Session{}, emitContractError(jsoncontract.CodeIOError, "verify safeslop.cue trust", map[string]any{"path": path, "error": err.Error()})
+	}
+	if status != trust.Trusted {
+		return engsession.Session{}, emitContractError(jsoncontract.CodeTrustRequired, "safeslop.cue is not host-approved", map[string]any{"path": approvedPath, "status": status.String(), "hint": "safeslop trust " + approvedPath})
+	}
 	prof, ok := cfg.Profiles[profile]
 	if !ok {
 		return engsession.Session{}, emitContractError(jsoncontract.CodeNotFound, fmt.Sprintf("no profile %q in safeslop.cue", profile), map[string]any{"profile": profile, "path": path})
@@ -621,6 +673,8 @@ func createSessionFromProfile(store engsession.Store, profile string) (engsessio
 	sess.RecipeID = recipe.RecipeID
 	sess.Image = recipe.AgentImage
 	sess.Resolved = resolvedMetadata(resolved)
+	sess.PolicyPath = approvedPath
+	sess.PolicyHash = approvedHash
 	if err := store.Save(sess); err != nil {
 		return engsession.Session{}, emitContractError(jsoncontract.CodeIOError, "save session", map[string]any{"error": err.Error()})
 	}
@@ -811,6 +865,13 @@ func cmdSessionRun() *cobra.Command {
 			store := sessionStore()
 			sess, err := store.Get(id)
 			if err != nil {
+				return err
+			}
+			// Re-verify the profile's policy is still host-approved before launch (specs/0072
+			// F1): session run rebuilds the profile from the record, so a create-time approval
+			// that was later revoked or edited must not still launch. Fail-closed here in the
+			// user's process; Supervise re-checks again at the detached supervisor's own start.
+			if err := verifySessionTrust(sess); err != nil {
 				return err
 			}
 			sess, err = recordSessionBackend(store, sess)
@@ -1172,23 +1233,55 @@ func emitContractError(code jsoncontract.ErrorCode, message string, details map[
 }
 
 func enforceTrust(policyPath string, allowTrust bool) error {
-	abs := canonicalPolicyPath(policyPath)
-	policyBytes, err := os.ReadFile(abs)
+	if allowTrust {
+		abs := canonicalPolicyPath(policyPath)
+		policyBytes, err := os.ReadFile(abs)
+		if err != nil {
+			return err
+		}
+		storePath, err := trust.DefaultPath()
+		if err != nil {
+			return err
+		}
+		store, err := trust.Load(storePath)
+		if err != nil {
+			return err
+		}
+		return store.Approve(abs, policyBytes)
+	}
+	abs, _, status, err := checkTrust(policyPath)
 	if err != nil {
 		return err
+	}
+	return trustStatusError(abs, status)
+}
+
+// checkTrust resolves the canonical policy path, hashes its current bytes, and reports the trust
+// status against the host store. Shared by the `run` gate, the session-create gate, and the
+// run/supervise re-verify (specs/0072 F1). It returns the hash so create can record exactly which
+// approved bytes a session was launched against, closing the create→run drift (0070 B3).
+func checkTrust(policyPath string) (abs, hash string, status trust.Status, err error) {
+	abs = canonicalPolicyPath(policyPath)
+	policyBytes, err := os.ReadFile(abs)
+	if err != nil {
+		return abs, "", trust.Untrusted, err
 	}
 	storePath, err := trust.DefaultPath()
 	if err != nil {
-		return err
+		return abs, "", trust.Untrusted, err
 	}
 	store, err := trust.Load(storePath)
 	if err != nil {
-		return err
+		return abs, "", trust.Untrusted, err
 	}
-	if allowTrust {
-		return store.Approve(abs, policyBytes)
-	}
-	switch store.Check(abs, policyBytes) {
+	return abs, trust.Hash(policyBytes), store.Check(abs, policyBytes), nil
+}
+
+// trustStatusError maps a trust status to the fail-closed CLI error `safeslop run` surfaces; a
+// Trusted policy yields nil. Kept as plain errors (not the JSON contract) because `run` is the
+// human-facing verb; the session lane wraps CodeTrustRequired around checkTrust itself.
+func trustStatusError(abs string, status trust.Status) error {
+	switch status {
 	case trust.Trusted:
 		return nil
 	case trust.Changed:
@@ -1196,6 +1289,26 @@ func enforceTrust(policyPath string, allowTrust bool) error {
 	default: // Untrusted
 		return fmt.Errorf("safeslop.cue at %s is not trusted (a policy can grant network and secret access).\n  review it, then run:  safeslop trust %s", abs, abs)
 	}
+}
+
+// verifySessionTrust re-checks, at run/supervise time, that a profile session's policy is STILL
+// host-approved for the exact bytes recorded when the session was created (specs/0072 F1, closing
+// 0070 B1/B3). session run/supervise rebuild the profile from the session record and never re-read
+// the cue, so without this a launch could ride a create-time approval that was later revoked, or a
+// policy edited-and-retrusted to different bytes. Ad-hoc (--agent) sessions carry no policy file
+// (PolicyPath empty) and are gated at create time instead.
+func verifySessionTrust(sess engsession.Session) error {
+	if sess.PolicyPath == "" {
+		return nil
+	}
+	abs, hash, status, err := checkTrust(sess.PolicyPath)
+	if err != nil {
+		return emitContractError(jsoncontract.CodeTrustRequired, "cannot verify safeslop.cue trust", map[string]any{"path": sess.PolicyPath, "error": err.Error()})
+	}
+	if status != trust.Trusted || hash != sess.PolicyHash {
+		return emitContractError(jsoncontract.CodeTrustRequired, "safeslop.cue is no longer trusted for this session (approval revoked or the file changed since create)", map[string]any{"path": abs, "status": status.String(), "hint": "safeslop trust " + abs})
+	}
+	return nil
 }
 
 func cmdTrust() *cobra.Command {
@@ -1846,7 +1959,10 @@ func runProfileCtx(ctx context.Context, name string, prof policy.Profile, argv [
 	if len(stdio) > 0 {
 		rio = stdio[0]
 	}
-	stageDir := filepath.Join(ws, ".safeslop", "runtime", name)
+	stageDir, err := stageDirFor(name, ws)
+	if err != nil {
+		return 1, err
+	}
 	defer os.RemoveAll(stageDir) // wipe staged secrets/.npmrc regardless of outcome
 
 	// kube/ssh creds are staged as files in stageDir and delivered via the /safeslop/runtime bind

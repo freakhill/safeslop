@@ -785,6 +785,44 @@ flight, so slow `session list' calls can't stack up."
 
 ;;; specs/0065: session naming + rename --------------------------------------
 
+(ert-deftest safeslop-test-session-trust-args ()
+  "Trust builds the exact CLI argv for host-approving a policy path (no shell)."
+  (should (equal (safeslop-session--trust-args "/w/safeslop.cue")
+                 '("trust" "/w/safeslop.cue"))))
+
+(ert-deftest safeslop-test-session-create-progress-p ()
+  "Spinner-worthy: profile and container ad-hoc creates; not host ad-hoc creates."
+  (should (safeslop-session--create-progress-p
+           '("session" "create" "--profile" "dev" "--output" "json")))
+  (should (safeslop-session--create-progress-p
+           '("session" "create" "--agent" "claude" "--environment" "container" "--workspace" "/w")))
+  ;; environment omitted -> container default -> still spinner-worthy
+  (should (safeslop-session--create-progress-p
+           '("session" "create" "--agent" "claude" "--workspace" "/w")))
+  (should-not (safeslop-session--create-progress-p
+               '("session" "create" "--agent" "claude" "--environment" "host" "--workspace" "/w"))))
+
+(ert-deftest safeslop-test-session-create-trust-required-retries ()
+  "A TRUST_REQUIRED refusal offers to trust the policy and re-dispatches the create."
+  (let ((trusted nil) (retried nil))
+    (cl-letf (((symbol-function 'y-or-n-p) (lambda (&rest _) t))
+              ((symbol-function 'safeslop--show-envelope-buffer) (lambda (&rest _) nil))
+              ((symbol-function 'safeslop--call-json)
+               (lambda (args)
+                 (setq trusted args)
+                 (safeslop-contract-parse-string
+                  "{\"schema_version\":1,\"ok\":true,\"data\":{},\"warnings\":[],\"errors\":[]}")))
+              ((symbol-function 'safeslop-session--create-async)
+               (lambda (args _p _cb) (setq retried args))))
+      (let ((envelope (safeslop-contract-parse-string
+                       (concat "{\"schema_version\":1,\"ok\":false,\"data\":{},\"warnings\":[],"
+                               "\"errors\":[{\"code\":\"TRUST_REQUIRED\",\"message\":\"nope\","
+                               "\"retryable\":false,\"details\":{\"path\":\"/w/safeslop.cue\"}}]}"))))
+        (safeslop-session--handle-create-result
+         '("session" "create" "--profile" "dev" "--output" "json") nil envelope)))
+    (should (equal trusted '("trust" "/w/safeslop.cue")))
+    (should (equal retried '("session" "create" "--profile" "dev" "--output" "json")))))
+
 (ert-deftest safeslop-test-session-rename-args ()
   "Rename builds the exact CLI argv (no shell, contract --output json)."
   (should (equal (safeslop-session--rename-args "sess-9" "my label")
