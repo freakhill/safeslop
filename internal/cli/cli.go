@@ -744,7 +744,22 @@ func cmdSessionStatus() *cobra.Command {
 				}
 				return emitContractError(jsoncontract.CodeIOError, "load session", map[string]any{"error": err.Error()})
 			}
-			env := jsoncontract.OK(sessionData(sess))
+			data := sessionData(sess)
+			// Surface the GitHub App-token TTL ceiling so the operator can see how long a
+			// session's ephemeral HTTPS access has left (specs/0069 T8). Additive + best
+			// effort: unlinked sessions have no manifest and simply omit the block.
+			if stageDir, derr := stageDirFor("session-"+sess.ID, sess.Workspace); derr == nil {
+				if exp, ok, _ := creds.GithubCredsExpiry(stageDir); ok {
+					block := map[string]any{"min_expires_at": exp.UTC().Format(time.RFC3339)}
+					if remaining := time.Until(exp); remaining > 0 {
+						block["ttl"] = remaining.Round(time.Second).String()
+					} else {
+						block["note"] = "github token expired (1h App-token ceiling; renewal lands in P2 \u2014 specs/0068 F4)"
+					}
+					data["github_creds"] = block
+				}
+			}
+			env := jsoncontract.OK(data)
 			if output == "jsonl" {
 				emitContractLine(env)
 			} else {
