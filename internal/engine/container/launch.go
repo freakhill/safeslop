@@ -5,10 +5,22 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/freakhill/safeslop/internal/engine/container/runtime"
 	"github.com/freakhill/safeslop/internal/engine/exec"
 )
+
+// policyFromNetwork maps a profile's `network:` field to the runtime.Detect egress posture. Anything
+// other than the explicit "allow" is the safe default (deny), which makes Detect fail-close on an
+// egress-unverified rootless runtime (specs/0066 D6).
+func policyFromNetwork(network string) runtime.NetworkPolicy {
+	if network == "allow" {
+		return runtime.PolicyAllow
+	}
+	return runtime.PolicyDeny
+}
 
 // materializeRun writes the per-run runtime dir (squid.conf, allowlist.domains, compose.yml,
 // entrypoint.sh, and a .safeslop-stage marker for the reconcile sweep) and returns the compose
@@ -32,7 +44,7 @@ func materializeRun(p composeParams, open bool) (string, error) {
 	}
 	files := map[string][]byte{
 		"squid.conf":        []byte(squid),
-		"allowlist.domains": allow,
+		"allowlist.domains": composeAllowlist(allow, p.Egress),
 		"compose.yml":       []byte(yml),
 		".safeslop-stage":   nil,
 	}
@@ -44,79 +56,127 @@ func materializeRun(p composeParams, open bool) (string, error) {
 	return filepath.Join(dir, "compose.yml"), nil
 }
 
+// composeAllowlist appends extra domains (the agent's built-in providers + the profile's
+// egress, already unioned by the caller) to the base allowlist asset, de-duplicating while
+// preserving order (base first, then first-seen extras). Empty/whitespace entries are
+// dropped. This is the per-run effective container egress allowlist (specs/0046).
+func composeAllowlist(base []byte, extra []string) []byte {
+	var lines []string
+	seen := map[string]bool{}
+	add := func(s string) {
+		s = strings.TrimSpace(s)
+		if s == "" || seen[s] {
+			return
+		}
+		seen[s] = true
+		lines = append(lines, s)
+	}
+	for _, l := range strings.Split(string(base), "\n") {
+		add(l)
+	}
+	for _, e := range extra {
+		add(e)
+	}
+	return []byte(strings.Join(lines, "\n") + "\n")
+}
+
 // provision materializes the per-run runtime dir and starts the compose stack, returning the
 // interactive argv that runs the agent (`docker compose run --rm agent <argv>`) plus the compose
-// file path (for teardown). Shared by Launch (safeslop run) and PrepareSession (the embedded cockpit).
-// secretEnv is written to secrets.env and sourced by the entrypoint; SP7c-2 cockpit sessions pass
-// nil (inherited-host-env parity with SP7c-1; full staging is a separate deferred unit).
-func provision(ctx context.Context, agentArgv []string, workspace, network string, secretEnv []string, stageDir string) (argv []string, composeFile string, err error) {
-	if !Available() {
-		return nil, "", fmt.Errorf("container environment requires docker + docker compose v2 (run: safeslop doctor)")
-	}
+// file path (for teardown).
+// secretEnv is written to secrets.env and sourced by the entrypoint.
+func provision(ctx context.Context, sessionID string, agentArgv []string, workspace, network string, egress []string, secretEnv []string, stageDir string, enabled []string) (argv []string, composeFile string, eng runtime.Engine, err error) {
 	if len(agentArgv) == 0 {
-		return nil, "", exec.ErrNoArgv
+		return nil, "", nil, exec.ErrNoArgv
 	}
 	if agentArgv[0] == "nix" {
-		return nil, "", fmt.Errorf("toolchain:nix is not supported in environment:container yet (read-only container vs writable /nix store); use environment:vm or host, or toolchain:mise")
+		return nil, "", nil, fmt.Errorf("toolchain:nix is not supported in environment:container yet (read-only container vs writable /nix store); use environment:vm or host, or toolchain:mise")
 	}
 	if err := os.MkdirAll(stageDir, 0o700); err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 	_ = withRepoLock(workspace, func() error { return Reconcile(ctx, workspace, time.Hour) })
 	if real, err := filepath.EvalSymlinks(workspace); err == nil {
 		workspace = real
 	}
+
+	// Detect the ambient container runtime (docker → podman → lima) and drive it; safeslop never
+	// provisions one (specs/0066 D3). The deny-tier fail-closed egress gate lives inside Detect, so a
+	// network:deny profile cannot launch on an egress-unverified rootless runtime (podman/lima) without an
+	// explicit opt-in — Detect returns an actionable error instead.
+	eng, err = runtime.Detect(policyFromNetwork(network))
+	if err != nil {
+		return nil, "", nil, err
+	}
+	// Egress isolation: the agent's no-egress network. Host docker honours compose's inline internal:true;
+	// lima/rootless-nerdctl does NOT, so the engine names a `--internal` network we pre-create here (before
+	// compose up) and the compose references it as external (validated 2026-06-22).
+	internalNet := eng.InternalNetwork()
+	if internalNet != "" {
+		_ = runEngine(ctx, eng, "network", "create", "--internal", internalNet) // idempotent; ignore "exists"
+	}
+
 	if _, err := writeSecretsEnv(stageDir, secretEnv); err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 	_, npmErr := os.Stat(filepath.Join(stageDir, ".npmrc"))
 	_, kubeErr := os.Stat(filepath.Join(stageDir, "kubeconfig"))
-	_, sshErr := os.Stat(filepath.Join(stageDir, ".ssh", "id"))
+	gitConfigName := ".gitconfig"
+	if _, err := os.Stat(filepath.Join(stageDir, ".gitconfig.container")); err == nil {
+		gitConfigName = ".gitconfig.container"
+	}
+	_, gitConfigErr := os.Stat(filepath.Join(stageDir, gitConfigName))
+	_, gitSSHConfigErr := os.Stat(filepath.Join(stageDir, ".ssh", "config.container"))
+	_, toolsImg, _, err := agentImageTags(enabled)
+	if err != nil {
+		return nil, "", nil, err
+	}
 	p := composeParams{
-		RuntimeDir: stageDir,
-		Workspace:  workspace,
-		StageDir:   stageDir,
-		Term:       os.Getenv("TERM"),
-		NpmConfig:  npmErr == nil,
-		Kubeconfig: kubeErr == nil,
-		SshKey:     sshErr == nil,
+		RuntimeDir:    stageDir,
+		Workspace:     workspace,
+		StageDir:      stageDir,
+		SessionID:     sessionID,
+		AgentImage:    toolsImg,
+		NpmConfig:     npmErr == nil,
+		Kubeconfig:    kubeErr == nil,
+		GitConfig:     gitConfigErr == nil,
+		GitConfigPath: "/safeslop/runtime/" + gitConfigName,
+		GitSSHConfig:  gitSSHConfigErr == nil,
+		OpenEgress:    network == "allow",
+		InternalNet:   internalNet,
+		Egress:        egress,
 	}
 	composeFile, err = materializeRun(p, network == "allow")
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
-	if err := Up(ctx, stageDir, composeFile); err != nil {
-		return nil, "", err
+	if err := Up(ctx, eng, stageDir, composeFile, enabled); err != nil {
+		return nil, "", nil, err
 	}
-	return composeRunArgv(composeFile, agentArgv), composeFile, nil
+	return composeRunArgv(eng, composeFile, agentArgv), composeFile, eng, nil
 }
 
 // Launch runs spec.Argv in the agent container. secretEnv (the resolved profile secrets) is
 // written to secrets.env and sourced by the entrypoint — never passed via -e, so it stays out
-// of host `ps` and `docker inspect`. stageDir is the host .safeslop/runtime/<profile> dir (already
-// holds .npmrc when pnpm creds were staged); it is bind-mounted ro at /safeslop/runtime and wiped
-// on exit by the caller. The agent runs interactively through a PTY (design §6.2).
-func Launch(ctx context.Context, spec exec.LaunchSpec, workspace, network string, secretEnv []string, stageDir string) (int, error) {
-	argv, _, err := provision(ctx, spec.Argv, workspace, network, secretEnv, stageDir)
+// of host `ps` and `docker inspect`. stageDir is the host stage dir (under the user cache dir,
+// outside the agent-writable workspace — specs/0072 F2; already holds .npmrc when pnpm creds were
+// staged); it is bind-mounted ro at /safeslop/runtime and wiped on exit by the caller. The agent runs interactively through a PTY (design §6.2).
+// enabled is the profile's resolved package identity set (specs/0058): it selects the agent
+// image (ENABLE_<pkg> build args) so a profile gets exactly the tools it declared.
+func Launch(ctx context.Context, spec exec.LaunchSpec, workspace, network string, egress []string, secretEnv []string, stageDir string, enabled []string) (int, error) {
+	argv, _, _, err := provision(ctx, SessionIDFromStageDir(stageDir), spec.Argv, workspace, network, egress, secretEnv, stageDir, enabled)
 	if err != nil {
 		return 1, err
 	}
-	return exec.RunInPTY(ctx, exec.LaunchSpec{Argv: argv})
-}
-
-// PrepareSession provisions the agent container for an embedded-cockpit session (SP7c-2): it
-// returns the interactive argv to run on the engine's PTY plus a cleanup that tears the stack
-// down (compose down + stageDir wipe) when the session closes. Cockpit sessions pass secretEnv
-// nil (inherited-host-env parity with SP7c-1). cleanup is always non-nil and safe to call once.
-func PrepareSession(ctx context.Context, agentArgv []string, workspace, network string, secretEnv []string, stageDir string) (argv []string, cleanup func(), err error) {
-	argv, composeFile, err := provision(ctx, agentArgv, workspace, network, secretEnv, stageDir)
-	if err != nil {
-		return nil, func() {}, err
+	// A detached supervisor passes a PTY slave it owns (spec.Stdin set). `compose
+	// run` already allocates the container's tty when its stdin is a tty, so binding
+	// the compose process's stdio directly to that PTY (RunInTerminal) bridges the
+	// container's tty straight to the supervisor's PTY — single hop, docker forwards
+	// resize. The coupled path (no stdio) keeps RunInPTY, which owns the host pty and
+	// puts the user's real terminal in raw mode + forwards SIGWINCH (specs/0051).
+	if spec.Stdin != nil {
+		return exec.RunInTerminal(ctx, exec.LaunchSpec{Argv: argv, Stdin: spec.Stdin, Stdout: spec.Stdout, Stderr: spec.Stderr, ControllingTTY: true})
 	}
-	return argv, func() {
-		_ = Teardown(context.Background(), composeFile)
-		_ = os.RemoveAll(stageDir)
-	}, nil
+	return exec.RunInPTY(ctx, exec.LaunchSpec{Argv: argv})
 }
 
 // ComposeForDown writes a throwaway runtime dir + compose file so `safeslop down` can target
@@ -127,7 +187,7 @@ func ComposeForDown() (dir, composeFile string, err error) {
 	if err != nil {
 		return "", "", err
 	}
-	cf, err := materializeRun(composeParams{RuntimeDir: dir, Workspace: "/", StageDir: dir}, false)
+	cf, err := materializeRun(composeParams{RuntimeDir: dir, Workspace: "/", StageDir: dir, SessionID: "down"}, false)
 	if err != nil {
 		return "", "", err
 	}

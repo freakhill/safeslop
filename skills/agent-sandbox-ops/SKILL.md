@@ -1,97 +1,175 @@
 ---
 name: agent-sandbox-ops
 description: >
-  Operate the local sandbox toolchain safely: Docker sandbox, Tart brew VM,
-  network-limiting checks, and explicit host file sharing.
+  Operate safeslop isolation profiles safely: host, container, and VM.
 ---
 
 # Agent Sandbox Ops Skill
 
-Use this skill whenever tasks involve runtime isolation, network limiting, or file transfer between host and sandboxed runtimes.
+Use this skill whenever tasks involve runtime isolation, network limiting, or
+file transfer between host and sandboxed runtimes.
 
 ## Required pre-read
 
-Before executing this skill, read:
-
 1. `CONTRIBUTING.md`
-2. `agents.md`
-3. `scripts/CONVENTIONS.md`
-4. `README.md`
+2. `AGENTS.md`
+3. `README.md`
+4. Relevant specs under `specs/`
 
 ## Command map
 
-- Hub: `scripts/slop-sandboxctl.fish`
-- Shim installer: `scripts/slop-install.fish`
-- Docker runtime: `scripts/slop-agent-sandbox.fish`, `scripts/slop-agent-sandbox-tools.fish`
-- Optional local runtime: `scripts/slop-macos-sandbox.fish` (`slop-sandboxctl local ...`)
-- VM runtime: `scripts/slop-brew-vm.fish`
+- `safeslop validate` — validate a policy against the embedded schema.
+- `safeslop list` — list available profiles.
+- `safeslop catalog list [--bundles] --output json` — list curated package catalog entries/bundles for profile creation UIs.
+- `safeslop catalog bump <pkg> --to V [--security]` — bump a pin: resolve all-arch digests, enforce the version policy (LAW-A/B/C/D + monotonic floor + soak), write `catalog.cue`+`catalog.json`, print a plan sheet. `--security` waives the soak window only, never a LAW.
+- `safeslop catalog propose-version <pkg>` — list upstream candidates newest-first with would-be digests + blast radius (read-only).
+- `safeslop catalog add <pkg> --kind K --version V [--sha256 arch=hex]...` — add a pinned entry (channel ban + full validate).
+- `safeslop catalog audit` — report staleness (versions-behind), yanked/unmaintained advisories, suggested lane (read-only).
+- `safeslop bundle add|remove <name> <pkg>...` — mutate bundle membership, re-validating references.
+- `safeslop bundle list --output json` — list curated bundles.
+- `safeslop profile create --name N --agent A --environment E [--bundle B] [--package P] --output json` — create or update a `safeslop.cue` profile.
+- `safeslop creds list|show [<profile>] --output json` — inspect the credential posture of `safeslop.cue` profiles (declared creds + value-free readiness status); read-only, never reveals secret values.
+- `safeslop profile show <name> --output json` — inspect a profile with resolved package set and dry-run image recipe.
+- `safeslop lock [profile] --output json` — write repo-root `safeslop.lock.json` for the selected profile's recipe identity.
+- `safeslop trust` — approve a policy's exact bytes for launch. Required by every launch lane: `safeslop run <profile>`, `session create --profile`, and the Emacs client all share this gate (specs/0072); an untrusted or changed `safeslop.cue` is refused with a `TRUST_REQUIRED` envelope.
+- `safeslop run <profile>` — launch a trusted profile.
+- `safeslop session create --profile <name> [--name <label>] --output json` — create an Emacs-visible session from an existing profile; the record includes resolved recipe/image metadata for the portal, and the Emacs client streams slow first-use image-build output into `*safeslop session progress*` with the final exit status. `--name` sets an optional display name and is combinable with `--profile`.
+- `safeslop session create --agent <claude|pi|fish|zsh> --environment <host|container> --workspace <dir> [--name <label>] [--trust-host] --output json` — create an ad-hoc Emacs-visible session record (`--environment` is required). A host ad-hoc session runs the agent unconfined with your host credentials, so it requires an explicit `--trust-host` acknowledgement (specs/0072); container ad-hoc sessions do not. `--name` sets an optional display name. `claude-code` remains accepted as a compatibility alias for `claude` but is not advertised in new UI/docs.
+- `safeslop session run --session-id <id> [--detach]` — run the session agent under safeslop isolation. Coupled (default) needs a controlling terminal (Emacs supplies one via `make-term`); with no usable TTY it emits the `PTY_UNAVAILABLE` contract error and the caller switches to the `--output jsonl` status monitor. `--detach` instead launches a per-session supervisor that owns the agent + its PTY, serves it over a per-session unix socket, and returns immediately (the buffer is freed).
+- `safeslop session attach --session-id <id>` — rejoin a detached session's agent over its socket under a controlling terminal, exiting with the agent's code; one active attach at a time. No usable TTY emits `PTY_UNAVAILABLE`.
+- `safeslop session status --session-id <id> --output <json|jsonl>` — inspect or monitor session state; a running detached session also reports its `socket`.
+- `safeslop session stop --session-id <id> --revoke-credentials --output json` — stop idempotently, revoking ephemeral credentials before terminating the process (a detached supervisor's whole process group), and removing the socket.
+- `safeslop session rm --session-id <id> --output json` — permanently remove one stopped/created session record so the portal does not accumulate dead-session corpses. Refuses a running session (stop it first); revokes any still-live staged credentials before deleting, so removal never orphans secrets. Returns `data.removed` (the removed id).
+- `safeslop session rename --session-id <id> --name <label> --output json` — set (or, with an empty `--name`, clear) a session's human display name. Allowed in any status (created, running, or stopped) since a label touches no boundary, credential, or process state. The name is validated (control/format/bidi characters rejected, so it cannot break the JSONL line protocol or spoof a status) and, when set, is surfaced as `data.name` in the session envelope and shown in the portal. Unknown id → `SESSION_NOT_FOUND`; a rejected name → `INVALID_ARGUMENT`.
+- `safeslop session prune --output json` — remove every stopped session record in one call, leaving created and running sessions untouched. Runs the liveness reconcile first, so a crashed session (marked `running` but whose process is gone) is persisted as `stopped` and swept in the same pass. Returns `data.removed` (the removed ids). In Emacs these are the portal's `x` (remove one) and `X` (prune) keys.
+- `safeslop doctor` — report available tools and isolation tiers.
+- `safeslop down` — tear down safeslop-managed host-container stacks by label, on the detected container runtime.
+- `safeslop gc [--until <age>] [--keep <N>]` — remove only unreferenced safeslop-managed images; current resolving profiles, the repo lockfile, and live sessions anchor images.
+
+## Container runtime
+
+The `container` tier runs on an **ambient, user-provided** container runtime; safeslop detects
+one and drives it, and never installs, upgrades, or manages one. Have one present:
+
+- **docker** (Docker Desktop / OrbStack / any docker-compatible CLI) — the only runtime
+  egress-verified for `network: deny` today.
+- **podman** — `podman` plus a working `podman compose`.
+- **lima** — a user-managed lima instance on a containerd/nerdctl template (`lima nerdctl`).
+
+Selection: `SAFESLOP_CONTAINER_RUNTIME=docker|podman|lima` forces one (used or fail closed — no
+silent fallback); otherwise auto-detect **docker → podman → lima** (first with a working compose
+wins); none present fails closed naming all three. A `network: deny` profile is **refused on
+podman/lima** (not yet egress-verified) unless `SAFESLOP_ALLOW_UNVERIFIED_RUNTIME=1` is set;
+teardown (`down`, the startup sweep, session reap) is never gated.
 
 ## Default policy
 
-1. Prefer `strict-egress` network policy.
-2. Keep domain access allowlisted via `library/layer/container/allowlist.domains`.
-3. Use explicit file transfer for VM (`copy-in`, `copy-out`) and avoid secret transfer.
+- `environment` is required (`host` | `container` | `vm`) — there is no default
+  tier (specs/0053 removed the macOS Seatbelt `sandbox` tier).
+- Prefer `environment: "container"` with `network: "deny"` for everyday agent work:
+  network-bound agents (claude, pi) need their runtime + egress inside the boundary.
+- Use `environment: "vm"` for untrusted code or maximum isolation.
+- Use `environment: "host"` only when you accept no isolation.
+- Do not mount or expose host credential directories to agents.
 
-## Per-framework restrictive policies
+## Common workflows
 
-When operating one of the supported agent runtimes, apply the matching policy template before launch:
+### Create and inspect a profile
 
-- Claude Code → `library/layer/policy/claude-code.settings.json`
-- OpenCode → `library/layer/policy/opencode.restrictive.json`
-- OpenClaw → `library/task/restrictive-flows/openclaw.md` (channels disabled by default; workspace overridden away from `~/.openclaw`; `SOUL.md` treated as untrusted input)
-- ZeroClaw → `library/task/restrictive-flows/zeroclaw.md` (workspace boundary, supervised autonomy, signed tool receipts kept on; OS sandbox layer is defense-in-depth — still run inside the `agent` container)
+```bash
+safeslop catalog list --bundles --output json
+safeslop profile create --name review --agent claude --environment container --network deny --output json
+safeslop profile show review --output json
+safeslop lock review --output json
+safeslop session create --profile review --output json
+safeslop validate
+safeslop list
+safeslop run review --dry-run
+```
 
-## Workflows
+In Emacs, `C-c s F` opens the Profiles surface. Use `RET`/`i` to inspect a
+profile's resolved packages/egress/recipe, `x` to launch a session from the row
+after an isolation/network summary, `e` to edit the CUE at that profile's block,
+`n` to create, `c` to clone, `D` for guided manual deletion, and `g` to refresh.
 
-### Docker sandbox workflow
+`C-c s P` opens the Sessions portal. The tab strip shows each surface's direct
+switch key (`P` Sessions, `F` Profiles); `TAB`/`S-TAB` or `[`/`]`
+cycle between them, and the strip is mouse-clickable. Portal row keys: `RET`/`o`
+state-aware open, `R` reattach, `i` details, `k` stop/revoke, `x` remove one
+stopped session, `X` prune all stopped sessions, `n` new, `g` refresh, `a`
+pause/resume auto-refresh. Each in-place refresh keeps point on the same session
+and preserves window scroll, so it never jumps the cursor out from under a row
+action key; session-mutating row actions refresh the portal in place instead of
+popping a JSON result buffer over the dashboard.
 
-1. `scripts/slop-sandboxctl.fish docker up`
-2. `scripts/slop-sandboxctl.fish docker shell`
-3. Verify non-allowlisted egress is blocked from agent runtime.
-4. `scripts/slop-sandboxctl.fish docker down`
+### Maintain the catalog (bump / propose / add / audit)
 
-### Optional local macOS sandbox workflow
+The catalog source of truth is `internal/engine/policy/catalog.cue` (rendered to embedded
+`catalog.json`; `make check` fails on drift). `bump`/`add` and `bundle add`/`remove`
+re-emit **both** files in lockstep and print a reviewable plan sheet. Run from the repo
+root (or pass `--catalog-dir`); add `--output json` for the machine contract.
 
-1. `source scripts/slop-macos-sandbox.fish`
-2. `slop-macos-sandbox run -- /bin/pwd`
-3. For repo-wide access, use `--repo-root-access` (alias of `--path-scope repo-root`).
-4. Prefer Docker/VM for untrusted code paths; use local sandbox as defense-in-depth only.
+```bash
+safeslop catalog propose-version ripgrep          # survey candidates first (read-only)
+safeslop catalog bump ripgrep --to 14.2.0          # enforce LAWs, write cue+json, plan sheet
+safeslop catalog bump ripgrep --to 2.0.0 --security   # CVE lane: waives soak, never a LAW
+safeslop catalog audit                            # staleness + advisory lanes
+safeslop catalog add mytool --kind binary --version 1.0.0 --sha256 amd64=$(…) --sha256 arm64=$(…)
+safeslop bundle add personal jq                   # re-validates the bundle
+make check                                        # proves cue↔json sync, vet, tests
+```
 
-### Brew VM workflow
+Bumps enforce: **A** atomic all-arch real digest, **B** stable channel only,
+**C** apt coordinates the Debian-snapshot timestamp, **D** one version per name — plus
+the monotonic floor and a SemVer-aware soak window. Non-semver kinds (apt/calver) are
+flagged `requires-human-confirm`. The policy is canonized in
+`specs/research/2026-06-30-version-policy-flo.md`.
 
-1. `source scripts/slop-brew-vm.fish`
-2. `set -x BREW_VM_PROXY_URL http://<proxy-host>:3128`
-3. `slop-brew-vm create-base`
-4. `slop-brew-vm install --network-policy strict-egress <formula>`
-5. `slop-brew-vm verify-network`
+### Trust and launch
 
-### File sharing workflow
+```bash
+safeslop trust
+safeslop run review
+```
 
-- Docker: `/workspace` mount = repo root. `library/layer/container/docker-compose.yml`
-  resolves `../../..` from its own location to the repo top, so any
-  `agent`/`agent-tools` container sees the user's project there with no
-  per-run plumbing. The orchestrator (`slop run`) layers a
-  per-profile override that adds `/root/.ssh:ro` for the staged
-  ephemeral keypair when `credentials.<host>` is declared.
-- VM: use `slop-brew-vm copy-in <host-path> <guest-path>` and `slop-brew-vm copy-out <guest-path> <host-path>`.
-- Recommended guest temp path: `/tmp/llm-share`.
+### Container profile
+
+```cue
+profiles: container_review: {
+	agent:       "claude"
+	environment: "container"
+	network:     "deny"
+	egress:      [".internal.example.com"]
+}
+```
+
+The container tier enforces egress by topology: the agent sits on an internal
+network and reaches HTTP(S) through the proxy allowlist.
+
+### VM profile
+
+```cue
+profiles: vm_review: {
+	agent:       "pi"
+	environment: "vm"
+	network:     "deny"
+}
+```
+
+The VM tier is disposable. Use explicit staged state and copy boundaries; do not
+rely on broad host mounts.
 
 ## Safety checklist
 
-- Do not mount host credential directories into containers/VMs.
-- Do not disable strict egress for untrusted installs.
-- Document every allowlist expansion with reason.
-- Inside the agent-tools image, every `pip` / `uv pip install --system`
-  line carries `--break-system-packages` because `node:22-bookworm`'s
-  Python ships PEP 668's externally-managed marker. The flag is the
-  canonical bookworm escape hatch for single-purpose containers and is
-  enforced by `tests/test_slop_pinning.fish`.
+- Keep network allowlists narrow and documented.
+- Prefer read-only credentials; use write credentials only for explicit workflows.
+- Verify `safeslop doctor` output before depending on a tier.
+- Run `safeslop down` to clean up safeslop-managed host-container stacks after interrupted work.
+- Run `safeslop gc --keep 2` only when you want to reclaim unreferenced managed images; it preserves profile/lock/live-session anchors.
 
-## Sync requirements after changes
+## Verification
 
-If you change sandbox scripts or defaults, update in the same task:
-
-- `README.md`
-- this skill file
-- any other affected skill under `skills/*/SKILL.md`
-- `skills/README.md` when installation/usage guidance changes
+```bash
+go test ./internal/engine/container/ ./internal/engine/vm/ -v
+make check
+```

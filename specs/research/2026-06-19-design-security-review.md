@@ -121,6 +121,17 @@ UNVERIFIED — needs the squid config audit]** · Surface 2 · Q1 high
   `(normalized-host, port)` via a real parser, terminate TLS or accept that it's SNI-trust. Keep
   it (real value vs `curl|sh` + accidental beaconing) but the "network-enforced" tier label
   should read "egress-allowlisted (SNI-trust)" until bypasses are closed.
+- **VERIFIED + REALIZED (squid.conf audit):** the bypass classes mostly **don't apply** to
+  safeslop's config — `CONNECT` is restricted to 443 (`deny CONNECT !SSL_ports`) and non-80/443
+  ports denied; RFC1918 + link-local are denied **before** the allow rule (blocks metadata/SSRF and
+  rebind-to-internal); it matches `dstdomain` not `urlpath_regex` (path-encoding tricks N/A); and
+  it's a **forward** proxy (squid resolves+connects), so the Host-vs-routed-IP / domain-fronting
+  asymmetry is N/A. The genuine residual is that it's an SNI-trust per-**domain** allowlist:
+  it stops `curl|sh` + accidental beaconing but **not** exfil via an *allowed* domain or DNS
+  tunneling. So the fix is the honest **relabel**, now shipped: `EnvTier("container")` →
+  `egress-allowlisted` ("default-deny per-domain egress allowlist (SNI-trust): stops curl|sh +
+  accidental beaconing, not exfil via an allowed domain") + README tier table. No squid hardening
+  was needed (the config is already deny-first and CONNECT/port-restricted).
 
 **S5. Build the child env / stage secrets so the daemon never *holds* reusable secret material,
 and so same-uid `ps`/`docker inspect` can't read it. [C, partial by design]** · Surface 3 · Q1 high
@@ -133,6 +144,19 @@ and so same-uid `ps`/`docker inspect` can't read it. [C, partial by design]** ·
 - DO: prefer a short-lived `credential_process`/file the SDK calls over raw env (the earlier
   pass's H5 actionable 5); `FD_CLOEXEC` + explicit FD scrub on every host-only fd before spawn
   ([G] fd-leak class); never return secret bytes over the socket.
+- **PARTIALLY REALIZED (specs/0026) + VERIFIED:** the scope-first half shipped for GCP — an
+  optional `gcp.scopes` downscopes the minted ADC token (least-privilege; bounds a full-TTL
+  reuse). Verified already-handled: **M1** refresh-token never crosses (GCP stages only the
+  short access token; AWS only short STS creds — the SSO refresh token stays in `~/.aws/sso`,
+  unmounted), and the ambient-authority leak is closed by S2 (specs/0024 `childEnv`). Deferred
+  with rationale: **AWS session-policy** downscoping (needs assume-role + role-ARN plumbing) and
+  **`credential_process`** delivery (the env channel is a deliberate uniform-across-tiers choice;
+  changing it is a design fork). The `op read`-over-socket / FD-scrub concerns hinge on S1's peer
+  check (specs/0024) — no socket method returns secret bytes.
+- **AWS half now REALIZED (specs/0027):** optional `aws.roleArn` + `aws.sessionPolicy` downscope the
+  staged creds via `sts assume-role` with an inline session policy (least-privilege; the role must
+  be assumable by the SSO identity). Scope-first at mint is now complete for **both** AWS and GCP;
+  only `credential_process` delivery remains (the design fork above).
 
 ### MEDIUM — actionable, secondary, or needs design
 

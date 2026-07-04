@@ -6,8 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/spf13/cobra"
-
 	"github.com/freakhill/safeslop/internal/engine/policy"
 )
 
@@ -61,46 +59,59 @@ func TestDoctorReportsGkeAuthPlugin(t *testing.T) {
 	}
 }
 
-func TestRunProfileKubeVMGuarded(t *testing.T) {
-	prof := policy.Profile{
-		Agent:       "claude",
-		Environment: "vm",
-		Network:     "allow",
-		Credentials: &policy.Credentials{Kube: &policy.KubeCluster{Eks: &policy.EksCluster{Name: "prod"}}},
-	}
-	_, err := runProfile("deploy", prof, []string{"claude"}, t.TempDir())
-	if err == nil || !strings.Contains(err.Error(), "vm") {
-		t.Fatalf("expected a vm-unsupported guard error for kube creds, got: %v", err)
-	}
-}
-
 func TestDoctorReportsGh(t *testing.T) {
 	if _, ok := doctorReport()["gh"]; !ok {
 		t.Fatalf("doctor must probe gh")
 	}
 }
 
-func TestRunProfileSshVMGuarded(t *testing.T) {
-	prof := policy.Profile{
-		Agent:       "claude",
-		Environment: "vm",
-		Network:     "deny",
-		Credentials: &policy.Credentials{Ssh: &policy.SshCreds{}},
-	}
-	_, err := runProfile("deploy", prof, []string{"claude"}, t.TempDir())
-	if err == nil || !strings.Contains(err.Error(), "vm") {
-		t.Fatalf("expected vm guard error for ssh creds, got: %v", err)
+// The pivot narrows the supported coding agents to Claude Code and Pi; doctor must
+// probe those and must not regrow probes for the dropped agent CLIs. The dropped
+// names are kept out of source here (the denylist guards their reappearance); the
+// agentseed/agentargv negative tests prove rejection.
+func TestDoctorProbesSupportedAgentsOnly(t *testing.T) {
+	report := doctorReport()
+	for _, want := range []string{"claude", "pi"} {
+		if _, ok := report[want]; !ok {
+			t.Fatalf("doctor must probe supported agent %q: %v keys", want, report)
+		}
 	}
 }
 
-func TestServeAndLaunchRegistered(t *testing.T) {
-	have := map[string]bool{}
-	for _, c := range []*cobra.Command{cmdServe(), cmdLaunch()} {
-		have[c.Name()] = true
+func TestServeRemovedFromRoot(t *testing.T) {
+	root := newRoot()
+	for _, c := range root.Commands() {
+		if c.Name() == "serve" {
+			t.Fatal("safeslop serve must stay removed with the old UI control plane")
+		}
 	}
-	if !have["serve"] || !have["launch"] {
-		t.Fatalf("serve/launch commands missing: %v", have)
+}
+
+func TestLaunchRegistered(t *testing.T) {
+	if cmdLaunch().Name() != "launch" {
+		t.Fatal("launch command missing")
 	}
+}
+
+// TestInstallUninstallRemovedFromRoot pins specs/0066 D1: the self-installer surface is gone, so neither
+// `safeslop install` nor `safeslop uninstall` may be registered on the root command.
+func TestInstallUninstallRemovedFromRoot(t *testing.T) {
+	root := newRoot()
+	for _, c := range root.Commands() {
+		if c.Name() == "install" || c.Name() == "uninstall" {
+			t.Fatalf("safeslop %s must stay removed after the ambient-runtime pivot (specs/0066)", c.Name())
+		}
+	}
+}
+
+func TestGcCommandRegistered(t *testing.T) {
+	root := newRoot()
+	for _, c := range root.Commands() {
+		if c.Name() == "gc" {
+			return
+		}
+	}
+	t.Fatal("safeslop gc command missing")
 }
 
 func TestLaunchProfileRejectsBadName(t *testing.T) {

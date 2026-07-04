@@ -45,3 +45,34 @@ func TestReconcileSweepsStaleMarkedDirs(t *testing.T) {
 		t.Fatal("fresh staged dir wrongly swept")
 	}
 }
+
+func TestWithBuildLockRunsBodyAndReleases(t *testing.T) {
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+	n := 0
+	for i := 0; i < 2; i++ { // the second acquire proves the first released
+		if err := withBuildLock("local/safeslop-tools:abc123def456", func() error { n++; return nil }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n != 2 {
+		t.Fatalf("body ran %d times, want 2", n)
+	}
+}
+
+// ensureImage must skip the build when the image already exists — the core of the Bug B fix.
+func TestEnsureImageBuildsOnceThenSkips(t *testing.T) {
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+	built := 0
+	present := false
+	exists := func() bool { return present }
+	build := func() error { built++; present = true; return nil }
+	if err := ensureImage("local/safeslop-tools:id", exists, build); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureImage("local/safeslop-tools:id", exists, build); err != nil {
+		t.Fatal(err)
+	}
+	if built != 1 {
+		t.Fatalf("ensureImage built %d times, want 1 (second call must skip the existing image)", built)
+	}
+}

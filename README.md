@@ -1,45 +1,32 @@
 # safeslop
 
-> **Practice safe safeslop** — run agentic workflows behind stronger isolation defaults.
+> **Practice safe safeslop** — launch coding agents behind stronger isolation defaults.
 
-[![Tests](https://github.com/freakhill/safeslop/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/freakhill/safeslop/actions/workflows/tests.yml?query=branch%3Amain+is%3Asuccess)
+`safeslop` is a single signed Go binary that launches coding agents under a
+per-repo `safeslop.cue` policy. One file declares the agent, isolation tier,
+network posture, toolchain, secrets, and ephemeral credentials; the binary
+validates the policy, provisions what is needed, launches the session, and tears
+staged state down on exit.
 
-The badge shows the current state of the test suite on `main`. Click it to see
-the list of successful runs on `main` — the topmost entry is the last commit
-that passed CI.
+## What it provides
 
-**safeslop** is a single, signed Go binary that launches coding agents (Claude
-Code, a shell, OpenCode) under macOS isolation, driven by a per-repo
-`safeslop.cue` policy. One file declares *which* agent runs, in *which* isolation
-environment, with *which* ephemeral credentials — and safeslop provisions it,
-launches the agent, and tears everything down on exit.
-
-What it gives you:
-
-- **Four isolation tiers, labelled honestly** — `host` (none), `sandbox`
-  (Seatbelt file/exec guard — the default), `container` (Docker + a Squid egress
-  allowlist), `vm` (a disposable Tart VM). `safeslop run` and `safeslop doctor`
-  print the active tier so the protection level is never implicit.
-- **Ephemeral, decay-first credentials** — short-TTL git deploy keys (read-only
-  by default), npm granular tokens, AWS-SSO / GCP-ADC / Kubernetes tokens, and
-  secrets via 1Password `op` — staged per-run, wiped on exit. Your permanent
-  credentials never cross the boundary.
-- **A scrubbed environment** in the `sandbox`/`host` tiers — ambient `AWS_*`,
-  `OP_SESSION_*`, `SSH_AUTH_SOCK`, `GITHUB_TOKEN` (even `ANTHROPIC_API_KEY`) are
-  *not* inherited; declare what the agent actually needs in `secrets:`.
-- **A fail-closed policy trust gate** — `safeslop run` refuses a `safeslop.cue`
-  you haven't approved with `safeslop trust`, so a freshly-cloned repo or an
-  agent editing its own policy can't silently escalate.
-
-> **Migration note.** safeslop is mid-port (strangler) from an older fish +
-> Python(`uv`) toolkit to this single Go binary. The Go binary is the product
-> and the direction; the original fish `slop-*` scripts still ship and work as a
-> transitional layer (see **Legacy fish toolkit** below) until each piece is
-> fully ported. Where both cover the same ground, prefer the Go binary.
+- **Honest isolation tiers**: `host` and `container`, with the active tier
+  printed by `run`/`doctor`. `environment` is required — there is no default, so a
+  profile always states its isolation explicitly.
+- **Fail-closed policy trust**: every launch lane — `safeslop run`, `safeslop
+  session run`, and the Emacs client — refuses an unapproved or changed
+  `safeslop.cue` until you review and trust it; an ad-hoc host session requires an
+  explicit `--trust-host` acknowledgement.
+- **Scrubbed child environments**: ambient host credentials are not inherited;
+  only policy-declared secrets/credentials cross the boundary.
+- **Ephemeral credentials**: staged deploy keys, registry tokens, cloud tokens,
+  and Kubernetes configs are scoped to the run and wiped on exit.
+- **Pinned tooling checks**: `make check` includes a Go pinning gate that rejects
+  unpinned `latest` references in policy/build config inputs.
 
 ## Quick start
 
-Drop a `safeslop.cue` at your repo root:
+Create `safeslop.cue` at your repo root:
 
 ```cue
 package safeslop
@@ -47,61 +34,162 @@ package safeslop
 safeslop: {
 	version: 1
 	profiles: {
-		// Sandboxed Claude Code: file-confined to this repo, egress denied.
-		review: {agent: "claude", environment: "sandbox", network: "deny"}
-
-		// A sandboxed shell for package work; network on for the registry.
-		dev: {agent: "shell", environment: "sandbox", network: "allow"}
+		review: {agent: "claude", environment: "container", network: "deny"}
+		pair:   {agent: "pi", environment: "container", network: "deny"}
 	}
 }
 ```
 
 Then validate, approve, and run:
 
-```fish
-safeslop validate           # check the file against the embedded schema
-safeslop list               # show the profiles
-safeslop trust              # approve this safeslop.cue (one-time, host-recorded)
-safeslop run review         # launch sandboxed Claude Code
+```bash
+safeslop validate
+safeslop list
+safeslop trust
+safeslop run review
 ```
 
-`list` and `run --dry-run` show exactly what you get, isolation tier included:
+Inspect without launching:
 
-```
-$ safeslop list
-review           agent=claude   environment=sandbox   network=deny
-dev              agent=shell    environment=sandbox   network=allow
-
-$ safeslop run review --dry-run
-profile "review": environment=sandbox workspace=/path/to/repo network=deny
-  argv: [claude]
-  isolation tier: mistake-guard — Seatbelt confines files + exec: guards agent mistakes + accidental exfil, not a malicious-code escape
+```bash
+safeslop run review --dry-run
+safeslop doctor
 ```
 
-`safeslop doctor` reports which boundaries and external tools are available on
-this host. See **`safeslop.cue` reference** below for the full schema —
-credentials, secrets, the container/VM tiers, and pinned toolchains.
+## CLI
 
-## Common use cases
+```text
+safeslop validate [safeslop.cue]    check against the embedded schema
+safeslop list [safeslop.cue]        list profiles and resolved tiers
+safeslop catalog list [--bundles] --output json   curated package catalog for UIs
+safeslop catalog bump <pkg> --to V [--security]   bump a pin: resolve all-arch digests, enforce the policy, write a plan sheet
+safeslop catalog propose-version <pkg>            list upstream candidates + would-be digests + blast radius (read-only)
+safeslop catalog add <pkg> --kind K --version V   add a pinned entry (channel ban + full validate)
+safeslop catalog audit                           report staleness, yanked/unmaintained advisories, suggested lane (read-only)
+safeslop bundle add|remove <name> <pkg>...       mutate bundle membership (re-validates references)
+safeslop bundle list --output json               curated bundles for UIs
+safeslop profile list|presets --output json       profiles + preset library as the JSON contract
+safeslop profile create --name N --agent A --environment E [--bundle B] [--package P] --output json
+safeslop profile show <name> --output json         profile + resolved packages + image recipe
+safeslop lock [profile] --output json              write repo-root safeslop.lock.json
+safeslop trust [safeslop.cue]       approve this policy's exact bytes
+safeslop run <profile> [--dry-run]  launch a trusted profile
+safeslop session create --profile <name> [--name <label>] --output json
+safeslop session create --agent <claude|pi|fish|zsh> --environment <host|container> --workspace <dir> [--name <label>] [--trust-host] --output json
+safeslop session run --session-id <id> [--detach]
+safeslop session attach --session-id <id>
+safeslop session status --session-id <id> --output <json|jsonl>
+safeslop session stop --session-id <id> --revoke-credentials --output json
+safeslop session rm --session-id <id> --output json        remove one stopped session record
+safeslop session prune --output json                       remove all stopped session records
+safeslop session rename --session-id <id> --name <label> --output json   set or clear a session's display name
+safeslop doctor                     report available tools and isolation tiers
+safeslop down                       tear down safeslop-managed container stacks
+safeslop gc [--until <age>] [--keep <N>]   remove unreferenced safeslop-managed images
+safeslop launch <profile>           open a terminal running a profile
+```
 
-Both everyday workflows are just a profile in `safeslop.cue`:
+Add `--json` to commands for machine-readable output where supported. Emacs-facing
+commands emit the shared versioned JSON contract envelope (`schema_version`,
+`ok`, `data`, `warnings`, `errors`). Session status also supports `--output
+jsonl` for a line-delimited monitor stream.
 
-- **Sandboxed Claude Code** (`agent: "claude"`) — Claude Code with a file
-  boundary and egress denied (`environment: "sandbox"`, `network: "deny"`): it
-  can edit the repo but can't read `~/.ssh` or beacon a secret out.
-- **A sandboxed shell for package work** (`agent: "shell"`) — run `pnpm install`
-  / `uv sync` under Seatbelt so a malicious lifecycle script can't read outside
-  the repo. `sandbox-exec` can't do a URL allowlist, so for *real* per-domain
-  egress control step up to `environment: "container"` (Docker + Squid).
+`session status` and `session list` reconcile liveness: a session still marked
+`running` whose run process is gone (crash, kill, host sleep) is reported — and
+persisted — as `stopped`, so status never lies about a session that is no longer
+executing. Container sessions are additionally reaped by their
+`safeslop.session=<id>` labels during stop/reconcile, so teardown does not depend
+on a still-readable session record.
 
-Rule of thumb: **`sandbox`** for everyday agent + package work, **`container`**
-when you need URL-level egress control, **`vm`** for untrusted code. The tier
-table under **macOS isolation reality** spells out what each actually protects.
+`session stop` (and a terminal/buffer close) tears the boundary down rather than
+just killing the wrapper: credentials are revoked before process termination when
+`--revoke-credentials` is requested, the run receives `SIGTERM`/`SIGHUP`, and the
+labelled container boundary is reaped; staged secrets are wiped by run teardown
+or the reap path. Interactive `Ctrl-C` (`SIGINT`) is left for the agent and does
+not tear the session down.
+
+`session run` is an interactive attach and needs a controlling terminal — Emacs
+supplies one via `make-term`. Invoked without a usable TTY (a pipe, cron, a
+headless shell), it emits the `PTY_UNAVAILABLE` contract error
+(`details.fallback = "status-jsonl"`) and exits non-zero **without** marking the
+session running, so nothing is left as a phantom. The Emacs client switches to a
+read-only `--output jsonl` status monitor on that code.
+
+`session run --detach` gives a session a life independent of the Emacs buffer that
+started it: it launches a per-session **supervisor** that owns the agent and its
+PTY — which, for a host session, is made the agent's controlling
+terminal so it behaves like a real interactive run (`/dev/tty`, terminal signals,
+hangup) — and
+serves that PTY over a per-session unix socket
+(`$SAFESLOP_STATE_DIR/sessions/<id>.sock`, surfaced as the session's `socket`
+field; when that path would exceed the `sun_path` limit it is transparently
+relocated to a short private runtime dir), and returns immediately. `session attach --session-id <id>` rejoins the
+running agent over that socket — bridging the local terminal, forwarding
+window-size changes, and exiting with the agent's code — with at most one client
+attached at a time. Attaching when no supervisor is serving the socket reports
+`SESSION_NOT_RUNNING` rather than the more specific `SESSION_STOPPED`. `session
+stop` then signals the supervisor's whole process
+group (graceful `SIGTERM`, then `SIGKILL`) so the boundary tree is torn down and
+the socket removed; a supervisor that dies uncleanly has its stale socket swept on
+the next `session status`/`list` reconcile.
+
+Detaching is a deliberate trade-off: a detached agent holds its staged secrets
+(`secrets.env`, deploy keys, kubeconfig) for its whole — possibly long — life,
+where a coupled run bounds them to the buffer's lifetime. `stop
+--revoke-credentials` still revokes before the kill, and liveness reconcile plus
+the stale-resource sweep bound the leak if the supervisor dies uncleanly.
+
+An exited session stays listed as `stopped` (with its exit code and last error)
+rather than vanishing, so its outcome is inspectable. `session rm --session-id
+<id>` removes one such record and `session prune` removes every stopped record in
+one call, so the session list does not accumulate dead-session corpses. Both
+refuse a still-running session — stop it first — and revoke any still-live staged
+credentials before deleting a record, so a removal can never orphan secrets on
+disk. `prune` first runs the liveness reconcile, so a crashed session (marked
+`running` but whose process is gone) is persisted as `stopped` and swept in the
+same pass. The Emacs portal exposes these as `x` (remove one) and `X` (prune).
+
+A session can carry an optional human display name. Set it at creation with
+`session create --name <label>` (combinable with `--profile`), or later — in any
+status — with `session rename --session-id <id> --name <label>`; an empty
+`--name` clears it. The name is validated (control, format, and bidi characters
+are rejected so it cannot break the JSONL line protocol or spoof a status) and,
+when set, is surfaced in the session's `status`/`list` envelope and the Emacs
+portal.
+
+`safeslop down` removes safeslop-managed host-container stacks by label. Container
+startup also sweeps managed, record-less orphan boundaries on the detected
+container runtime. `safeslop gc` only removes safeslop-managed images after
+protecting the current image recipe for resolving profiles, the repo
+`safeslop.lock.json`, and running session image references; `--until` and `--keep`
+apply only to the unreferenced remainder.
+
+## Container runtime
+
+The `container` tier runs on an **ambient, user-provided** container runtime — safeslop
+detects one and drives it; it never installs, upgrades, or manages one. Have one of these
+present:
+
+- **docker** — Docker Desktop, OrbStack, or any docker-compatible CLI on PATH (today's
+  behaviour). The only runtime egress-verified for the `network: deny` tier.
+- **podman** — `podman` plus a working `podman compose`.
+- **lima** — a user-managed lima instance on a containerd/nerdctl template (`lima nerdctl`).
+
+Selection order: `SAFESLOP_CONTAINER_RUNTIME=docker|podman|lima` (an explicit override — that
+runtime is used or the command fails closed, never a silent fallback to another), else
+auto-detect in the fixed precedence **docker → podman → lima** (first whose CLI *and* working
+compose capability is present wins). With none present/working, the command fails closed and
+names all three.
+
+**Deny-tier fail-closed:** a `network: deny` profile must place the agent on a network with no
+default route. Only docker/OrbStack are egress-verified for this today, so launching a `deny`
+profile on **podman or lima is refused** unless you set `SAFESLOP_ALLOW_UNVERIFIED_RUNTIME=1`
+to accept the (still-unverified) risk. Teardown — `down`, the startup sweep, session reap — is
+never gated, so cleanup works on any detected runtime, verified or not.
 
 ## `safeslop.cue` reference
 
-One file at your repo root declares your profiles. The schema is embedded in the
-binary (no external `cue` needed); `safeslop validate` checks against it.
+A representative profile:
 
 ```cue
 package safeslop
@@ -109,1321 +197,282 @@ package safeslop
 safeslop: {
 	version: 1
 	profiles: {
-		example: {
-			// What to launch: "claude" | "shell" | "opencode".
-			agent: "claude"
+		work: {
+			agent:       "claude"          // "claude" | "claude-code" | "pi" | "fish" | "zsh"
+			environment: "container"       // "host" | "container"  (required)
+			network:     "deny"            // "deny" | "allow"
+			workspace:   "."
+			bundles:     ["base-tools"]
+			packages:    ["pnpm"]
+			egress:      [".internal.example.com"]
 
-			// Where it runs: "sandbox" (default) | "container" | "vm" | "host".
-			environment: "sandbox"
-
-			// Coarse egress for sandbox/host: "deny" (default) | "allow".
-			// Real per-URL allowlisting is the container tier's job.
-			network: "deny"
-
-			// Directory the boundary confines file access to.
-			// Omitted => the directory you ran safeslop from.
-			workspace: "."
-
-			// Env var -> secret ref, materialized at launch, wiped on exit.
-			// Refs are 1Password ("op://vault/item/field") or "env:NAME".
 			secrets: {
 				ANTHROPIC_API_KEY: "op://Private/Anthropic/credential"
 			}
 
-			// Ephemeral credentials staged before launch, torn down after.
 			credentials: {
-				ssh: {write: false, ttl: "1h"}     // repo-scoped deploy key
-				aws: {profile: "my-sso-profile"}    // short-lived SSO role creds
-				gcp: {}                             // ADC access token
+				// GitHub App tokens over HTTPS: omit repos to infer the current origin, or
+				// declare repos (one token per owner, partitioned by write). Each owner needs
+				// a link: safeslop creds link github --app-id N --installation-id N --key-ref op://…
+				github: {
+					repos: [{repo: "owner/web"}, {repo: "owner/api", write: true}]
+				}
+
+				// GitHub PAT fallback: one existing fine-grained HTTPS token for repos.
+				// The token is staged in a wipe-on-exit file, not embedded in config.
+				// github: {mode: "pat", pat: "env:GITHUB_FINE_GRAINED_PAT", repos: [{repo: "owner/web"}]}
+
+				// Forgejo/Gitea deploy keys. url is required for multi-repo. The registration
+				// token comes from accounts.cue: safeslop creds link forgejo --host H --owner O --token-ref op://…
+				forgejo: {
+					url:        "https://forgejo.example.com"
+					"ssh-port": 2222
+					repos:      [{repo: "owner/web"}]
+				}
+
+				aws:  {profile: "my-sso-profile"}
+				gcp:  {}
 				pnpm: [{host: "registry.npmjs.org", token: "op://Private/npm/token"}]
 			}
 
-			// Optional pinned toolchain, orthogonal to environment.
-			toolchain: {kind: "mise"}              // "mise" | "nix" | "none"
+			toolchain: {kind: "mise"} // "mise" | "nix" | "none"
 		}
 	}
 }
 ```
 
-Every field except `agent` has a default or is optional. `safeslop run` is
-**fail-closed on trust**: a `safeslop.cue` is honored only after you approve its
-exact bytes with `safeslop trust` (or `safeslop run --trust`); editing the file
-afterwards re-blocks it until you re-approve. `validate`, `list`, and
-`run --dry-run` stay ungated — inspect an untrusted policy before trusting it.
+`agent: "claude-code"` is accepted as a user-facing alias for Claude Code and is
+normalized to the canonical `claude` engine value, so it launches the same
+`claude` binary and is reported as `claude` in status output.
 
-### CLI
+`bundles` and `packages` select build-time packages from the curated catalog. Use
+`safeslop catalog list --output json` or `safeslop catalog list --bundles --output
+json` to inspect available entries; `profile show` reports the resolved package
+set and dry-run image `recipeID` without building. `safeslop lock [profile]
+--output json` writes the repo-root `safeslop.lock.json` for review/commit.
 
-```
-safeslop validate [safeslop.cue]    # check against the embedded schema
-safeslop list                       # profiles + resolved environment/network
-safeslop trust [safeslop.cue]       # record approval of this policy's bytes
-safeslop run <profile> [--dry-run]  # launch under the profile's tier (trust-gated)
-safeslop doctor                     # what boundaries/tools are available here
-safeslop down                       # tear down container/VM sessions
-safeslop install                    # inventory + install the pinned toolchain (status/plan/apply)
-safeslop serve                      # gRPC control plane (drives the GUI app)
-```
+The curated bundles (`catalog list --bundles`) cover common toolchains. Declaring a
+bundle pulls in its packages' `requires`-closure in topological install order and
+unions each package's runtime egress into the squid allowlist (never relaxing
+default-deny):
 
-Add `--json` to any command for machine-readable output (a future GUI drives the
-engine entirely through it).
-
----
-
-## Legacy fish toolkit (transitional)
-
-Everything below documents the original fish + Python(`uv`) toolkit safeslop is
-being ported from, plus the broader macOS agent-sandboxing reference it grew up
-with. **These scripts still ship and work** — they back surfaces not yet folded
-into the Go binary (the `slop-*` helpers, the `slop-isolate` CUE compiler, the
-multi-framework reference). New work targets the Go binary above; where it
-already covers the same ground (`run`, the four tiers, ephemeral creds), prefer
-it.
-
-## Install fish command shims
-
-One-shot install — cleans up legacy artifacts, writes the conf.d snippet, then execs into a fresh fish so every `slop-*` command is immediately on PATH:
-
-```fish
-./install
-```
-
-Variants: `./install --no-exec` (write snippet, do not replace shell), `./install --dry-run` (preview, no writes), `./install --help`. The bootstrap pre-flights `fish`/`uv`/`cue`; missing `uv`/`cue` warn and continue.
-
-Or invoke the inner installer directly (does not exec fish):
-
-```fish
-scripts/slop-install.fish install
-```
-
-What this does:
-
-- Generates `~/.config/fish/conf.d/safeslop.fish`. Fish sources
-  it on every shell startup, so commands like `safeslop`, `slop-sandboxctl`,
-  `slop-gh-key`, `slop-agent-sandbox`, `slop-brew-vm`, etc. are available in every new
-  fish session — no `~/.local/bin` shims, no `PATH` manipulation.
-- The snippet `source`s "module" scripts that define functions, and wraps
-  "standalone" scripts (those with top-level code) as thin functions that
-  exec them with `command fish`.
-- Auto-loads completion files from `scripts/completions/`.
-- Bakes the absolute repo root into the snippet so it is self-contained.
-- Re-runs are idempotent — re-execute any time to regenerate the snippet.
-
-After install, run `exec fish` (or open a new shell) to load the snippet.
-
-Use a custom snippet directory:
-
-```fish
-scripts/slop-install.fish install --conf-dir /path/to/conf.d
-```
-
-Verify install state:
-
-```fish
-scripts/slop-install.fish status
-```
-
-Uninstall:
-
-```fish
-scripts/slop-install.fish uninstall
-```
-
-### Cleanup of legacy installs
-
-If you previously used the older bin-shim/stow installer, the new install
-detects and removes its artifacts on first run: `~/.local/bin/<our-tools>`,
-`~/.local/share/fish/vendor_conf.d/safeslop.fish`,
-`~/.local/share/fish/vendor_completions.d/<our-tools>.fish`,
-`~/.config/safeslop/fish-tools.env`, and any
-`~/.local/.local` tree-fold symlink left behind by stow. Pass
-`--no-cleanup` to opt out.
-
-## Contributor policy (important)
-
-Before edits, read:
-
-1. `CONTRIBUTING.md`
-2. `agents.md`
-3. `scripts/CONVENTIONS.md`
-
-When changing `scripts/*.fish`, keep docs, skills, **and tests** synchronized in the same change:
-
-- `README.md`
-- affected `skills/*/SKILL.md`
-- `skills/README.md` when usage/install guidance changes
-- `tests/test_<script>.fish` for new/changed subcommands, flags, or error paths
-- `scripts/_py/<helper>.py` and `tests/test_py_helpers.fish` when the Python helper contract changes
-
-CI enforces this via `.github/workflows/script-doc-sync-check.yml`.
-
-Run the test suite locally with:
-
-```fish
-fish tests/run.fish
-```
-
-### Python helpers run via `uv`
-
-The `scripts/llm-*.fish` wrappers delegate JSON, datetime, and state-file work
-to small Python helpers in `scripts/_py/llm_*.py`. Each helper carries
-PEP-723 inline metadata (`requires-python`, `dependencies`) and is invoked as
-`uv run --script "$HELPER_PY" <subcommand> ...` from fish. This keeps the
-Python interpreter version pinned per helper and avoids relying on whatever
-`python3` happens to be on `$PATH`. **`uv` is therefore a hard dependency of
-the `llm-*` workflows; `python3` is not.** Any new Python work in this repo
-must follow the same pattern (no bare `python3 -c '...'`).
-
-## LLM Agent Sandboxing on macOS (fish shell)
-
-This guide is written for macOS and fish users. It follows the Diataxis model:
-
-- Explanation: why these controls matter and what macOS can/cannot do
-- Reference: copy/paste config snippets (the full capability matrix is in the Reference appendix at the end)
-- How-to: task-oriented procedures
-- Tutorials: end-to-end walkthroughs
-
----
-
-## Explanation
-
-### Threat model for coding agents
-
-When an LLM can call tools, the main risks are:
-
-- Prompt injection: hostile text in docs/issues/tests tricks the agent into dangerous commands
-- Data exfiltration: reading secrets (`~/.ssh`, cloud creds, `.env`) then sending them over the network
-- Supply chain compromise: package installs run untrusted scripts
-- Persistence: shell startup files or git hooks get modified to survive beyond one session
-
-For your use case, enforce three boundaries at all times:
-
-1. File boundary: only mount/expose a dedicated workspace
-2. Network boundary: explicit URL/domain allowlist
-3. Installer boundary: strict package install policy (`npm`, `uv/pip`, `brew`)
-
-### macOS isolation reality in 2026
-
-| environment | tier | what it actually protects |
+| bundle | packages | for |
 |---|---|---|
-| `host` | none | no boundary — the agent runs as you |
-| `sandbox` (default) | mistake-guard | Seatbelt confines files + exec; guards mistakes + accidental exfil, **not** a malicious-code escape |
-| `container` | network-enforced | container + egress allowlist: real per-URL network control |
-| `vm` | adversary-grade | disposable hardware-virtualized VM: strongest, heaviest |
-
-`safeslop doctor` and `safeslop run` print the active tier so the label is never implicit.
-
-- `sandbox-exec` (macOS Seatbelt) is the **first-class lightweight local boundary** for the
-  common case — launching Claude Code or a shell for package work with a file boundary and
-  strict egress deny. It is built in to macOS, needs no daemon, and starts instantly.
-- Honest caveats: Apple has deprecated the `sandbox-exec` CLI (still present and working on
-  current macOS), and its network control is coarse (allow/deny, not a URL allowlist).
-- For untrusted code or real URL-allowlisting, step up to the container boundary (Docker
-  network namespace + a [Squid](https://www.squid-cache.org/) proxy allowlist) or a disposable
-  VM ([VZ.framework](https://developer.apple.com/documentation/virtualization) via
-  [OrbStack](https://orbstack.dev), [Lima](https://lima-vm.io), or [Tart](https://tart.run)).
-- Per-process outbound controls are best done with a Network Extension firewall
-  ([LuLu](https://objective-see.org/products/lulu.html)) as defense-in-depth.
-- **Credentials + the sandbox boundary:** because `sandbox-exec` cannot do per-destination
-  egress filtering, staging credentials/secrets into an `environment: sandbox` profile with
-  `network: allow` is exfiltration-ready — a prompt-injected agent can POST them out. `safeslop
-  validate` and `safeslop run` warn on exactly that combination (`sandbox-open-egress-with-creds`);
-  use `environment: container`/`vm` or `network: deny` for credentialed work. Per-process egress
-  filtering for the sandbox boundary is planned (the NetworkExtension filter).
-- **Scrubbed environment:** the `sandbox` and `host` environments run the agent with a scrubbed
-  environment — only safe basics (`PATH`, `HOME`, `TERM`, `LANG`, …) are carried from your shell.
-  Ambient credentials — `AWS_*`, `OP_SESSION_*`, `SSH_AUTH_SOCK`, `GITHUB_TOKEN`, and even
-  `ANTHROPIC_API_KEY` — are **not** inherited. Give the agent a credential by declaring it in your
-  `safeslop.cue` `secrets:` block (e.g. `secrets: { ANTHROPIC_API_KEY: "op://Private/Anthropic/api-key" }`),
-  which is staged ephemerally and wiped on exit.
-- **Egress enforcement differs by boundary:** the *container* boundary enforces egress by
-  **topology** (the agent sits on an internal Docker network with Squid as the sole bridge, which
-  denies cloud-metadata + RFC1918 + loopback deny-first). The *VM* boundary's `network: deny`
-  egress is **advisory** — an `SAFESLOP_VM_PROXY_URL` HTTP proxy, not topology — so point it at a
-  filtering proxy; topological VM egress is future work.
-
-Practical consequence: use `sandbox-exec` as the default local boundary for everyday agent
-and package work; escalate to container/VM when you need URL-level network control or are
-running untrusted code.
-
-### Package installer threat model
-
-- `npm`: lifecycle scripts (`preinstall`, `install`, `postinstall`) can execute arbitrary shell commands
-- `uv/pip`: source builds or malicious build backends can execute arbitrary code at install time
-- `brew`: formula Ruby can execute arbitrary commands during source build; bottles are prebuilt binaries you still trust by provenance
-
-Default stance: no installer network except approved registries, no installer scripts unless necessary, immutable lockfiles/hashes.
-
----
-
-## Reference
-
-### Default best-practice recommendations per framework
-
-These are the defaults this repo recommends. They turn each row of the
-matrix into concrete configuration. Treat them as the floor: weaken
-only with a written reason and a compensating control.
-
-**All frameworks (cross-cutting):**
-
-- Run the agent inside a container (OrbStack / Lima / Docker Desktop) or
-  a disposable VM (Tart for macOS). No host home mount; mount only the
-  project directory at a fixed path (e.g. `/workspace`).
-- Force outbound traffic through a proxy with a deny-by-default
-  allowlist. Start from `library/layer/container/allowlist.domains` and
-  `library/layer/container/squid.conf`. Add a host-level firewall ([LuLu](https://objective-see.org/products/lulu.html)
-  or [pf](https://www.openbsd.org/faq/pf/)) as defense-in-depth.
-- Never mount `~/.ssh`, `~/.aws`, `~/.config/gcloud`, or other
-  credential directories. Use ephemeral, scope-limited credentials
-  generated by the helpers under `scripts/slop-*.fish`.
-- Pin all installed tools to exact versions (`library/layer/container/agent-tools.env`,
-  lockfiles checked in, `npm ci` / `uv sync --frozen`). CI gates this
-  via `scripts/slop-pinning.fish`.
-- Default network policy: `strict-egress`. Document any exceptions.
-- Do not pass `--pid=host`, `--network=host`, `--privileged`, or mount
-  `/var/run/docker.sock` into the agent container.
-
-**Claude Code:** start from `library/layer/policy/claude-code.settings.json`.
-Enable `/sandbox`, deny-list `~/.ssh`, `~/.aws`, `~/.config/gcloud`,
-and shell rc files. Sandbox profile must include `(deny network*)`,
-`(deny process-info*)`, and `(deny mach-lookup)`; allow only the
-specific subpaths the session needs to write.
-
-**OpenCode:** load `library/layer/policy/opencode.restrictive.json` via
-`OPENCODE_CONFIG`, then run OpenCode inside the `agent` container from
-`library/layer/container/docker-compose.yml`. App-level URL allowlist is not enough on
-its own — bash escapes it; the container network namespace + proxy is
-what enforces network policy.
-
-**CrewAI:** treat the framework as having no built-in controls. Run
-the crew runtime inside a container, expose only the project mount,
-keep credentials in short-lived env vars or secret mounts, and route
-all egress through the proxy. For tools that execute generated code,
-prefer external sandbox services (E2B / Modal) over local execution.
-
-**PydanticAI:** for any LLM-written code, use Code Mode with Monty so
-execution happens in the Rust sandbox (no host process access, no host
-filesystem, no host network). For ordinary tools, enforce path/network
-allowlists in each tool wrapper, set `requires_approval=True` on tools
-that mutate state or can exfiltrate, and cap runs with `UsageLimits`
-(`request_limit`, `tool_calls_limit`, token caps).
-
-**AG2:** use `DockerCommandLineCodeExecutor`, never the local executor.
-Mount only a per-session `work_dir`; keep the container's root
-filesystem read-only where possible; set `network_mode` to use the
-proxy network, not `host`. Destroy the execution container after each
-session.
-
-**OpenClaw:** start from `library/task/restrictive-flows/openclaw.md`. Because
-OpenClaw is a *messaging gateway* — by design it bridges messaging
-platforms (WhatsApp, Telegram, Slack, Discord, …) into an LLM agent —
-its blast radius is broader than a coding-only agent. Defaults:
-override the workspace from `~/.openclaw/workspace` to a per-session
-project mount; opt in to channels explicitly, never enable all
-channels at once; never run on the host with access to host
-credential directories — always run inside the `agent` container
-from `library/layer/container/docker-compose.yml`; treat `SOUL.md` and any persona
-file as untrusted input (prompt-injection vector); keep the proxy
-allowlist narrow and add only the messaging-platform endpoints you
-actually intend to bridge.
-
-**ZeroClaw:** start from `library/task/restrictive-flows/zeroclaw.md`. ZeroClaw
-ships with security-relevant defaults (workspace boundary, supervised
-autonomy where medium-risk operations require approval and high-risk
-are blocked, cryptographic tool receipts, optional OS sandbox layer
-via [Landlock](https://landlock.io/) / [Bubblewrap](https://github.com/containers/bubblewrap) / [Seatbelt](https://reverse.put.as/wp-content/uploads/2011/09/Apple-Sandbox-Guide-v1.0.pdf) / Docker). Keep them on. On
-macOS the OS sandbox layer reduces to Seatbelt — defense-in-depth
-only; still run ZeroClaw inside the `agent` container so the network
-namespace + proxy enforces egress. Pin the binary by checksum, not
-by `latest` tag. Disable the shell tool unless a specific task needs
-it; if you enable it, route it through the same proxy.
-
-**macOS host (defense-in-depth):** for risky one-off package installs,
-prefer `scripts/slop-brew-vm.fish` over the host. `scripts/slop-macos-sandbox.fish`
-(`slop-sandboxctl local ...`) is acceptable as a lighter local layer for
-trusted tasks but not as a substitute for container/VM isolation.
-
-### OpenCode deep dive (requested focus)
-
-OpenCode's permission model is useful but not sufficient by itself for untrusted execution. Use it with a container boundary.
-
-Recommended layering:
-
-1. Run OpenCode in Docker (no host home mount)
-2. Mount only project directory
-3. Route all egress through proxy allowlist
-4. Use restrictive `opencode.json`
-
-Reference config: `library/layer/policy/opencode.restrictive.json`
-
-### OpenClaw deep dive
-
-OpenClaw's threat surface is wider than a code-only agent because it
-is, by design, a multi-channel messaging gateway: every connected
-channel (WhatsApp, Telegram, Slack, Discord, Signal, iMessage, email,
-…) is both an input vector for prompt injection and an output vector
-for exfiltration. The host process reads workspace memory from
-plain Markdown files (`SOUL.md`, notes, scratch files) — those files
-are agent-controlled and must be treated as untrusted text.
-
-Recommended layering:
-
-1. Run OpenClaw in the `agent` container, never directly on the host.
-2. Override `OPENCLAW_WORKSPACE` (or equivalent) to a per-session
-   project subdirectory mounted at `/workspace`; do not let it
-   default to `~/.openclaw/workspace`.
-3. Enable channels one at a time, behind explicit credentials with
-   the smallest possible scope (single chat, single inbox).
-4. Route all egress through the proxy, and add only the messaging
-   platform's API endpoints you actually need to the allowlist.
-5. Treat `SOUL.md` as configuration, not as a memory bank. Review it
-   like you would a system prompt.
-6. Never mount host credential directories. Use ephemeral keys from
-   `scripts/llm-*.fish` for any source-control identity OpenClaw
-   needs.
-
-Reference policy: `library/task/restrictive-flows/openclaw.md`.
-
-### ZeroClaw deep dive
-
-ZeroClaw is a single Rust binary with a trait-driven runtime: model
-providers, channels, memory backends, and tools are pluggable. The
-positive side is that the runtime itself ships security-relevant
-defaults that this repo wants to keep enforced:
-
-- workspace boundary (operations confined to a configured root)
-- supervised autonomy (medium-risk operations require approval,
-  high-risk operations are blocked)
-- optional OS sandbox layer (Landlock on Linux, Seatbelt on macOS,
-  Bubblewrap, or Docker)
-- cryptographic tool receipts (signed audit log of every tool call)
-
-Keep all four on. The runtime defaults are necessary but not
-sufficient: the OS sandbox layer on macOS reduces to Seatbelt, which
-is deprecated as a primary boundary. Treat ZeroClaw's local sandbox
-as defense-in-depth and still run the binary inside the `agent`
-container so the Docker network namespace + proxy enforces egress.
-
-Recommended layering:
-
-1. Pin the binary by SHA-256 checksum; do not fetch `latest`.
-2. Run inside the `agent` container, mounting only the project
-   directory.
-3. Keep supervised autonomy enabled. Do not raise the auto-approve
-   threshold for the agent identity.
-4. Enable the shell tool only when needed; when enabled, ensure the
-   container's `HTTP_PROXY`/`HTTPS_PROXY` is set so any subprocess
-   inherits the allowlist.
-5. Persist tool receipts to a path under `/workspace` so the audit
-   log survives container teardown.
-
-Reference policy: `library/task/restrictive-flows/zeroclaw.md`.
-
-### Claude Code sandbox reference
-
-Use `/sandbox` in Claude Code and keep filesystem/network policy strict. Example file: `library/layer/policy/claude-code.settings.json`.
-
-Key points:
-
-- Explicitly deny `~/.ssh`, cloud credentials, and shell rc files
-- Restrict write access to project/work directories
-- Keep domain allowlist narrow (registries + source control only)
-
-### CrewAI reference
-
-CrewAI has no native process sandbox for arbitrary tools. Use:
-
-- Docker wrapper for crew runtime
-- Proxy-enforced egress allowlist
-- Tool wrappers for sensitive actions
-- Optional external sandbox services for code execution (E2B/Modal)
-
-Minimal hardening checklist:
-
-- run CrewAI process in container/VM
-- expose only a project mount (never host home)
-- keep credentials in short-lived env vars or secret mounts
-- route outbound network through allowlist proxy
-
-### PydanticAI reference
-
-- For LLM-written code: prefer Code Mode + Monty
-- For normal tools: each tool is your code, so enforce path/network rules in tool wrappers
-- Add `requires_approval=True` to high-risk tools
-
-Minimal hardening checklist:
-
-- use Monty for generated code execution
-- guard filesystem/network tools with explicit allowlists
-- enforce `UsageLimits` and approval for sensitive tools
-
-### AG2 reference
-
-Use `DockerCommandLineCodeExecutor` for untrusted code. Keep:
-
-- `work_dir` as only mounted path
-- read-only root fs where possible
-- no host credential mounts
-- proxy-enforced egress rules
-
-Minimal hardening checklist:
-
-- prefer `DockerCommandLineCodeExecutor` over local executor
-- isolate `work_dir` per session
-- avoid mounting host sockets (`/var/run/docker.sock`) unless unavoidable
-
-### Homebrew reference (sandboxing suspicious installs)
-
-Facts that matter:
-
-- Homebrew still uses sandboxing for source builds on macOS, but bottles are prebuilt and skip build sandboxing
-- Separate Homebrew prefixes can coexist but are not a security boundary
-- Strongest option for suspicious brew installs is a disposable macOS VM (Tart)
-
-Use `scripts/slop-brew-vm.fish` for VM-backed isolation. `scripts/brew-sandbox.fish` is only prefix separation and should not be treated as sandboxing.
-
-### Package manager hardening reference
-
-`npm`
-
-- Prefer `npm ci`
-- Default to `--ignore-scripts`
-- Use lockfile only, no ad hoc install in agent runs
-- Pin CLI packages to exact versions (no `latest` in production)
-
-`uv/pip`
-
-- Prefer wheels only: `--only-binary :all:`
-- Pin exact versions/hashes where possible
-- Use `uv sync --frozen` for project sync
-- Keep pinned framework versions in `library/layer/container/agent-tools.env`
-
-`brew`
-
-- Audit formula first (`brew cat`, `brew info`, `brew install --dry-run`)
-- Prefer official taps only
-- For unknown packages, install in disposable VM first
-
-Recommended registry/domain allowlist baseline:
-
-- npm: `registry.npmjs.org`
-- Python: `pypi.org`, `files.pythonhosted.org`
-- Git source: `github.com`, `raw.githubusercontent.com`
-
-### Artifact pinning and attestation reference
-
-Use pinned versions by default:
-
-- `library/layer/container/agent-tools.env`
-- `library/layer/container/agent-tools.env.example`
-
-Useful verification commands:
-
-```fish
-npm view @anthropic-ai/claude-code@2.1.121 dist.integrity
-npm view opencode-ai@1.14.28 dist.integrity
-"/opt/homebrew/bin/python3" -m pip index versions crewai
-"/opt/homebrew/bin/python3" -m pip index versions pydantic-ai
-"/opt/homebrew/bin/python3" -m pip index versions ag2
-./scripts/slop-pinning.fish
+| `base-tools` | ripgrep, fd, bat, eza, fzf, zoxide | everyday CLI ergonomics |
+| `claude` | node, claude-code | the `claude` agent (its default) |
+| `go` | go | Go toolchain (module proxy + checksum DB egress) |
+| `node` | node, pnpm, bun | JS/TS work |
+| `personal` | CLI ergonomics + node/python/go/rust toolchains + hyperfine/tokei/sccache | daily-driver multi-language set |
+| `pi` | node, pi | the `pi` agent (its default) |
+| `python` | python3, uv, ruff | Python work |
+| `rust` | rust + cargo-nextest/audit/deny/expand/make/watch + sccache | Rust toolchain + cargo subcommands |
+| `rust-embedded` | rust, cargo-binutils, flip-link | no_std / embedded targets |
+| `web` | node, pnpm, typescript, vite, eslint, prettier, web-ext | JS/TS web development |
+
+Catalog packages and bundles are safeslop-owned, version- and (for `binary` kinds)
+per-arch sha256-pinned; extending the catalog is a code edit + review, which is the
+supply-chain review boundary. The package-version selection and bump policy that
+governs which pin lands is canonized in `specs/research/2026-06-30-version-policy-flo.md`.
+
+### Catalog version tooling
+
+The catalog source of truth is the authored `internal/engine/policy/catalog.cue`, rendered
+to an embedded `catalog.json` (`make render-catalog`; a `make check` sync gate fails on
+drift). `catalog bump`/`add` and `bundle add`/`remove` mutate it: they load the catalog,
+run the engine, and re-emit **both** `catalog.cue` and `catalog.json` in lockstep, then
+print a reviewable plan sheet. Run them from the repo root (or pass `--catalog-dir`):
+
+```text
+safeslop catalog bump ripgrep --to 14.2.0         # resolve all-arch digests, enforce LAWs, write + plan sheet
+safeslop catalog bump ripgrep --to 14.2.0 --security   # waive the soak window only (never a LAW)
+safeslop catalog propose-version ripgrep          # newest-first upstream candidates + would-be shas + blast radius
+safeslop catalog add mytool --kind binary --version 1.0.0 --sha256 amd64=… --sha256 arm64=…
+safeslop catalog audit                           # versions-behind, yanked/unmaintained, suggested lane
+safeslop bundle add personal jq                  # add a package to a bundle (re-validates)
 ```
 
-For project dependencies:
+Every bump enforces the four hard LAWs: **A** atomic all-arch real digest (no
+`sha256Unresolved` survives), **B** stable channel only (rejects rc/beta/nightly/…),
+**C** apt bumps coordinate the Debian-snapshot timestamp, **D** one version per name —
+plus the monotonic floor (never roll back) and a SemVer-aware soak window (`--security`
+waives soak, never a LAW). Non-semver kinds (apt, calver) return candidates flagged
+`requires-human-confirm`. Live fetch is hermetic in tests (a fixture seam); production
+uses `net/http`. Add `--output json` for the enveloped machine contract.
 
-- npm: commit `package-lock.json` and use `npm ci`
-- uv: commit `uv.lock` and use `uv sync --frozen`
-- Homebrew: prefer explicit formula names, official taps, and dry-run/audit before install
+`safeslop session create --profile <name> --output json` creates an Emacs-visible
+session from an existing `safeslop.cue` profile: it uses the profile's agent,
+environment, network, and workspace, resolves its catalog package set, and includes
+`recipeID`/`image` metadata for the portal Recipe/Image columns. In Emacs, this
+profile-backed path opens `*safeslop session progress*` so slow first-use image
+build logs stream live and end with the subprocess exit status. The ad-hoc
+`--agent` form remains available for one-off sessions.
 
----
+### Starter profiles (presets)
 
-## How-to
+safeslop ships a small library of known-good starting points so you don't write a
+`safeslop.cue` from scratch. List them as the JSON contract:
 
-### Unified isolation config
-
-`slop-isolate` compiles a single [CUE](https://cuelang.org/) policy to per-tool configs (sandbox-exec, docker-compose, [squid](https://www.squid-cache.org/), [envoy](https://www.envoyproxy.io/) + [coredns](https://coredns.io/) + notifier, [lulu](https://objective-see.org/products/lulu.html), [pf](https://www.openbsd.org/faq/pf/), claude-code-settings, opencode-settings, ag2-executor, [tart](https://tart.run), [orbstack](https://orbstack.dev)). Ten presets ship: `any-agent`, `claude-code`, `opencode`, `crewai`, `pydantic-ai`, `ag2`, `openclaw`, `zeroclaw`, `nous-hermes-local`, `nous-hermes-remote`. Authors keep one `isolation.cue`; the compiler emits the config every adapter actually understands. Where an adapter cannot enforce a primitive (e.g. pf cannot match by domain), the emitted output records the gap as a comment (or fails with `--strict`).
-
-The [Envoy](https://www.envoyproxy.io/) adapter additionally compiles a runnable docker-compose stack ([Envoy](https://www.envoyproxy.io/) + [CoreDNS](https://coredns.io/) + a notifier sidecar). It runs SNI-only by default, opts into MITM with `--mitm`, surfaces blocked flows as macOS notifications via [terminal-notifier](https://github.com/julienXX/terminal-notifier) or [alerter](https://github.com/vjeantet/alerter), and accepts `slop-isolate approve --once` (10-min TTL) or `--always` (logs the approval; user adds it to `extras.allow-domains`).
-
-1. Install dependencies:
-
-```fish
-brew install cue-lang/tap/cue
-brew install terminal-notifier   # optional: macOS deny notifications
+```bash
+safeslop profile presets --output json
 ```
 
-2. Pick a preset and validate it:
+Each preset is a complete, validated `safeslop.cue` with a one-line description:
 
-```fish
-source scripts/slop-isolate.fish
-slop-isolate presets list
-slop-isolate presets show claude-code
+| preset | what it gives you |
+|---|---|
+| `claude-container-allowlist` | Claude Code in a container, default-allowlist egress (the safe default). |
+| `claude-subscription-container` | Same, but authenticated with your Claude **subscription** token (not an API key). |
+| `claude-host-unconfined` | Claude Code on the host — **no isolation**; convenient, not contained. |
+| `pi-container-allowlist` | The `pi` agent in a container, default-allowlist egress. |
+| `shell-container` | A plain `fish` shell in a container — a sandboxed shell, no coding agent. |
+
+The Emacs Profiles surface (`C-c s F`) is a list of your `safeslop.cue` profiles
+with ergonomic CRUD and launch keys: `RET`/`i` inspect a profile's resolved
+packages, egress, and image recipe (read-only, no file edit); `x` launches a
+session from the selected profile after an isolation/network summary; `e` opens
+the CUE file jumped to that profile's block; `n` creates one with structured
+prompts (the name is validated and overwriting an existing profile is confirmed);
+`c` clones the row at point (only a new name is required); `D` guides deletion
+(pick the target, confirm, then remove the block by hand); `g` refreshes. Creating
+is backed by the catalog/bundle lists and routes through `profile create`, while
+CUE stays the stored source of truth. This repo also dogfoods a checked-in
+`safeslop.cue` with `default`, `pi`, and `shell` profiles so the Profiles surface
+has useful local rows immediately.
+
+### Trust model
+
+`validate`, `list`, and `run --dry-run` are inspection commands and do not require
+trust. Every real launch — `safeslop run`, `safeslop session run`, and the Emacs
+client (which launches only through sessions) — requires the exact current policy
+bytes to be trusted:
+
+```bash
+safeslop trust
+safeslop run work
 ```
 
-3. Author your config (extend a preset via the `extras` struct):
+For sessions the approval is checked when the session is created from a profile and
+recorded on the session, then re-verified before the agent starts; if an agent or
+editor changes the policy — or trust is revoked — in between, launch is blocked until
+you review and trust the new bytes. An ad-hoc host session (`session create --agent
+… --environment host`) has no `safeslop.cue` to approve and instead requires an
+explicit `--trust-host` acknowledgement that the agent runs unconfined with your
+host credentials.
 
-```fish
-cat > .isolation.cue <<'CUE'
-package isolation
-import "safeslop.dev/isolation/presets"
-isolation: presets.#ClaudeCode & {
-    extras: "allow-domains": ["github.example.internal"]
-    tool: pf: "domain-fallback": "fail"
-}
-CUE
-slop-isolate validate .isolation.cue
+Staged credentials never live under the agent-writable workspace: they are written
+to a host-only stage dir under your user cache dir (`~/Library/Caches/safeslop` on
+macOS, `~/.cache/safeslop` on Linux) and bind-mounted read-only into the container.
+
+### Isolation tiers
+
+`environment` is required — there is no default (specs/0053 removed the macOS
+Seatbelt `sandbox` tier: it could not run the network-bound, home-installed agents
+safeslop launches, only confined accidents).
+
+| environment | label | summary |
+|---|---|---|
+| `host` | none | No isolation boundary; the agent runs as you. |
+| `container` | egress-allowlisted | An ambient docker/podman/lima container plus proxy topology for per-domain egress control. |
+
+Use `container` for routine agent sessions (network-bound agents belong here),
+and `host` only when you accept no isolation.
+
+## Credentials
+
+Credentials are staged under the run's runtime directory and wiped on exit.
+Token revocation is best-effort; deletion of the staged token/key on exit is the
+decay-first safety guarantee.
+
+- GitHub uses `credentials.github`. In the default `app` mode safeslop mints an
+  ephemeral, repo-scoped GitHub App installation token (contents + metadata) and
+  stages it as a git-over-HTTPS credential — no deploy keys, no `gh` CLI. Each
+  owner needs an account link (`safeslop creds link github`); repos are
+  partitioned by `write` so a read-only repo never gets a write token. The P1
+  token lifetime is capped at ~1h (no renewal yet; renewal lands in P2). PAT mode
+  (`mode: "pat"`, `pat: <ref>`) stages one existing fine-grained token instead.
+- Forgejo/Gitea uses `credentials.forgejo` (deploy keys, one per repo, with
+  per-repo SSH host aliases + git URL rewrites). The account token that registers
+  each key comes from `~/.config/safeslop/accounts.cue`
+  (`safeslop creds link forgejo`), never from `safeslop.cue`. Forgejo account
+  tokens are account-wide — prefer a dedicated bot account.
+- Account links live in `~/.config/safeslop/accounts.cue` (0600, host-only): they
+  hold non-secret ids + secret *refs* only, never a token or key value, and are
+  never serialized into a container or stage dir. Manage them with `safeslop creds
+  link|unlink|status`.
+- When github creds are staged on a `network: "deny"` profile, the egress
+  allowlist gains `github.com`, `codeload.github.com`, and
+  `objects.githubusercontent.com` (clone + LFS). `api.github.com` is not added in
+  P1 (API-token staging is P2).
+
+### Inspecting credential posture (Emacs `C-c s K`, `safeslop creds`)
+
+The Emacs Credentials surface (`C-c s K`, "Keys") makes a workspace's credential
+posture legible *before* launch. For every profile it lists each declared secret
+and credential with its **source ref** (`op://…`/`env:NAME` — a reference, never a
+value), whether it is **ephemeral** (a deploy key minted per session and wiped on
+exit) or **ref-backed**, and — for the ref-backed ones — a value-free **readiness
+status**: `resolvable`, `missing`, `op-signed-out`, `op-unavailable`, `ephemeral`,
+or `ambient` (host SSO/ADC). `RET`/`i` inspect a profile's credentials, `e` opens
+the `safeslop.cue` credentials block (authoring stays CUE-canonical — you edit
+refs, not values), and `g` re-probes.
+
+The surface is backed by `safeslop creds list [safeslop.cue] --output json` and
+`safeslop creds show <profile> --output json`. The readiness probe resolves each
+ref only to keep the pass/fail result and **discards the value**, so no secret is
+ever read into the UI or the envelope. There is no in-UI mint/revoke — ephemeral
+keys live and die with a session (`run`/`session`), so the surface is read +
+status + jump-to-edit, never a secret vault.
+
+## Development
+
+Requirements for engine work:
+
+```bash
+make check
+make build
 ```
 
-4. Compile to one or every adapter:
+Local developer install:
 
-```fish
-slop-isolate compile .isolation.cue --adapter sandbox-exec --out ./out
-slop-isolate compile .isolation.cue --adapter envoy --out ./out
-slop-isolate compile .isolation.cue   # uses adapters.enabled list
+```bash
+make install       # ~/.local/bin/safeslop + ~/.local/share/safeslop/emacs
+make install-emacs # only sync the Emacs package under ~/.local/share/safeslop/emacs
 ```
 
-5. Apply (bounded — never touches sudo/pf/lulu):
+If a future safeslop MCP server package is added under `cmd/*mcp*`, `make install`
+will also build and install it into `~/.local/bin`.
 
-```fish
-slop-isolate apply .isolation.cue --yes
+`make check` performs:
+
+- container asset drift check
+- specs/0049 pivot denylist check
+- `go vet ./...`
+- `gofmt` verification for `cmd` and `internal`
+- `go test ./...`
+- Emacs package smoke/contract/session tests via `make test-emacs`
+
+Useful targeted tests:
+
+```bash
+go test ./internal/engine/creds/ -v
+go test ./internal/engine/policy/ -run 'Pinned|Latest' -v
+go test ./internal/cli/ -v
+go test ./internal/engine/session ./internal/jsoncontract -v
+make test-emacs EMACS=/absolute/path/to/emacs
 ```
 
-6. Boot the interactive proxy and approve flows on the fly:
+The checked Emacs package consumes the Go golden JSON fixtures directly from
+`internal/jsoncontract/testdata/*.golden.json`; there is no copied fixture set.
+CI scaffolding for a pinned Emacs 32.1 source build lives under `ci/emacs32/`.
 
-```fish
-slop-isolate proxy start
-slop-isolate approve --once api.example.com
-slop-isolate denials --since 10m
-slop-isolate proxy stop
+Active development happens on the Forgejo remote. Use branches and Forgejo PRs;
+GitHub is a release mirror.
+
+## Release builds
+
+Build local binaries with:
+
+```bash
+make build
+make dist
 ```
-
-### How to run any agent behind Docker + URL allowlist proxy
-
-1. Create stack files from this repo:
-   - `library/layer/container/Dockerfile.agent`
-   - `library/layer/container/Dockerfile.agent.tools`
-   - `library/layer/container/docker-compose.yml`
-   - `library/layer/container/squid.conf`
-   - `library/layer/container/agent-tools.env.example`
-2. Start the proxy:
-
-```fish
-docker compose -f library/layer/container/docker-compose.yml build agent
-docker compose -f library/layer/container/docker-compose.yml up -d proxy
-```
-
-3. Run agent container through proxy:
-
-```fish
-docker compose -f library/layer/container/docker-compose.yml run --rm agent
-```
-
-4. Verify blocking:
-
-```fish
-docker compose -f library/layer/container/docker-compose.yml run --rm agent sh -lc 'curl -I https://example.com'
-```
-
-Expected: denied unless domain is allowlisted.
-
-### How to run with preinstalled CLIs/frameworks
-
-1. Copy env template and pin versions:
-
-```fish
-cp library/layer/container/agent-tools.env.example library/layer/container/agent-tools.env
-```
-
-2. Edit `library/layer/container/agent-tools.env` and enable only the stacks you need
-3. Keep versions pinned; avoid `latest` in automation. The Dockerfile
-   passes `--break-system-packages` to every `pip` / `uv pip install
-   --system` line because the base image (`node:22-bookworm`) ships
-   PEP 668's externally-managed marker; we install into the system
-   site-packages deliberately because the container is single-purpose,
-   and the flag is the canonical Debian-bookworm escape hatch
-4. Build and run the tools image:
-
-```fish
-docker compose --env-file library/layer/container/agent-tools.env -f library/layer/container/docker-compose.yml build agent-tools
-docker compose --env-file library/layer/container/agent-tools.env -f library/layer/container/docker-compose.yml run --rm agent-tools
-```
-
-5. Optional convenience wrapper:
-
-```fish
-source scripts/slop-agent-sandbox-tools.fish
-slop-agent-sandbox-tools shell
-```
-
-or use hub command:
-
-```fish
-scripts/slop-sandboxctl.fish docker-tools shell
-```
-
-### Launch agents with defaults
-
-`slop-agents` drops you into Claude Code or OpenCode in the right cwd,
-applying the bundled defaults the first time you opt in. The bundled
-JSON is the compile output of the matching CUE presets in
-`library/layer/policy/presets/`, mirrored as fixtures.
-
-1. Source the helper:
-
-```fish
-source scripts/slop-agents.fish
-```
-
-2. One-time, write secure defaults to the repo root:
-
-```fish
-slop-agents seed all
-```
-
-3. Drop into Claude Code with those defaults applied:
-
-```fish
-slop-agents claude
-```
-
-4. Drop into OpenCode with those defaults applied:
-
-```fish
-slop-agents opencode
-```
-
-`seed` writes `<repo-root>/.claude/settings.json` and
-`<repo-root>/opencode.json`. It never overwrites an existing override
-file — edit the resulting JSON to take control. Settings precedence,
-first hit wins:
-
-1. `<cwd>/.claude/settings.json` (or `<cwd>/opencode.json`)
-2. `<repo_root>/.claude/settings.json` (or `<repo_root>/opencode.json`)
-3. user-level `~/.claude/settings.json` if present, else nothing
-
-`safeslop` (the Textual TUI) exposes the same flow under key `a` ("Agents").
-
-For container-side use, drop into the agent-tools shell first and type
-`claude` or `opencode` once inside (`slop-agent-sandbox-tools shell`).
-
-### Drive isolated agent sessions with `safeslop.cue` (legacy orchestrator)
-
-The current `safeslop.cue` workflow — schema, `validate` / `list` / `trust` /
-`run`, and what `run` provisions — is documented under **`safeslop.cue`
-reference** near the top of this README. That is the Go engine and the supported
-path.
-
-Historically the same idea was driven by the fish/Python orchestrator
-(`scripts/_py/slop_orchestrator.py`), which read an *earlier* `slop.cue` shape
-(`profiles: { … isolation: presets.#ClaudeCode, credentials: github:
-"ephemeral-rw", "on-exit": [...] }`) and shelled out to the `slop-*` helpers —
-`slop-gh-key here create-pair` for credentials, `slop-agent-sandbox-tools up`
-for the container + Squid stack, `slop-brew-vm` for the VM — with a Textual TUI
-fallback. That orchestrator still exists during the migration but is being
-superseded by the Go engine, which stages credentials natively (the
-`CredentialProvider` interface), enforces the trust gate, and scrubs the child
-environment.
-
-**Prefer the Go `safeslop.cue` shape documented above.** The legacy `slop.cue`
-shape (with `isolation:`, `credentials: github:`, `on-exit:`, `default:`) is
-**not** accepted by the Go binary's embedded schema.
-
-### How to lock down OpenCode on macOS
-
-1. Use restrictive config:
-
-```fish
-set -x OPENCODE_CONFIG (pwd)/library/layer/policy/opencode.restrictive.json
-```
-
-2. Run OpenCode inside the `agent` container from `library/layer/container/docker-compose.yml`
-3. Do not mount host home, only mount repo workspace
-4. Keep proxy allowlist minimal and add domains only when required
-
-### How to lock down OpenClaw
-
-1. Read `library/task/restrictive-flows/openclaw.md` and apply its policy to
-   your local OpenClaw config.
-2. Run OpenClaw inside the `agent` container from
-   `library/layer/container/docker-compose.yml`. Do not run it on the host.
-3. Override the workspace location so it does not default to the
-   user's home directory:
-
-```fish
-docker compose -f library/layer/container/docker-compose.yml run --rm \
-    -e OPENCLAW_WORKSPACE=/workspace/.openclaw \
-    agent fish
-```
-
-4. Enable one channel at a time. For each channel, scope its
-   credential to the smallest possible target (one chat, one inbox).
-5. Add the channel's API host to `library/layer/container/allowlist.domains` and
-   restart the proxy. Remove it when the session ends.
-6. Treat `SOUL.md` as configuration, not memory. Review it on every
-   session start.
-
-### How to lock down ZeroClaw
-
-1. Read `library/task/restrictive-flows/zeroclaw.md` and apply its policy to
-   your local ZeroClaw config.
-2. Pin the binary by SHA-256 and verify before running.
-3. Run ZeroClaw inside the `agent` container so the Docker network
-   namespace + proxy enforces egress, even though ZeroClaw also has
-   its own OS sandbox layer (Seatbelt on macOS, Landlock /
-   Bubblewrap on Linux).
-4. Keep supervised autonomy at the default threshold (medium-risk
-   asks for approval; high-risk is blocked).
-5. Persist tool receipts under `/workspace` so the audit log
-   survives container teardown.
-6. Enable the shell tool only on demand. When enabled, confirm the
-   container's `HTTP_PROXY` / `HTTPS_PROXY` are set so any
-   subprocess egress goes through the allowlist.
-
-### How to run a command under the `sandbox-exec` boundary (macOS)
-
-This is the default local boundary for everyday agent and package work. Step up to
-container/VM (below) when you need URL-level network control or are running untrusted code.
-
-1. Load helper:
-
-```fish
-source scripts/slop-macos-sandbox.fish
-```
-
-2. Run command with default `cwd` scope and strict egress deny:
-
-```fish
-slop-macos-sandbox run -- /bin/pwd
-```
-
-3. Run command with repository-root scope (alternative to default `cwd` scope):
-
-```fish
-slop-macos-sandbox run --repo-root-access -- /usr/bin/env ls
-slop-macos-sandbox run --path-scope repo-root -- /usr/bin/env ls
-```
-
-4. Use through the unified hub:
-
-```fish
-scripts/slop-sandboxctl.fish local run --repo-root-access -- /bin/pwd
-```
-
-5. Add explicit additional paths only when needed:
-
-```fish
-slop-macos-sandbox run --allow-read ~/.config --allow-write ./tmp -- /usr/bin/env ls
-```
-
-Notes:
-
-- `--repo-root-access` is an alias for `--path-scope repo-root`
-- `--network-policy strict-egress` (default) denies outbound network in profile
-- Escalate to Docker/VM workflows for untrusted execution or URL-level network control
-
-### How to lock down Claude Code
-
-1. Enable `/sandbox`
-2. Apply settings similar to `library/layer/policy/claude-code.settings.json`
-3. Add deny rules for sensitive paths (`~/.ssh`, `~/.aws`, `~/.config/gcloud`)
-4. Keep network allowlist to registries + git hosts only
-
-### How to run CrewAI with container boundaries
-
-1. Run your CrewAI app inside the `agent` service (or a custom image)
-2. Mount only workspace paths needed by tasks
-3. Keep outbound traffic proxy-only (`HTTP_PROXY`/`HTTPS_PROXY` set)
-4. For code execution tools, use external sandbox providers where possible
-
-### How to run PydanticAI safely
-
-1. Use Code Mode + Monty for generated code
-2. Wrap filesystem/network tools in allowlist checks
-3. Add approval gates to mutation/exfiltration-capable tools
-4. Enforce run limits (`request_limit`, `tool_calls_limit`, token limits)
-
-### How to run AG2 safely
-
-1. Use Docker executor classes, not local execution
-2. Mount only a session directory as `work_dir`
-3. Keep egress constrained by proxy ACLs
-4. Destroy execution container after each session
-
-### How to add host-level process egress controls (LuLu)
-
-1. Install [LuLu](https://objective-see.org/products/lulu.html) (free, open source)
-2. Create deny-by-default outbound policy for agent binaries
-3. Allow only explicit domains/ports needed for registries and git
-4. Keep this as defense-in-depth even when using containers
-
-### How to sandbox `npm` and `uv` installs
-
-Use helper scripts:
-
-- `scripts/slop-safe-npm.fish`
-- `scripts/slop-safe-uv.fish`
-
-These enforce strict defaults and are designed to run inside containerized agent sessions.
-
-### How to sandbox `brew` with disposable Tart VMs
-
-1. Load VM helper:
-
-```fish
-source scripts/slop-brew-vm.fish
-```
-
-2. Create base template once:
-
-```fish
-slop-brew-vm create-base
-```
-
-3. Install formula in disposable VM session:
-
-```fish
-set -x BREW_VM_PROXY_URL http://<proxy-host>:3128
-slop-brew-vm install --network-policy strict-egress <formula>
-```
-
-4. Optional: inspect manually in VM shell:
-
-```fish
-set -x BREW_VM_KEEP_SESSION true
-slop-brew-vm install <formula>
-slop-brew-vm shell
-slop-brew-vm destroy
-```
-
-5. Share files explicitly with host:
-
-```fish
-slop-brew-vm copy-in ./local-file.txt /tmp/llm-share/local-file.txt
-slop-brew-vm copy-out /tmp/llm-share/result.txt ./result.txt
-```
-
-6. Verify policy enforcement:
-
-```fish
-slop-brew-vm verify-network
-```
-
-Reference: `library/task/evaluate-formulae/README.md`
-
-### How to strengthen network limiting
-
-1. Keep default script mode as `strict-egress`
-2. Maintain outbound allowlist in `library/layer/container/allowlist.domains`
-3. Use internal Docker network path (`agent`/`agent-tools` -> `proxy` only)
-4. For VM sessions, set `BREW_VM_PROXY_URL` and run `slop-brew-vm verify-network`
-5. Keep host firewall egress rules ([LuLu](https://objective-see.org/products/lulu.html) or [pf](https://www.openbsd.org/faq/pf/)) as defense in depth
-
-### How to manage ephemeral GitHub SSH deploy keys
-
-1. Load helper:
-
-```fish
-source scripts/slop-gh-key.fish
-```
-
-2. Create RO + RW key pair for one repo (default TTL 24h):
-
-```fish
-slop-gh-key create-pair --repo <owner>/<repo> --name session-1 --ttl 24h
-```
-
-Optional: append SSH aliases to `~/.ssh/config` while creating:
-
-```fish
-slop-gh-key create-pair --repo <owner>/<repo> --name session-1 --ttl 24h --install-ssh-config --host-prefix github-llm
-```
-
-What this actually writes — the launcher appends a marker-fenced block
-to `~/.ssh/config` so a later `uninstall-ssh-config` can remove it
-cleanly:
-
-```ssh-config
-# BEGIN slop-gh-key:<owner>-<repo>:session-1:<utc-stamp>
-Host github-llm-ro
-  HostName github.com
-  User git
-  IdentityFile ~/.ssh/llm_agent_github_ro_session-1_<utc-stamp>
-  IdentitiesOnly yes
-
-Host github-llm-rw
-  HostName github.com
-  User git
-  IdentityFile ~/.ssh/llm_agent_github_rw_session-1_<utc-stamp>
-  IdentitiesOnly yes
-# END slop-gh-key:<owner>-<repo>:session-1:<utc-stamp>
-```
-
-`Host github-llm-ro` is just a [name your local SSH client recognizes](https://www.man7.org/linux/man-pages/man5/ssh_config.5.html) —
-the `HostName` line points it at the real `github.com`. `IdentitiesOnly yes`
-forces ssh to use *only* the listed `IdentityFile`, never your
-`~/.ssh/id_*`, so the ephemeral deploy key is the only credential
-offered. With that block in place, you swap the alias into any git
-URL targeting that one repo:
-
-```fish
-# Read-only: clone, fetch, pull
-git clone git@github-llm-ro:<owner>/<repo>.git
-git -C <repo> remote set-url origin git@github-llm-ro:<owner>/<repo>.git
-
-# Read-write: same repo, different alias → gets the RW key
-git -C <repo> remote set-url --push origin git@github-llm-rw:<owner>/<repo>.git
-git -C <repo> push
-```
-
-The aliases are scoped per repo by their marker block, but the
-`Host github-llm-ro` / `github-llm-rw` *names* are global per
-`--host-prefix`. If you juggle multiple repos under one user account,
-pass distinct `--host-prefix github-llm-<repo-slug>` values so the
-aliases don't shadow each other in `~/.ssh/config`. See
-`scripts/slop-gh-key.fish help` and `slop-gh-key uninstall-ssh-config`
-for the full lifecycle.
-
-3. List deploy keys on repo:
-
-```fish
-slop-gh-key list --repo <owner>/<repo>
-```
-
-4. Revoke one key by id:
-
-```fish
-slop-gh-key revoke --repo <owner>/<repo> --id <key-id>
-```
-
-5. Revoke keys by title pattern or expiration:
-
-```fish
-slop-gh-key revoke-by-title --repo <owner>/<repo> --match '^llm-agent:'
-slop-gh-key revoke-expired --repo <owner>/<repo>
-```
-
-6. Generate or install SSH config aliases manually:
-
-```fish
-slop-gh-key print-ssh-config --ro-key ~/.ssh/llm_agent_github_ro_<stamp> --rw-key ~/.ssh/llm_agent_github_rw_<stamp>
-slop-gh-key install-ssh-config --repo <owner>/<repo> --name session-1 --ro-key ~/.ssh/llm_agent_github_ro_<stamp> --rw-key ~/.ssh/llm_agent_github_rw_<stamp>
-```
-
-7. Remove old alias blocks from `~/.ssh/config`:
-
-```fish
-slop-gh-key uninstall-ssh-config --repo <owner>/<repo> --name session-1 --yes
-slop-gh-key uninstall-ssh-config --marker '^slop-gh-key:<owner>-<repo>:' --yes
-```
-
-Notes:
-
-- Prefer deploy keys (repo-scoped) over account-level SSH keys for agent identities
-- Keep RO and RW keys separate and short-lived
-- Enforce branch protections/rulesets for RW keys
-
-### How to manage ephemeral Forgejo deploy keys (multi-instance)
-
-1. Load helper:
-
-```fish
-source scripts/slop-forgejo-key.fish
-```
-
-Optional bootstrap to copy starter config locally:
-
-```fish
-slop-forgejo-key bootstrap-config
-```
-
-2. Save Forgejo instance profile once:
-
-```fish
-slop-forgejo-key instance-set --name main --url https://forgejo.example.com --token-env FORGEJO_TOKEN_MAIN
-set -x FORGEJO_TOKEN_MAIN <token-with-repo-admin>
-```
-
-Reference template: `library/layer/policy/forgejo-instances.example.json`
-
-3. Create RO + RW deploy key pair for one repository:
-
-```fish
-slop-forgejo-key create-pair --instance main --repo <owner>/<repo> --name session-1 --ttl 24h --install-ssh-config
-```
-
-4. List and revoke:
-
-```fish
-slop-forgejo-key list --instance main --repo <owner>/<repo>
-slop-forgejo-key revoke --instance main --repo <owner>/<repo> --id <key-id>
-slop-forgejo-key revoke-expired --instance main --repo <owner>/<repo> --yes
-```
-
-5. Remove old SSH alias blocks:
-
-```fish
-slop-forgejo-key uninstall-ssh-config --repo <owner>/<repo> --name session-1 --yes
-```
-
----
-
-## Tutorials
-
-### Tutorial: first sandboxed OpenCode session
-
-Goal: run OpenCode with file, SSH, and URL constraints in <10 minutes.
-
-1. Start proxy and agent container:
-
-```fish
-docker compose -f library/layer/container/docker-compose.yml build agent
-docker compose -f library/layer/container/docker-compose.yml up -d proxy
-docker compose -f library/layer/container/docker-compose.yml run --rm agent
-```
-
-2. Inside container, set OpenCode config and start:
-
-```fish
-set -x OPENCODE_CONFIG /workspace/library/layer/policy/opencode.restrictive.json
-# Install your OpenCode binary/package in this image first,
-# then run it with the restrictive config.
-```
-
-3. Validate file isolation:
-   - Attempt read of `/root/.ssh/id_rsa` (should fail or not exist)
-   - Attempt write outside `/workspace` (should fail)
-
-4. Validate URL isolation:
-   - `curl https://registry.npmjs.org` should succeed
-   - `curl https://example.com` should fail by proxy ACL
-
-5. Tear down:
-
-```fish
-docker compose -f library/layer/container/docker-compose.yml down
-```
-
-### Tutorial: evaluate a suspicious formula safely
-
-1. Load VM helper and create base template:
-
-```fish
-source scripts/slop-brew-vm.fish
-slop-brew-vm create-base
-```
-
-2. Review formula first:
-
-```fish
-set -x BREW_VM_PROXY_URL http://<proxy-host>:3128
-slop-brew-vm run --network-policy strict-egress brew cat <formula>
-slop-brew-vm run --network-policy strict-egress brew info <formula>
-slop-brew-vm run --network-policy strict-egress brew install --dry-run <formula>
-```
-
-3. Install in disposable VM:
-
-```fish
-slop-brew-vm install --network-policy strict-egress <formula>
-```
-
-4. Verify teardown:
-
-```fish
-slop-brew-vm destroy
-```
-
-Host remains unchanged after VM deletion.
-
----
-
-## Example scripts and configs
-
-- `scripts/slop-agent-sandbox.fish`: convenience runner for Docker sandbox
-- `scripts/slop-agent-sandbox-tools.fish`: runner for tool-preinstalled sandbox image
-- `scripts/slop-macos-sandbox.fish`: optional local `sandbox-exec` wrapper (defense-in-depth)
-- `scripts/slop-sandboxctl.fish`: unified command hub for sandbox scripts and tutorials
-- `scripts/slop-brew-vm.fish`: disposable Tart VM wrapper for Homebrew installs
-- `library/task/evaluate-formulae/README.md`: VM template assumptions for `slop-brew-vm`
-- `scripts/brew-sandbox.fish`: legacy isolated-prefix helper (not a sandbox)
-- `scripts/slop-gh-key.fish`: generate/revoke ephemeral GitHub deploy keys
-- `scripts/slop-forgejo-key.fish`: generate/revoke ephemeral Forgejo deploy keys (multi-instance)
-- `scripts/_py/llm_*.py`: pinned-Python helpers for the `llm-*.fish` scripts (run via `uv run --script`, PEP-723 inline metadata)
-- `scripts/slop-skills-install.fish`: install repo-versioned skills into local runtime
-- `scripts/slop-install.fish`: install fish command shims (stow preferred, direct fallback)
-- `stow/fish-tools`: stow package for tool command shims under `.local/{bin,lib}`
-- `skills/agent-sandbox-ops/SKILL.md`: operating workflow for sandbox + network controls
-- `skills/agent-key-lifecycle/SKILL.md`: operating workflow for key and identity lifecycle
-- `library/layer/policy/forgejo-instances.example.json`: sample multi-instance Forgejo profile file
-- `scripts/slop-pinning.fish`: CI/local gate for pinned tool versions
-- `scripts/slop-safe-npm.fish`: strict npm install wrapper
-- `scripts/slop-safe-uv.fish`: strict uv/pip install wrapper
-- `scripts/CONVENTIONS.md`: script UX/comment/safety standards for maintainers
-- `scripts/script-template.fish`: starter template for new fish scripts
-- `CONTRIBUTING.md`: contributor workflow and sync requirements
-- `agents.md`: agent operating contract and mandatory read order
-- `library/layer/container/docker-compose.yml`: reusable agent + proxy stack
-- `library/layer/container/allowlist.domains`: central outbound domain allowlist used by proxy
-- `library/layer/container/Dockerfile.agent`: custom agent image with fish + uv + Python + Node
-- `library/layer/container/Dockerfile.agent.tools`: optional layer with preinstalled agent stacks
-- `library/layer/container/agent-tools.env.example`: pinned package/version template
-- `library/layer/container/squid.conf`: URL allowlist rules
-- `library/layer/policy/opencode.restrictive.json`: restrictive OpenCode permissions
-- `library/layer/policy/claude-code.settings.json`: restrictive Claude Code sandbox settings
-- `library/task/restrictive-flows/openclaw.md`: restrictive OpenClaw policy (channels, workspace, SOUL.md handling)
-- `library/task/restrictive-flows/zeroclaw.md`: restrictive ZeroClaw policy (workspace boundary, supervised autonomy, tool receipts)
-
----
-
-## Recommended baseline (short version)
-
-If you want one default setup that works well on macOS:
-
-1. Run agent in container (OrbStack/Lima/Docker Desktop)
-2. Mount only the project directory
-3. Never mount host credential directories (`~/.ssh`, cloud configs)
-4. Force egress through allowlist proxy
-5. Keep allowlist in `library/layer/container/allowlist.domains` and verify denials regularly
-6. For risky brew installs, use disposable Tart VM first
-
----
-
-## Reference appendix
-
-### Capability matrix (macOS)
-
-Columns are ordered from "what the agent can see/touch on disk" through to
-"what enforces the policy". Two columns are deliberately distinct:
-
-- **URL restrictions** — HTTP/HTTPS-layer allowlist applied to the agent's
-  fetch tools (webfetch/websearch/etc.).
-- **Network restrictions** — broader socket-/DNS-/firewall-level egress
-  control. URL allowlists do not stop a `bash -c "curl ..."` or a raw
-  socket; only network-layer controls (sandbox-exec `(deny network*)`,
-  Docker network namespace + proxy, host firewall like [LuLu](https://objective-see.org/products/lulu.html))
-  do.
-- **Process visibility limits** — whether the framework prevents the
-  agent from enumerating, inspecting, or signaling other processes on the
-  host (`ps`, `/proc/*/cmdline`, `lsof`, `kill`, etc.). Agents that can
-  read other processes can scrape secrets out of `argv`, environment
-  variables, or open file handles.
-
-| Framework | File restrictions | SSH key restrictions | URL restrictions | Network restrictions | Process visibility limits | Installer restrictions | Enforcement level |
-|---|---|---|---|---|---|---|---|
-| Claude Code | Yes (`/sandbox` filesystem policy) | Yes (`denyRead` on `~/.ssh`) | Yes (managed domain filtering/proxy) | Yes when `/sandbox` profile uses `(deny network*)`; otherwise relies on app-layer allowlist | Configurable via sandbox-exec (`(deny process-info*)`, `(deny mach-lookup)`); not enforced by default profile | Indirect via command policy + environment | OS-level sandbox + app policy |
-| OpenCode | Yes (permission rules, app-level) | Yes (pattern deny, app-level) | Partial (`webfetch/websearch`; bash needs external controls) | Not built-in (bash escape route); rely on Docker netns + proxy | Not built-in; rely on Docker PID namespace | Via command allow/deny + external sandbox | App policy (plus Docker if added) |
-| CrewAI | Not built-in | Not built-in | Not built-in | Not built-in | Not built-in | Not built-in | External controls required |
-| PydanticAI | Strong in Code Mode (Monty); otherwise not built-in | Strong in Code Mode; otherwise not built-in | Strong in Code Mode; otherwise not built-in | Strong in Code Mode (Monty isolates network); otherwise not built-in | Strong in Code Mode (Monty has no host process access); otherwise not built-in | Policy in your tool wrappers | Rust sandbox (Monty) + your controls |
-| AG2 | Yes with Docker executor (`work_dir` mount) | Yes if keys never mounted | Via Docker networking/proxy | Via Docker network policy + proxy ACL | Yes via Docker PID namespace (default); broken if `--pid=host` is set | Via container policy/wrappers | Container boundary |
-| OpenClaw | Partial (workspace defaults to `~/.openclaw/workspace`; broad by default — must be confined to a project mount) | Not built-in (requires explicit deny via container/sandbox; OpenClaw will read whatever the host process can read) | Partial (per-tool/channel allow/deny in `SOUL.md` and config; not a full HTTP allowlist) | Not built-in (messaging-channel egress is intentional; rely on container netns + proxy ACL) | Not built-in (rely on Docker PID namespace) | Via tool allowlist + external sandbox | App policy (plus Docker if added) |
-| ZeroClaw | Yes (workspace boundary in runtime; supervised autonomy denies escape by default) | Yes if keys never mounted; runtime does not auto-expose host creds | Partial (per-tool policy; HTTP tool can be gated) | Partial (OS sandbox layer: Landlock / Bubblewrap / Seatbelt / Docker — depends on host); rely on container netns + proxy ACL for full enforcement | Yes when run under Bubblewrap/Landlock/Docker; not enforced by the binary alone | Yes (medium-risk requires approval, high-risk blocked; cryptographic tool receipts) | Rust runtime policy + OS sandbox |
-
-For frameworks marked "Not built-in" or "Configurable", the practical
-defense remains the container/VM boundary plus a host firewall:
-
-- **Network**: route the agent through a proxy (`library/layer/container/squid.conf`)
-  inside a Docker network with no direct internet route, then keep a
-  host-level deny-by-default firewall ([LuLu](https://objective-see.org/products/lulu.html) or [pf](https://www.openbsd.org/faq/pf/)).
-- **Process visibility**: prefer Docker / Tart so the agent runs in its
-  own PID namespace. Avoid `--pid=host`, `docker run --privileged`, or
-  mounting `/proc`. On macOS `sandbox-exec`, add `(deny process-info*)`
-  and `(deny mach-lookup)` to the profile.
-
----
-
-## Verification checklist
-
-Use these checks after setup to prove controls are active.
-
-1. Build and start components:
-
-```fish
-docker compose -f library/layer/container/docker-compose.yml build agent
-docker compose -f library/layer/container/docker-compose.yml up -d proxy
-```
-
-Optional tools image verification:
-
-```fish
-cp library/layer/container/agent-tools.env.example library/layer/container/agent-tools.env
-docker compose --env-file library/layer/container/agent-tools.env -f library/layer/container/docker-compose.yml build agent-tools
-docker compose --env-file library/layer/container/agent-tools.env -f library/layer/container/docker-compose.yml run --rm agent-tools sh -lc 'python3 --version && node --version && uv --version'
-docker compose --env-file library/layer/container/agent-tools.env -f library/layer/container/docker-compose.yml run --rm agent-tools sh -lc 'python3 -m pip show crewai pydantic-ai pydantic-ai-harness ag2'
-```
-
-2. Confirm proxy policy blocks non-allowlisted URLs:
-
-```fish
-docker compose -f library/layer/container/docker-compose.yml run --rm agent \
-    sh -lc 'curl -I https://example.com || true'
-```
-
-3. Confirm allowlisted registries still work:
-
-```fish
-docker compose -f library/layer/container/docker-compose.yml run --rm agent \
-    sh -lc 'curl -I https://registry.npmjs.org'
-docker compose -f library/layer/container/docker-compose.yml run --rm agent \
-    sh -lc 'curl -I https://pypi.org/simple/'
-```
-
-4. Confirm SSH keys are not present in container:
-
-```fish
-docker compose -f library/layer/container/docker-compose.yml run --rm agent \
-    sh -lc 'ls -la /root/.ssh || true'
-```
-
-5. Confirm `npm` strict mode wrapper behavior:
-
-```fish
-source scripts/slop-safe-npm.fish
-slop-safe-npm
-```
-
-6. Confirm `uv` strict mode wrapper behavior:
-
-```fish
-source scripts/slop-safe-uv.fish
-slop-safe-uv sync
-slop-safe-uv pip-install requests==2.32.3
-```
-
-7. Confirm pinning gate passes:
-
-```fish
-./scripts/slop-pinning.fish
-```
-
-8. Confirm `brew` VM workflow is disposable:
-
-```fish
-source scripts/slop-brew-vm.fish
-set -x BREW_VM_PROXY_URL http://<proxy-host>:3128
-slop-brew-vm create-base
-slop-brew-vm install --network-policy strict-egress wget
-tart list | grep brew-sandbox-session
-```
-
-Expected: no `brew-sandbox-session` VM remains unless `BREW_VM_KEEP_SESSION=true`.
-
-9. Confirm CI enforces pinning on PRs:
-
-- Workflow file: `.github/workflows/pinning-check.yml`
-- Trigger: pull requests and pushes to `main`
-
-10. Confirm CI can build sandbox images:
-
-- Workflow file: `.github/workflows/sandbox-images-check.yml`
-- Builds both `agent` and `agent-tools` services
-
-11. Confirm CI enforces script/docs/skills/tests synchronization:
-
-- Workflow file: `.github/workflows/script-doc-sync-check.yml`
-- Rule: when `scripts/*.fish` **or** `scripts/_py/*.py` changes, corresponding updates must include:
-  - `README.md`
-  - `skills/*/SKILL.md` or `skills/README.md`
-  - `tests/*.fish`
-
-12. Confirm CI runs the test suite:
-
-- Workflow file: `.github/workflows/tests.yml`
-- Runs `fish tests/run.fish` on Ubuntu for every PR and push to `main`

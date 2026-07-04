@@ -1,24 +1,26 @@
 # Local environment override (copied from example)
 library/layer/container/agent-tools.env
 
+# Local worktrees
+.worktrees/
+
 # macOS metadata
 .DS_Store
 
-# Claude Code per-machine settings (project-wide settings.json is fine to commit)
+# Claude Code per-machine settings
 .claude/
-opencode.json
 
-# Python bytecode caches from `uv run --script` of repo helpers (slop_tui.py etc.)
-scripts/_py/__pycache__/
+# Python bytecode caches from developer tools
 **/__pycache__/
 
-# Per-repo orchestrator state (slop.cue → .slop/state.json + compile/)
+# Per-repo runtime state
+.safeslop/
 .slop/
 
-# Slop-isolate compile outputs (when run with default --out)
+# Generated/reference outputs
 library/.generated/
 
-# Go build artifacts (the safeslop binary lives in cmd/safeslop; built to ./safeslop or ./dist)
+# Go build artifacts
 /safeslop
 /dist/
 *.test

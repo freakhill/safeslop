@@ -10,11 +10,8 @@ type Warning struct {
 	Message string `json:"message"`
 }
 
-// Lint reports profiles whose configuration is legal but risky. Today it flags
-// the one egress combination with no compensating control: credentials/secrets
-// staged under environment:sandbox + network:allow. The Seatbelt boundary has no
-// egress topology (it cannot do a per-IP/URL allowlist — that is the container's
-// or SP8's job), so a prompt-injected agent can exfiltrate the staged creds.
+// Lint reports profiles whose configuration is legal but risky: a write-capable
+// ssh deploy key with open egress, and egress domains set where they are ignored.
 func Lint(cfg *Config) []Warning {
 	if cfg == nil {
 		return nil
@@ -28,22 +25,20 @@ func Lint(cfg *Config) []Warning {
 	var out []Warning
 	for _, n := range names {
 		p := cfg.Profiles[n]
-		hasCreds := len(p.Secrets) > 0 || p.Credentials != nil
-		if p.Environment == "sandbox" && p.Network == "allow" && hasCreds {
+		if p.Credentials != nil && p.Credentials.Github != nil && p.Credentials.Github.Write && p.Network == "allow" {
 			out = append(out, Warning{
 				Profile: n,
-				Code:    "sandbox-open-egress-with-creds",
-				Message: "stages credentials/secrets under environment:sandbox with network:allow — " +
-					"the Seatbelt boundary has no egress filtering, so a compromised agent can exfiltrate them; " +
-					"use environment:container/vm, or set network:deny",
+				Code:    "github-write-open-egress",
+				Message: "a write-capable github credential with network:allow can be exfiltrated and used off-host — " +
+					"set network:deny with a forge-only egress allowlist, or use a read-only credential (specs/0011, specs/0069)",
 			})
 		}
-		if p.Credentials != nil && p.Credentials.Ssh != nil && p.Credentials.Ssh.Write && p.Network == "allow" {
+		if len(p.Egress) > 0 && (p.Network == "allow" || p.Environment != "container") {
 			out = append(out, Warning{
 				Profile: n,
-				Code:    "ssh-write-open-egress",
-				Message: "a write-capable ssh deploy key with network:allow can be exfiltrated and used off-host — " +
-					"set network:deny with a forge-only egress allowlist, or use a read-only key (specs/0011)",
+				Code:    "egress-ignored",
+				Message: "sets egress domains but they are ignored — the egress allowlist is honored only on " +
+					"environment:container with network:deny (network:allow bypasses it; host is unrestricted)",
 			})
 		}
 	}

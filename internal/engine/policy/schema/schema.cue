@@ -3,18 +3,25 @@ package safeslop
 // Embedded engine schema for safeslop.cue (specs/0001 §6.1). Compiled into the
 // binary via go:embed; the external `cue` binary is never needed.
 //
-// SP1 scope: enough to launch claude/shell under the sandbox-exec boundary.
-// credentials (SP2), container/vm (SP3/SP4), and toolchains (SP5) extend this.
+// Scope: launch claude/shell/pi under an isolation boundary. credentials (SP2),
+// container/vm (SP3/SP4), and toolchains (SP5) extend this.
 
-// Where the agent runs. SP1 implements "sandbox" (default) and "host"; the
-// others are accepted by the schema and land in later sub-projects.
-#Environment: "sandbox" | "container" | "vm" | "host"
+// Where the agent runs (specs/0053 removed the macOS sandbox/Seatbelt tier):
+//   host      — no isolation boundary; runs as you
+//   container — Docker + egress allowlist (network-bound agents belong here)
+// Required — there is no default, so a profile must always state its isolation
+// explicitly (a security tool must never silently run weaker than intended).
+#Environment: "container" | "host"
 
-// What to launch.
-#Agent: "claude" | "shell" | "opencode"
+// What to launch. "claude-code" is accepted as a user-facing alias and
+// normalized to the canonical "claude" engine value after decode. fish/zsh are
+// first-class shell agents; the generic "shell" is a profile-only legacy value
+// (handled by `safeslop run` but not accepted by `session create`).
+#Agent: "claude" | "claude-code" | "shell" | "pi" | "fish" | "zsh"
 
-// Coarse egress policy for the sandbox-exec boundary. Not a URL allowlist —
-// that is the container's job (specs/0001 §6.2).
+// Coarse egress policy. "deny" + environment:container is the egress-allowlisted
+// path (the per-domain allowlist is the container's job, specs/0001 §6.2);
+// "allow" opens egress. On host, network is always unrestricted regardless.
 #Network: "deny" | "allow"
 
 // A secret reference resolved at launch (specs/0001 §7): a 1Password URI
@@ -36,12 +43,21 @@ package safeslop
 #AwsSso: {
 	profile: string // a named profile configured for SSO in ~/.aws/config
 	region?: string
+	// Optional scope-first downscope: assume roleArn with an inline sessionPolicy (JSON), using
+	// the SSO creds, so the staged creds are least-privilege. Both required together; the role
+	// must be assumable by your SSO identity.
+	roleArn?:       string
+	sessionPolicy?: string
 }
 
 // GCP creds from Application Default Credentials. A short-lived access token is
 // minted via `gcloud auth application-default print-access-token`; the long-lived
 // refresh token is never staged (specs/0009).
 #GcpAdc: {
+	// Optional: downscope the minted access token to these OAuth scopes (scope-first
+	// least-privilege). Empty = ADC's default (broad) scopes. E.g.
+	// ["https://www.googleapis.com/auth/devstorage.read_only"].
+	scopes?: [...string]
 }
 
 // A single Kubernetes cluster to pre-authenticate for (specs/0010). Set exactly one
@@ -75,18 +91,69 @@ package safeslop
 // SSH/Git auth into the boundary as a per-run, repo-scoped ephemeral deploy key — the
 // 1Password agent socket is never passed in (specs/0001 §7.1, specs/0011). The host mints
 // the key (read-only by default); write:true is lint-gated on network:deny.
-#SshCreds: {
+// One repository in a multi-repo credential, with its own access level (specs/0047 P2).
+#RepoCred: {
+	repo:   string // "owner/name"
 	write?: bool | *false
-	ttl?:   string | *"1h"
 }
 
-// Credential providers a profile uses (SP2: pnpm; SP/0009: aws/gcp; SP/0010: kube; SP/0011: ssh).
+#GithubCreds: {
+	mode:   "app" | "pat" | *"app"
+	write?: bool | *false
+	ttl?:   string | *"1h"
+	// PAT opt-in: stage one existing fine-grained token from this secret ref as an HTTPS credential
+	// for every repo below. The token value is never embedded in git config. safeslop does not mint
+	// or revoke account PATs; rotate/revoke them at the forge (specs/0047 P2.3).
+	pat?: #SecretRef
+	// App/PAT both stage over HTTPS via per-URL credential helpers (specs/0069, generalizing the
+	// specs/0047 renderer). App-token permissions are token-wide, so repos partition into ro/rw
+	// scopes by write. Omit repos in app mode to infer the single repo from the cwd origin.
+	repos?: [...#RepoCred]
+	// Opt-in staged API token; permissions are token-wide (specs/0068 F5). Staging errors in P1.
+	api?: #GithubApi
+	if mode == "pat" {
+		pat:   #SecretRef
+		repos: [...#RepoCred] & [_, ...]
+	}
+}
+
+#GithubApi: {
+	enabled?:     bool | *false
+	permissions?: [...string]
+}
+
+// Forgejo/Gitea ephemeral deploy key — the non-GitHub-forge sibling of #GithubCreds (specs/0047). The
+// instance has no `gh`-style ambient auth, so `token` is an explicit secret ref. `url` is the
+// instance base (e.g. "https://codeberg.org"); when omitted the host is inferred from the cwd
+// origin remote. The SSH host key is pinned per run via ssh-keyscan at stage time.
+#ForgejoCreds: {
+	write?: bool | *false
+	ttl?:   string | *"1h"
+	url?:   string
+	// Multi-repo: one deploy key per entry. `url` is required in multi-repo mode (no single origin to
+	// infer the instance from). The account token that registers each key comes from
+	// ~/.config/safeslop/accounts.cue (safeslop creds link forgejo), never from this file (specs/0069).
+	repos?:      [...#RepoCred]
+	"ssh-port"?: int | *22
+	// Opt-in staged API token (P2 staging). Forgejo tokens are account-wide, so enabling requires
+	// an explicit ackAccountWide (enforced at load, specs/0068 F5).
+	api?: #ForgejoApi
+}
+
+#ForgejoApi: {
+	enabled?:        bool | *false
+	ackAccountWide?: bool | *false
+}
+
+// Credential providers a profile uses (SP2: pnpm; SP/0009: aws/gcp; SP/0010: kube; SP/0011: github,
+// specs/0069; specs/0047: forgejo).
 #Credentials: {
-	pnpm?: [...#PnpmRegistry]
-	aws?:  #AwsSso
-	gcp?:  #GcpAdc
-	kube?: #KubeCluster
-	ssh?:  #SshCreds
+	pnpm?:    [...#PnpmRegistry]
+	aws?:     #AwsSso
+	gcp?:     #GcpAdc
+	kube?:    #KubeCluster
+	github?:  #GithubCreds
+	forgejo?: #ForgejoCreds
 }
 
 // A pinned toolchain layered onto any environment (SP5), orthogonal to `environment`.
@@ -102,17 +169,30 @@ package safeslop
 
 #Profile: {
 	agent:       #Agent
-	environment: #Environment | *"sandbox"
+	environment: #Environment
 	// Directory the boundary confines file access to. Empty (default) means the
 	// directory safeslop was invoked from.
 	workspace?: string
-	network:    #Network | *"deny"
+	network: #Network | *"deny"
+	// Extra egress domains for environment:container with network:deny — unioned with the
+	// base allowlist + the agent's built-in providers (specs/0046). A leading dot
+	// (".example.com") is a subdomain suffix match; a bare host is exact. Ignored on
+	// network:allow and on host.
+	egress?: [...string]
 	// Env var name -> secret ref; injected into the agent's environment at launch.
 	secrets?: {[string]: #SecretRef}
 	// Credentials staged before launch and wiped on exit.
 	credentials?: #Credentials
 	// Optional pinned toolchain, provisioned into the chosen environment (SP5).
 	toolchain?: #Toolchain
+	// Build-time packages baked into the container image, from the curated catalog
+	// (specs/0058). `bundles` are named sets; `packages` are à la carte. Names are
+	// validated against the catalog by the engine (unknown => error); the agent's
+	// default bundle is included unless `bareAgent` explicitly opts out. Orthogonal
+	// to `toolchain` (a build-time bake vs a runtime version-manager).
+	bundles?:   [...string]
+	packages?:  [...string]
+	bareAgent?: bool | *false
 }
 
 #Slop: {

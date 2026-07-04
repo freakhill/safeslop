@@ -6,13 +6,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
-)
 
-const (
-	baseTag  = "local/agent-sandbox:latest"
-	toolsTag = "local/agent-sandbox-tools:latest"
+	"github.com/freakhill/safeslop/internal/engine/container/runtime"
 )
 
 // Reconcile reclaims state a crashed prior run may have left: staged dirs older than maxAge
@@ -43,8 +39,8 @@ func Available() bool {
 	return exec.CommandContext(context.Background(), "docker", "compose", "version").Run() == nil
 }
 
-func imageExists(ctx context.Context, tag string) bool {
-	return exec.CommandContext(ctx, "docker", "image", "inspect", tag).Run() == nil
+func imageExists(ctx context.Context, eng runtime.Engine, tag string) bool {
+	return eng.Command(ctx, "image", "inspect", tag).Run() == nil
 }
 
 func ensureDockerfiles(dir string) error {
@@ -60,66 +56,87 @@ func ensureDockerfiles(dir string) error {
 	return nil
 }
 
-func runDocker(ctx context.Context, args ...string) error {
-	c := exec.CommandContext(ctx, "docker", args...)
+// runEngine runs a container subcommand through the selected engine, streaming to the host stdio
+// (docker on the host, or nerdctl inside the lima guest). Replaces the former hardcoded `docker`.
+func runEngine(ctx context.Context, eng runtime.Engine, args ...string) error {
+	c := eng.Command(ctx, args...)
 	c.Stdout, c.Stderr = os.Stdout, os.Stderr
 	return c.Run()
 }
 
-// buildImages builds the base then the tools image (idempotent via docker image inspect),
-// from dir as build context. The tools Dockerfile's FROM local/agent-sandbox:latest is
-// satisfied by the base build.
-func buildImages(ctx context.Context, dir string) error {
+// runBuild runs an image build with BuildKit forced on (DOCKER_BUILDKIT=1). The agent
+// Dockerfile uses BuildKit-only features (`--mount=type=cache`, the `# syntax=`
+// directive); modern docker defaults to BuildKit but older daemons fall back to the
+// legacy builder, which would fail on those, so we set it explicitly (specs/0058 N1).
+// nerdctl always builds via BuildKit, so the extra env is harmless there.
+func runBuild(ctx context.Context, eng runtime.Engine, args ...string) error {
+	c := eng.Command(ctx, args...)
+	c.Stdout, c.Stderr = os.Stdout, os.Stderr
+	c.Env = append(os.Environ(), "DOCKER_BUILDKIT=1")
+	return c.Run()
+}
+
+// buildImages builds the base then the tools image, each tagged by its content-hash recipe id
+// (local/safeslop-{base,tools}:<id>) so imageExists(<id-tag>) is a CORRECT skip — an unchanged
+// recipe is reused, a changed Dockerfile/build-arg yields a new tag and rebuilds (specs/0055 W1,
+// killing the stale-":latest" Bug B). dir is the build context.
+func buildImages(ctx context.Context, eng runtime.Engine, dir string, enabled []string) error {
 	if err := ensureDockerfiles(dir); err != nil {
 		return err
 	}
-	if !imageExists(ctx, baseTag) {
-		if err := runDocker(ctx, "build", "-f", filepath.Join(dir, "Dockerfile.agent"), "-t", baseTag, dir); err != nil {
-			return fmt.Errorf("build base image: %w", err)
-		}
+	baseImg, toolsImg, toolsArgs, err := agentImageTags(enabled)
+	if err != nil {
+		return err
 	}
-	if !imageExists(ctx, toolsTag) {
-		if err := runDocker(ctx, "build", "-f", filepath.Join(dir, "Dockerfile.agent.tools"), "-t", toolsTag,
-			"--build-arg", "ENABLE_CLAUDE_CODE=true", "--build-arg", "ENABLE_OPENCODE=true", dir); err != nil {
-			return fmt.Errorf("build tools image: %w", err)
-		}
+	if err := ensureImage(baseImg,
+		func() bool { return imageExists(ctx, eng, baseImg) },
+		func() error {
+			return runBuild(ctx, eng, "build", "-f", filepath.Join(dir, "Dockerfile.agent"), "-t", baseImg, dir)
+		}); err != nil {
+		return fmt.Errorf("build base image: %w", err)
+	}
+	if err := ensureImage(toolsImg,
+		func() bool { return imageExists(ctx, eng, toolsImg) },
+		func() error {
+			args := []string{"build", "-f", filepath.Join(dir, "Dockerfile.agent.tools"), "-t", toolsImg}
+			for _, kv := range toolsArgs {
+				args = append(args, "--build-arg", kv)
+			}
+			return runBuild(ctx, eng, append(args, dir)...)
+		}); err != nil {
+		return fmt.Errorf("build tools image: %w", err)
 	}
 	return nil
 }
 
-// Up ensures images are built and the squid proxy is running for the given compose file.
-func Up(ctx context.Context, dir, composeFile string) error {
-	if err := buildImages(ctx, dir); err != nil {
+// ensureImage runs build() to create the image unless exists() already reports it present. The build
+// is serialized by a per-id flock with a double-check (exists() is re-tested once the lock is held),
+// so concurrent safeslop runs build a given recipe at most once.
+func ensureImage(id string, exists func() bool, build func() error) error {
+	if exists() {
+		return nil
+	}
+	return withBuildLock(id, func() error {
+		if exists() { // built by another run while we waited for the lock
+			return nil
+		}
+		return build()
+	})
+}
+
+// Up ensures images are built (for the profile's resolved package set, enabled) and the
+// squid proxy is running for the given compose file.
+func Up(ctx context.Context, eng runtime.Engine, dir, composeFile string, enabled []string) error {
+	if err := buildImages(ctx, eng, dir, enabled); err != nil {
 		return err
 	}
-	return runDocker(ctx, "compose", "-f", composeFile, "up", "-d", "proxy")
+	return runEngine(ctx, eng, "compose", "-f", composeFile, "up", "-d", "proxy")
 }
 
 // Down stops squid + networks. A "" composeFile is a no-op.
-func Down(ctx context.Context, composeFile string) error {
+func Down(ctx context.Context, eng runtime.Engine, composeFile string) error {
 	if composeFile == "" {
 		return nil
 	}
-	return runDocker(ctx, "compose", "-f", composeFile, "down")
-}
-
-// Teardown fully reaps a cockpit session's stack: it force-removes every container carrying the
-// compose project label — including the one-off `docker compose run` agent container, which
-// `compose down` deliberately leaves behind — then runs Down to drop the proxy + networks. The
-// compose project name defaults to the compose file's parent dir basename; safeslop gives each
-// cockpit session a unique cockpit-* stage dir, so this only ever reaps that session's own
-// containers. A "" composeFile is a no-op.
-func Teardown(ctx context.Context, composeFile string) error {
-	if composeFile == "" {
-		return nil
-	}
-	project := filepath.Base(filepath.Dir(composeFile))
-	out, err := exec.CommandContext(ctx, "docker", "ps", "-aq",
-		"--filter", "label=com.docker.compose.project="+project).Output()
-	if err == nil {
-		for _, id := range strings.Fields(string(out)) {
-			_ = exec.CommandContext(ctx, "docker", "rm", "-f", id).Run()
-		}
-	}
-	return Down(ctx, composeFile)
+	return runEngine(ctx, eng, "compose", "-f", composeFile, "down")
 }

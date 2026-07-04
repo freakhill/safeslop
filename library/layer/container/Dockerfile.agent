@@ -1,24 +1,99 @@
-FROM node:22-bookworm
+# safeslop golden base (specs/0058 N1). ONE minimal base shared by every profile:
+# the universal floor only. node/python/uv are NOT here — they are catalog packages
+# baked on top by Dockerfile.agent.tools when a profile resolves them. This is the big
+# byte-win over the old node:22-bookworm base (~1.8GB -> a few hundred MB for
+# shell-only profiles); node is re-added only where a bundle pulls it in.
+#
+# Pinned by DIGEST (not a floating tag) so the base recipe is content-addressed and a
+# re-tag upstream does not silently change the image (specs/0058 N1/N2). Digest is the
+# multi-arch index for debian:bookworm-slim, verified 2026-06-29.
+FROM debian:bookworm-slim@sha256:60eac759739651111db372c07be67863818726f754804b8707c90979bda511df
+
+LABEL safeslop.managed="true"
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV UV_INSTALL_DIR=/usr/local/bin
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
+# apt is pinned to a snapshot.debian.org timestamp so the floor's TRANSITIVE deps are
+# frozen — without this, "apt-get install <pinned-leaf>" pulls unpinned deps from a
+# moving archive and content-addressing is a lie for apt installs (specs/0058 N2.2,
+# the DeepSeek/GLM FATAL F2 fix). The snapshot Release file is intentionally old, so
+# the per-snapshot sources opt out of the Valid-Until freshness check (the snapshot is
+# itself the immutable pin).
+#
+# HTTP (not HTTPS) on purpose: debian-bookworm-slim ships NO ca-certificates, so an
+# HTTPS apt fetch cannot verify the snapshot cert (a bootstrap chicken-and-egg — you'd
+# need ca-certificates to fetch ca-certificates). Integrity does NOT rest on TLS here:
+# apt verifies the GPG-SIGNED Release against the base image's debian-archive-keyring
+# and then each package against its signed Release hash. This is exactly the spec N2.2
+# guarantee (build-time integrity via signatures/checksums, not the transport — it even
+# survives a TLS-MITM). ca-certificates is then installed below for the agent's runtime
+# HTTPS (squid, git, npm).
+ARG DEBIAN_SNAPSHOT=20260628T204121Z
+RUN set -eux; \
+    printf 'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/%s bookworm main\n' "$DEBIAN_SNAPSHOT" > /etc/apt/sources.list; \
+    printf 'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/%s bookworm-security main\n' "$DEBIAN_SNAPSHOT" >> /etc/apt/sources.list; \
+    printf 'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/%s bookworm-updates main\n' "$DEBIAN_SNAPSHOT" >> /etc/apt/sources.list; \
+    rm -f /etc/apt/sources.list.d/debian.sources; \
+    echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/10no-check-valid-until
+
+# The universal floor (specs/0058 N1): TLS roots, fetchers, VCS, JSON + pager, the
+# three interactive shells, and the terminfo db (so xterm-256color resolves inside the
+# container for correct TUI rendering). bash is explicit because debian-slim ships only
+# dash as /bin/sh and some agents expect /bin/bash. --no-install-recommends keeps the
+# floor minimal; the apt lists are removed afterward.
+#
+# Fish subtlety: Debian bookworm's `fish` package has a hard `Depends: python3`, but
+# specs/0058 N1 requires fish/zsh in the universal base AND no python in that base.
+# The fish binary itself does NOT link Python (verified by ldd); python is for helper
+# scripts/docs. So we apt-install fish's runtime libs explicitly, then `apt-get download`
+# fish+fish-common from the already snapshot-pinned, signed apt indexes and extract only
+# their payloads with dpkg-deb. This keeps the shell available while avoiding the
+# python3 package closure. The live verification asserts `/usr/bin/fish` exists and
+# `python3` does not.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
-        fish \
         git \
         jq \
         less \
-        python3 \
-        python3-pip \
-    && rm -rf /var/lib/apt/lists/*
+        bash \
+        zsh \
+        ncurses-term \
+        bsdextrautils \
+        groff-base \
+        man-db \
+        procps \
+        libpcre2-32-0 \
+        libstdc++6 \
+        libtinfo6; \
+    fish_debs="$(mktemp -d)"; \
+    cd "$fish_debs"; \
+    apt-get download fish fish-common; \
+    for deb in ./*.deb; do dpkg-deb -x "$deb" /; done; \
+    cd /; \
+    rm -rf "$fish_debs"; \
+    grep -qxF /usr/bin/fish /etc/shells || echo /usr/bin/fish >> /etc/shells; \
+    fish --version; \
+    fish -lc 'echo fish-ready'; \
+    rm -rf /var/lib/apt/lists/*
 
-# Install uv for Python dependency workflows.
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+# Strip every setuid/setgid bit: the agent runs unprivileged and never needs su/mount/
+# ping privilege-escalation surfaces (defense in depth on top of cap_drop:[ALL] +
+# no-new-privileges in compose).
+RUN set -eux; \
+    find / -xdev -perm /6000 -type f -exec chmod a-s {} + 2>/dev/null || true
 
+# Non-root agent user. The workspace is bind-mounted rw and owned by the host user; the
+# container runs read_only with tmpfs /tmp (compose), so agent only needs to be a plain
+# unprivileged uid. Home is /home/agent.
+RUN set -eux; \
+    useradd --create-home --shell /usr/bin/fish --uid 1000 agent
+
+ENV TERM=xterm-256color
+USER agent
 WORKDIR /workspace
 
-# Keep container shell interactive by default.
+# Keep the container shell interactive by default.
 CMD ["fish"]

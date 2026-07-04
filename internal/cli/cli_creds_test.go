@@ -1,59 +1,143 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
-	"github.com/freakhill/safeslop/internal/engine/policy"
+	"github.com/freakhill/safeslop/internal/engine/creds"
 )
 
-func fakeBin(t *testing.T, dir, name, stdout string) {
+const credsCue = `package safeslop
+
+safeslop: profiles: {
+	app: {
+		agent: "claude"
+		environment: "container"
+		network: "deny"
+		secrets: {TOKEN: "env:APP_TOKEN"}
+		credentials: {github: {}, aws: {profile: "acme", region: "eu-west-1"}}
+	}
+	other: {
+		agent: "pi"
+		environment: "host"
+		network: "deny"
+		secrets: {K: "env:OTHER_K"}
+	}
+}
+`
+
+func writeCredsCue(t *testing.T, dir string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\ncat <<'EOF'\n"+stdout+"\nEOF\n"), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "safeslop.cue"), []byte(credsCue), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
 
-// A host-mode profile with aws+gcp creds stages both into the child's env, and the
-// stage (with the GCP token file) is wiped on exit. The child never reads host
-// ~/.aws — it gets the short-lived SSO creds we resolved.
-func TestRunProfileStagesCloudCredsThenWipes(t *testing.T) {
-	binDir := t.TempDir()
-	fakeBin(t, binDir, "aws", `{"Version":1,"AccessKeyId":"AKIA","SecretAccessKey":"sek","SessionToken":"tok"}`)
-	fakeBin(t, binDir, "gcloud", "ya29.TOKEN")
-	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+// withFakeProber swaps the CLI's credential prober for a hermetic one (no `op`, controlled env),
+// so `creds` tests never shell out and are deterministic regardless of the host's 1Password state.
+func withFakeProber(t *testing.T, env map[string]string) {
+	t.Helper()
+	prev := credsProber
+	credsProber = func() creds.Prober {
+		return creds.Prober{
+			OpAvailable: func() bool { return false },
+			OpSignedIn:  func(context.Context) bool { return false },
+			LookupEnv:   func(n string) (string, bool) { v, ok := env[n]; return v, ok },
+			ResolveOp:   func(context.Context, string) error { return nil },
+		}
+	}
+	t.Cleanup(func() { credsProber = prev })
+}
 
+func credRows(t *testing.T, data map[string]any) []map[string]any {
+	t.Helper()
+	raw, ok := data["credentials"].([]any)
+	if !ok {
+		t.Fatalf("credentials not an array: %#v", data["credentials"])
+	}
+	out := make([]map[string]any, len(raw))
+	for i, r := range raw {
+		out[i] = r.(map[string]any)
+	}
+	return out
+}
+
+func findRow(rows []map[string]any, kind, name string) map[string]any {
+	for _, r := range rows {
+		if r["kind"] == kind && r["name"] == name {
+			return r
+		}
+	}
+	return nil
+}
+
+func TestCredsListEmitsContractEnvelope(t *testing.T) {
 	ws := t.TempDir()
-	out := filepath.Join(ws, "seen")
-	script := `printf '%s\n%s\n' "$AWS_ACCESS_KEY_ID" "$CLOUDSDK_AUTH_ACCESS_TOKEN" > "` + out + `"`
-
-	prof := policy.Profile{
-		Agent: "shell", Environment: "host", Network: "deny",
-		Credentials: &policy.Credentials{Aws: &policy.AwsSso{Profile: "dev"}, Gcp: &policy.GcpAdc{}},
+	writeCredsCue(t, ws)
+	withFakeProber(t, map[string]string{"APP_TOKEN": "x", "OTHER_K": "y"})
+	out, err := runRootForTest(t, ws, "creds", "list", "--output", "json")
+	if err != nil {
+		t.Fatalf("creds list: %v\nout=%s", err, out)
 	}
-	code, err := runProfile("cloud", prof, []string{"/bin/sh", "-c", script}, ws)
-	if err != nil || code != 0 {
-		t.Fatalf("runProfile code=%d err=%v", code, err)
+	env := parseEnvelopeForTest(t, out)
+	if !env.OK {
+		t.Fatalf("error envelope: %+v", env.Errors)
 	}
-	got, _ := os.ReadFile(out)
-	if !strings.Contains(string(got), "AKIA") {
-		t.Fatalf("child did not get AWS key: %q", got)
+	if env.Data["config"] == "" {
+		t.Fatalf("missing config path: %#v", env.Data)
 	}
-	if !strings.Contains(string(got), "ya29.TOKEN") {
-		t.Fatalf("child did not get GCP token: %q", got)
+	rows := credRows(t, env.Data)
+	if r := findRow(rows, "secret", "TOKEN"); r == nil || r["status"] != "resolvable" {
+		t.Fatalf("secret TOKEN not resolvable: %#v", r)
 	}
-	if _, err := os.Stat(filepath.Join(ws, ".safeslop", "runtime", "cloud")); !os.IsNotExist(err) {
-		t.Fatalf("stage (with gcp token file) not wiped: %v", err)
+	if r := findRow(rows, "github", "origin"); r == nil || r["status"] != "ephemeral" {
+		t.Fatalf("ssh not ephemeral: %#v", r)
+	}
+	if r := findRow(rows, "aws", "acme"); r == nil || r["status"] != "ambient" {
+		t.Fatalf("aws not ambient: %#v", r)
 	}
 }
 
-func TestDoctorReportsCloudTools(t *testing.T) {
-	report := doctorReport()
-	for _, tool := range []string{"aws", "gcloud"} {
-		if _, ok := report[tool]; !ok {
-			t.Fatalf("doctor omits %q", tool)
+func TestCredsShowScopesToProfile(t *testing.T) {
+	ws := t.TempDir()
+	writeCredsCue(t, ws)
+	withFakeProber(t, map[string]string{"APP_TOKEN": "x", "OTHER_K": "y"})
+	out, err := runRootForTest(t, ws, "creds", "show", "other", "--output", "json")
+	if err != nil {
+		t.Fatalf("creds show: %v\nout=%s", err, out)
+	}
+	env := parseEnvelopeForTest(t, out)
+	if !env.OK {
+		t.Fatalf("error envelope: %+v", env.Errors)
+	}
+	rows := credRows(t, env.Data)
+	if len(rows) == 0 {
+		t.Fatalf("expected other's secret row")
+	}
+	for _, r := range rows {
+		if r["profile"] != "other" {
+			t.Fatalf("show leaked another profile's row: %#v", r)
 		}
+	}
+}
+
+func TestCredsShowUnknownProfileErrors(t *testing.T) {
+	ws := t.TempDir()
+	writeCredsCue(t, ws)
+	withFakeProber(t, nil)
+	out, _ := runRootForTest(t, ws, "creds", "show", "nope", "--output", "json")
+	env := parseEnvelopeForTest(t, out)
+	if env.OK {
+		t.Fatalf("expected error envelope for unknown profile, got %#v", env.Data)
+	}
+}
+
+func TestCredsListRequiresJSON(t *testing.T) {
+	ws := t.TempDir()
+	writeCredsCue(t, ws)
+	if _, err := runRootForTest(t, ws, "creds", "list"); err == nil {
+		t.Fatalf("expected error without --output json")
 	}
 }

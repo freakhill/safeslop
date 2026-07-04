@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "ok": true,
+  "data": {
+    "agent": "claude",
+    "created_at": "2026-06-26T00:00:00Z",
+    "credentials_revoked": false,
+    "environment": "host",
+    "network": "deny",
+    "pid": 4242,
+    "session_id": "sess-0123456789abcdef01234567",
+    "socket": "/state/sessions/sess-0123456789abcdef01234567.sock",
+    "started_at": "2026-06-26T00:00:00Z",
+    "status": "running",
+    "updated_at": "2026-06-26T00:00:00Z",
+    "workspace": "/workspace/project"
+  },
+  "warnings": [],
+  "errors": []
+}

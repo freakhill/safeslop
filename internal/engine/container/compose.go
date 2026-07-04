@@ -6,18 +6,33 @@ import (
 	"path/filepath"
 	"strings"
 	"text/template"
+
+	"github.com/freakhill/safeslop/internal/engine/container/runtime"
 )
 
 // composeParams fills compose.yml.tmpl. RuntimeDir holds the rendered squid.conf +
 // allowlist.domains; StageDir (== RuntimeDir in Launch) is bind-mounted ro at /safeslop/runtime.
 type composeParams struct {
-	RuntimeDir string
-	Workspace  string
-	StageDir   string
-	SshKey     bool // true when a staged ssh deploy key exists (GIT_SSH_COMMAND -> bind-mount path)
-	Term       string
-	NpmConfig  bool // true when a staged .npmrc exists
-	Kubeconfig bool // true when a staged kubeconfig exists (KUBECONFIG -> bind-mount path)
+	RuntimeDir    string
+	Workspace     string
+	StageDir      string
+	SessionID     string // stable label value for record-independent reap (session id, or profile name for direct run)
+	AgentImage    string // content-addressed agent image tag (local/safeslop-tools:<id>) -> compose image:
+	GitConfig     bool   // true when staged .gitconfig exists (GIT_CONFIG_GLOBAL -> bind-mount path)
+	GitConfigPath string // path to the in-boundary gitconfig, usually /safeslop/runtime/.gitconfig
+	GitSSHConfig  bool   // true when staged .ssh/config.container exists (GIT_SSH_COMMAND -> bind-mount path)
+	NpmConfig     bool   // true when a staged .npmrc exists
+	Kubeconfig    bool   // true when a staged kubeconfig exists (KUBECONFIG -> bind-mount path)
+	OpenEgress    bool   // true in network:allow -> agent also joins the egress bridge (real route + DNS)
+	// InternalNet, when set, is the name of an externally pre-created `--internal` network the compose
+	// references instead of declaring `internal: true` inline. The lima/rootless-nerdctl backend MUST set
+	// it (compose's inline internal:true does not isolate egress there); the host docker backend leaves it
+	// empty (rootful docker honors internal:true). See compose.yml.tmpl.
+	InternalNet string
+	// Egress is the extra allowlist domains (the agent's built-in providers + the profile's `egress:`,
+	// already unioned by the caller) appended to the base allowlist asset when the per-run
+	// allowlist.domains is materialized. Empty => base allowlist only (specs/0046).
+	Egress []string
 }
 
 func renderCompose(p composeParams) (string, error) {
@@ -61,11 +76,12 @@ func writeSecretsEnv(stageDir string, secretEnv []string) (string, error) {
 	return path, nil
 }
 
-// composeRunArgv builds `docker compose -f <file> run --rm agent <argv...>`. There is NO -e:
-// secrets ride secrets.env (sourced by the entrypoint), non-secret env lives in the compose file.
-func composeRunArgv(composeFile string, argv []string) []string {
-	out := []string{"docker", "compose", "-f", composeFile, "run", "--rm", "agent"}
-	return append(out, argv...)
+// composeRunArgv builds the engine's `compose -f <file> run --rm agent <argv...>` invocation (docker on
+// the host, or `limactl shell <inst> … nerdctl …` for lima). There is NO -e: secrets ride secrets.env
+// (sourced by the entrypoint), non-secret env lives in the compose file. The result is driven through a
+// PTY (RunInPTY) — the interactive terminal passes through limactl shell (validated 2026-06-22).
+func composeRunArgv(eng runtime.Engine, composeFile string, argv []string) []string {
+	return eng.Argv(append([]string{"compose", "-f", composeFile, "run", "--rm", "agent"}, argv...)...)
 }
 
 // writeEntrypoint copies the embedded entrypoint.sh into dir (mode 0755).

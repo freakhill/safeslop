@@ -1,60 +1,108 @@
-FROM local/agent-sandbox:latest
+# syntax=docker/dockerfile:1
+# safeslop agent image (specs/0058 N1): the golden base + the profile's RESOLVED package
+# set, toggled by per-package ENABLE_<PKG> build args emitted from identity.go. Each
+# package is a guarded RUN with a BuildKit cache mount. Steps are ordered so a package's
+# requires install first (node before the npm CLIs that need npm) for EVERY enabled
+# subset, satisfying the resolver's topological order with a fixed Dockerfile.
+#
+# Versions + per-arch digests are passed as build args (sourced from the in-tree catalog
+# via identity.go), so the catalog is the single source of truth and a version/digest
+# bump rotates the recipeID (correct cache invalidation). The 2-file base+agent split is
+# kept for now; collapsing into one multi-stage Dockerfile is deferred (deviation from
+# specs/0058 N1, noted).
+ARG BASE=local/safeslop-base:latest
+FROM ${BASE}
 
+LABEL safeslop.managed="true"
+
+# Installs write to /usr/local (root); the base image's default user is the unprivileged
+# `agent`. Switch to root for the build, then drop back to agent at the end.
+USER root
+ENV DEBIAN_FRONTEND=noninteractive
+
+# --- node (kind: binary) — official multi-arch tarball, sha256-verified per arch.
+# Provides npm, which the npm CLIs below require; installed FIRST so any subset that
+# enables a CLI also has node. amd64 selects the x64 tarball.
+ARG ENABLE_NODE=false
+ARG NODE_VERSION=
+ARG NODE_SHA256_AMD64=
+ARG NODE_SHA256_ARM64=
+RUN if [ "$ENABLE_NODE" = "true" ]; then set -eux; \
+      # Node publishes .tar.xz archives. Keep xz as a guarded package-local build
+      # helper (not in the universal base), so shell-only profiles stay lean.
+      apt-get update; \
+      apt-get install -y --no-install-recommends xz-utils; \
+      arch="$(dpkg --print-architecture)"; \
+      case "$arch" in \
+        amd64) ntarch=x64;   sha="$NODE_SHA256_AMD64";; \
+        arm64) ntarch=arm64; sha="$NODE_SHA256_ARM64";; \
+        *) echo "node: unsupported build arch $arch" >&2; exit 1;; \
+      esac; \
+      curl -fsSLo /tmp/node.tar.xz \
+        "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${ntarch}.tar.xz"; \
+      echo "${sha}  /tmp/node.tar.xz" | sha256sum -c -; \
+      tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 --no-same-owner; \
+      rm -f /tmp/node.tar.xz; \
+      apt-get purge -y --auto-remove xz-utils; \
+      rm -rf /var/lib/apt/lists/*; \
+      node --version; npm --version; \
+    fi
+
+# --- claude-code (kind: npm) — Claude Code CLI, exact version.
 ARG ENABLE_CLAUDE_CODE=false
-ARG ENABLE_OPENCODE=false
-ARG ENABLE_CREWAI=true
-ARG ENABLE_PYDANTICAI=true
-ARG ENABLE_AG2=true
-
 ARG CLAUDE_CODE_NPM_PACKAGE=@anthropic-ai/claude-code
-ARG CLAUDE_CODE_VERSION=2.1.121
-ARG OPENCODE_NPM_PACKAGE=opencode-ai
-ARG OPENCODE_VERSION=1.14.28
-
-ARG CREWAI_VERSION=0.11.2
-ARG PYDANTIC_AI_VERSION=1.87.0
-ARG PYDANTIC_AI_HARNESS_VERSION=0.2.0
-ARG AG2_VERSION=0.12.1
-
-# mise — pinned toolchain provisioner for `toolchain: {kind: "mise"}` (SP5).
-ARG MISE_VERSION=2026.6.11
-
-# Keep Python tooling current for framework installs.
-# --break-system-packages: the base image is node:22-bookworm whose
-# python3 ships with PEP 668 (externally-managed-environment). We're
-# inside a single-purpose container so the "might break the OS"
-# rationale for that gate doesn't apply. The flag matches what
-# `uv pip install --system` does in the steps below.
-RUN python3 -m pip install --no-cache-dir --break-system-packages --upgrade pip setuptools wheel
-
-# Optional npm-based CLIs. These are disabled/enabled via build args.
-RUN if [ "$ENABLE_CLAUDE_CODE" = "true" ]; then \
+ARG CLAUDE_CODE_VERSION=
+RUN --mount=type=cache,target=/root/.npm,sharing=locked \
+    if [ "$ENABLE_CLAUDE_CODE" = "true" ]; then set -eux; \
       npm install -g "${CLAUDE_CODE_NPM_PACKAGE}@${CLAUDE_CODE_VERSION}"; \
     fi
 
-RUN if [ "$ENABLE_OPENCODE" = "true" ]; then \
-      npm install -g "${OPENCODE_NPM_PACKAGE}@${OPENCODE_VERSION}"; \
+# --- pi (kind: npm). --ignore-scripts: skip pi's npm lifecycle scripts (supply-chain
+# hygiene; matches pi.dev's published install command).
+ARG ENABLE_PI=false
+ARG PI_NPM_PACKAGE=@earendil-works/pi-coding-agent
+ARG PI_VERSION=
+RUN --mount=type=cache,target=/root/.npm,sharing=locked \
+    if [ "$ENABLE_PI" = "true" ]; then set -eux; \
+      npm install -g --ignore-scripts "${PI_NPM_PACKAGE}@${PI_VERSION}"; \
     fi
 
-# Optional Python agent stacks.
-RUN if [ "$ENABLE_CREWAI" = "true" ]; then \
-      uv pip install --system --break-system-packages --no-cache "crewai==${CREWAI_VERSION}"; \
+# --- pnpm (kind: npm) — JS/TS package manager, exact version.
+ARG ENABLE_PNPM=false
+ARG PNPM_NPM_PACKAGE=pnpm
+ARG PNPM_VERSION=
+RUN --mount=type=cache,target=/root/.npm,sharing=locked \
+    if [ "$ENABLE_PNPM" = "true" ]; then set -eux; \
+      npm install -g "${PNPM_NPM_PACKAGE}@${PNPM_VERSION}"; \
     fi
 
-RUN if [ "$ENABLE_PYDANTICAI" = "true" ]; then \
-      uv pip install --system --break-system-packages --no-cache "pydantic-ai==${PYDANTIC_AI_VERSION}" "pydantic-ai-harness==${PYDANTIC_AI_HARNESS_VERSION}"; \
+# --- ripgrep (kind: binary) — official release tarball, sha256-verified per arch.
+ARG ENABLE_RIPGREP=false
+ARG RIPGREP_VERSION=
+ARG RIPGREP_SHA256_AMD64=
+ARG RIPGREP_SHA256_ARM64=
+RUN if [ "$ENABLE_RIPGREP" = "true" ]; then set -eux; \
+      arch="$(dpkg --print-architecture)"; \
+      case "$arch" in \
+        amd64) rgtarget=x86_64-unknown-linux-musl; sha="$RIPGREP_SHA256_AMD64";; \
+        arm64) rgtarget=aarch64-unknown-linux-gnu; sha="$RIPGREP_SHA256_ARM64";; \
+        *) echo "ripgrep: unsupported build arch $arch" >&2; exit 1;; \
+      esac; \
+      curl -fsSLo /tmp/ripgrep.tar.gz \
+        "https://github.com/BurntSushi/ripgrep/releases/download/${RIPGREP_VERSION}/ripgrep-${RIPGREP_VERSION}-${rgtarget}.tar.gz"; \
+      echo "${sha}  /tmp/ripgrep.tar.gz" | sha256sum -c -; \
+      mkdir -p /tmp/ripgrep; \
+      tar -xzf /tmp/ripgrep.tar.gz -C /tmp/ripgrep --strip-components=1 --no-same-owner; \
+      install -m 0755 /tmp/ripgrep/rg /usr/local/bin/rg; \
+      rm -rf /tmp/ripgrep /tmp/ripgrep.tar.gz; \
+      rg --version; \
     fi
 
-RUN if [ "$ENABLE_AG2" = "true" ]; then \
-      uv pip install --system --break-system-packages --no-cache "ag2==${AG2_VERSION}"; \
-    fi
+# NOTE: bun, uv, mise, fd are in the catalog but ship the IW2 digest SENTINEL;
+# the Go BuildReady gate (policy.BuildReadyFor) refuses to build a profile that resolves
+# any of them, so no ENABLE_<PKG> for them is ever emitted here. They get real digests +
+# their own guarded RUN blocks in a follow-up. python3 (kind: apt) likewise lands later.
 
-# mise: a single static binary (arch-detected), pinned by MISE_VERSION. nix is intentionally
-# NOT installed — the agent container runs read_only:true and nix needs a writable /nix store
-# (a follow-up: nix-store volume + relaxed hardening). toolchain:nix in a container fails fast.
-RUN arch="$(uname -m)"; case "$arch" in x86_64) a=x64;; aarch64|arm64) a=arm64;; *) a="$arch";; esac; \
-    curl -fsSL "https://github.com/jdx/mise/releases/download/v${MISE_VERSION}/mise-v${MISE_VERSION}-linux-${a}" \
-      -o /usr/local/bin/mise && chmod +x /usr/local/bin/mise && mise --version
-
+USER agent
 WORKDIR /workspace
 CMD ["fish"]

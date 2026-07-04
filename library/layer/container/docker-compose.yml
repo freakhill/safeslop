@@ -56,14 +56,11 @@ services:
       dockerfile: library/layer/container/Dockerfile.agent.tools
       args:
         ENABLE_CLAUDE_CODE: ${ENABLE_CLAUDE_CODE:-false}
-        ENABLE_OPENCODE: ${ENABLE_OPENCODE:-false}
         ENABLE_CREWAI: ${ENABLE_CREWAI:-true}
         ENABLE_PYDANTICAI: ${ENABLE_PYDANTICAI:-true}
         ENABLE_AG2: ${ENABLE_AG2:-true}
         CLAUDE_CODE_NPM_PACKAGE: ${CLAUDE_CODE_NPM_PACKAGE:-@anthropic-ai/claude-code}
         CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:-2.1.121}
-        OPENCODE_NPM_PACKAGE: ${OPENCODE_NPM_PACKAGE:-opencode-ai}
-        OPENCODE_VERSION: ${OPENCODE_VERSION:-1.14.28}
         CREWAI_VERSION: ${CREWAI_VERSION:-0.11.2}
         PYDANTIC_AI_VERSION: ${PYDANTIC_AI_VERSION:-1.87.0}
         PYDANTIC_AI_HARNESS_VERSION: ${PYDANTIC_AI_HARNESS_VERSION:-0.2.0}

@@ -1,116 +1,122 @@
 ---
 name: agent-key-lifecycle
 description: >
-  Manage ephemeral GitHub/Forgejo deploy keys
-  with short TTLs, scoped access, and clean revocation.
+  Use safeslop's Go credential providers to stage short-lived GitHub/Forgejo
+  credentials for agent sessions and verify cleanup behavior.
 ---
 
 # Agent Key Lifecycle Skill
 
-Use this skill when creating, listing, rotating, or revoking keys/identities for automation agents.
+Use this skill when a task touches GitHub or Forgejo credentials for agent
+sessions.
 
 ## Required pre-read
 
-Before executing this skill, read:
-
 1. `CONTRIBUTING.md`
-2. `agents.md`
-3. `scripts/CONVENTIONS.md`
-4. `README.md`
+2. `AGENTS.md`
+3. `README.md`
+4. Relevant specs under `specs/`
 
-## Command map
+## Current command surface
 
-- GitHub: `scripts/slop-gh-key.fish` (`slop-gh-key ...`)
-- Forgejo: `scripts/slop-forgejo-key.fish` (`slop-forgejo-key ...`)
+Credential staging is driven by `safeslop run <profile>` from the profile's
+`credentials:` block. Mutating key management commands were intentionally dropped;
+a future `safeslop creds gc` sweep is the only planned *mutating* credential
+command.
 
-The fish wrappers above delegate JSON / state / datetime work to small Python
-helpers under `scripts/_py/llm_*.py`. Each helper carries PEP-723 inline
-metadata pinning the interpreter, and is invoked via `uv run --script`.
+Forge account links are managed out of band with `safeslop creds
+link|unlink|status`: they live in `~/.config/safeslop/accounts.cue` (0600,
+host-only) and hold non-secret ids + secret *refs* only. `link` probes the forge
+(no token minted) and never prompts for a password/OTP; `status [--json]` shows a
+value-free probe result + TTL model per link.
 
-## Required tools
+Read-only posture inspection exists (specs/0067): `safeslop creds list
+[safeslop.cue] --output json` and `safeslop creds show <profile> --output json`
+enumerate every declared secret/credential across profiles with a value-free
+**readiness status** (does its `op://`/`env:` ref resolve now? is the key
+`ephemeral` or the cloud auth `ambient`?). The probe resolves each ref only to
+keep the pass/fail result and discards the value — no secret is read into the
+output. This is surfaced in Emacs as the Credentials surface (`C-c s K`). It
+never reveals values and never mints/revokes; staging stays at run time and
+revocation at `session stop`.
 
-- `ssh-keygen` (everywhere)
-- `gh` (GitHub workflow only)
-- `curl` (Forgejo workflow only)
-- `uv` (everywhere — runs the pinned Python helpers; replaces bare `python3`)
+For Emacs-driven sessions, `safeslop session stop --session-id <id>
+--revoke-credentials` revokes ephemeral credentials before forcing process
+termination and is idempotent (a second stop neither revokes nor kills again).
+Revocation stays best-effort; the decay-first guarantee remains the wipe of
+staged private keys.
 
-## Defaults
+## GitHub
 
-1. Use separate RO and RW credentials.
-2. Prefer short TTLs (default `24h`) and revoke aggressively.
-3. Install SSH config aliases for explicit remote intent.
+First link the GitHub App installation (once per owner; stores ids + a key ref,
+never the key value):
 
-## Workflows
+```
+safeslop creds link github --app-id N --installation-id N --key-ref op://Vault/gh-app/private-key
+```
 
-### GitHub key pair
+Then declare `credentials.github`:
 
-1. `source scripts/slop-gh-key.fish`
-2. `slop-gh-key create-pair --repo <owner>/<repo> --name session-1 --ttl 24h --install-ssh-config`
-3. Use `git@github-llm-ro:<owner>/<repo>.git` for read-only operations.
-4. Revoke with `slop-gh-key revoke-expired --repo <owner>/<repo> --yes`.
+```cue
+credentials: github: {
+	repos: [{repo: "owner/web"}, {repo: "owner/api", write: true}]
+}
+```
 
-### GitHub key pair — repo-aware shortcuts
+Omit `repos` to infer a single repository from the current `origin` remote. In
+the default `app` mode safeslop mints an ephemeral, repo-scoped App installation
+token per owner (partitioned by `write`) and stages it over HTTPS — no deploy
+keys, no `gh` CLI. An owner with no account link is a hard error. The P1 token
+lifetime is ~1h with no renewal (renewal is P2).
 
-When invoked from inside the target repo's working tree, `slop-gh-key here ...`
-infers `--repo` from the cwd's `origin` remote (handles HTTPS, SSH, and
-`github-*` ssh-config aliases) and supplies sensible defaults:
+PAT fallback (an existing fine-grained token, staged in a wipe-on-exit file, not
+embedded in git config or the environment):
 
-- `slop-gh-key here create-pair` — RO+RW pair, 24h TTL, auto name
-  (`auto-<short-sha>-<utc-date>`), `--install-ssh-config` enabled by default
-  (override with `--no-install-config`).
-- `slop-gh-key here list` — list deploy keys for the current repo.
-- `slop-gh-key here revoke <id>` — revoke a single key by id.
-- `slop-gh-key here cleanup` — `revoke-expired --yes` for the current repo.
-- `slop-gh-key here revoke-all` — `revoke-by-title '^llm-agent:' --yes` for the
-  current repo (destructive; confirm explicitly).
+```cue
+credentials: github: {
+	mode: "pat"
+	pat:  "env:GITHUB_FINE_GRAINED_PAT"
+	repos: [{repo: "owner/web"}, {repo: "owner/api"}]
+}
+```
 
-Falls back to a clear error with the underlying CLI flag to use if the cwd is
-not a git repo or the origin is not a recognized GitHub URL.
+## Forgejo/Gitea
 
-### Interactive flows
+First link the Forgejo account token (stores the token ref, never the value):
 
-Two TUIs are available, both teachable (each action prints its equivalent CLI
-before executing):
+```
+safeslop creds link forgejo --host forgejo.example.com --owner owner --token-ref op://Vault/forgejo/token
+```
 
-- `slop` — global launcher across every tool in this repo. Hard-deps on
-  [`gum`](https://github.com/charmbracelet/gum). Install with `brew install gum`.
-- `slop-gh-key tui` — focused per-tool launcher for the current repo's deploy
-  keys. Soft-deps on `gum` (graceful install hint if missing).
+Then declare `credentials.forgejo` (deploy keys; the registration token comes
+from the account link, not from `safeslop.cue`):
 
-### Forgejo key pair
+```cue
+credentials: forgejo: {
+	url:        "https://forgejo.example.com"
+	"ssh-port": 2222
+	repos:      [{repo: "owner/web"}]
+}
+```
 
-1. `source scripts/slop-forgejo-key.fish`
-2. `slop-forgejo-key bootstrap-config`
-3. `slop-forgejo-key create-pair --instance main --repo <owner>/<repo> --name session-1 --ttl 24h --install-ssh-config`
-4. Revoke by id/title/expiration as needed.
-
-### Forgejo — repo-aware shortcuts and TUI
-
-When invoked from a Forgejo-tracked repo's working tree:
-
-- `slop-forgejo-key here create-pair` — RO+RW pair, infers `--instance` (looked
-  up by host in the saved profiles file) and `--repo` from the cwd's origin.
-  Auto name and 24h TTL by default; ssh-config installed.
-- `slop-forgejo-key here list` / `here revoke <id>` / `here cleanup` /
-  `here revoke-all`.
-- `slop-forgejo-key tui` — focused per-tool TUI (soft-deps on gum).
-
-If the host has no matching profile, the error message tells you to run
-`bootstrap-config` and `instance-set --name <label> --url https://<host> --token-env <ENV>`.
+safeslop mints one deploy key per repo and stages per-repo SSH aliases plus git
+URL rewrites. Each declared owner needs a forgejo account link; Forgejo tokens
+are account-wide, so prefer a dedicated bot account.
 
 ## Safety checklist
 
-- Never use long-lived RW keys unless required.
-- Keep branch protections/rulesets active for RW deploy keys.
-- Remove stale SSH alias blocks after revocation.
+- Prefer minted App tokens (GitHub) and dedicated bot accounts (Forgejo) over personal PATs.
+- Keep write access rare and profile-specific.
+- Keep credentialed profiles on `network: "deny"` or a constrained container/VM path.
+- Never commit token values; use `env:` or `op://` secret refs.
+- Verify cleanup by checking staged runtime directories are wiped and deploy-key revocation ran best-effort.
 
-## Sync requirements after changes
+## Verification
 
-If you change key/identity script behavior, update in the same task:
+Run focused tests after credential changes:
 
-- `README.md`
-- this skill file
-- any other affected skill under `skills/*/SKILL.md`
-- `skills/README.md` when installation/usage guidance changes
-- `tests/test_slop_gh_key.fish`, `tests/test_slop_forgejo_key.fish`, and `tests/test_py_helpers.fish` for changed argv or error paths
-- `scripts/_py/llm_*.py` if the JSON / state / datetime contract changes (and never reintroduce bare `python3` — keep things uv-managed)
+```bash
+go test ./internal/engine/creds/ -v
+go test ./internal/cli/ -run StageProfile -v
+make check
+```

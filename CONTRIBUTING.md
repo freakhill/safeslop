@@ -7,68 +7,51 @@ Thanks for contributing.
 Before editing code or docs, read:
 
 1. `AGENTS.md`
-2. `scripts/CONVENTIONS.md`
-3. `README.md`
-4. `CLAUDE.md` (if you're an LLM agent — repo-specific landmines and workflows)
+2. `README.md`
+3. Relevant `specs/` files for the area you are changing
+4. Relevant skill files in `skills/`
 
-## Script Standards
+## Go Engine
 
-- Keep script UX consistent (`help`/`--help`, predictable subcommands, stable flags).
-- Prefer safe defaults (for sandbox and network-sensitive workflows this means `strict-egress`).
-- Add comments that explain **why**, not obvious shell syntax.
-- Include official documentation links in script headers when behavior is non-obvious.
+`safeslop` is a single signed Go binary. Engine and CLI code live in
+`cmd/safeslop` and `internal/engine/*`; the policy schema is embedded through
+Go. There is no external policy compiler required at runtime.
 
-## Python via uv
+- Format with `gofmt`.
+- Keep `go vet ./...` clean.
+- Put tests next to the code and keep them hermetic.
+- Do not call live forges, credential providers, registries, or cloud APIs from
+  unit tests. Use fakes and local HTTP test servers.
+- Preserve safe defaults: `network: "deny"` unless a policy opts into more
+  authority. `environment` is required (host/container/vm) — there is no default
+  tier (specs/0053).
 
-Any Python invoked from this repo must run under `uv` so the interpreter and
-dependencies are pinned and reproducible across machines.
+## Docs, Skills, and Tests Sync Policy
 
-- Helpers for fish scripts live in `scripts/_py/*.py` and start with PEP-723
-  inline metadata (`requires-python`, `dependencies`).
-- Fish wrappers call them as `uv run --script "$HELPER_PY" <subcommand> ...`.
-- New Python work follows the same pattern. Do not introduce bare
-  `python3 -c '...'` snippets or list `python3` as a required tool.
-
-## Go engine
-
-The repo is migrating to a single signed Go binary (`safeslop`). Engine + CLI live
-in `cmd/safeslop` and `internal/engine/*`; the policy schema is embedded via
-`go:embed` (no external `cue`). See `specs/0001` for the design.
-
-- Format with `gofmt`; keep `go vet ./...` clean.
-- Put tests next to the code and keep them hermetic — no live network or
-  credential APIs (mirror the existing engine tests).
-- `make check` runs `go vet` + gofmt + `go test ./...` (CI on macOS so the
-  sandbox-exec tests run).
-
-## Skills, Docs, and Tests Sync Policy
-
-When changing any script under `scripts/` that affects behavior, flags, workflows, or defaults, update all relevant docs **and tests** in the same change:
+When command behavior, policy schema, defaults, or safety guarantees change,
+update all relevant docs and tests in the same change:
 
 - `README.md`
-- Related skill files under `skills/*/SKILL.md`
-- `skills/README.md` if install/use guidance changes
-- `tests/test_<script>.fish` for changed/added subcommands, flags, or error paths
-- `scripts/_py/<helper>.py` and `tests/test_py_helpers.fish` when the Python helper contract changes
-
-Do not merge behavior changes where skills, docs, or tests are stale.
+- Related skill files under `skills/`
+- Go tests for changed behavior or error paths
+- Specs/checklists when executing a written plan
 
 ## Verification
 
 Run at least:
 
-```fish
-fish -n scripts/*.fish
-fish tests/run.fish
+```bash
+make check
+make build
 ```
 
-For Go engine changes, also run `make check` (`go vet` + gofmt + `go test ./...`).
-
-For command-surface changes, also verify help output paths still work.
+For targeted work, also run the narrower package tests that prove the changed
+behavior.
 
 ## Network and File-Sharing Guardrails
 
 - Keep deny-by-default egress and explicit allowlists.
 - Do not broaden allowlist domains without rationale.
-- For VM paths, prefer explicit `copy-in`/`copy-out`; avoid broad host mounts.
-- Never introduce defaults that expose host credential directories.
+- For VM paths, prefer explicit copy-in/copy-out behavior over broad host mounts.
+- Never expose host credential directories to containers or VMs.
+- Keep staged credentials short-lived, scoped, and wiped on exit.

@@ -6,31 +6,38 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"hash/fnv"
+	"io"
+	"net"
 	"os"
 	osexec "os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"sort"
+	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/freakhill/safeslop/internal/engine/container"
-	"github.com/freakhill/safeslop/internal/engine/control"
-	"github.com/freakhill/safeslop/internal/engine/control/pb"
+	runtimepkg "github.com/freakhill/safeslop/internal/engine/container/runtime"
 	"github.com/freakhill/safeslop/internal/engine/creds"
 	engexec "github.com/freakhill/safeslop/internal/engine/exec"
 	"github.com/freakhill/safeslop/internal/engine/gitguard"
-	"github.com/freakhill/safeslop/internal/engine/install"
+	"github.com/freakhill/safeslop/internal/engine/hostenv"
 	"github.com/freakhill/safeslop/internal/engine/launch"
 	"github.com/freakhill/safeslop/internal/engine/policy"
-	"github.com/freakhill/safeslop/internal/engine/sandbox"
 	"github.com/freakhill/safeslop/internal/engine/secrets"
+	engsession "github.com/freakhill/safeslop/internal/engine/session"
 	"github.com/freakhill/safeslop/internal/engine/toolchain"
 	"github.com/freakhill/safeslop/internal/engine/trust"
 	"github.com/freakhill/safeslop/internal/engine/userconfig"
-	"github.com/freakhill/safeslop/internal/engine/vm"
+	"github.com/freakhill/safeslop/internal/jsoncontract"
 )
 
 // Version is overridden at build time via -ldflags "-X .../cli.Version=...".
@@ -41,10 +48,12 @@ var jsonOut bool
 // Execute runs the root command and exits non-zero on error.
 func Execute() {
 	if err := newRoot().Execute(); err != nil {
-		if !jsonOut {
-			fmt.Fprintln(os.Stderr, "safeslop:", err)
-		} else {
-			emitJSON(map[string]any{"ok": false, "error": err.Error()})
+		if !errors.Is(err, errOutputEmitted) {
+			if !jsonOut {
+				fmt.Fprintln(os.Stderr, "safeslop:", err)
+			} else {
+				emitJSON(map[string]any{"ok": false, "error": err.Error()})
+			}
 		}
 		os.Exit(1)
 	}
@@ -59,7 +68,7 @@ func newRoot() *cobra.Command {
 		SilenceErrors: true,
 	}
 	root.PersistentFlags().BoolVar(&jsonOut, "json", false, "emit machine-readable JSON output")
-	root.AddCommand(cmdValidate(), cmdList(), cmdDoctor(), cmdRun(), cmdTrust(), cmdDown(), cmdServe(), cmdLaunch(), cmdInstall())
+	root.AddCommand(cmdValidate(), cmdList(), cmdDoctor(), cmdRun(), cmdSession(), cmdTrust(), cmdDown(), cmdGC(), cmdLaunch(), cmdCatalog(), cmdBundle(), cmdProfile(), cmdCreds(), cmdLock())
 	return root
 }
 
@@ -80,7 +89,7 @@ func cmdValidate() *cobra.Command {
 				return err
 			}
 			if jsonOut {
-				emitJSON(map[string]any{"ok": true, "path": path, "warnings": warns})
+				emitContract(jsoncontract.OK(map[string]any{"path": path}, lintWarnings(warns)...))
 			} else {
 				fmt.Printf("ok: %s is valid\n", path)
 				printWarnings(warns)
@@ -133,16 +142,14 @@ func cmdList() *cobra.Command {
 // doctorReport probes the external tools and isolation boundaries safeslop can use.
 // Extracted so it is testable and reusable (e.g. a future GUI / installer).
 func doctorReport() map[string]any {
-	tools := []string{"git", "gh", "docker", "op", "claude", "opencode", "tart", "mise", "nix", "aws", "gcloud", "gke-gcloud-auth-plugin"}
+	tools := []string{"git", "gh", "docker", "op", "claude", "pi", "mise", "nix", "aws", "gcloud", "gke-gcloud-auth-plugin"}
 	report := map[string]any{}
 	for _, t := range tools {
 		p, err := osexec.LookPath(t)
 		report[t] = map[string]any{"present": err == nil, "path": p}
 	}
-	report["sandbox-exec"] = map[string]any{"present": sandbox.Available(), "path": sandbox.SandboxExecPath}
 	report["1password-signedin"] = map[string]any{"present": secrets.OpSignedIn(context.Background()), "path": ""}
 	report["container-runtime"] = map[string]any{"present": container.Available(), "path": ""}
-	report["vm-runtime"] = map[string]any{"present": vm.Available(), "path": ""}
 	return report
 }
 
@@ -150,7 +157,7 @@ func doctorReport() map[string]any {
 // so the honest "what each boundary protects" framing is never implicit (ayo §10.5 H1).
 func doctorTiers() map[string]map[string]string {
 	out := map[string]map[string]string{}
-	for _, env := range []string{"host", "sandbox", "container", "vm"} {
+	for _, env := range []string{"host", "container"} {
 		tier, note := policy.EnvTier(env)
 		out[env] = map[string]string{"tier": tier, "note": note}
 	}
@@ -165,7 +172,7 @@ func cmdDoctor() *cobra.Command {
 		RunE: func(_ *cobra.Command, _ []string) error {
 			report := doctorReport()
 			if jsonOut {
-				emitJSON(map[string]any{"ok": true, "os": runtime.GOOS, "arch": runtime.GOARCH, "tools": report, "tiers": doctorTiers()})
+				emitContract(jsoncontract.OK(map[string]any{"os": runtime.GOOS, "arch": runtime.GOARCH, "tools": report, "tiers": doctorTiers()}))
 				return nil
 			}
 			fmt.Printf("safeslop %s  (%s/%s)\n", Version, runtime.GOOS, runtime.GOARCH)
@@ -183,7 +190,7 @@ func cmdDoctor() *cobra.Command {
 				fmt.Printf("  %-14s %-4s %s\n", n, mark, m["path"])
 			}
 			fmt.Println("isolation tiers (what each environment actually protects):")
-			for _, env := range []string{"host", "sandbox", "container", "vm"} {
+			for _, env := range []string{"host", "container"} {
 				tier, note := policy.EnvTier(env)
 				fmt.Printf("  %-10s %-16s %s\n", env, tier, note)
 			}
@@ -239,9 +246,6 @@ func cmdRun() *cobra.Command {
 				if prof.Credentials != nil && len(prof.Credentials.Pnpm) > 0 {
 					out["pnpm"] = prof.Credentials.Pnpm // token field is a ref, not a value
 				}
-				if prof.Environment == "sandbox" {
-					out["sandbox_profile"] = sandbox.Profile(ws, prof.Network)
-				}
 				if jsonOut {
 					emitJSON(out)
 				} else {
@@ -262,9 +266,6 @@ func cmdRun() *cobra.Command {
 							fmt.Printf("  pnpm %s token <- %s\n", hostOr(r.Host), r.Token)
 						}
 					}
-					if prof.Environment == "sandbox" {
-						fmt.Printf("--- seatbelt profile ---\n%s", sandbox.Profile(ws, prof.Network))
-					}
 				}
 				return nil
 			}
@@ -278,15 +279,23 @@ func cmdRun() *cobra.Command {
 			if err := enforceTrust(path, trustFlag); err != nil {
 				return err
 			}
+			if prof.Environment == "container" {
+				if err := sweepManagedOrphans(context.Background()); err != nil {
+					return err
+				}
+			}
 			code, err := runProfile(name, prof, argv, ws)
-			if err != nil && code == 0 {
+			if err != nil {
+				// Surface the failure reason. runProfile returns code=1 on setup
+				// errors, so the old `&& code == 0` guard silently dropped them — a
+				// launch that failed with no diagnostic. cobra prints returned errors as "Error: …".
 				return err
 			}
 			os.Exit(code)
 			return nil
 		},
 	}
-	c.Flags().BoolVar(&dryRun, "dry-run", false, "print the resolved launch + sandbox profile without executing")
+	c.Flags().BoolVar(&dryRun, "dry-run", false, "print the resolved launch plan without executing")
 	c.Flags().BoolVar(&trustFlag, "trust", false, "approve this safeslop.cue, then run it")
 	return c
 }
@@ -294,27 +303,1000 @@ func cmdRun() *cobra.Command {
 // enforceTrust gates `run` on a host-recorded approval of the policy's exact bytes. With allowTrust
 // it records approval and proceeds; otherwise an untrusted or changed policy is a fail-closed error.
 // The store is host-side (~/.config/safeslop/trust.json), outside the agent-writable workspace.
-func enforceTrust(policyPath string, allowTrust bool) error {
-	abs, err := filepath.Abs(policyPath)
+// canonicalPolicyPath resolves a policy path to an absolute, symlink-free key so the trust gate
+// can't be fooled by /tmp vs /private/tmp (or any symlinked dir): the GUI approves a path the engine
+// reaches one way and `safeslop run` reaches the same file another way. Both must hash to one key.
+func canonicalPolicyPath(p string) string {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return p
+	}
+	if real, err := filepath.EvalSymlinks(abs); err == nil {
+		return real
+	}
+	return abs
+}
+
+// ---- session ----
+
+var errOutputEmitted = errors.New("machine-readable error already emitted")
+
+var sessionRevokeCredentials = func(sess engsession.Session) error {
+	stageDir, err := stageDirFor("session-"+sess.ID, sess.Workspace)
 	if err != nil {
 		return err
 	}
-	policyBytes, err := os.ReadFile(abs)
+	creds.RevokeGithub(context.Background(), stageDir)
+	creds.RevokeForgejo(context.Background(), stageDir)
+	return nil
+}
+
+// stageDirFor returns the host directory where a run's credentials/squid config are
+// staged, OUTSIDE the agent-writable workspace (specs/0072 F2, closing 0070 B2). The
+// stage tree used to live at <ws>/.safeslop/runtime/<name>, so the agent saw every
+// staged bearer at a predictable /workspace path and could rewrite the ":ro" mount via
+// the rw workspace path. It now lives under os.UserCacheDir()/safeslop/runtime, with an
+// 8-hex fnv(ws) suffix so concurrent coupled runs of the same profile name in different
+// workspaces (previously separated by living under each ws) stay distinct. The base is
+// created 0700; a UserCacheDir failure is fail-closed (no /tmp fallback — the predictable
+// path under $HOME and its 0700 ancestry are part of the boundary, and match what Lima/
+// Colima already share rw). The path is deterministic, so the revoke/wipe paths
+// reconstruct it without persisting anything.
+func stageDirFor(name, ws string) (string, error) {
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve user cache dir for credential staging: %w", err)
+	}
+	base := filepath.Join(cache, "safeslop", "runtime")
+	if err := os.MkdirAll(base, 0o700); err != nil {
+		return "", fmt.Errorf("create credential staging root: %w", err)
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(ws))
+	return filepath.Join(base, fmt.Sprintf("%s-%08x", name, h.Sum32())), nil
+}
+
+// stopGraceTimeout bounds the graceful SIGTERM wait before a detached supervisor's
+// process group is SIGKILLed on stop (specs/0051 D6). Overridable in tests.
+var stopGraceTimeout = 5 * time.Second
+
+// sessionKillProcess signals a session's recorded target. A positive target is a
+// coupled run's wrapper PID (bare SIGTERM, unchanged from 0050). A negative target
+// is a detached supervisor's process group (-pgid): SIGTERM the group, wait bounded
+// (stopGraceTimeout), then SIGKILL the group so the whole boundary tree is reached
+// (specs/0051 D4/D6).
+var sessionKillProcess = func(target int) error {
+	switch {
+	case target == 0:
+		return nil
+	case target > 0:
+		return syscall.Kill(target, syscall.SIGTERM)
+	}
+	_ = syscall.Kill(target, syscall.SIGTERM)
+	deadline := time.Now().Add(stopGraceTimeout)
+	for time.Now().Before(deadline) {
+		if syscall.Kill(target, 0) != nil {
+			return nil // the group is gone
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return syscall.Kill(target, syscall.SIGKILL)
+}
+
+// sessionProcessAlive probes whether a recorded session PID is still live, so
+// status/list can reconcile a session whose run wrapper died without recording
+// an exit. Overridable in tests.
+var sessionProcessAlive = engsession.ProcessAlive
+
+func sessionReapBoundary(sess engsession.Session) error {
+	if sess.Environment != "container" {
+		return nil
+	}
+	return container.ReapBySession(context.Background(), engineForSession(sess), sess.ID)
+}
+
+// detectEngineName reports the ambient container runtime that would drive a session, for recording
+// Session.Backend (specs/0066 D7). It detects with PolicyAllow — recording the name must never be blocked
+// by the deny-tier egress gate — and is best-effort: with no runtime present it returns "" and Backend
+// stays unknown-until-provisioned. Overridable in tests so backend recording stays hermetic.
+var detectEngineName = func() string {
+	eng, err := runtimepkg.Detect(runtimepkg.PolicyAllow)
+	if err != nil {
+		return ""
+	}
+	return eng.Name()
+}
+
+func recordSessionBackend(store engsession.Store, sess engsession.Session) (engsession.Session, error) {
+	if sess.Environment != "container" {
+		return sess, nil
+	}
+	changed := false
+	if backend := detectEngineName(); backend != "" && sess.Backend != backend {
+		sess.Backend = backend
+		changed = true
+	}
+	if sess.Image == "" || sess.RecipeID == "" {
+		resolved, err := policy.Resolve(sessionProfile(sess))
+		if err != nil {
+			return engsession.Session{}, err
+		}
+		recipe, err := container.ResolveRecipe(resolved.IdentitySet)
+		if err != nil {
+			return engsession.Session{}, err
+		}
+		sess.RecipeID = recipe.RecipeID
+		sess.Image = recipe.AgentImage
+		sess.Resolved = resolvedMetadata(resolved)
+		changed = true
+	}
+	if !changed {
+		return sess, nil
+	}
+	sess.UpdatedAt = time.Now().UTC()
+	return sess, store.Save(sess)
+}
+
+// engineForSession returns the container engine to reap a session's boundary through. Teardown/reap must
+// work on ANY ambient runtime, verified or not, so it detects with PolicyAllow (never the deny-tier
+// gate). With no runtime present it falls back to docker — the reap then simply finds nothing to remove
+// (specs/0066 D5).
+func engineForSession(_ engsession.Session) runtimepkg.Engine {
+	if eng, err := runtimepkg.Detect(runtimepkg.PolicyAllow); err == nil {
+		return eng
+	}
+	return runtimepkg.HostDockerEngine{}
+}
+
+// sweepManagedOrphans reaps labelled boundaries whose session record is gone, before a new container run.
+// It detects the ambient runtime with PolicyAllow (teardown is never gated); with no runtime present
+// Detect fails and the sweep is a no-op — nothing safeslop could have started (specs/0066 D5).
+func sweepManagedOrphans(ctx context.Context) error {
+	eng, err := runtimepkg.Detect(runtimepkg.PolicyAllow)
+	if err != nil {
+		return nil
+	}
+	live, err := container.LiveSessions(sessionStore().Dir)
 	if err != nil {
 		return err
+	}
+	return container.SweepManagedOrphans(ctx, eng, live)
+}
+
+func cmdSession() *cobra.Command {
+	c := &cobra.Command{Use: "session", Short: "Manage Emacs-visible safeslop sessions"}
+	c.AddCommand(cmdSessionCreate(), cmdSessionRun(), cmdSessionStatus(), cmdSessionStop(), cmdSessionList(), cmdSessionRemove(), cmdSessionRename(), cmdSessionPrune(), cmdSessionSupervise(), cmdSessionAttach())
+	return c
+}
+
+func cmdSessionCreate() *cobra.Command {
+	var agent, workspace, output, environment, network, profile, name string
+	var trustHost bool
+	c := &cobra.Command{
+		Use:   "create (--profile <name> | --agent <claude|pi|fish|zsh> --environment <host|container> --workspace <dir>) [--name <label>] --output json",
+		Short: "Create a safeslop session record",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if output != "json" {
+				return fmt.Errorf("session create requires --output json")
+			}
+			// Validate the optional display name once, up front, so the identical rule
+			// applies to both the --profile and explicit-flag creation paths (specs/0065
+			// S2). An empty/whitespace name is allowed and means "no name".
+			validName, err := engsession.ValidateName(name)
+			if err != nil {
+				return emitContractError(jsoncontract.CodeInvalidArgument, err.Error(), map[string]any{"name": name})
+			}
+			store := sessionStore()
+			if profile != "" {
+				if agent != "" || workspace != "" || environment != "" || network != "" {
+					return emitContractError(jsoncontract.CodeInvalidArgument, "--profile cannot be combined with --agent, --environment, --workspace, or --network", nil)
+				}
+				sess, err := createSessionFromProfile(store, profile)
+				if err != nil {
+					return err
+				}
+				if validName != "" {
+					sess.Name = validName
+					if err := store.Save(sess); err != nil {
+						return emitContractError(jsoncontract.CodeIOError, "save session", map[string]any{"error": err.Error()})
+					}
+				}
+				emitContract(jsoncontract.OK(sessionData(sess)))
+				return nil
+			}
+			canonicalAgent := policy.NormalizeAgent(agent)
+			if !policy.IsLaunchableAgent(canonicalAgent) {
+				return emitContractError(jsoncontract.CodeAgentUnsupported, fmt.Sprintf("unsupported agent %q", agent), map[string]any{"agent": agent})
+			}
+			if workspace == "" {
+				return emitContractError(jsoncontract.CodeInvalidArgument, "--workspace is required", nil)
+			}
+			if fi, err := os.Stat(workspace); err != nil || !fi.IsDir() {
+				return emitContractError(jsoncontract.CodeInvalidArgument, "--workspace must name an existing directory", map[string]any{"workspace": workspace})
+			}
+			switch environment {
+			case "container":
+			case "host":
+				// An ad-hoc host launch has no safeslop.cue to approve, yet it runs the agent
+				// unconfined with your real host credentials. Require an explicit ack so the
+				// session lane can't silently launch a host agent (specs/0072 F1, closing the
+				// ad-hoc arm of 0070 B1). Profile host launches are gated by policy-byte trust.
+				if !trustHost {
+					return emitContractError(jsoncontract.CodeTrustRequired,
+						"host sessions run the agent unconfined with your host credentials; pass --trust-host to acknowledge",
+						map[string]any{"environment": "host", "hint": "add --trust-host"})
+				}
+			case "":
+				return emitContractError(jsoncontract.CodeInvalidArgument,
+					"--environment is required; must be one of: host, container", nil)
+			default:
+				return emitContractError(jsoncontract.CodeInvalidArgument,
+					fmt.Sprintf("--environment %q is not valid; must be one of: host, container", environment),
+					map[string]any{"environment": environment})
+			}
+			if network != "" {
+				switch network {
+				case "deny", "allow":
+				default:
+					return emitContractError(jsoncontract.CodeInvalidArgument,
+						fmt.Sprintf("--network %q is not valid; must be one of: deny, allow", network),
+						map[string]any{"network": network})
+				}
+			}
+			sess, err := store.Create(canonicalAgent, environment, workspace, time.Now())
+			if err != nil {
+				return emitContractError(jsoncontract.CodeIOError, "create session", map[string]any{"error": err.Error()})
+			}
+			// Persist post-create mutations (network override and display name) in a
+			// single Save so the record is written exactly once (specs/0065 S2).
+			if network != "" || validName != "" {
+				if network != "" {
+					sess.Network = network
+				}
+				if validName != "" {
+					sess.Name = validName
+				}
+				if err := store.Save(sess); err != nil {
+					return emitContractError(jsoncontract.CodeIOError, "save session", map[string]any{"error": err.Error()})
+				}
+			}
+			emitContract(jsoncontract.OK(sessionData(sess)))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&profile, "profile", "", "profile name from safeslop.cue")
+	c.Flags().StringVar(&agent, "agent", "", "agent to run: claude, pi, fish, or zsh")
+	c.Flags().StringVar(&workspace, "workspace", "", "workspace directory")
+	c.Flags().StringVar(&output, "output", "", "output format: json")
+	c.Flags().StringVar(&environment, "environment", "", "isolation environment (required): host or container")
+	c.Flags().StringVar(&network, "network", "", "network policy: deny or allow (overrides profile default)")
+	c.Flags().StringVar(&name, "name", "", "optional human display name for the session (combinable with --profile)")
+	c.Flags().BoolVar(&trustHost, "trust-host", false, "acknowledge that an ad-hoc host session runs the agent unconfined with your host credentials")
+	return c
+}
+
+// cmdSessionRename sets or clears a session's human display name. A label touches
+// no boundary, credential, or process state, so the engine allows it in any
+// status (specs/0065 D5). This mirrors the flag/output/error shape of the sibling
+// session commands: --output json is mandatory, an empty --session-id is rejected
+// before the store is touched, and an empty --name is a deliberate clear.
+func cmdSessionRename() *cobra.Command {
+	var id, name, output string
+	c := &cobra.Command{
+		Use:   "rename --session-id <id> --name <name> --output json",
+		Short: "Set or clear a session's human display name",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if output != "json" {
+				return fmt.Errorf("session rename requires --output json")
+			}
+			if id == "" {
+				return emitContractError(jsoncontract.CodeInvalidArgument, "--session-id is required", nil)
+			}
+			sess, err := sessionStore().Rename(id, name, time.Now())
+			if err != nil {
+				switch {
+				case errors.Is(err, engsession.ErrNotFound):
+					return emitContractError(jsoncontract.CodeSessionNotFound, "session not found", map[string]any{"session_id": id})
+				default:
+					// ValidateName returns a plain (non-sentinel) error, so re-run the pure
+					// validator to distinguish a rejected name (INVALID_ARGUMENT) from a
+					// Save/IO failure (IO_ERROR) — specs/0065 S2.
+					if _, verr := engsession.ValidateName(name); verr != nil {
+						return emitContractError(jsoncontract.CodeInvalidArgument, verr.Error(), map[string]any{"name": name})
+					}
+					return emitContractError(jsoncontract.CodeIOError, "rename session", map[string]any{"error": err.Error()})
+				}
+			}
+			emitContract(jsoncontract.OK(sessionData(sess)))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&id, "session-id", "", "session id to rename")
+	c.Flags().StringVar(&name, "name", "", "new display name (empty clears it)")
+	c.Flags().StringVar(&output, "output", "", "output format: json")
+	return c
+}
+
+func createSessionFromProfile(store engsession.Store, profile string) (engsession.Session, error) {
+	path, err := findConfig("")
+	if err != nil {
+		return engsession.Session{}, emitContractError(jsoncontract.CodeNotFound, "safeslop.cue not found", map[string]any{"error": err.Error()})
+	}
+	cfg, err := policy.Load(path)
+	if err != nil {
+		return engsession.Session{}, emitContractError(jsoncontract.CodeSchemaViolation, "load safeslop.cue", map[string]any{"path": path, "error": err.Error()})
+	}
+	// Gate the session lane on the same host-approval `safeslop run` requires (specs/0072 F1,
+	// closing 0070 B1): the Emacs client launches exclusively through session create, so without
+	// this every session launch skipped policy-byte approval. The approved hash is recorded on the
+	// session below and re-verified at run time (verifySessionTrust).
+	approvedPath, approvedHash, status, err := checkTrust(path)
+	if err != nil {
+		return engsession.Session{}, emitContractError(jsoncontract.CodeIOError, "verify safeslop.cue trust", map[string]any{"path": path, "error": err.Error()})
+	}
+	if status != trust.Trusted {
+		return engsession.Session{}, emitContractError(jsoncontract.CodeTrustRequired, "safeslop.cue is not host-approved", map[string]any{"path": approvedPath, "status": status.String(), "hint": "safeslop trust " + approvedPath})
+	}
+	prof, ok := cfg.Profiles[profile]
+	if !ok {
+		return engsession.Session{}, emitContractError(jsoncontract.CodeNotFound, fmt.Sprintf("no profile %q in safeslop.cue", profile), map[string]any{"profile": profile, "path": path})
+	}
+	resolved, err := policy.Resolve(prof)
+	if err != nil {
+		return engsession.Session{}, emitContractError(jsoncontract.CodeInvalidArgument, "resolve profile packages", map[string]any{"profile": profile, "error": err.Error()})
+	}
+	recipe, err := container.ResolveRecipe(resolved.IdentitySet)
+	if err != nil {
+		return engsession.Session{}, emitContractError(jsoncontract.CodeInvalidArgument, "resolve profile image recipe", map[string]any{"profile": profile, "error": err.Error()})
+	}
+	workspace := prof.Workspace
+	if workspace == "" {
+		workspace, _ = os.Getwd()
+	} else if !filepath.IsAbs(workspace) {
+		workspace = filepath.Join(filepath.Dir(path), workspace)
+	}
+	if fi, err := os.Stat(workspace); err != nil || !fi.IsDir() {
+		return engsession.Session{}, emitContractError(jsoncontract.CodeInvalidArgument, "profile workspace must name an existing directory", map[string]any{"profile": profile, "workspace": workspace})
+	}
+	agent := policy.NormalizeAgent(prof.Agent)
+	if !policy.IsLaunchableAgent(agent) && agent != "shell" {
+		return engsession.Session{}, emitContractError(jsoncontract.CodeAgentUnsupported, fmt.Sprintf("unsupported agent %q", prof.Agent), map[string]any{"agent": prof.Agent, "profile": profile})
+	}
+	sess, err := store.Create(agent, prof.Environment, workspace, time.Now())
+	if err != nil {
+		return engsession.Session{}, emitContractError(jsoncontract.CodeIOError, "create session", map[string]any{"error": err.Error()})
+	}
+	sess.Profile = profile
+	sess.Network = prof.Network
+	sess.RecipeID = recipe.RecipeID
+	sess.Image = recipe.AgentImage
+	sess.Resolved = resolvedMetadata(resolved)
+	sess.PolicyPath = approvedPath
+	sess.PolicyHash = approvedHash
+	if err := store.Save(sess); err != nil {
+		return engsession.Session{}, emitContractError(jsoncontract.CodeIOError, "save session", map[string]any{"error": err.Error()})
+	}
+	return sess, nil
+}
+
+func resolvedMetadata(resolved *policy.Resolved) *engsession.ResolvedMetadata {
+	if resolved == nil {
+		return nil
+	}
+	return &engsession.ResolvedMetadata{
+		Packages:      append([]string(nil), resolved.Packages...),
+		IdentitySet:   append([]string(nil), resolved.IdentitySet...),
+		RuntimeEgress: append([]string(nil), resolved.RuntimeEgress...),
+	}
+}
+
+func sessionProfile(sess engsession.Session) policy.Profile {
+	prof := policy.Profile{Agent: sess.Agent, Environment: sess.Environment, Network: sess.Network, Workspace: sess.Workspace}
+	if sess.Resolved != nil {
+		prof.Packages = append([]string(nil), sess.Resolved.IdentitySet...)
+		prof.BareAgent = true
+	}
+	return prof
+}
+
+func cmdSessionList() *cobra.Command {
+	var output string
+	c := &cobra.Command{
+		Use:   "list --output json",
+		Short: "List safeslop sessions",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if output != "json" {
+				return fmt.Errorf("session list requires --output json")
+			}
+			sessions, err := sessionStore().ListReconciled(time.Now(), sessionProcessAlive, sessionReapBoundary)
+			if err != nil {
+				return emitContractError(jsoncontract.CodeIOError, "list sessions", map[string]any{"error": err.Error()})
+			}
+			items := make([]map[string]any, 0, len(sessions))
+			for _, sess := range sessions {
+				items = append(items, sessionData(sess))
+			}
+			emitContract(jsoncontract.OK(map[string]any{"sessions": items}))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&output, "output", "", "output format: json")
+	return c
+}
+
+func cmdSessionStatus() *cobra.Command {
+	var id, output string
+	c := &cobra.Command{
+		Use:   "status --session-id <id> --output <json|jsonl>",
+		Short: "Report safeslop session status",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if output != "json" && output != "jsonl" {
+				return fmt.Errorf("session status requires --output json or jsonl")
+			}
+			sess, err := sessionStore().GetReconciled(id, time.Now(), sessionProcessAlive, sessionReapBoundary)
+			if err != nil {
+				if errors.Is(err, engsession.ErrNotFound) {
+					return emitContractError(jsoncontract.CodeSessionNotFound, "session not found", map[string]any{"session_id": id})
+				}
+				return emitContractError(jsoncontract.CodeIOError, "load session", map[string]any{"error": err.Error()})
+			}
+			data := sessionData(sess)
+			// Surface the GitHub App-token TTL ceiling so the operator can see how long a
+			// session's ephemeral HTTPS access has left (specs/0069 T8). Additive + best
+			// effort: unlinked sessions have no manifest and simply omit the block.
+			if stageDir, derr := stageDirFor("session-"+sess.ID, sess.Workspace); derr == nil {
+				if exp, ok, _ := creds.GithubCredsExpiry(stageDir); ok {
+					block := map[string]any{"min_expires_at": exp.UTC().Format(time.RFC3339)}
+					if remaining := time.Until(exp); remaining > 0 {
+						block["ttl"] = remaining.Round(time.Second).String()
+					} else {
+						block["note"] = "github token expired (1h App-token ceiling; renewal lands in P2 \u2014 specs/0068 F4)"
+					}
+					data["github_creds"] = block
+				}
+			}
+			env := jsoncontract.OK(data)
+			if output == "jsonl" {
+				emitContractLine(env)
+			} else {
+				emitContract(env)
+			}
+			return nil
+		},
+	}
+	c.Flags().StringVar(&id, "session-id", "", "session id")
+	c.Flags().StringVar(&output, "output", "", "output format: json or jsonl")
+	return c
+}
+
+func cmdSessionStop() *cobra.Command {
+	var id, output string
+	var revoke bool
+	c := &cobra.Command{
+		Use:   "stop --session-id <id> --revoke-credentials --output json",
+		Short: "Stop a safeslop session",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if output != "json" {
+				return fmt.Errorf("session stop requires --output json")
+			}
+			sess, err := sessionStore().Stop(id, revoke, time.Now(), sessionRevokeCredentials, sessionKillProcess, sessionReapBoundary)
+			if err != nil {
+				if errors.Is(err, engsession.ErrNotFound) {
+					return emitContractError(jsoncontract.CodeSessionNotFound, "session not found", map[string]any{"session_id": id})
+				}
+				return emitContractError(jsoncontract.CodeCredentialRevokeFailed, "stop session", map[string]any{"error": err.Error()})
+			}
+			emitContract(jsoncontract.OK(sessionData(sess)))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&id, "session-id", "", "session id")
+	c.Flags().BoolVar(&revoke, "revoke-credentials", false, "revoke ephemeral credentials before stopping")
+	c.Flags().StringVar(&output, "output", "", "output format: json")
+	return c
+}
+
+// cmdSessionRemove deletes a single non-running session record so the operator
+// can clear a stopped/created "corpse" out of the portal list. A running session
+// is refused with SESSION_ALREADY_RUNNING pointing at `stop` first; still-live
+// credentials are revoked before the record is deleted so removal can never
+// orphan staged secrets.
+func cmdSessionRemove() *cobra.Command {
+	var id, output string
+	c := &cobra.Command{
+		Use:   "rm --session-id <id> --output json",
+		Short: "Remove a stopped safeslop session record",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if output != "json" {
+				return fmt.Errorf("session rm requires --output json")
+			}
+			sess, err := sessionStore().Remove(id, sessionRevokeCredentials, sessionReapBoundary)
+			if err != nil {
+				switch {
+				case errors.Is(err, engsession.ErrNotFound):
+					return emitContractError(jsoncontract.CodeSessionNotFound, "session not found", map[string]any{"session_id": id})
+				case errors.Is(err, engsession.ErrSessionRunning):
+					return emitContractError(jsoncontract.CodeSessionAlreadyRunning, "session is running; stop it before removing", map[string]any{"session_id": id})
+				default:
+					return emitContractError(jsoncontract.CodeIOError, "remove session", map[string]any{"error": err.Error()})
+				}
+			}
+			emitContract(jsoncontract.OK(map[string]any{"removed": []string{sess.ID}}))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&id, "session-id", "", "session id")
+	c.Flags().StringVar(&output, "output", "", "output format: json")
+	return c
+}
+
+// cmdSessionPrune removes every stopped session record in one call so the
+// operator can clear all the "failed corpses" at once. It reconciles liveness
+// first, so a session whose run process is gone (crash/kill/host sleep) is
+// persisted as stopped and then pruned in the same pass; created and running
+// sessions are always left untouched.
+func cmdSessionPrune() *cobra.Command {
+	var output string
+	c := &cobra.Command{
+		Use:   "prune --output json",
+		Short: "Remove all stopped safeslop session records",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if output != "json" {
+				return fmt.Errorf("session prune requires --output json")
+			}
+			store := sessionStore()
+			// Reconcile first so a crashed session (still marked running but whose
+			// process is gone) is persisted as stopped and swept in this same pass.
+			if _, err := store.ListReconciled(time.Now(), sessionProcessAlive, sessionReapBoundary); err != nil {
+				return emitContractError(jsoncontract.CodeIOError, "list sessions", map[string]any{"error": err.Error()})
+			}
+			removed, err := store.PruneStopped(sessionRevokeCredentials, sessionReapBoundary)
+			if err != nil {
+				return emitContractError(jsoncontract.CodeIOError, "prune sessions", map[string]any{"error": err.Error(), "removed": removed})
+			}
+			emitContract(jsoncontract.OK(map[string]any{"removed": removed}))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&output, "output", "", "output format: json")
+	return c
+}
+
+func cmdSessionRun() *cobra.Command {
+	var id string
+	var detach bool
+	c := &cobra.Command{
+		Use:   "run --session-id <id>",
+		Short: "Run a safeslop session's agent",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			store := sessionStore()
+			sess, err := store.Get(id)
+			if err != nil {
+				return err
+			}
+			// Re-verify the profile's policy is still host-approved before launch (specs/0072
+			// F1): session run rebuilds the profile from the record, so a create-time approval
+			// that was later revoked or edited must not still launch. Fail-closed here in the
+			// user's process; Supervise re-checks again at the detached supervisor's own start.
+			if err := verifySessionTrust(sess); err != nil {
+				return err
+			}
+			sess, err = recordSessionBackend(store, sess)
+			if err != nil {
+				return err
+			}
+			if detach {
+				// Detached: re-exec a supervisor that owns the agent + its PTY and
+				// serves it over the per-session socket, then return so the issuing
+				// buffer is freed immediately. No local tty is needed here (the
+				// supervisor allocates the PTY; the user attaches later), so the
+				// interactive PTY guard below is intentionally skipped (specs/0051
+				// D1, PR3).
+				return runDetach(store, id)
+			}
+			prof := sessionProfile(sess)
+			argv, err := agentArgv(prof)
+			if err != nil {
+				return err
+			}
+			// `session run` is an interactive attach: every boundary presents the
+			// agent under a controlling terminal (host via RunInTerminal,
+			// container via the RunInPTY tty bridge), so without a usable PTY the
+			// session is undriveable. Emacs drives this via
+			// make-term, which connects the process to a pty; a no-tty invocation
+			// (cron, a pipe, a headless shell) gets the PTY_UNAVAILABLE contract error
+			// pointing at the JSONL status fallback, exits non-zero, and is *not*
+			// marked running — a session that can never start must not be left as a
+			// phantom for liveness/reconcile or `session stop` (specs/0050 PR4).
+			if !sessionHasInteractivePTY() {
+				emitContract(jsoncontract.PTYUnavailable())
+				return errOutputEmitted
+			}
+			if _, err := store.MarkRunning(id, os.Getpid(), time.Now()); err != nil {
+				return err
+			}
+			code, runErr := runProfile("session-"+id, prof, argv, sess.Workspace)
+			lastErr := ""
+			if runErr != nil {
+				lastErr = runErr.Error()
+			}
+			_, _ = store.Finish(id, code, lastErr, time.Now())
+			if runErr != nil {
+				return runErr
+			}
+			os.Exit(code)
+			return nil
+		},
+	}
+	c.Flags().StringVar(&id, "session-id", "", "session id")
+	c.Flags().BoolVar(&detach, "detach", false, "run the agent under a detached supervisor and return immediately")
+	return c
+}
+
+// detachReadyTimeout bounds how long `run --detach` waits for the supervisor's
+// socket to appear before declaring the launch failed (specs/0051 Q1). Overridable
+// in tests.
+var detachReadyTimeout = 2 * time.Second
+
+// launchSupervisor re-execs this binary as a detached per-session supervisor (the
+// hidden `session supervise`) and returns the supervisor's PID. This is the
+// canonical Go daemonization: a new session via Setsid (no controlling tty), which
+// also makes the child its own process-group leader so a later `session stop` can
+// signal the whole tree via kill(-pgid) (specs/0051 D4), plus fully detached stdio.
+// Overridable in tests so no real setsid or second binary is needed (the specs/0051
+// D1 test seam).
+var launchSupervisor = func(id string) (int, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return 0, err
+	}
+	null, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+	if err != nil {
+		return 0, err
+	}
+	defer null.Close()
+	cmd := osexec.Command(exe, "session", "supervise", "--session-id", id)
+	// Setsid only: it makes the child a new session AND process-group leader
+	// (pgid == pid). Adding Setpgid on top is invalid — a session leader cannot
+	// setpgid (EPERM), which fails the fork/exec ("operation not permitted").
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = null, null, null
+	if err := cmd.Start(); err != nil {
+		return 0, err
+	}
+	pid := cmd.Process.Pid
+	_ = cmd.Process.Release() // detach: the daemon is never Wait()ed on
+	return pid, nil
+}
+
+// runDetach launches the supervisor, waits (bounded) for its socket so a reported
+// success means the agent is actually reachable, records the supervisor PID, and
+// emits the session envelope. On readiness timeout it kills the half-born
+// supervisor and emits a contract error, leaving the session not-running so no
+// phantom is left for liveness/reconcile or `session stop` (specs/0051 Q1).
+func runDetach(store engsession.Store, id string) error {
+	if sess, err := store.Get(id); err == nil {
+		if _, err := recordSessionBackend(store, sess); err != nil {
+			return err
+		}
+	}
+	pid, err := launchSupervisor(id)
+	if err != nil {
+		return emitContractError(jsoncontract.CodeIOError, "launch session supervisor", map[string]any{"error": err.Error()})
+	}
+	sockPath := store.SocketPath(id)
+	if !waitForFile(sockPath, detachReadyTimeout) {
+		_ = sessionKillProcess(pid) // best-effort; the supervisor never became ready
+		return emitContractError(jsoncontract.CodeIOError, "session supervisor did not become ready", map[string]any{"session_id": id})
+	}
+	if _, err := store.MarkRunningDetached(id, pid, time.Now()); err != nil {
+		return err
+	}
+	sess, err := store.Get(id)
+	if err != nil {
+		return err
+	}
+	emitContract(jsoncontract.OK(sessionData(sess)))
+	return nil
+}
+
+// waitForFile polls until path exists or the timeout elapses.
+func waitForFile(path string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// cmdSessionSupervise is the hidden re-exec target launched by `run --detach`. It
+// runs the per-session supervisor in this process and exits with the agent's code.
+// SIGTERM cancels the run so the supervisor tears the agent + boundary down before
+// exiting; os.Exit lives only here at the cobra boundary (specs/0051 PR2/PR3).
+func cmdSessionSupervise() *cobra.Command {
+	var id string
+	c := &cobra.Command{
+		Use:    "supervise --session-id <id>",
+		Short:  "(internal) run a detached session supervisor",
+		Hidden: true,
+		Args:   cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM)
+			defer stop()
+			code, err := Supervise(ctx, sessionStore(), id, time.Now)
+			if err != nil {
+				return err
+			}
+			os.Exit(code)
+			return nil
+		},
+	}
+	c.Flags().StringVar(&id, "session-id", "", "session id")
+	return c
+}
+
+// cmdSessionAttach attaches to a detached session's supervisor over its socket,
+// bridging the local terminal to the agent and exiting with the agent's code.
+// Like `run`, it needs a usable controlling terminal: with none it emits
+// PTY_UNAVAILABLE pointing at the JSONL status fallback, before any connect
+// attempt. os.Exit lives only here at the cobra boundary, so attachSession stays
+// drivable to completion in tests (specs/0051 PR4).
+func cmdSessionAttach() *cobra.Command {
+	var id string
+	c := &cobra.Command{
+		Use:   "attach --session-id <id>",
+		Short: "Attach to a detached safeslop session",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if !sessionHasInteractivePTY() {
+				emitContract(jsoncontract.PTYUnavailable())
+				return errOutputEmitted
+			}
+			code, err := attachSession(sessionStore(), id, os.Stdin, os.Stdout, attachResizeChannel())
+			if err != nil {
+				contractCode, message := attachFailureContract(err)
+				return emitContractError(contractCode, message, map[string]any{"session_id": id, "error": err.Error()})
+			}
+			os.Exit(code)
+			return nil
+		},
+	}
+	c.Flags().StringVar(&id, "session-id", "", "session id")
+	return c
+}
+
+// errSupervisorUnreachable marks an attach that failed at the dial: there is no
+// live supervisor socket to bridge to. It is wrapped around the net.Dial error so
+// attachFailureContract can map it to SESSION_NOT_RUNNING, distinct from a bridge
+// that died after the connection was already live (SESSION_STOPPED).
+var errSupervisorUnreachable = errors.New("no live supervisor socket to attach to")
+
+// attachSession dials the per-session socket and bridges in/out to the agent,
+// returning the agent's exit code from the X frame. Returning (rather than
+// os.Exit-ing) keeps it drivable to completion in tests. A failed dial is wrapped
+// in errSupervisorUnreachable so the caller can report SESSION_NOT_RUNNING.
+func attachSession(store engsession.Store, id string, in io.Reader, out io.Writer, resize <-chan [2]uint16) (int, error) {
+	conn, err := net.Dial("unix", store.SocketPath(id))
+	if err != nil {
+		return 1, fmt.Errorf("%w: %v", errSupervisorUnreachable, err)
+	}
+	defer conn.Close()
+	return engsession.Attach(conn, in, out, resize)
+}
+
+// attachFailureContract maps an attachSession error to its contract code and
+// message. A dial that never reached a live supervisor is SESSION_NOT_RUNNING (the
+// session exists in the store, or did, but nothing is serving its socket); any
+// other failure happened on an already-live bridge and stays SESSION_STOPPED.
+// attach is a pure client that never loads the store, so it does not distinguish a
+// never-created id from a stopped one — both honestly read as "not running".
+func attachFailureContract(err error) (jsoncontract.ErrorCode, string) {
+	if errors.Is(err, errSupervisorUnreachable) {
+		return jsoncontract.CodeSessionNotRunning, "session is not running; start it before attaching"
+	}
+	return jsoncontract.CodeSessionStopped, "attach to session ended"
+}
+
+// attachResizeChannel reports the local terminal size on SIGWINCH (and once up
+// front) as {rows, cols}, which the attach client forwards as R frames so the
+// agent's PTY tracks the window. Lives in the cobra path (a real tty); the
+// hermetic tests pass a nil channel.
+func attachResizeChannel() <-chan [2]uint16 {
+	ch := make(chan [2]uint16, 1)
+	send := func() {
+		if w, h, err := term.GetSize(int(os.Stdout.Fd())); err == nil {
+			select {
+			case ch <- [2]uint16{uint16(h), uint16(w)}: // rows = height, cols = width
+			default:
+			}
+		}
+	}
+	winch := make(chan os.Signal, 1)
+	signal.Notify(winch, syscall.SIGWINCH)
+	go func() {
+		for range winch {
+			send()
+		}
+	}()
+	send() // initial size
+	return ch
+}
+
+// sessionHasInteractivePTY reports whether `session run` has a usable controlling
+// terminal for the agent. Both stdin and stdout must be a tty: the agent needs a
+// keyboard (stdin) and a display (stdout) to be interactive, and Emacs make-term
+// supplies both. Either one being a pipe (the no-controlling-terminal case) means
+// the interactive run path cannot be driven, so the caller must fall back to the
+// JSONL status monitor (specs/0050 PR4).
+func sessionHasInteractivePTY() bool {
+	return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
+}
+
+func sessionStore() engsession.Store {
+	root := os.Getenv("SAFESLOP_STATE_DIR")
+	if root == "" {
+		if userState, err := os.UserConfigDir(); err == nil {
+			root = filepath.Join(userState, "safeslop")
+		} else {
+			root = filepath.Join(os.TempDir(), "safeslop")
+		}
+	}
+	return engsession.NewStore(filepath.Join(root, "sessions"))
+}
+
+func sessionData(sess engsession.Session) map[string]any {
+	out := map[string]any{
+		"session_id":          sess.ID,
+		"agent":               sess.Agent,
+		"workspace":           sess.Workspace,
+		"environment":         sess.Environment,
+		"network":             sess.Network,
+		"status":              sess.Status,
+		"created_at":          sess.CreatedAt.Format(time.RFC3339Nano),
+		"updated_at":          sess.UpdatedAt.Format(time.RFC3339Nano),
+		"credentials_revoked": sess.CredentialsRevoked,
+	}
+	if sess.Profile != "" {
+		out["profile"] = sess.Profile
+	}
+	if sess.Name != "" {
+		out["name"] = sess.Name
+	}
+	if sess.RecipeID != "" {
+		out["recipeID"] = sess.RecipeID
+	}
+	if sess.Image != "" {
+		out["image"] = sess.Image
+	}
+	if sess.Resolved != nil {
+		out["resolved"] = sess.Resolved
+	}
+	if !sess.StartedAt.IsZero() {
+		out["started_at"] = sess.StartedAt.Format(time.RFC3339Nano)
+	}
+	if !sess.StoppedAt.IsZero() {
+		out["stopped_at"] = sess.StoppedAt.Format(time.RFC3339Nano)
+	}
+	if !sess.RevokedAt.IsZero() {
+		out["revoked_at"] = sess.RevokedAt.Format(time.RFC3339Nano)
+	}
+	if sess.PID != 0 {
+		out["pid"] = sess.PID
+	}
+	if sess.ExitCode != nil {
+		out["exit_code"] = *sess.ExitCode
+	}
+	if sess.LastError != "" {
+		out["last_error"] = sess.LastError
+	}
+	if path, ok := sessionSocket(sess); ok {
+		out["socket"] = path
+	}
+	return out
+}
+
+// sessionSocket reports a session's per-session socket path, but only when the
+// session is running and the socket actually exists on disk (specs/0051 D5): the
+// path is derived from the state root the supervisor binds, never persisted, so we
+// only ever advertise a socket that is really there. Overridable in tests.
+var sessionSocket = func(sess engsession.Session) (string, bool) {
+	if sess.Status != engsession.StatusRunning {
+		return "", false
+	}
+	path := sessionStore().SocketPath(sess.ID)
+	if _, err := os.Stat(path); err != nil {
+		return "", false
+	}
+	return path, true
+}
+
+func emitContract(env jsoncontract.Envelope) {
+	b, err := jsoncontract.Marshal(env)
+	if err != nil {
+		panic(err)
+	}
+	_, _ = os.Stdout.Write(b)
+}
+
+func emitContractLine(env jsoncontract.Envelope) {
+	if err := jsoncontract.Validate(env); err != nil {
+		panic(err)
+	}
+	b, err := json.Marshal(env)
+	if err != nil {
+		panic(err)
+	}
+	_, _ = os.Stdout.Write(append(b, '\n'))
+}
+
+func emitContractError(code jsoncontract.ErrorCode, message string, details map[string]any) error {
+	emitContract(jsoncontract.Error(jsoncontract.NewMessage(code, message, false, details)))
+	return errOutputEmitted
+}
+
+func enforceTrust(policyPath string, allowTrust bool) error {
+	if allowTrust {
+		abs := canonicalPolicyPath(policyPath)
+		policyBytes, err := os.ReadFile(abs)
+		if err != nil {
+			return err
+		}
+		storePath, err := trust.DefaultPath()
+		if err != nil {
+			return err
+		}
+		store, err := trust.Load(storePath)
+		if err != nil {
+			return err
+		}
+		return store.Approve(abs, policyBytes)
+	}
+	abs, _, status, err := checkTrust(policyPath)
+	if err != nil {
+		return err
+	}
+	return trustStatusError(abs, status)
+}
+
+// checkTrust resolves the canonical policy path, hashes its current bytes, and reports the trust
+// status against the host store. Shared by the `run` gate, the session-create gate, and the
+// run/supervise re-verify (specs/0072 F1). It returns the hash so create can record exactly which
+// approved bytes a session was launched against, closing the create→run drift (0070 B3).
+func checkTrust(policyPath string) (abs, hash string, status trust.Status, err error) {
+	abs = canonicalPolicyPath(policyPath)
+	policyBytes, err := os.ReadFile(abs)
+	if err != nil {
+		return abs, "", trust.Untrusted, err
 	}
 	storePath, err := trust.DefaultPath()
 	if err != nil {
-		return err
+		return abs, "", trust.Untrusted, err
 	}
 	store, err := trust.Load(storePath)
 	if err != nil {
-		return err
+		return abs, "", trust.Untrusted, err
 	}
-	if allowTrust {
-		return store.Approve(abs, policyBytes)
-	}
-	switch store.Check(abs, policyBytes) {
+	return abs, trust.Hash(policyBytes), store.Check(abs, policyBytes), nil
+}
+
+// trustStatusError maps a trust status to the fail-closed CLI error `safeslop run` surfaces; a
+// Trusted policy yields nil. Kept as plain errors (not the JSON contract) because `run` is the
+// human-facing verb; the session lane wraps CodeTrustRequired around checkTrust itself.
+func trustStatusError(abs string, status trust.Status) error {
+	switch status {
 	case trust.Trusted:
 		return nil
 	case trust.Changed:
@@ -322,6 +1304,26 @@ func enforceTrust(policyPath string, allowTrust bool) error {
 	default: // Untrusted
 		return fmt.Errorf("safeslop.cue at %s is not trusted (a policy can grant network and secret access).\n  review it, then run:  safeslop trust %s", abs, abs)
 	}
+}
+
+// verifySessionTrust re-checks, at run/supervise time, that a profile session's policy is STILL
+// host-approved for the exact bytes recorded when the session was created (specs/0072 F1, closing
+// 0070 B1/B3). session run/supervise rebuild the profile from the session record and never re-read
+// the cue, so without this a launch could ride a create-time approval that was later revoked, or a
+// policy edited-and-retrusted to different bytes. Ad-hoc (--agent) sessions carry no policy file
+// (PolicyPath empty) and are gated at create time instead.
+func verifySessionTrust(sess engsession.Session) error {
+	if sess.PolicyPath == "" {
+		return nil
+	}
+	abs, hash, status, err := checkTrust(sess.PolicyPath)
+	if err != nil {
+		return emitContractError(jsoncontract.CodeTrustRequired, "cannot verify safeslop.cue trust", map[string]any{"path": sess.PolicyPath, "error": err.Error()})
+	}
+	if status != trust.Trusted || hash != sess.PolicyHash {
+		return emitContractError(jsoncontract.CodeTrustRequired, "safeslop.cue is no longer trusted for this session (approval revoked or the file changed since create)", map[string]any{"path": abs, "status": status.String(), "hint": "safeslop trust " + abs})
+	}
+	return nil
 }
 
 func cmdTrust() *cobra.Command {
@@ -348,360 +1350,504 @@ func cmdTrust() *cobra.Command {
 	}
 }
 
-// ---- down ----
+// ---- down / gc ----
 
 func cmdDown() *cobra.Command {
 	return &cobra.Command{
 		Use:   "down",
-		Short: "Tear down the container stack (squid) and any disposable VM sessions",
+		Short: "Tear down safeslop-managed container stacks",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			if !container.Available() && !vm.Available() {
-				return fmt.Errorf("nothing to tear down: neither docker nor tart is available (run: safeslop doctor)")
-			}
-			if container.Available() {
-				dir, composeFile, err := container.ComposeForDown()
-				if err != nil {
-					return err
-				}
-				defer os.RemoveAll(dir)
-				if err := container.Down(context.Background(), composeFile); err != nil {
-					return err
-				}
-			}
-			if vm.Available() {
-				_ = vm.DestroyAll(context.Background())
-			}
-			return nil
-		},
-	}
-}
-
-func cmdServe() *cobra.Command {
-	return &cobra.Command{
-		Use:   "serve",
-		Short: "Run the gRPC control plane on ~/.safeslop/s.sock (drives the GUI app)",
-		Args:  cobra.NoArgs,
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return control.Serve(Version,
-				func(profile, configPath string, emit func(*pb.LaunchEvent)) error {
-					emit(&pb.LaunchEvent{Kind: pb.LaunchEvent_SPAWNED, Message: profile})
-					code, err := launchProfile(profile, configPath)
-					if err != nil {
-						emit(&pb.LaunchEvent{Kind: pb.LaunchEvent_ERROR, Message: err.Error()})
-						return nil
-					}
-					emit(&pb.LaunchEvent{Kind: pb.LaunchEvent_EXITED, ExitCode: int32(code)})
-					return nil
-				},
-				resolveSession,
-			)
-		},
-	}
-}
-
-// resolveSession turns a profile name into a control.SessionSpec: the (optionally toolchain-
-// wrapped) agent argv, the workspace, the profile's resolved secrets + staged credentials, and
-// the per-environment cleanup as OnClose. Credential parity with `safeslop run` (SP7c-3), minus ssh
-// deploy keys, which are deferred in the cockpit (they key off the workspace git origin).
-func resolveSession(profile, configPath string) (control.SessionSpec, error) {
-	path, err := findConfig(configPath)
-	if err != nil {
-		return control.SessionSpec{}, err
-	}
-	// Fail-closed policy trust gate, identical to the CLI `run` path (specs/0022). The cockpit's
-	// in-process OpenSession data plane was the one launch chokepoint not gated, so a same-uid
-	// in-sandbox peer could rewrite safeslop.cue and OpenSession its way to environment:"host"
-	// (specs/0024 S1a). The GUI surfaces approval via `safeslop trust` (a wizard screen is a
-	// follow-on); allowTrust stays false here (the engine never auto-approves on the agent's behalf).
-	if err := enforceTrust(path, false); err != nil {
-		return control.SessionSpec{}, err
-	}
-	cfg, err := policy.Load(path)
-	if err != nil {
-		return control.SessionSpec{}, err
-	}
-	_, prof, err := selectProfile(cfg, profile)
-	if err != nil {
-		return control.SessionSpec{}, err
-	}
-	argv, err := agentArgv(prof)
-	if err != nil {
-		return control.SessionSpec{}, err
-	}
-	if prof.Toolchain != nil && toolchain.Wraps(prof.Toolchain.Kind) {
-		argv = toolchain.Wrap(prof.Toolchain.Kind, prof.Toolchain.Run, argv)
-	}
-	ws := prof.Workspace
-	if ws == "" {
-		ws, _ = os.Getwd()
-	}
-
-	// Credential gates the cockpit can't satisfy yet (reject before staging anything):
-	// ssh mints a per-window deploy key scoped to the *workspace* git origin, but safeslop serve's
-	// cwd isn't the workspace — deferred to `safeslop run`. vm can't reach kube (mirrors runProfile).
-	if prof.Credentials != nil {
-		if prof.Credentials.Ssh != nil {
-			return control.SessionSpec{}, fmt.Errorf("ssh credentials aren't supported in cockpit sessions yet (the deploy key is scoped to the workspace git origin); use `safeslop run`")
-		}
-		if prof.Environment == "vm" && prof.Credentials.Kube != nil {
-			return control.SessionSpec{}, fmt.Errorf("kube credentials are not supported with environment:%q; use environment:\"container\" (specs/0010)", prof.Environment)
-		}
-	}
-
-	// Per-session stage dir (unique → N concurrent sessions don't collide; also the vm clone name).
-	base := filepath.Join(ws, ".safeslop", "runtime")
-	if err := os.MkdirAll(base, 0o700); err != nil {
-		return control.SessionSpec{}, err
-	}
-	stageDir, err := os.MkdirTemp(base, "cockpit-*")
-	if err != nil {
-		return control.SessionSpec{}, err
-	}
-	secretEnv, pathEnv, err := stageProfile(context.Background(), prof, stageDir)
-	if err != nil {
-		_ = os.RemoveAll(stageDir)
-		return control.SessionSpec{}, err
-	}
-	wipe := func() { _ = os.RemoveAll(stageDir) }
-
-	switch prof.Environment {
-	case "host":
-		env := childEnv(secretEnv, pathEnv)
-		return control.SessionSpec{Argv: argv, Dir: ws, Env: env, OnClose: wipe}, nil
-	case "sandbox", "": // sandbox is the default
-		wrapped, wrapCleanup, err := sandbox.WrapArgv(argv, ws, prof.Network)
-		if err != nil {
-			_ = os.RemoveAll(stageDir)
-			return control.SessionSpec{}, err
-		}
-		env := childEnv(secretEnv, pathEnv)
-		return control.SessionSpec{Argv: wrapped, Dir: ws, Env: env, OnClose: chainClose(wrapCleanup, wipe)}, nil
-	case "container":
-		cargv, cleanup, err := container.PrepareSession(context.Background(), argv, ws, prof.Network, secretEnv, stageDir)
-		if err != nil {
-			_ = os.RemoveAll(stageDir)
-			return control.SessionSpec{}, err
-		}
-		return control.SessionSpec{Argv: cargv, Dir: ws, OnClose: cleanup}, nil // cleanup wipes stageDir
-	case "vm":
-		tk := ""
-		if prof.Toolchain != nil {
-			tk = prof.Toolchain.Kind
-		}
-		// stageDir basename is the per-session VM clone name (concurrency isolation).
-		vargv, cleanup, err := vm.PrepareSession(context.Background(), argv, prof.Network, secretEnv, stageDir, filepath.Base(stageDir), tk)
-		if err != nil {
-			_ = os.RemoveAll(stageDir)
-			return control.SessionSpec{}, err
-		}
-		return control.SessionSpec{Argv: vargv, Dir: ws, OnClose: cleanup}, nil // cleanup wipes stageDir
-	default:
-		_ = os.RemoveAll(stageDir)
-		return control.SessionSpec{}, fmt.Errorf("unknown environment %q", prof.Environment)
-	}
-}
-
-// chainClose returns a cleanup that runs fns in order, skipping nils — used to compose a
-// session's OnClose (e.g. a sandbox temp-profile removal followed by the stage-dir wipe).
-func chainClose(fns ...func()) func() {
-	return func() {
-		for _, f := range fns {
-			if f != nil {
-				f()
-			}
-		}
-	}
-}
-
-func cmdInstall() *cobra.Command {
-	c := &cobra.Command{
-		Use:   "install",
-		Short: "Inventory and (later) provision the safeslop toolchain",
-	}
-	c.AddCommand(&cobra.Command{
-		Use:   "status",
-		Short: "Report whether safeslop, its app, toolchains, and runtimes are installed",
-		Args:  cobra.NoArgs,
-		RunE: func(_ *cobra.Command, _ []string) error {
-			if jsonOut {
-				fmt.Println(renderInstallStatusJSON(Version))
-				return nil
-			}
-			st := install.Status(context.Background(), Version)
-			fmt.Printf("safeslop %s  (on PATH: %v)\n", st.Self.Version, st.Self.OnPath)
-			if st.Self.Path != "" {
-				fmt.Printf("  binary: %s\n", st.Self.Path)
-			}
-			app := "not installed"
-			if st.App.Present {
-				app = st.App.Path
-			}
-			fmt.Printf("  app:    %s\n", app)
-			printTools("toolchains", st.Toolchains)
-			printTools("runtimes", st.Runtimes)
-			return nil
-		},
-	})
-	c.AddCommand(&cobra.Command{
-		Use:   "plan",
-		Short: "Show the pinned actions needed to install/upgrade toolchains + runtimes",
-		Args:  cobra.NoArgs,
-		RunE: func(_ *cobra.Command, _ []string) error {
-			if jsonOut {
-				out, err := renderInstallPlanJSON(Version)
-				if err != nil {
-					return err
-				}
-				fmt.Println(out)
-				return nil
-			}
-			res, err := installPlanResult(Version)
+			ctx := context.Background()
+			// Detect with PolicyAllow: `down` must clean up whatever ambient runtime safeslop launched on,
+			// verified or not (the deny-tier gate applies only to launching). With no runtime present there
+			// is nothing safeslop could have started, so down is a no-op (specs/0066 D5).
+			eng, err := runtimepkg.Detect(runtimepkg.PolicyAllow)
 			if err != nil {
-				return err // fail closed: a bad manifest is an error, not an empty plan
+				return nil
 			}
-			fmt.Printf("%d change(s) pending\n", res.Pending())
-			for _, a := range res.Actions {
-				cur := a.Current
-				if cur == "" {
-					cur = "-"
-				}
-				fmt.Printf("  %-10s %-8s %s -> %s\n", a.Name, a.Kind, cur, a.Desired)
+			dir, composeFile, err := container.ComposeForDown()
+			if err != nil {
+				return err
 			}
-			if len(res.Actions) == 0 {
-				fmt.Println("  (desired-state manifest is empty)")
+			defer os.RemoveAll(dir)
+			if err := container.Down(ctx, eng, composeFile); err != nil {
+				return err
+			}
+			return container.ReapManaged(ctx, eng)
+		},
+	}
+}
+
+func cmdGC() *cobra.Command {
+	var until, keepRaw string
+	c := &cobra.Command{
+		Use:   "gc [--until <age>] [--keep <N>]",
+		Short: "Garbage-collect unreferenced safeslop-managed images",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if !container.Available() {
+				return fmt.Errorf("cannot gc: docker is not available (run: safeslop doctor)")
+			}
+			keep, err := container.ParseKeep(keepRaw)
+			if err != nil {
+				return err
+			}
+			policyPath, _ := findConfig("")
+			removed, err := container.GCImages(context.Background(), runtimepkg.HostDockerEngine{}, container.GCOptions{Until: until, Keep: keep}, container.DefaultProtection(policyPath, sessionStore().Dir))
+			if err != nil {
+				return err
+			}
+			if jsonOut {
+				emitContract(jsoncontract.OK(map[string]any{"removed": removed}))
+				return nil
+			}
+			if len(removed) == 0 {
+				fmt.Println("removed 0 images")
+				return nil
+			}
+			fmt.Printf("removed %d image(s):\n", len(removed))
+			for _, ref := range removed {
+				fmt.Printf("  %s\n", ref)
 			}
 			return nil
 		},
-	})
-	c.AddCommand(func() *cobra.Command {
-		var dryRun bool
-		ac := &cobra.Command{
-			Use:   "apply",
-			Short: "Download, verify (fail-closed), and install the pinned toolchains + runtimes",
-			Args:  cobra.NoArgs,
-			RunE: func(cmd *cobra.Command, _ []string) error {
-				res, err := installPlanResult(Version)
-				if err != nil {
-					return err
-				}
-				if dryRun {
-					if jsonOut {
-						out, _ := renderInstallApplyDryRunJSON(Version)
-						fmt.Println(out)
-						return nil
-					}
-					fmt.Printf("%d change(s) would be applied\n", res.Pending())
-					for _, a := range res.Actions {
-						if a.Kind != install.ActionOK {
-							fmt.Printf("  %-10s %-8s -> %s\n", a.Name, a.Kind, a.Desired)
-						}
-					}
-					return nil
-				}
-				dirs, err := install.DefaultDirs()
-				if err != nil {
-					return err
-				}
-				emit := func(e install.Event) {
-					if jsonOut {
-						emitJSON(map[string]any{"kind": e.Kind, "tool": e.Tool, "msg": e.Msg})
-					} else {
-						fmt.Printf("  [%s] %s %s\n", e.Tool, e.Kind, e.Msg)
-					}
-				}
-				if err := install.Apply(cmd.Context(), res, dirs, install.HTTPFetcher{}, emit); err != nil {
-					return err
-				}
-				warnIfNotOnPath(dirs.BinDir)
-				return nil
-			},
-		}
-		ac.Flags().BoolVar(&dryRun, "dry-run", false, "show what would be installed without doing it")
-		return ac
-	}())
+	}
+	c.Flags().StringVar(&until, "until", "", "only consider managed images older than this engine age filter (for example 24h)")
+	c.Flags().StringVar(&keepRaw, "keep", "", "keep the N most-recent unreferenced managed images")
 	return c
 }
 
-func renderInstallApplyDryRunJSON(version string) (string, error) {
-	res, err := installPlanResult(version)
+type lockfile struct {
+	RecipeID string            `json:"recipeID"`
+	Agent    string            `json:"agent"`
+	Base     string            `json:"base"`
+	Bundles  []string          `json:"bundles,omitempty"`
+	Packages []string          `json:"packages"`
+	Versions map[string]string `json:"versions"`
+}
+
+func cmdLock() *cobra.Command {
+	var output string
+	c := &cobra.Command{
+		Use:   "lock [profile] --output json",
+		Short: "Write safeslop.lock.json for a profile's resolved image recipe",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			if output != "json" {
+				return fmt.Errorf("lock requires --output json")
+			}
+			path, err := findConfig("")
+			if err != nil {
+				return err
+			}
+			cfg, err := policy.Load(path)
+			if err != nil {
+				return err
+			}
+			name, prof, err := selectProfile(cfg, arg0(args))
+			if err != nil {
+				return err
+			}
+			resolved, err := policy.Resolve(prof)
+			if err != nil {
+				return err
+			}
+			recipe, err := container.ResolveRecipe(resolved.IdentitySet)
+			if err != nil {
+				return err
+			}
+			lf, err := buildLockfile(prof, resolved, recipe)
+			if err != nil {
+				return err
+			}
+			b, err := json.MarshalIndent(lf, "", "  ")
+			if err != nil {
+				return err
+			}
+			b = append(b, '\n')
+			lockPath := filepath.Join(filepath.Dir(path), "safeslop.lock.json")
+			if err := os.WriteFile(lockPath, b, 0o644); err != nil {
+				return fmt.Errorf("write %s: %w", lockPath, err)
+			}
+			emitContract(jsoncontract.OK(map[string]any{
+				"path":     lockPath,
+				"profile":  name,
+				"recipeID": lf.RecipeID,
+				"lock":     lf,
+			}))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&output, "output", "", "output format: json")
+	return c
+}
+
+func buildLockfile(prof policy.Profile, resolved *policy.Resolved, recipe *container.Recipe) (*lockfile, error) {
+	versions := make(map[string]string, len(resolved.IdentitySet))
+	cat := policy.DefaultCatalog()
+	for _, name := range resolved.IdentitySet {
+		p, ok := cat.Lookup(name)
+		if !ok {
+			return nil, fmt.Errorf("lock: resolved package %q is not in the catalog", name)
+		}
+		versions[name] = p.Version
+	}
+	return &lockfile{
+		RecipeID: recipe.RecipeID,
+		Agent:    policy.NormalizeAgent(prof.Agent),
+		Base:     recipe.SourceBaseImage,
+		Bundles:  append([]string(nil), prof.Bundles...),
+		Packages: append([]string(nil), resolved.IdentitySet...),
+		Versions: versions,
+	}, nil
+}
+
+// cmdProfile groups the enveloped policy surfaces the Emacs profiles view consumes
+// (specs/0052 E2/E3, specs/0058 IW3).
+// credsProber builds the Prober behind `creds list|show`. It is a seam: tests replace it with a
+// hermetic prober so the command never shells out to `op` or reads the real process env.
+var credsProber = creds.DefaultProber
+
+// cmdCreds groups read-only credential-posture inspection over safeslop.cue (specs/0067). Authoring
+// stays CUE-canonical (edit safeslop.cue itself); this surface only reads and reports value-free
+// readiness status — it never handles or reveals a secret value.
+func cmdCreds() *cobra.Command {
+	c := &cobra.Command{Use: "creds", Short: "Inspect the credential posture of safeslop.cue profiles"}
+	c.AddCommand(cmdCredsList(), cmdCredsShow(), cmdCredsLink(), cmdCredsUnlink(), cmdCredsStatus())
+	return c
+}
+
+func cmdCredsList() *cobra.Command {
+	var output string
+	c := &cobra.Command{
+		Use:   "list [safeslop.cue] --output json",
+		Short: "List declared credentials across profiles with value-free readiness status",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			if output != "json" {
+				return fmt.Errorf("creds list requires --output json")
+			}
+			path, err := findConfig(argAt(args, 0))
+			if err != nil {
+				return emitContractError(jsoncontract.CodeNotFound, "safeslop.cue not found", map[string]any{"error": err.Error()})
+			}
+			cfg, err := policy.Load(path)
+			if err != nil {
+				return emitContractError(jsoncontract.CodeSchemaViolation, "load safeslop.cue", map[string]any{"path": path, "error": err.Error()})
+			}
+			rep := creds.Inspect(context.Background(), cfg, credsProber())
+			emitContract(jsoncontract.OK(map[string]any{
+				"config":      path,
+				"op":          rep.Op,
+				"credentials": credRowsOrEmpty(rep.Rows),
+			}))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&output, "output", "", "output format: json")
+	return c
+}
+
+func cmdCredsShow() *cobra.Command {
+	var output string
+	c := &cobra.Command{
+		Use:   "show <profile> [safeslop.cue] --output json",
+		Short: "Show one profile's declared credentials with value-free readiness status",
+		Args:  cobra.RangeArgs(1, 2),
+		RunE: func(_ *cobra.Command, args []string) error {
+			if output != "json" {
+				return fmt.Errorf("creds show requires --output json")
+			}
+			path, err := findConfig(argAt(args, 1))
+			if err != nil {
+				return emitContractError(jsoncontract.CodeNotFound, "safeslop.cue not found", map[string]any{"error": err.Error()})
+			}
+			cfg, err := policy.Load(path)
+			if err != nil {
+				return emitContractError(jsoncontract.CodeSchemaViolation, "load safeslop.cue", map[string]any{"path": path, "error": err.Error()})
+			}
+			prof, ok := cfg.Profiles[args[0]]
+			if !ok {
+				return emitContractError(jsoncontract.CodeNotFound, fmt.Sprintf("no profile %q in safeslop.cue", args[0]), map[string]any{"profile": args[0], "path": path})
+			}
+			// Scope Inspect to just this profile for the detail view.
+			one := &policy.Config{Version: cfg.Version, Profiles: map[string]policy.Profile{args[0]: prof}}
+			rep := creds.Inspect(context.Background(), one, credsProber())
+			emitContract(jsoncontract.OK(map[string]any{
+				"config":      path,
+				"profile":     args[0],
+				"op":          rep.Op,
+				"credentials": credRowsOrEmpty(rep.Rows),
+			}))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&output, "output", "", "output format: json")
+	return c
+}
+
+// credRowsOrEmpty coalesces a nil row slice to non-nil so the envelope always carries a
+// `credentials: []` array (never `null`) for the Emacs client.
+func credRowsOrEmpty(rows []creds.CredRow) []creds.CredRow {
+	if rows == nil {
+		return []creds.CredRow{}
+	}
+	return rows
+}
+
+func cmdProfile() *cobra.Command {
+	c := &cobra.Command{Use: "profile", Short: "Inspect and author safeslop.cue profiles"}
+	c.AddCommand(cmdProfileList(), cmdProfilePresets(), cmdProfileShow(), cmdProfileCreate())
+	return c
+}
+
+func cmdProfileList() *cobra.Command {
+	var output string
+	c := &cobra.Command{
+		Use:   "list [safeslop.cue] --output json",
+		Short: "List the profiles defined in a safeslop.cue (enveloped JSON contract)",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			if output != "json" {
+				return fmt.Errorf("profile list requires --output json")
+			}
+			path, err := findConfig(arg0(args))
+			if err != nil {
+				return err
+			}
+			cfg, err := policy.Load(path)
+			if err != nil {
+				return err
+			}
+			emitContract(jsoncontract.OK(map[string]any{"path": path, "profiles": cfg.Profiles}))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&output, "output", "", "output format: json")
+	return c
+}
+
+func cmdProfilePresets() *cobra.Command {
+	var output string
+	c := &cobra.Command{
+		Use:   "presets --output json",
+		Short: "List the embedded policy presets offered as starting points",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if output != "json" {
+				return fmt.Errorf("profile presets requires --output json")
+			}
+			emitContract(jsoncontract.OK(map[string]any{"presets": policy.Presets()}))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&output, "output", "", "output format: json")
+	return c
+}
+
+func cmdProfileShow() *cobra.Command {
+	var output string
+	c := &cobra.Command{
+		Use:   "show <name> [safeslop.cue] --output json",
+		Short: "Show a profile with its resolved catalog packages and image recipe",
+		Args:  cobra.RangeArgs(1, 2),
+		RunE: func(_ *cobra.Command, args []string) error {
+			if output != "json" {
+				return fmt.Errorf("profile show requires --output json")
+			}
+			path, err := findConfig(argAt(args, 1))
+			if err != nil {
+				return emitContractError(jsoncontract.CodeNotFound, "safeslop.cue not found", map[string]any{"error": err.Error()})
+			}
+			cfg, err := policy.Load(path)
+			if err != nil {
+				return emitContractError(jsoncontract.CodeSchemaViolation, "load safeslop.cue", map[string]any{"path": path, "error": err.Error()})
+			}
+			prof, ok := cfg.Profiles[args[0]]
+			if !ok {
+				return emitContractError(jsoncontract.CodeNotFound, fmt.Sprintf("no profile %q in safeslop.cue", args[0]), map[string]any{"profile": args[0], "path": path})
+			}
+			data, err := profileResolvedData(path, args[0], prof)
+			if err != nil {
+				return emitContractError(jsoncontract.CodeInvalidArgument, "resolve profile image recipe", map[string]any{"profile": args[0], "error": err.Error()})
+			}
+			emitContract(jsoncontract.OK(data))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&output, "output", "", "output format: json")
+	return c
+}
+
+func cmdProfileCreate() *cobra.Command {
+	var name, agent, environment, workspace, network, output string
+	var bundles, packages []string
+	var noDefaultBundle bool
+	c := &cobra.Command{
+		Use:   "create --name N --agent A --environment E [--bundle B ...] [--package P ...] --output json",
+		Short: "Create or update a safeslop.cue profile",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if output != "json" {
+				return fmt.Errorf("profile create requires --output json")
+			}
+			if name == "" || agent == "" || environment == "" {
+				return emitContractError(jsoncontract.CodeInvalidArgument, "profile create requires --name, --agent, and --environment", nil)
+			}
+			if network == "" {
+				network = "deny"
+			}
+			path, cfg, err := loadOrNewConfigForCreate()
+			if err != nil {
+				return emitContractError(jsoncontract.CodeIOError, "load safeslop.cue", map[string]any{"error": err.Error()})
+			}
+			prof := policy.Profile{
+				Agent:       policy.NormalizeAgent(agent),
+				Environment: environment,
+				Workspace:   workspace,
+				Network:     network,
+				Bundles:     append([]string(nil), bundles...),
+				Packages:    append([]string(nil), packages...),
+				BareAgent:   noDefaultBundle,
+			}
+			if _, err := policy.Resolve(prof); err != nil {
+				return emitContractError(jsoncontract.CodeInvalidArgument, "resolve profile packages", map[string]any{"profile": name, "error": err.Error()})
+			}
+			data, err := profileResolvedData(path, name, prof)
+			if err != nil {
+				return emitContractError(jsoncontract.CodeInvalidArgument, "resolve profile image recipe", map[string]any{"profile": name, "error": err.Error()})
+			}
+			cfg.Profiles[name] = prof
+			rendered, err := renderConfigCUE(cfg)
+			if err != nil {
+				return emitContractError(jsoncontract.CodeInternal, "render safeslop.cue", map[string]any{"error": err.Error()})
+			}
+			if _, err := policy.LoadBytes(rendered); err != nil {
+				return emitContractError(jsoncontract.CodeSchemaViolation, "rendered safeslop.cue did not validate; not writing", map[string]any{"error": err.Error()})
+			}
+			if err := os.WriteFile(path, rendered, 0o644); err != nil {
+				return emitContractError(jsoncontract.CodeIOError, "write safeslop.cue", map[string]any{"path": path, "error": err.Error()})
+			}
+			data["created"] = true
+			emitContract(jsoncontract.OK(data))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&name, "name", "", "profile name")
+	c.Flags().StringVar(&agent, "agent", "", "agent: claude, claude-code, pi, fish, zsh, or shell")
+	c.Flags().StringVar(&environment, "environment", "", "isolation environment: host or container")
+	c.Flags().StringArrayVar(&bundles, "bundle", nil, "catalog bundle to include (repeatable)")
+	c.Flags().StringArrayVar(&packages, "package", nil, "catalog package to include (repeatable)")
+	c.Flags().StringVar(&workspace, "workspace", "", "workspace directory")
+	c.Flags().StringVar(&network, "network", "deny", "network policy: deny or allow")
+	c.Flags().BoolVar(&noDefaultBundle, "no-default-bundle", false, "do not include the agent's default package bundle")
+	c.Flags().StringVar(&output, "output", "", "output format: json")
+	return c
+}
+
+func loadOrNewConfigForCreate() (string, *policy.Config, error) {
+	path, err := findConfig("")
 	if err != nil {
-		return "", err
-	}
-	b, _ := json.MarshalIndent(map[string]any{"dry_run": true, "actions": res.Actions}, "", "  ")
-	return string(b), nil
-}
-
-func warnIfNotOnPath(binDir string) {
-	for _, p := range filepath.SplitList(os.Getenv("PATH")) {
-		if p == binDir {
-			return
+		wd, werr := os.Getwd()
+		if werr != nil {
+			return "", nil, werr
 		}
+		path = filepath.Join(wd, "safeslop.cue")
+		return path, &policy.Config{Version: 1, Profiles: map[string]policy.Profile{}}, nil
 	}
-	fmt.Fprintf(os.Stderr, "note: %s is not on your $PATH — add it so installed tools resolve\n", binDir)
-}
-
-func renderInstallStatusJSON(version string) string {
-	st := install.Status(context.Background(), version)
-	b, _ := json.MarshalIndent(st, "", "  ")
-	return string(b)
-}
-
-func installPlanResult(version string) (install.Result, error) {
-	st := install.Status(context.Background(), version)
-	return install.Plan(st, install.DesiredState())
-}
-
-func renderInstallPlanJSON(version string) (string, error) {
-	res, err := installPlanResult(version)
+	cfg, err := policy.Load(path)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	b, _ := json.MarshalIndent(res, "", "  ")
-	return string(b), nil
+	if cfg.Profiles == nil {
+		cfg.Profiles = map[string]policy.Profile{}
+	}
+	if cfg.Version == 0 {
+		cfg.Version = 1
+	}
+	return path, cfg, nil
 }
 
-func printTools(label string, tools []install.Tool) {
-	fmt.Printf("  %s:\n", label)
-	for _, t := range tools {
-		mark := "no"
-		if t.Present {
-			mark = "yes"
-		}
-		v := t.Version
-		if v == "" {
-			v = "-"
-		}
-		fmt.Printf("    %-10s %-4s %s\n", t.Name, mark, v)
+func renderConfigCUE(cfg *policy.Config) ([]byte, error) {
+	b, err := json.MarshalIndent(cfg, "", "\t")
+	if err != nil {
+		return nil, err
 	}
+	return append([]byte("package safeslop\n\nsafeslop: "), append(b, '\n')...), nil
+}
+
+func profileResolvedData(path, name string, prof policy.Profile) (map[string]any, error) {
+	resolved, err := policy.Resolve(prof)
+	if err != nil {
+		return nil, err
+	}
+	recipe, err := container.ResolveRecipe(resolved.IdentitySet)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"path":      path,
+		"name":      name,
+		"profile":   prof,
+		"resolved":  resolved,
+		"recipeID":  recipe.RecipeID,
+		"image":     recipe.AgentImage,
+		"base":      recipe.SourceBaseImage,
+		"baseImage": recipe.BaseImage,
+		"recipe":    recipe,
+	}, nil
 }
 
 func cmdLaunch() *cobra.Command {
-	return &cobra.Command{
+	var configDir string
+	cmd := &cobra.Command{
 		Use:   "launch <profile>",
 		Short: "Open a terminal window running the profile's agent (ctty intact)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			_, err := launchProfile(args[0], "")
+			_, err := launchProfile(args[0], configDir)
 			return err
 		},
 	}
+	// --config makes launch usable from a hotkey/skhd in ANY cwd: it resolves the workspace from
+	// here instead of os.Getwd() (specs/0028). Trust is still enforced by the launched `safeslop run`.
+	cmd.Flags().StringVar(&configDir, "config", "", "directory holding the safeslop.cue (for hotkeys/launchers from any cwd)")
+	return cmd
 }
 
 // launchProfile opens the user's preferred terminal (from ~/.config/safeslop/config.cue) running
 // `safeslop run <profile>`, so the real ctty handoff happens inside that window. Returns once the
-// terminal is spawned. configPath is reserved for the gRPC delegation (v1 resolves safeslop.cue
-// from the workspace).
+// terminal is spawned.
 // profileNameRe constrains launchable profile names: the name is embedded in the spawned
 // terminal's window title and SAFESLOP_SESSION, so it must not carry shell/title metacharacters.
 var profileNameRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
+// launchWorkspace resolves the workspace directory for a launch: from --config (usable from any cwd,
+// e.g. a skhd hotkey) canonicalized so the spawned `safeslop run` computes the same trust key (the
+// /tmp vs /private/tmp fix, specs/0028), or the current directory when --config is empty. Extracted
+// so the resolution is unit-testable without spawning a terminal.
+func launchWorkspace(configPath string) (string, error) {
+	if configPath != "" {
+		cuePath, err := findConfig(configPath)
+		if err != nil {
+			return "", err
+		}
+		// Fail fast for a hotkey/launcher: a missing safeslop.cue should error here, not spawn a
+		// terminal that dies (findConfig constructs the path without checking existence).
+		if _, err := os.Stat(cuePath); err != nil {
+			return "", fmt.Errorf("no safeslop.cue under %s", configPath)
+		}
+		return filepath.Dir(canonicalPolicyPath(cuePath)), nil
+	}
+	return os.Getwd()
+}
+
 func launchProfile(name, configPath string) (int, error) {
-	_ = configPath
 	if !profileNameRe.MatchString(name) {
 		return 1, fmt.Errorf("invalid profile name %q (allowed: letters, digits, dot, underscore, hyphen)", name)
 	}
-	ws, err := os.Getwd()
+	ws, err := launchWorkspace(configPath)
 	if err != nil {
 		return 1, err
 	}
@@ -730,8 +1876,8 @@ func launchProfile(name, configPath string) (int, error) {
 // stageProfile resolves the profile's secrets and stages its credentials into stageDir. It
 // returns secretEnv (sensitive KEY=VAL — the resolved secrets plus aws/gcp env creds, destined
 // for the secrets.env channel / the process env) and pathEnv (non-secret NPM_CONFIG_USERCONFIG /
-// KUBECONFIG / GIT_SSH_COMMAND host paths into stageDir, for the host/sandbox process env). The
-// caller owns the stageDir lifecycle (creation, the on-exit wipe, and creds.RevokeSSH if an ssh
+// KUBECONFIG / GIT_SSH_COMMAND host paths into stageDir, for the host process env). The
+// caller owns the stageDir lifecycle (creation, the on-exit wipe, and creds.RevokeGithub if github
 // key was staged).
 func stageProfile(ctx context.Context, prof policy.Profile, stageDir string) (secretEnv, pathEnv []string, err error) {
 	if len(prof.Secrets) > 0 {
@@ -748,8 +1894,8 @@ func stageProfile(ctx context.Context, prof policy.Profile, stageDir string) (se
 		return nil, nil, err
 	}
 	// Cloud creds are short-lived (SSO role creds / ADC access token) and delivered as env vars
-	// through the secret channel, so they ride secrets.env (container) / the scp'd env (vm) and
-	// reach host/sandbox children too. No revoke: decay-first.
+	// through the secret channel, so they ride secrets.env (container) and reach host children too.
+	// No revoke: decay-first.
 	awsEnv, err := creds.StageAWS(ctx, prof.Credentials, stageDir)
 	if err != nil {
 		return nil, nil, err
@@ -762,18 +1908,42 @@ func stageProfile(ctx context.Context, prof policy.Profile, stageDir string) (se
 	secretEnv = append(secretEnv, gcpEnv...)
 	// kubeconfig / .npmrc / ssh key bearers are staged 0600 in stageDir; KUBECONFIG /
 	// NPM_CONFIG_USERCONFIG / GIT_SSH_COMMAND are non-secret host paths delivered via the env for
-	// host/sandbox, and via the bind mount (paths set by the compose file) for container.
+	// host, and via the bind mount (paths set by the compose file) for container.
 	kubeEnv, err := creds.StageKube(ctx, prof.Credentials, stageDir)
 	if err != nil {
 		return nil, nil, err
 	}
-	sshEnv, err := creds.StageSSH(ctx, prof.Credentials, stageDir)
+	// One forge per profile: github (App tokens / PAT over HTTPS) and forgejo (deploy keys) both
+	// stage git credentials into the same dir; cross-forge unification is out of specs/0068 scope.
+	if prof.Credentials != nil && prof.Credentials.Github != nil && prof.Credentials.Forgejo != nil {
+		return nil, nil, fmt.Errorf("credentials: set either github or forgejo, not both")
+	}
+	// GitHub App staging and Forgejo deploy-key staging both read the host account links; load them
+	// only when a forge creds block is present so a malformed accounts.cue never breaks a run that
+	// uses no forge creds (specs/0069 T2/T4/T6).
+	var accounts *userconfig.Accounts
+	if prof.Credentials != nil && (prof.Credentials.Github != nil || prof.Credentials.Forgejo != nil) {
+		accPath, err := userconfig.DefaultAccountsPath()
+		if err != nil {
+			return nil, nil, err
+		}
+		accounts, err = userconfig.LoadAccounts(accPath)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	githubEnv, err := creds.StageGithub(ctx, prof.Credentials, stageDir, accounts)
+	if err != nil {
+		return nil, nil, err
+	}
+	forgejoEnv, err := creds.StageForgejo(ctx, prof.Credentials, stageDir, accounts)
 	if err != nil {
 		return nil, nil, err
 	}
 	pathEnv = append(pathEnv, npmrcEnv...)
 	pathEnv = append(pathEnv, kubeEnv...)
-	pathEnv = append(pathEnv, sshEnv...)
+	pathEnv = append(pathEnv, githubEnv...)
+	pathEnv = append(pathEnv, forgejoEnv...)
 	return secretEnv, pathEnv, nil
 }
 
@@ -781,31 +1951,65 @@ func stageProfile(ctx context.Context, prof policy.Profile, stageDir string) (se
 // workspace, launches the agent under its environment, and wipes the stage on
 // exit. Returns the child's exit code.
 func runProfile(name string, prof policy.Profile, argv []string, ws string) (int, error) {
-	ctx := context.Background()
+	// SIGTERM (what `session stop` sends to this wrapper) and SIGHUP (terminal /
+	// Emacs-buffer close) cancel the run so the boundary is torn down and staged
+	// secrets are wiped via the deferred teardown in runProfileCtx, instead of
+	// the process dying with its defers unrun and leaving a live container
+	// holding staged secrets (specs/0050 PR2, gap #2). SIGINT is deliberately
+	// NOT caught: interactive Ctrl-C must reach the agent (e.g. interrupt a
+	// generation), not tear the session down. runProfile is shared with
+	// `safeslop run`, so this also gives that path a graceful teardown without
+	// changing its Ctrl-C behavior. SIGKILL is uncatchable; PR1's liveness
+	// reconcile is the backstop for a wrapper that dies without cleaning up.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGHUP)
+	defer stop()
+	return runProfileCtx(ctx, name, prof, argv, ws)
+}
 
-	stageDir := filepath.Join(ws, ".safeslop", "runtime", name)
+// runIO optionally rebinds an agent's stdio. The zero value is the coupled path:
+// the agent inherits the wrapper's stdio (a tty under Emacs make-term). A detached
+// supervisor has no inherited terminal, so it passes a PTY slave it owns: host
+// runs the agent on that slave as its controlling terminal, and container
+// binds the `compose run` process's stdio to it so the container's tty bridges
+// back (specs/0051 D2).
+type runIO struct {
+	Stdin  io.Reader
+	Stdout io.Writer
+	Stderr io.Writer
+}
+
+// containerLaunch is the container-launch seam: the real container.Launch in
+// production, swappable in tests to assert the detached supervisor's PTY is
+// forwarded without standing up docker.
+var containerLaunch = container.Launch
+
+func runProfileCtx(ctx context.Context, name string, prof policy.Profile, argv []string, ws string, stdio ...runIO) (int, error) {
+	var rio runIO
+	if len(stdio) > 0 {
+		rio = stdio[0]
+	}
+	stageDir, err := stageDirFor(name, ws)
+	if err != nil {
+		return 1, err
+	}
 	defer os.RemoveAll(stageDir) // wipe staged secrets/.npmrc regardless of outcome
 
-	// kube/ssh creds need a file at a boundary-stable path; vm's scp'd stage path
-	// (unknown guest $HOME, single-quoted secrets.env) isn't wired yet. Fail fast,
-	// before minting any token / registering any deploy key (specs/0010, specs/0011).
-	if prof.Environment == "vm" && prof.Credentials != nil {
-		if prof.Credentials.Kube != nil {
-			return 1, fmt.Errorf("kube credentials are not yet supported with environment:%q — use environment:\"container\" (specs/0010)", prof.Environment)
-		}
-		if prof.Credentials.Ssh != nil {
-			return 1, fmt.Errorf("ssh credentials are not yet supported with environment:%q — use environment:\"container\" (specs/0011)", prof.Environment)
-		}
+	// kube/ssh creds are staged as files in stageDir and delivered via the /safeslop/runtime bind
+	// mount (container). GIT_SSH_COMMAND/KUBECONFIG are exported inside the boundary.
+	if err := seedAgentDefaults(prof, ws); err != nil {
+		return 1, err
 	}
-
 	secretEnv, pathEnv, err := stageProfile(ctx, prof, stageDir)
 	if err != nil {
 		return 1, err
 	}
 	// Best-effort revoke runs before the stageDir wipe (deferred after the top-of-func wipe, so
 	// LIFO orders it first).
-	if prof.Credentials != nil && prof.Credentials.Ssh != nil {
-		defer creds.RevokeSSH(context.Background(), stageDir)
+	if prof.Credentials != nil && prof.Credentials.Github != nil {
+		defer creds.RevokeGithub(context.Background(), stageDir)
+	}
+	if prof.Credentials != nil && prof.Credentials.Forgejo != nil {
+		defer creds.RevokeForgejo(context.Background(), stageDir)
 	}
 
 	// Detect (and warn about) any change the agent makes to git's executable surface —
@@ -816,23 +2020,33 @@ func runProfile(name string, prof policy.Profile, argv []string, ws string) (int
 	defer warnGitExecSurface(ws, gitBefore)
 
 	switch prof.Environment {
-	case "sandbox":
-		env := childEnv(secretEnv, pathEnv)
-		return sandbox.Launch(ctx, engexec.LaunchSpec{Argv: argv, Dir: ws, Env: env}, ws, prof.Network)
 	case "host":
+		argv = resolveHostBinary(argv)
 		env := childEnv(secretEnv, pathEnv)
-		return engexec.RunInTerminal(ctx, engexec.LaunchSpec{Argv: argv, Dir: ws, Env: env})
+		// A detached supervisor passes a PTY slave it owns (rio set); make it the
+		// agent's controlling terminal. The coupled path (rio zero) inherits the
+		// user's real terminal and must not steal it (specs/0051).
+		return engexec.RunInTerminal(ctx, engexec.LaunchSpec{Argv: argv, Dir: ws, Env: env, Stdin: rio.Stdin, Stdout: rio.Stdout, Stderr: rio.Stderr, ControllingTTY: rio.Stdin != nil})
 	case "container":
 		// secrets go in secrets.env (sourced by the entrypoint); .npmrc and kubeconfig
 		// are staged in stageDir and reached via the /safeslop/runtime bind mount.
-		return container.Launch(ctx, engexec.LaunchSpec{Argv: argv}, ws, prof.Network, secretEnv, stageDir)
-	case "vm":
-		// secrets ride secrets.env scp'd into the VM and sourced over ssh; the VM is destroyed on exit.
-		tk := ""
-		if prof.Toolchain != nil {
-			tk = prof.Toolchain.Kind
+		// Resolve the profile's catalog package set (specs/0058): its identity set selects
+		// the agent image (which tools get baked), and its runtime egress is UNIONed into
+		// the squid allowlist (union-only; never relaxes default-deny).
+		resolved, err := policy.Resolve(prof)
+		if err != nil {
+			return 1, fmt.Errorf("resolve packages for profile %q: %w", name, err)
 		}
-		return vm.Launch(ctx, argv, prof.Network, secretEnv, stageDir, name, tk)
+		// egress = the agent's built-in providers + the resolved packages' runtimeEgress +
+		// the profile's egress: list (specs/0046 + 0058 N2).
+		egress := append(append([]string{}, policy.AgentEgress(prof.Agent)...), resolved.RuntimeEgress...)
+		// Union the hosts the staged git credentials need to reach (GitHub HTTPS + CDN, specs/0069 T7).
+		egress = append(egress, policy.CredsEgress(&prof)...)
+		egress = append(egress, prof.Egress...)
+		// A detached supervisor passes a PTY slave it owns (rio set); forward it so the
+		// container's tty bridges to the supervisor's PTY for attach. Coupled (rio zero)
+		// leaves stdio nil and container.Launch runs the user's terminal (specs/0051).
+		return containerLaunch(ctx, engexec.LaunchSpec{Argv: argv, Stdin: rio.Stdin, Stdout: rio.Stdout, Stderr: rio.Stderr}, ws, prof.Network, egress, secretEnv, stageDir, resolved.IdentitySet)
 	default:
 		return 1, fmt.Errorf("unknown environment %q", prof.Environment)
 	}
@@ -882,9 +2096,27 @@ func printWarnings(ws []policy.Warning) {
 	}
 }
 
+func lintWarnings(ws []policy.Warning) []jsoncontract.Message {
+	out := make([]jsoncontract.Message, 0, len(ws))
+	for _, w := range ws {
+		out = append(out, jsoncontract.NewMessage(jsoncontract.CodePolicyDenied, w.Message, false, map[string]any{
+			"profile":   w.Profile,
+			"lint_code": w.Code,
+		}))
+	}
+	return out
+}
+
 func arg0(args []string) string {
 	if len(args) > 0 {
 		return args[0]
+	}
+	return ""
+}
+
+func argAt(args []string, i int) string {
+	if len(args) > i {
+		return args[i]
 	}
 	return ""
 }
@@ -893,6 +2125,10 @@ func arg0(args []string) string {
 // walking up from the current directory.
 func findConfig(explicit string) (string, error) {
 	if explicit != "" {
+		// A directory => the safeslop.cue inside it (callers may pass a config dir).
+		if fi, err := os.Stat(explicit); err == nil && fi.IsDir() {
+			return filepath.Join(explicit, "safeslop.cue"), nil
+		}
 		return explicit, nil
 	}
 	dir, err := os.Getwd()
@@ -935,20 +2171,59 @@ func selectProfile(cfg *policy.Config, requested string) (string, policy.Profile
 
 // agentArgv maps a profile's agent to the command to launch.
 func agentArgv(p policy.Profile) ([]string, error) {
-	switch p.Agent {
+	switch policy.NormalizeAgent(p.Agent) {
 	case "claude":
 		return []string{"claude"}, nil
-	case "opencode":
-		return []string{"opencode"}, nil
+	case "pi":
+		return []string{"pi"}, nil
+	case "fish":
+		return []string{"fish"}, nil
+	case "zsh":
+		return []string{"zsh"}, nil
 	case "shell":
-		sh := os.Getenv("SHELL")
-		if sh == "" {
-			sh = "/bin/sh"
+		// The host's $SHELL is an absolute host path (e.g. /bin/zsh, /opt/homebrew/bin/fish).
+		// That path is correct for host (the agent runs on the host) but does NOT exist
+		// inside a container, where exec would fail ("/bin/zsh: not found"). For container,
+		// name a shell guaranteed to exist in the image instead — resolved via the guest's
+		// PATH, not the host path.
+		switch p.Environment {
+		case "container":
+			// The agent image (node:22-bookworm + fish) always has bash.
+			return []string{"bash"}, nil
+		default: // host
+			sh := os.Getenv("SHELL")
+			if sh == "" {
+				sh = "/bin/sh"
+			}
+			return []string{sh}, nil
 		}
-		return []string{sh}, nil
 	default:
 		return nil, fmt.Errorf("unknown agent %q", p.Agent)
 	}
+}
+
+// resolveHostBinary makes argv[0] an absolute path via the reconstructed host PATH, for the host
+// tier where the agent runs in the host process namespace. Under a Finder/launchd launch the
+// process PATH is stripped, so a bare "claude" would fail to exec; resolving it against the
+// host_discovery_env recovers the real location. Container resolves inside the guest and must
+// NOT be passed through here. Uses the same rich-env-for-discovery path as detection (the host child
+// env firewall is childEnv, not this).
+func resolveHostBinary(argv []string) []string {
+	return resolveBinaryWith(argv, func(name string) (string, bool) {
+		return hostenv.Reconstruct().LookPath(name)
+	})
+}
+
+// resolveBinaryWith resolves argv[0] to an absolute path using lookPath, leaving an already-absolute
+// path or an unresolvable name unchanged (extracted from resolveHostBinary so it is testable).
+func resolveBinaryWith(argv []string, lookPath func(string) (string, bool)) []string {
+	if len(argv) == 0 || filepath.IsAbs(argv[0]) {
+		return argv
+	}
+	if abs, ok := lookPath(argv[0]); ok {
+		return append([]string{abs}, argv[1:]...)
+	}
+	return argv
 }
 
 func emitJSON(v any) {
