@@ -1,6 +1,6 @@
 # 0069 — Forge account links + ephemeral repo-scoped creds: P1 implementation plan
 
-**Status:** plan, ready to execute **Date:** 2026-07-03
+**Status:** implemented — P1 landed on `forge-account-creds` (T1–T10; T8 TTL surfaced in `session status`, github row kind renamed ssh→github). Real-forge smoke = manual (T10, see PR). **Date:** 2026-07-03 (impl 2026-07-04)
 Executes P1 of the ratified decision `specs/0068-forge-account-ephemeral-creds-flo.md`
 (FLO baseline 88.0/100, 5 forced fixes folded). Prior art & laws:
 `specs/0068-forge-account-ephemeral-creds-ayo.md`, specs/0047 (deploy-key staging),
