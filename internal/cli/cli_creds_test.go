@@ -92,7 +92,7 @@ func TestCredsListEmitsContractEnvelope(t *testing.T) {
 	if r := findRow(rows, "secret", "TOKEN"); r == nil || r["status"] != "resolvable" {
 		t.Fatalf("secret TOKEN not resolvable: %#v", r)
 	}
-	if r := findRow(rows, "ssh", "origin"); r == nil || r["status"] != "ephemeral" {
+	if r := findRow(rows, "github", "origin"); r == nil || r["status"] != "ephemeral" {
 		t.Fatalf("ssh not ephemeral: %#v", r)
 	}
 	if r := findRow(rows, "aws", "acme"); r == nil || r["status"] != "ambient" {

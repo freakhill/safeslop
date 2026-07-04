@@ -28,8 +28,8 @@ const (
 // value-free readiness status. It is the wire row behind `safeslop creds list` (specs/0067).
 type CredRow struct {
 	Profile string    `json:"profile"`
-	Kind    string    `json:"kind"`  // secret|pnpm|ssh|forgejo|aws|gcp|kube
-	Name    string    `json:"name"`  // env var (secret), host (pnpm), repo/"origin" (ssh/forgejo), cluster/profile (aws/gcp/kube)
+	Kind    string    `json:"kind"`  // secret|pnpm|github|forgejo|aws|gcp|kube
+	Name    string    `json:"name"`  // env var (secret), host (pnpm), repo/"origin" (github/forgejo), cluster/profile (aws/gcp/kube)
 	Scope   string    `json:"scope"` // extra detail: mode/write/ttl/region/scope
 	Ref     string    `json:"ref"`   // op://.../env:NAME source ref, or "" for ambient/ephemeral (refs are not values)
 	Status  RefStatus `json:"status"`
@@ -125,15 +125,15 @@ func inspectProfile(ctx context.Context, profile string, prof policy.Profile, op
 	}
 
 	// github: pat mode probes its token ref; app mode is ephemeral (minted per session). The row
-	// kind stays "ssh" until the specs/0069 T4 inspect rework; the provider is credentials.github.
+	// kind is "github" (renamed from the legacy "ssh" once T4 dropped GitHub SSH); provider is credentials.github.
 	if s := c.Github; s != nil {
 		if s.Mode == "pat" {
 			for _, name := range repoNames(s.Repos) {
-				row("ssh", name, "pat "+access(s.Write), s.Pat, probeRef(ctx, s.Pat, op, p))
+				row("github", name, "pat "+access(s.Write), s.Pat, probeRef(ctx, s.Pat, op, p))
 			}
 		} else {
 			for _, name := range repoNames(s.Repos) {
-				row("ssh", name, "app "+access(s.Write)+ttl(s.Ttl), "", StatusEphemeral)
+				row("github", name, "app "+access(s.Write)+ttl(s.Ttl), "", StatusEphemeral)
 			}
 		}
 	}

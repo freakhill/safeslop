@@ -110,7 +110,7 @@ func TestInspectOpResolvable(t *testing.T) {
 func TestInspectSshDeployKeyEphemeral(t *testing.T) {
 	cfg := cfgWith(policy.Profile{Credentials: &policy.Credentials{Github: &policy.GithubCreds{}}})
 	rep := Inspect(context.Background(), cfg, fakeProber(nil, false, false, nil, nil))
-	r, ok := rowFor(rep.Rows, "ssh", "origin")
+	r, ok := rowFor(rep.Rows, "github", "origin")
 	if !ok {
 		t.Fatalf("no ssh origin row: %+v", rep.Rows)
 	}
@@ -125,7 +125,7 @@ func TestInspectSshDeployKeyEphemeral(t *testing.T) {
 func TestInspectSshPatProbed(t *testing.T) {
 	cfg := cfgWith(policy.Profile{Credentials: &policy.Credentials{Github: &policy.GithubCreds{Mode: "pat", Pat: "env:TOK"}}})
 	rep := Inspect(context.Background(), cfg, fakeProber(map[string]string{"TOK": "x"}, false, false, nil, nil))
-	r, ok := rowFor(rep.Rows, "ssh", "origin")
+	r, ok := rowFor(rep.Rows, "github", "origin")
 	if !ok {
 		t.Fatalf("no ssh row: %+v", rep.Rows)
 	}
