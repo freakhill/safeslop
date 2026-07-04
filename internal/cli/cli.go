@@ -417,7 +417,11 @@ func recordSessionBackend(store engsession.Store, sess engsession.Session) (engs
 		changed = true
 	}
 	if sess.Image == "" || sess.RecipeID == "" {
-		resolved, err := policy.Resolve(sessionProfile(sess))
+		prof, err := sessionProfile(sess)
+		if err != nil {
+			return engsession.Session{}, err
+		}
+		resolved, err := policy.Resolve(prof)
 		if err != nil {
 			return engsession.Session{}, err
 		}
@@ -692,13 +696,41 @@ func resolvedMetadata(resolved *policy.Resolved) *engsession.ResolvedMetadata {
 	}
 }
 
-func sessionProfile(sess engsession.Session) policy.Profile {
+// sessionProfile reconstructs the profile a session launches. A profile-backed
+// session re-reads its pinned safeslop.cue (specs/0073): the record stores only
+// scalar fields, so launching anything less than the parsed policy silently
+// strips credentials/secrets/egress/toolchain from the boundary — the 0072 F1
+// gate would verify approval of bytes that then didn't drive the launch. The
+// bytes are re-hashed against the create-time approval and parsed from that
+// same read (no verify→parse TOCTOU); every failure is fail-closed, never a
+// silent fallback to the synthetic profile. Ad-hoc sessions (PolicyPath empty)
+// have no policy file to be faithful to and keep the synthetic path.
+func sessionProfile(sess engsession.Session) (policy.Profile, error) {
 	prof := policy.Profile{Agent: sess.Agent, Environment: sess.Environment, Network: sess.Network, Workspace: sess.Workspace}
+	if sess.Profile != "" && sess.PolicyPath != "" {
+		data, err := os.ReadFile(sess.PolicyPath)
+		if err != nil {
+			return policy.Profile{}, fmt.Errorf("re-read pinned policy for session %s: %w", sess.ID, err)
+		}
+		if trust.Hash(data) != sess.PolicyHash {
+			return policy.Profile{}, fmt.Errorf("safeslop.cue at %s changed since this session was created; review it, then re-trust and recreate the session", sess.PolicyPath)
+		}
+		cfg, err := policy.LoadBytes(data)
+		if err != nil {
+			return policy.Profile{}, fmt.Errorf("parse pinned policy %s: %w", sess.PolicyPath, err)
+		}
+		p, ok := cfg.Profiles[sess.Profile]
+		if !ok {
+			return policy.Profile{}, fmt.Errorf("profile %q no longer exists in %s; recreate the session", sess.Profile, sess.PolicyPath)
+		}
+		prof = p
+		prof.Workspace = sess.Workspace
+	}
 	if sess.Resolved != nil {
 		prof.Packages = append([]string(nil), sess.Resolved.IdentitySet...)
 		prof.BareAgent = true
 	}
-	return prof
+	return prof, nil
 }
 
 func cmdSessionList() *cobra.Command {
@@ -902,7 +934,10 @@ func cmdSessionRun() *cobra.Command {
 				// D1, PR3).
 				return runDetach(store, id)
 			}
-			prof := sessionProfile(sess)
+			prof, err := sessionProfile(sess)
+			if err != nil {
+				return err
+			}
 			argv, err := agentArgv(prof)
 			if err != nil {
 				return err

@@ -58,7 +58,10 @@ func Supervise(ctx context.Context, store engsession.Store, id string, now func(
 	if err := verifySessionTrust(sess); err != nil {
 		return 1, err
 	}
-	prof := sessionProfile(sess)
+	prof, err := sessionProfile(sess)
+	if err != nil {
+		return 1, err
+	}
 	argv, err := agentArgv(prof)
 	if err != nil {
 		return 1, err

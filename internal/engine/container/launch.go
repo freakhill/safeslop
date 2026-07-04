@@ -60,8 +60,20 @@ func materializeRun(p composeParams, open bool) (string, error) {
 // egress, already unioned by the caller) to the base allowlist asset, de-duplicating while
 // preserving order (base first, then first-seen extras). Empty/whitespace entries are
 // dropped. This is the per-run effective container egress allowlist (specs/0046).
+//
+// A bare entry covered by a wildcard entry (`.example.com`, squid's dstdomain
+// "domain and all subdomains" form) is dropped: squid FATALs when its dstdomain
+// ACL holds both a wildcard `.D` and a domain equal-to-or-under D
+// ("'.github.com' is a subdomain of 'github.com'"), which crash-loops the proxy
+// and takes all egress down. The T7 CredsEgress union (specs/0069) returns bare
+// `github.com`/`codeload.github.com`/`objects.githubusercontent.com`, each already
+// covered by a base wildcard, so before this they collided the moment a github-creds
+// profile ran (specs/0073). Wildcard entries are left untouched — squid tolerates a
+// wildcard nested under a wildcard (`.raw.githubusercontent.com` under
+// `.githubusercontent.com`), so the base list's own nesting is preserved. Dropping a
+// covered bare entry loses no reachability: the covering wildcard already grants it.
 func composeAllowlist(base []byte, extra []string) []byte {
-	var lines []string
+	var all []string
 	seen := map[string]bool{}
 	add := func(s string) {
 		s = strings.TrimSpace(s)
@@ -69,13 +81,36 @@ func composeAllowlist(base []byte, extra []string) []byte {
 			return
 		}
 		seen[s] = true
-		lines = append(lines, s)
+		all = append(all, s)
 	}
 	for _, l := range strings.Split(string(base), "\n") {
 		add(l)
 	}
 	for _, e := range extra {
 		add(e)
+	}
+	// Collect wildcard base domains (".D" => "D"), then drop any BARE entry equal to
+	// or under some wildcard's D — the exact overlap squid rejects.
+	var wildcards []string
+	for _, s := range all {
+		if strings.HasPrefix(s, ".") {
+			wildcards = append(wildcards, s[1:])
+		}
+	}
+	covered := func(bare string) bool {
+		for _, w := range wildcards {
+			if bare == w || strings.HasSuffix(bare, "."+w) {
+				return true
+			}
+		}
+		return false
+	}
+	lines := make([]string, 0, len(all))
+	for _, s := range all {
+		if !strings.HasPrefix(s, ".") && covered(s) {
+			continue
+		}
+		lines = append(lines, s)
 	}
 	return []byte(strings.Join(lines, "\n") + "\n")
 }

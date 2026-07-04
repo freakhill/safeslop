@@ -245,7 +245,10 @@ safeslop: {
 	if err != nil {
 		t.Fatalf("load stored session: %v", err)
 	}
-	runProfile := sessionProfile(storedSession)
+	runProfile, sperr := sessionProfile(storedSession)
+	if sperr != nil {
+		t.Fatalf("sessionProfile: %v", sperr)
+	}
 	if !runProfile.BareAgent || strings.Join(runProfile.Packages, ",") != "node,pi" {
 		t.Fatalf("sessionProfile packages = %v bare=%v, want exact resolved package identity", runProfile.Packages, runProfile.BareAgent)
 	}
