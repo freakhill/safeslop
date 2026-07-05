@@ -60,7 +60,7 @@ Runtime env additions: `DOCKER_HOST`, `DOCKER_CONTEXT`, `DOCKER_CONFIG`, `DOCKER
 
 ## Execution plan
 
-- [ ] Add `internal/engine/hostexec` resolver/command layer.
+- [x] Add `internal/engine/hostexec` resolver/command layer.
   FILE:     `internal/engine/hostexec/hostexec.go`, `internal/engine/hostexec/hostexec_test.go`
   CHANGE:   Add a `Resolver` over an injectable `LookupEnv` (`PATH()`, `Get`, `LookPath`, `LookAll`) plus helper specs/classes. Implement `Resolve`, `Inspect`, `Preflight`, `CommandContext`, and env builders. Resolution rules: bare name uses `LookAll` and fails on zero or >1 executable matches for executable helpers; absolute path must be executable; relative slash paths are refused. `CommandContext` must set absolute `cmd.Path`, absolute `cmd.Args[0]`, direct argv only, and the selected allowlisted env.
   VERIFY:   `go test ./internal/engine/hostexec -v`
