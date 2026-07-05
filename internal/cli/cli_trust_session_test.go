@@ -105,6 +105,54 @@ safeslop: {
 	}
 }
 
+func TestSessionCreateFromProfileRecordsLoadedPolicyHash(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	cue := `package safeslop
+
+safeslop: {
+	version: 1
+	profiles: {
+		dev: {
+			agent: "claude"
+			environment: "container"
+			network: "deny"
+			workspace: "."
+		}
+	}
+}
+`
+	cuePath := filepath.Join(ws, "safeslop.cue")
+	if err := os.WriteFile(cuePath, []byte(cue), 0o644); err != nil {
+		t.Fatalf("write safeslop.cue: %v", err)
+	}
+	loaded, err := loadPolicyForLaunch(cuePath)
+	if err != nil {
+		t.Fatalf("load policy fixture: %v", err)
+	}
+	if err := enforceLoadedPolicyTrust(loaded, true); err != nil {
+		t.Fatalf("approve loaded policy: %v", err)
+	}
+
+	out, err := runRootForTest(t, ws, "session", "create", "--profile", "dev", "--output", "json")
+	if err != nil {
+		t.Fatalf("session create --profile: %v\nout=%s", err, out)
+	}
+	env := parseEnvelopeForTest(t, out)
+	if !env.OK {
+		t.Fatalf("expected ok envelope, got: %+v", env.Errors)
+	}
+	id, _ := env.Data["session_id"].(string)
+	stored, err := sessionStore().Get(id)
+	if err != nil {
+		t.Fatalf("load stored session: %v", err)
+	}
+	if stored.PolicyPath != loaded.trustPath || stored.PolicyHash != loaded.hash {
+		t.Fatalf("stored policy = %s %s, want loaded %s %s", stored.PolicyPath, stored.PolicyHash, loaded.trustPath, loaded.hash)
+	}
+}
+
 // TestVerifySessionTrustDetectsDrift pins the run-time re-verify (specs/0072 F1, closing 0070 B3):
 // session run/supervise rebuild the profile from the record, so verifySessionTrust must refuse a
 // session whose policy was edited (or re-trusted to different bytes) since create.

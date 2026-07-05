@@ -223,11 +223,11 @@ func cmdRun() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			cfg, err := policy.Load(path)
+			loaded, err := loadPolicyForLaunch(path)
 			if err != nil {
 				return err
 			}
-			name, prof, err := selectProfile(cfg, arg0(args))
+			name, prof, err := selectProfile(loaded.cfg, arg0(args))
 			if err != nil {
 				return err
 			}
@@ -286,7 +286,7 @@ func cmdRun() *cobra.Command {
 
 			// Fail-closed: only an explicitly host-approved safeslop.cue may launch an agent
 			// (specs/0022). --dry-run above stays ungated — it is inspection, like validate.
-			if err := enforceTrust(path, trustFlag); err != nil {
+			if err := enforceLoadedPolicyTrust(loaded, trustFlag); err != nil {
 				return err
 			}
 			if prof.Environment == "container" {
@@ -662,22 +662,23 @@ func createSessionFromProfile(store engsession.Store, profile string) (engsessio
 	if err != nil {
 		return engsession.Session{}, emitContractError(jsoncontract.CodeNotFound, "safeslop.cue not found", map[string]any{"error": err.Error()})
 	}
-	cfg, err := policy.Load(path)
+	loaded, err := loadPolicyForLaunch(path)
 	if err != nil {
 		return engsession.Session{}, emitContractError(jsoncontract.CodeSchemaViolation, "load safeslop.cue", map[string]any{"path": path, "error": err.Error()})
 	}
 	// Gate the session lane on the same host-approval `safeslop run` requires (specs/0072 F1,
 	// closing 0070 B1): the Emacs client launches exclusively through session create, so without
 	// this every session launch skipped policy-byte approval. The approved hash is recorded on the
-	// session below and re-verified at run time (verifySessionTrust).
-	approvedPath, approvedHash, status, err := checkTrust(path)
+	// session below and re-verified at run time (verifySessionTrust). The status check uses the same
+	// bytes parsed above, so the session cannot approve one policy read while recording another.
+	status, err := loadedPolicyTrustStatus(loaded)
 	if err != nil {
 		return engsession.Session{}, emitContractError(jsoncontract.CodeIOError, "verify safeslop.cue trust", map[string]any{"path": path, "error": err.Error()})
 	}
 	if status != trust.Trusted {
-		return engsession.Session{}, emitContractError(jsoncontract.CodeTrustRequired, "safeslop.cue is not host-approved", map[string]any{"path": approvedPath, "status": status.String(), "hint": "safeslop trust " + approvedPath})
+		return engsession.Session{}, emitContractError(jsoncontract.CodeTrustRequired, "safeslop.cue is not host-approved", map[string]any{"path": loaded.trustPath, "status": status.String(), "hint": "safeslop trust " + loaded.trustPath})
 	}
-	prof, ok := cfg.Profiles[profile]
+	prof, ok := loaded.cfg.Profiles[profile]
 	if !ok {
 		return engsession.Session{}, emitContractError(jsoncontract.CodeNotFound, fmt.Sprintf("no profile %q in safeslop.cue", profile), map[string]any{"profile": profile, "path": path})
 	}
@@ -711,8 +712,8 @@ func createSessionFromProfile(store engsession.Store, profile string) (engsessio
 	sess.RecipeID = recipe.RecipeID
 	sess.Image = recipe.AgentImage
 	sess.Resolved = resolvedMetadata(resolved)
-	sess.PolicyPath = approvedPath
-	sess.PolicyHash = approvedHash
+	sess.PolicyPath = loaded.trustPath
+	sess.PolicyHash = loaded.hash
 	if err := store.Save(sess); err != nil {
 		return engsession.Session{}, emitContractError(jsoncontract.CodeIOError, "save session", map[string]any{"error": err.Error()})
 	}
@@ -1316,49 +1317,99 @@ func emitContractError(code jsoncontract.ErrorCode, message string, details map[
 	return errOutputEmitted
 }
 
-func enforceTrust(policyPath string, allowTrust bool) error {
-	if allowTrust {
-		abs := canonicalPolicyPath(policyPath)
-		policyBytes, err := os.ReadFile(abs)
-		if err != nil {
-			return err
-		}
-		storePath, err := trust.DefaultPath()
-		if err != nil {
-			return err
-		}
-		store, err := trust.Load(storePath)
-		if err != nil {
-			return err
-		}
-		return store.Approve(abs, policyBytes)
+type launchPolicy struct {
+	trustPath string
+	bytes     []byte
+	hash      string
+	cfg       *policy.Config
+}
+
+func loadPolicyForLaunch(policyPath string) (launchPolicy, error) {
+	lp := launchPolicy{trustPath: canonicalPolicyPath(policyPath)}
+	policyBytes, err := os.ReadFile(lp.trustPath)
+	if err != nil {
+		return launchPolicy{}, fmt.Errorf("read %s: %w", lp.trustPath, err)
 	}
-	abs, _, status, err := checkTrust(policyPath)
+	cfg, err := policy.LoadBytes(policyBytes)
+	if err != nil {
+		return launchPolicy{}, fmt.Errorf("%s:\n%w", policyPath, err)
+	}
+	lp.bytes = policyBytes
+	lp.hash = trust.Hash(policyBytes)
+	lp.cfg = cfg
+	return lp, nil
+}
+
+func enforceTrust(policyPath string, allowTrust bool) error {
+	abs := canonicalPolicyPath(policyPath)
+	policyBytes, err := os.ReadFile(abs)
+	if err != nil {
+		return err
+	}
+	if allowTrust {
+		return approvePolicyBytes(abs, policyBytes)
+	}
+	_, status, err := policyBytesTrustStatus(abs, policyBytes)
 	if err != nil {
 		return err
 	}
 	return trustStatusError(abs, status)
 }
 
+func enforceLoadedPolicyTrust(lp launchPolicy, allowTrust bool) error {
+	if allowTrust {
+		return approvePolicyBytes(lp.trustPath, lp.bytes)
+	}
+	status, err := loadedPolicyTrustStatus(lp)
+	if err != nil {
+		return err
+	}
+	return trustStatusError(lp.trustPath, status)
+}
+
+func loadedPolicyTrustStatus(lp launchPolicy) (trust.Status, error) {
+	_, status, err := policyBytesTrustStatus(lp.trustPath, lp.bytes)
+	return status, err
+}
+
+func approvePolicyBytes(abs string, policyBytes []byte) error {
+	store, err := loadTrustStore()
+	if err != nil {
+		return err
+	}
+	return store.Approve(abs, policyBytes)
+}
+
+func policyBytesTrustStatus(abs string, policyBytes []byte) (hash string, status trust.Status, err error) {
+	store, err := loadTrustStore()
+	if err != nil {
+		return "", trust.Untrusted, err
+	}
+	return trust.Hash(policyBytes), store.Check(abs, policyBytes), nil
+}
+
+func loadTrustStore() (*trust.Store, error) {
+	storePath, err := trust.DefaultPath()
+	if err != nil {
+		return nil, err
+	}
+	return trust.Load(storePath)
+}
+
 // checkTrust resolves the canonical policy path, hashes its current bytes, and reports the trust
-// status against the host store. Shared by the `run` gate, the session-create gate, and the
-// run/supervise re-verify (specs/0072 F1). It returns the hash so create can record exactly which
-// approved bytes a session was launched against, closing the create→run drift (0070 B3).
+// status against the host store. Shared by the standalone trust gate and the run/supervise re-verify
+// (specs/0072 F1). Launch/create paths use loadPolicyForLaunch so parse + trust observe one read.
 func checkTrust(policyPath string) (abs, hash string, status trust.Status, err error) {
 	abs = canonicalPolicyPath(policyPath)
 	policyBytes, err := os.ReadFile(abs)
 	if err != nil {
 		return abs, "", trust.Untrusted, err
 	}
-	storePath, err := trust.DefaultPath()
+	hash, status, err = policyBytesTrustStatus(abs, policyBytes)
 	if err != nil {
 		return abs, "", trust.Untrusted, err
 	}
-	store, err := trust.Load(storePath)
-	if err != nil {
-		return abs, "", trust.Untrusted, err
-	}
-	return abs, trust.Hash(policyBytes), store.Check(abs, policyBytes), nil
+	return abs, hash, status, nil
 }
 
 // trustStatusError maps a trust status to the fail-closed CLI error `safeslop run` surfaces; a
