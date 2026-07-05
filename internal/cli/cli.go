@@ -321,8 +321,16 @@ func canonicalPolicyPath(p string) string {
 
 var errOutputEmitted = errors.New("machine-readable error already emitted")
 
+// sessionStageDir reconstructs the deterministic host stage dir a session's run staged under,
+// so teardown paths (credential revoke, boundary reap) address the exact same tree — and the
+// exact safeslop.session label — the launch path used (mirrors runProfileCtx's
+// stageDirFor("session-"+id, ws); specs/0074).
+func sessionStageDir(sess engsession.Session) (string, error) {
+	return stageDirFor("session-"+sess.ID, sess.Workspace)
+}
+
 var sessionRevokeCredentials = func(sess engsession.Session) error {
-	stageDir, err := stageDirFor("session-"+sess.ID, sess.Workspace)
+	stageDir, err := sessionStageDir(sess)
 	if err != nil {
 		return err
 	}
@@ -388,11 +396,27 @@ var sessionKillProcess = func(target int) error {
 // an exit. Overridable in tests.
 var sessionProcessAlive = engsession.ProcessAlive
 
+// sessionReapKey is the safeslop.session label value the launch path stamps on a session's
+// boundary: SessionIDFromStageDir(stageDir), NOT the bare session id. The stage dir carries an
+// fnv(ws) suffix, so the label is "<id>-<hash>"; reaping by the bare id misses it and a detached
+// stop leaks its containers (specs/0074 Bug 1).
+func sessionReapKey(sess engsession.Session) (string, error) {
+	stageDir, err := sessionStageDir(sess)
+	if err != nil {
+		return "", err
+	}
+	return container.SessionIDFromStageDir(stageDir), nil
+}
+
 func sessionReapBoundary(sess engsession.Session) error {
 	if sess.Environment != "container" {
 		return nil
 	}
-	return container.ReapBySession(context.Background(), engineForSession(sess), sess.ID)
+	key, err := sessionReapKey(sess)
+	if err != nil {
+		return err
+	}
+	return container.ReapBySession(context.Background(), engineForSession(sess), key)
 }
 
 // detectEngineName reports the ambient container runtime that would drive a session, for recording
@@ -1401,14 +1425,11 @@ func cmdDown() *cobra.Command {
 			if err != nil {
 				return nil
 			}
-			dir, composeFile, err := container.ComposeForDown()
-			if err != nil {
-				return err
-			}
-			defer os.RemoveAll(dir)
-			if err := container.Down(ctx, eng, composeFile); err != nil {
-				return err
-			}
+			// The label sweep (ReapManaged) is the real teardown: it removes every
+			// safeslop.managed container + network regardless of compose project. The former
+			// ComposeForDown+Down step rendered a throwaway compose whose ephemeral project
+			// matched no live session (a no-op) and, with no AgentImage, failed compose schema
+			// validation before the sweep could run — breaking `down` entirely (specs/0074 Bug 2).
 			return container.ReapManaged(ctx, eng)
 		},
 	}

@@ -132,11 +132,3 @@ func Up(ctx context.Context, eng runtime.Engine, dir, composeFile string, enable
 	}
 	return runEngine(ctx, eng, "compose", "-f", composeFile, "up", "-d", "proxy")
 }
-
-// Down stops squid + networks. A "" composeFile is a no-op.
-func Down(ctx context.Context, eng runtime.Engine, composeFile string) error {
-	if composeFile == "" {
-		return nil
-	}
-	return runEngine(ctx, eng, "compose", "-f", composeFile, "down")
-}
