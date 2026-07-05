@@ -2,8 +2,11 @@ package runtime
 
 import (
 	"context"
-	"os/exec"
+	"errors"
+	"path/filepath"
 	"testing"
+
+	"github.com/freakhill/safeslop/internal/engine/hostexec"
 )
 
 // fakeDetector builds a detector whose PATH lookup, capability probe, and env reads are all injected, so
@@ -12,14 +15,14 @@ import (
 // runtime binary). A runtime is "available" only when it is BOTH on PATH and its probe returns 0.
 func fakeDetector(onPath, probeOK map[string]bool, env map[string]string) detector {
 	return detector{
-		lookPath: func(name string) (string, error) {
+		resolveRuntime: func(name string) (string, error) {
 			if onPath[name] {
 				return "/usr/bin/" + name, nil
 			}
-			return "", exec.ErrNotFound
+			return "", hostexec.ErrNotFound
 		},
 		run: func(_ context.Context, argv []string) (string, int, error) {
-			if probeOK[argv[0]] {
+			if probeOK[filepath.Base(argv[0])] {
 				return "", 0, nil
 			}
 			return "probe failed", 1, nil
@@ -48,6 +51,20 @@ func TestDetectPrecedenceDockerBeatsPodmanAndLima(t *testing.T) {
 	}
 }
 
+func TestDetectCachesResolvedRuntimePath(t *testing.T) {
+	eng, err := detect(fakeDetector(set("docker"), set("docker"), nil), PolicyAllow)
+	if err != nil {
+		t.Fatalf("detect: %v", err)
+	}
+	if got := eng.Argv("ps")[0]; got != "/usr/bin/docker" {
+		t.Fatalf("Argv()[0]=%q, want resolved absolute docker path", got)
+	}
+	cmd := eng.Command(context.Background(), "ps")
+	if cmd.Path != "/usr/bin/docker" || cmd.Args[0] != "/usr/bin/docker" {
+		t.Fatalf("Command path = %q args=%v, want resolved absolute docker path", cmd.Path, cmd.Args)
+	}
+}
+
 func TestDetectPrecedenceFallsToPodmanThenLima(t *testing.T) {
 	// No docker → podman wins.
 	eng, err := detect(fakeDetector(set("podman", "lima"), set("podman", "lima"), nil), PolicyAllow)
@@ -68,6 +85,26 @@ func TestDetectDaemonDownIsNotAvailable(t *testing.T) {
 	eng, err := detect(d, PolicyAllow)
 	if err != nil || eng.Name() != "podman" {
 		t.Fatalf("docker daemon down: want fall-through to podman, got %q (err %v)", engName(eng), err)
+	}
+}
+
+func TestDetectShadowedRuntimeIsHardError(t *testing.T) {
+	d := fakeDetector(set("podman"), set("podman"), nil)
+	d.resolveRuntime = func(name string) (string, error) {
+		if name == "docker" {
+			return "", hostexec.ErrShadowed
+		}
+		if name == "podman" {
+			return "/usr/bin/podman", nil
+		}
+		return "", hostexec.ErrNotFound
+	}
+	eng, err := detect(d, PolicyAllow)
+	if !errors.Is(err, hostexec.ErrShadowed) {
+		t.Fatalf("shadowed docker err=%v, want ErrShadowed", err)
+	}
+	if eng != nil {
+		t.Fatalf("shadowed docker must not silently fall through to %q", eng.Name())
 	}
 }
 

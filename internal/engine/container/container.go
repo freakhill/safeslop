@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"time"
 
 	"github.com/freakhill/safeslop/internal/engine/container/runtime"
+	"github.com/freakhill/safeslop/internal/engine/hostexec"
 )
 
 // Reconcile reclaims state a crashed prior run may have left: staged dirs older than maxAge
@@ -31,12 +31,10 @@ func Reconcile(ctx context.Context, repo string, maxAge time.Duration) error {
 	return nil
 }
 
-// Available reports whether this host can run the container boundary: docker + Compose v2.
+// Available reports whether this host can run the container boundary with a detected runtime.
 func Available() bool {
-	if _, err := exec.LookPath("docker"); err != nil {
-		return false
-	}
-	return exec.CommandContext(context.Background(), "docker", "compose", "version").Run() == nil
+	_, err := runtime.Detect(runtime.PolicyAllow)
+	return err == nil
 }
 
 func imageExists(ctx context.Context, eng runtime.Engine, tag string) bool {
@@ -72,7 +70,7 @@ func runEngine(ctx context.Context, eng runtime.Engine, args ...string) error {
 func runBuild(ctx context.Context, eng runtime.Engine, args ...string) error {
 	c := eng.Command(ctx, args...)
 	c.Stdout, c.Stderr = os.Stdout, os.Stderr
-	c.Env = append(os.Environ(), "DOCKER_BUILDKIT=1")
+	c.Env = hostexec.AppendEnv(c.Env, "DOCKER_BUILDKIT=1")
 	return c.Run()
 }
 

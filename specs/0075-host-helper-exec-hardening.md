@@ -84,7 +84,7 @@ Runtime env additions: `DOCKER_HOST`, `DOCKER_CONTEXT`, `DOCKER_CONFIG`, `DOCKER
   VERIFY:   `go test ./internal/cli -run 'StageProfile|HostHelper|Preflight' -v`
   EXPECTED: PASS; a missing/shadowed required helper returns before any stage file is created; profiles using only `env:` refs do not require `op`; declared forge repos avoid the `git remote` helper when no inference is needed.
 
-- [ ] Cache absolute container-runtime CLI paths from detect to execution.
+- [x] Cache absolute container-runtime CLI paths from detect to execution.
   FILE:     `internal/engine/container/runtime/runtime.go`, `internal/engine/container/runtime/engine.go`, `internal/engine/container/runtime/*_test.go`, `internal/engine/container/container.go`
   CHANGE:   Make production `Detect` use `hostexec`/`hostenv` lookup instead of raw `exec.LookPath`. Return engines carrying resolved absolute CLI paths (`docker`, `podman`, or `lima`) so `Engine.Argv` and `Engine.Command` cannot drift from detection. `defaultRunner` must execute the already-resolved path used for probes. Auto-detect keeps docker → podman → lima; missing/probe-failed candidates try next; a shadowed candidate is a hard error; explicit `SAFESLOP_CONTAINER_RUNTIME` missing/shadowed/probe-failed is fatal. `container.Available` uses the same path.
   VERIFY:   `go test ./internal/engine/container/runtime ./internal/engine/container -run 'Detect|Available|Engine|Runtime' -v`

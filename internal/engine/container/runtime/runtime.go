@@ -7,9 +7,12 @@ package runtime
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+
+	"github.com/freakhill/safeslop/internal/engine/hostexec"
 )
 
 // NetworkPolicy is the egress posture Detect gates on. It mirrors a profile's `network:` field: a deny
@@ -33,6 +36,9 @@ type Runner func(ctx context.Context, argv []string) (output string, exitCode in
 
 func defaultRunner(ctx context.Context, argv []string) (string, int, error) {
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Path = argv[0]
+	cmd.Args[0] = argv[0]
+	cmd.Env = hostexec.Default().EnvFor(hostexec.EnvRuntime)
 	var buf bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &buf, &buf
 	err := cmd.Run()
@@ -50,15 +56,26 @@ func defaultRunner(ctx context.Context, argv []string) (string, int, error) {
 // detector holds the injected seams (PATH lookup, command runner, env reader) so Detect's precedence,
 // capability probes, and egress gate are all unit-testable without shelling a real runtime.
 type detector struct {
-	lookPath func(string) (string, error)
-	run      Runner
-	getenv   func(string) string
+	resolveRuntime func(string) (string, error)
+	run            Runner
+	getenv         func(string) string
 }
 
 // Detect runs the ambient-runtime selection (specs/0066 D3/D4/D6) with production seams and returns a
 // ready, zero-config Engine or a fail-closed error. policy gates the deny tier (see NetworkPolicy).
 func Detect(policy NetworkPolicy) (Engine, error) {
-	return detect(detector{lookPath: exec.LookPath, run: defaultRunner, getenv: os.Getenv}, policy)
+	resolver := hostexec.Default()
+	return detect(detector{
+		resolveRuntime: func(name string) (string, error) {
+			res, err := resolver.Resolve(hostexec.RuntimeSpec(name, "container runtime"))
+			if err != nil {
+				return "", err
+			}
+			return res.Path, nil
+		},
+		run:    defaultRunner,
+		getenv: os.Getenv,
+	}, policy)
 }
 
 // candidates is the fixed auto-detect precedence: docker → podman → lima (D3). docker wins when present
@@ -82,16 +99,24 @@ func detect(d detector, policy NetworkPolicy) (Engine, error) {
 		if !ok {
 			return nil, fmt.Errorf("SAFESLOP_CONTAINER_RUNTIME=%q is not a known runtime; choose one of docker, podman, lima", name)
 		}
-		if !d.available(eng) {
+		resolved, ok, err := d.available(eng)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
 			return nil, fmt.Errorf("SAFESLOP_CONTAINER_RUNTIME=%q was selected but its capability probe failed (CLI absent, daemon down, or an unusable lima instance/template); an override means use exactly this runtime or fail", name)
 		}
-		return d.gate(eng, policy)
+		return d.gate(resolved, policy)
 	}
 
 	// 2. Auto-detect in fixed precedence: first whose CLI + working compose capability is present wins.
 	for _, eng := range candidates() {
-		if d.available(eng) {
-			return d.gate(eng, policy)
+		resolved, ok, err := d.available(eng)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			return d.gate(resolved, policy)
 		}
 	}
 
@@ -99,28 +124,33 @@ func detect(d detector, policy NetworkPolicy) (Engine, error) {
 	return nil, fmt.Errorf("no working container runtime found: safeslop needs one of docker, podman, or lima on PATH with a working compose (install OrbStack/Docker Desktop, `brew install podman`, or `brew install lima` and start an instance), or set SAFESLOP_CONTAINER_RUNTIME to name one explicitly")
 }
 
-// available runs the per-runtime capability probe (D4): CLI on PATH is necessary but not sufficient.
-func (d detector) available(eng Engine) bool {
-	switch eng.(type) {
+// available runs the per-runtime capability probe (D4): CLI on sanitized PATH is necessary but not sufficient.
+func (d detector) available(eng Engine) (Engine, bool, error) {
+	path, err := d.resolveRuntime(eng.Name())
+	if err != nil {
+		if errors.Is(err, hostexec.ErrNotFound) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	resolved := engineWithPath(eng, path)
+	switch resolved.(type) {
 	case HostDockerEngine:
-		return d.probeDocker()
+		return resolved, d.probeDocker(resolved), nil
 	case PodmanEngine:
-		return d.probePodman()
+		return resolved, d.probePodman(resolved), nil
 	case LimaEngine:
-		return d.probeLima()
+		return resolved, d.probeLima(resolved), nil
 	default:
-		return false
+		return nil, false, nil
 	}
 }
 
 // probeDocker: `docker compose version` succeeds — which also implies a reachable daemon, so a `docker`
 // CLI on PATH with no running daemon fails here and is treated as not-available (never "docker selected
 // but broken"). Mirrors container.Available().
-func (d detector) probeDocker() bool {
-	if _, err := d.lookPath("docker"); err != nil {
-		return false
-	}
-	_, code, err := d.run(context.Background(), []string{"docker", "compose", "version"})
+func (d detector) probeDocker(eng Engine) bool {
+	_, code, err := d.run(context.Background(), eng.Argv("compose", "version"))
 	return err == nil && code == 0
 }
 
@@ -128,10 +158,7 @@ func (d detector) probeDocker() bool {
 // (Python), docker-compose v1, or the v2 plugin, each with different external-network semantics (B2). The
 // probe asserts the external-network split actually parses: render a minimal compose referencing an
 // `external: true` network and run `podman compose -f <file> config`; reject podman if it does not.
-func (d detector) probePodman() bool {
-	if _, err := d.lookPath("podman"); err != nil {
-		return false
-	}
+func (d detector) probePodman(eng Engine) bool {
 	f, err := os.CreateTemp("", "safeslop-podman-probe-*.yml")
 	if err != nil {
 		return false
@@ -142,17 +169,14 @@ func (d detector) probePodman() bool {
 		return false
 	}
 	f.Close()
-	_, code, err := d.run(context.Background(), []string{"podman", "compose", "-f", f.Name(), "config"})
+	_, code, err := d.run(context.Background(), eng.Argv("compose", "-f", f.Name(), "config"))
 	return err == nil && code == 0
 }
 
 // probeLima: `lima nerdctl info` must succeed — a lima on the docker template (no containerd/nerdctl) or
 // with no started instance FAILS here, so detection fails closed rather than mis-driving it (S5).
-func (d detector) probeLima() bool {
-	if _, err := d.lookPath("lima"); err != nil {
-		return false
-	}
-	_, code, err := d.run(context.Background(), []string{"lima", "nerdctl", "info"})
+func (d detector) probeLima(eng Engine) bool {
+	_, code, err := d.run(context.Background(), eng.Argv("info"))
 	return err == nil && code == 0
 }
 
