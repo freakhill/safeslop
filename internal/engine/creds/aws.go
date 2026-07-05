@@ -4,9 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	osexec "os/exec"
 
+	"github.com/freakhill/safeslop/internal/engine/hostexec"
 	"github.com/freakhill/safeslop/internal/engine/policy"
 )
 
@@ -59,9 +58,13 @@ func StageAWS(ctx context.Context, creds *policy.Credentials, _ string) ([]strin
 		return nil, nil
 	}
 	argv := awsExportArgv(creds.Aws.Profile)
-	out, err := osexec.CommandContext(ctx, argv[0], argv[1:]...).Output()
+	cmd, err := hostCommand(ctx, argv, "AWS SSO credentials")
 	if err != nil {
-		return nil, fmt.Errorf("aws export-credentials (profile %q; is `aws sso login` current?): %w", creds.Aws.Profile, err)
+		return nil, err
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("aws export-credentials (profile %q; is `aws sso login` current?): helper failed", creds.Aws.Profile)
 	}
 	c, err := parseAWSProcessCreds(out)
 	if err != nil {
@@ -110,15 +113,21 @@ func parseAWSAssumeRole(out []byte) (awsCreds, error) {
 // (they override any AWS_PROFILE from the host), returning the downscoped creds.
 func assumeRoleDownscope(ctx context.Context, base awsCreds, roleArn, sessionPolicy string) (awsCreds, error) {
 	argv := awsAssumeRoleArgv(roleArn, sessionPolicy)
-	cmd := osexec.CommandContext(ctx, argv[0], argv[1:]...)
-	cmd.Env = append(os.Environ(),
-		"AWS_ACCESS_KEY_ID="+base.AccessKeyID,
-		"AWS_SECRET_ACCESS_KEY="+base.SecretAccessKey,
-		"AWS_SESSION_TOKEN="+base.SessionToken,
-	)
+	cmd, err := hostCommand(ctx, argv, "AWS assume-role downscope")
+	if err != nil {
+		return awsCreds{}, err
+	}
+	extra := []string{
+		"AWS_ACCESS_KEY_ID=" + base.AccessKeyID,
+		"AWS_SECRET_ACCESS_KEY=" + base.SecretAccessKey,
+	}
+	if base.SessionToken != "" {
+		extra = append(extra, "AWS_SESSION_TOKEN="+base.SessionToken)
+	}
+	cmd.Env = hostexec.AppendEnv(cmd.Env, extra...)
 	out, err := cmd.Output()
 	if err != nil {
-		return awsCreds{}, fmt.Errorf("aws sts assume-role (role %q; is it assumable by your SSO identity?): %w", roleArn, err)
+		return awsCreds{}, fmt.Errorf("aws sts assume-role (role %q; is it assumable by your SSO identity?): helper failed", roleArn)
 	}
 	return parseAWSAssumeRole(out)
 }

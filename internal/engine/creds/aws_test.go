@@ -18,6 +18,7 @@ func fakeBin(t *testing.T, dir, name, stdout string) {
 	if err := os.WriteFile(p, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	withCredsHostExecDir(t, dir)
 }
 
 func TestAwsExportArgv(t *testing.T) {
@@ -125,6 +126,7 @@ fi
 	if err := os.WriteFile(filepath.Join(binDir, "aws"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	withCredsHostExecDir(t, binDir)
 	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
 
 	env, err := StageAWS(context.Background(), &policy.Credentials{Aws: &policy.AwsSso{
@@ -141,5 +143,42 @@ fi
 	}
 	if strings.Contains(joined, "SSO") {
 		t.Fatalf("broad SSO creds must be replaced by the downscoped ones: %v", env)
+	}
+}
+
+func TestStageAWSDownscopeDoesNotInheritAmbientAWSProfile(t *testing.T) {
+	binDir := t.TempDir()
+	script := `#!/bin/sh
+if [ "$2" = "export-credentials" ]; then
+  echo '{"Version":1,"AccessKeyId":"SSO","SecretAccessKey":"ssosek","SessionToken":"ssotok"}'
+elif [ "$2" = "assume-role" ]; then
+  if [ -n "$AWS_PROFILE" ]; then
+    echo "ambient AWS_PROFILE leaked" >&2
+    exit 7
+  fi
+  if [ "$AWS_ACCESS_KEY_ID" != "SSO" ]; then
+    echo "explicit base creds missing" >&2
+    exit 8
+  fi
+  echo '{"Credentials":{"AccessKeyId":"DOWN","SecretAccessKey":"downsek","SessionToken":"downtok"}}'
+fi
+`
+	if err := os.WriteFile(filepath.Join(binDir, "aws"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	withCredsHostExecDir(t, binDir)
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+	t.Setenv("AWS_PROFILE", "prod")
+
+	env, err := StageAWS(context.Background(), &policy.Credentials{Aws: &policy.AwsSso{
+		Profile:       "dev",
+		RoleArn:       "arn:aws:iam::123:role/downscope",
+		SessionPolicy: `{"Version":"2012-10-17","Statement":[]}`,
+	}}, t.TempDir())
+	if err != nil {
+		t.Fatalf("StageAWS: %v", err)
+	}
+	if !strings.Contains(strings.Join(env, "\n"), "AWS_ACCESS_KEY_ID=DOWN") {
+		t.Fatalf("expected downscoped creds, got %v", env)
 	}
 }

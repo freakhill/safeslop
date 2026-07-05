@@ -50,4 +50,5 @@ func fakeStub(t *testing.T, dir, name, body string) {
 	if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	withCredsHostExecDir(t, dir)
 }

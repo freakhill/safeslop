@@ -109,6 +109,7 @@ func fakeMultiBin(t *testing.T, dir, name string, bySubcmd map[string]string) {
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(sb.String()), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	withCredsHostExecDir(t, dir)
 }
 
 func TestStageKubeEks(t *testing.T) {

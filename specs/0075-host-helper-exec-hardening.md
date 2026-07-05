@@ -72,7 +72,7 @@ Runtime env additions: `DOCKER_HOST`, `DOCKER_CONTEXT`, `DOCKER_CONFIG`, `DOCKER
   VERIFY:   `go test ./internal/engine/secrets ./internal/engine/creds -run 'Op|Secret|Inspect' -v`
   EXPECTED: PASS; missing/shadowed `op` produces actionable host-helper errors; fake `op read --no-newline` still resolves refs; no test shells live 1Password.
 
-- [ ] Route credential helpers through `hostexec`.
+- [x] Route credential helpers through `hostexec`.
   FILE:     `internal/engine/creds/ssh.go`, `internal/engine/creds/aws.go`, `internal/engine/creds/gcp.go`, `internal/engine/creds/kube.go`, tests beside each.
   CHANGE:   Update `runSSHCmd`, `StageAWS`, `assumeRoleDownscope`, `StageGCP`, and `runKubeCmd` to resolve helpers via `hostexec` and use credential envs. `assumeRoleDownscope` must stop appending to `os.Environ()` and instead inject only the freshly minted base AWS creds on top of the credential allowlist. Preserve direct argv and existing hermetic fake-binary seams.
   VERIFY:   `go test ./internal/engine/creds -run 'AWS|GCP|Kube|SSH|Forgejo|Github|Pnpm' -v`

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	osexec "os/exec"
 	"strings"
 )
 
@@ -51,13 +50,13 @@ func parseKeyID(out []byte) (string, error) {
 
 // runSSHCmd executes argv and returns stdout, wrapping failures with a hint.
 func runSSHCmd(ctx context.Context, argv []string, hint string) ([]byte, error) {
-	out, err := osexec.CommandContext(ctx, argv[0], argv[1:]...).Output()
+	cmd, err := hostCommand(ctx, argv, hint)
 	if err != nil {
-		label := argv[0]
-		if len(argv) > 1 {
-			label += " " + argv[1]
-		}
-		return nil, fmt.Errorf("%s (%s): %w", label, hint, err)
+		return nil, err
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("%s (%s): helper failed", helperLabel(argv), hint)
 	}
 	return out, nil
 }

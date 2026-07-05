@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	osexec "os/exec"
 	"path/filepath"
 	"strings"
 
@@ -30,9 +29,13 @@ func StageGCP(ctx context.Context, creds *policy.Credentials, stageDir string) (
 		return nil, nil
 	}
 	argv := gcpTokenArgv(creds.Gcp.Scopes)
-	out, err := osexec.CommandContext(ctx, argv[0], argv[1:]...).Output()
+	cmd, err := hostCommand(ctx, argv, "GCP ADC access token")
 	if err != nil {
-		return nil, fmt.Errorf("gcloud print-access-token (is ADC set up? run: gcloud auth application-default login): %w", err)
+		return nil, err
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("gcloud print-access-token (is ADC set up? run: gcloud auth application-default login): helper failed")
 	}
 	tok := strings.TrimSpace(string(out))
 	if tok == "" {
