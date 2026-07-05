@@ -11,6 +11,7 @@ import (
 	"hash/fnv"
 	"io"
 	"net"
+	"net/url"
 	"os"
 	osexec "os/exec"
 	"os/signal"
@@ -18,6 +19,7 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
+	"strings"
 	"syscall"
 	"time"
 
@@ -30,6 +32,7 @@ import (
 	engexec "github.com/freakhill/safeslop/internal/engine/exec"
 	"github.com/freakhill/safeslop/internal/engine/gitguard"
 	"github.com/freakhill/safeslop/internal/engine/hostenv"
+	"github.com/freakhill/safeslop/internal/engine/hostexec"
 	"github.com/freakhill/safeslop/internal/engine/launch"
 	"github.com/freakhill/safeslop/internal/engine/policy"
 	"github.com/freakhill/safeslop/internal/engine/secrets"
@@ -1929,6 +1932,98 @@ func launchProfile(name, configPath string) (int, error) {
 
 // ---- helpers ----
 
+var stageHostExecResolver = hostexec.Default
+
+func preflightProfileHostHelpers(prof policy.Profile, accounts *userconfig.Accounts) error {
+	return stageHostExecResolver().Preflight(requiredProfileHostHelpers(prof, accounts)...)
+}
+
+func requiredProfileHostHelpers(prof policy.Profile, accounts *userconfig.Accounts) []hostexec.Spec {
+	var specs []hostexec.Spec
+	add := func(name, purpose string) {
+		specs = append(specs, hostexec.CredentialSpec(name, purpose))
+	}
+	addOpRef := func(ref, purpose string) {
+		if strings.HasPrefix(ref, "op://") {
+			add("op", purpose)
+		}
+	}
+	for _, ref := range prof.Secrets {
+		addOpRef(ref, "op:// secrets")
+	}
+	c := prof.Credentials
+	if c == nil {
+		return specs
+	}
+	for _, r := range c.Pnpm {
+		addOpRef(r.Token, "pnpm registry token")
+	}
+	if c.Aws != nil {
+		add("aws", "AWS credentials")
+	}
+	if c.Gcp != nil {
+		add("gcloud", "GCP credentials")
+	}
+	if k := c.Kube; k != nil {
+		if k.Eks != nil {
+			add("aws", "EKS kube credentials")
+		}
+		if k.Gke != nil {
+			add("gke-gcloud-auth-plugin", "GKE kube token")
+			add("gcloud", "GKE cluster describe")
+		}
+	}
+	if g := c.Github; g != nil {
+		if g.Mode == "pat" {
+			addOpRef(g.Pat, "GitHub PAT")
+		} else if len(g.Repos) == 0 {
+			add("git", "GitHub origin inference")
+		} else {
+			for _, owner := range ownersFromRepos(g.Repos) {
+				if link := accounts.Lookup("github.com", owner); link != nil && link.Github != nil {
+					addOpRef(link.Github.PrivateKeyRef, "GitHub App key")
+				}
+			}
+		}
+	}
+	if f := c.Forgejo; f != nil {
+		add("ssh-keygen", "Forgejo deploy-key staging")
+		add("ssh-keyscan", "Forgejo host-key pinning")
+		if len(f.Repos) == 0 {
+			add("git", "Forgejo origin inference")
+		} else if host := forgejoPreflightHost(f.URL); host != "" {
+			for _, owner := range ownersFromRepos(f.Repos) {
+				if link := accounts.Lookup(host, owner); link != nil && link.Forgejo != nil {
+					addOpRef(link.Forgejo.TokenRef, "Forgejo account token")
+				}
+			}
+		}
+	}
+	return specs
+}
+
+func ownersFromRepos(repos []policy.RepoCred) []string {
+	seen := map[string]bool{}
+	var owners []string
+	for _, r := range repos {
+		owner, _, ok := strings.Cut(strings.TrimSpace(r.Repo), "/")
+		if owner == "" || !ok || seen[owner] {
+			continue
+		}
+		seen[owner] = true
+		owners = append(owners, owner)
+	}
+	return owners
+}
+
+func forgejoPreflightHost(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return u.Hostname()
+}
+
 // stageProfile resolves the profile's secrets and stages its credentials into stageDir. It
 // returns secretEnv (sensitive KEY=VAL — the resolved secrets plus aws/gcp env creds, destined
 // for the secrets.env channel / the process env) and pathEnv (non-secret NPM_CONFIG_USERCONFIG /
@@ -1936,6 +2031,23 @@ func launchProfile(name, configPath string) (int, error) {
 // caller owns the stageDir lifecycle (creation, the on-exit wipe, and creds.RevokeGithub if github
 // key was staged).
 func stageProfile(ctx context.Context, prof policy.Profile, stageDir string) (secretEnv, pathEnv []string, err error) {
+	// GitHub App staging and Forgejo deploy-key staging both read the host account links. Load them
+	// before preflight so declared repo owners can contribute their op:// account refs, but only when
+	// forge creds are present so malformed accounts.cue never breaks unrelated profiles.
+	var accounts *userconfig.Accounts
+	if prof.Credentials != nil && (prof.Credentials.Github != nil || prof.Credentials.Forgejo != nil) {
+		accPath, err := userconfig.DefaultAccountsPath()
+		if err != nil {
+			return nil, nil, err
+		}
+		accounts, err = userconfig.LoadAccounts(accPath)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	if err := preflightProfileHostHelpers(prof, accounts); err != nil {
+		return nil, nil, err
+	}
 	if len(prof.Secrets) > 0 {
 		resolved, err := secrets.ResolveMap(ctx, prof.Secrets)
 		if err != nil {
@@ -1973,20 +2085,6 @@ func stageProfile(ctx context.Context, prof policy.Profile, stageDir string) (se
 	// stage git credentials into the same dir; cross-forge unification is out of specs/0068 scope.
 	if prof.Credentials != nil && prof.Credentials.Github != nil && prof.Credentials.Forgejo != nil {
 		return nil, nil, fmt.Errorf("credentials: set either github or forgejo, not both")
-	}
-	// GitHub App staging and Forgejo deploy-key staging both read the host account links; load them
-	// only when a forge creds block is present so a malformed accounts.cue never breaks a run that
-	// uses no forge creds (specs/0069 T2/T4/T6).
-	var accounts *userconfig.Accounts
-	if prof.Credentials != nil && (prof.Credentials.Github != nil || prof.Credentials.Forgejo != nil) {
-		accPath, err := userconfig.DefaultAccountsPath()
-		if err != nil {
-			return nil, nil, err
-		}
-		accounts, err = userconfig.LoadAccounts(accPath)
-		if err != nil {
-			return nil, nil, err
-		}
 	}
 	githubEnv, err := creds.StageGithub(ctx, prof.Credentials, stageDir, accounts)
 	if err != nil {

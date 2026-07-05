@@ -78,7 +78,7 @@ Runtime env additions: `DOCKER_HOST`, `DOCKER_CONTEXT`, `DOCKER_CONFIG`, `DOCKER
   VERIFY:   `go test ./internal/engine/creds -run 'AWS|GCP|Kube|SSH|Forgejo|Github|Pnpm' -v`
   EXPECTED: PASS; tests prove helper argv is unchanged except argv[0] absolute; missing/shadowed helpers fail before command execution; downscope env excludes ambient AWS vars except explicit staged values.
 
-- [ ] Preflight required helpers before staging credential artifacts.
+- [x] Preflight required helpers before staging credential artifacts.
   FILE:     `internal/cli/cli.go`, `internal/cli/cli_stage_test.go`, optional helper file under `internal/engine/creds/` for required-helper derivation.
   CHANGE:   Before `stageProfile` writes `.npmrc`, kubeconfig, git config, SSH keys, or token files, compute the helpers known from the profile/account refs and call `hostexec.Preflight`. Include `op` for any `op://` in secrets, pnpm tokens, GitHub App key refs, Forgejo token refs; `aws` for AWS/EKS; `gcloud` and `gke-gcloud-auth-plugin` for GCP/GKE; `git` for omitted repo inference; `ssh-keygen`/`ssh-keyscan` for Forgejo deploy keys. Dynamic helpers that can only be known after a safe read still fail closed at their call sites.
   VERIFY:   `go test ./internal/cli -run 'StageProfile|HostHelper|Preflight' -v`
