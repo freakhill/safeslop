@@ -31,6 +31,9 @@ func parseOwnerRepo(out []byte) (owner, repo string, err error) {
 	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
 		return "", "", fmt.Errorf("could not parse owner/repo from %q", u)
 	}
+	if err := validateOwnerRepo(parts[0], parts[1]); err != nil {
+		return "", "", fmt.Errorf("origin remote %q: %w", u, err)
+	}
 	return parts[0], parts[1], nil
 }
 

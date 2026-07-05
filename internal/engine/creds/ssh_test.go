@@ -31,6 +31,16 @@ func TestParseOwnerRepo(t *testing.T) {
 	if _, _, err := parseOwnerRepo([]byte("/local/path\n")); err == nil {
 		t.Fatal("expected error on non-github remote")
 	}
+	bad := []string{
+		"git@github.com:acme/repo\"\nProxyCommand=sh.git\n",
+		"git@github.com:acme\nHost */repo.git\n",
+		"https://github.com/acme/re po.git\n",
+	}
+	for _, in := range bad {
+		if _, _, err := parseOwnerRepo([]byte(in)); err == nil {
+			t.Fatalf("parseOwnerRepo(%q) unexpectedly succeeded", in)
+		}
+	}
 }
 
 func TestParseKeyID(t *testing.T) {

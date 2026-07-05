@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -14,9 +15,35 @@ import (
 	"github.com/freakhill/safeslop/internal/engine/userconfig"
 )
 
+var (
+	repoComponentRE = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+	gitHostRE       = regexp.MustCompile(`^[A-Za-z0-9.-]+$`)
+)
+
 // repoSlug turns "owner/name" into a filesystem- and SSH-alias-safe "owner-name".
 func repoSlug(ownerRepo string) string {
 	return strings.ReplaceAll(strings.TrimSpace(ownerRepo), "/", "-")
+}
+
+func validateRepoComponent(label, value string) error {
+	if !repoComponentRE.MatchString(value) {
+		return fmt.Errorf("%s %q contains unsupported characters (allowed: A-Za-z0-9._-)", label, value)
+	}
+	return nil
+}
+
+func validateOwnerRepo(owner, repo string) error {
+	if err := validateRepoComponent("repo owner", owner); err != nil {
+		return err
+	}
+	return validateRepoComponent("repo name", repo)
+}
+
+func validateGitHost(host string) error {
+	if !gitHostRE.MatchString(host) {
+		return fmt.Errorf("git host %q contains unsupported characters", host)
+	}
+	return nil
 }
 
 func atoiOrZero(s string) int {
@@ -29,6 +56,9 @@ func splitOwnerRepo(s string) (owner, repo string, err error) {
 	p := strings.SplitN(strings.TrimSpace(s), "/", 2)
 	if len(p) != 2 || p[0] == "" || p[1] == "" {
 		return "", "", fmt.Errorf("repo %q must be \"owner/name\"", s)
+	}
+	if err := validateOwnerRepo(p[0], p[1]); err != nil {
+		return "", "", fmt.Errorf("repo %q: %w", s, err)
 	}
 	return p[0], p[1], nil
 }
@@ -55,13 +85,21 @@ func stageRepoSSH(stageDir, hostName, port string, knownHosts []byte, entries []
 	}
 
 	cfgPath := filepath.Join(sshDir, "config")
-	if err := os.WriteFile(cfgPath, []byte(renderAliasSSHConfig(hostName, port, khPath, entries, func(p string) string { return p })), 0o600); err != nil {
+	cfg, err := renderAliasSSHConfig(hostName, port, khPath, entries, func(p string) string { return p })
+	if err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
 		return nil, err
 	}
 	// Container runs see the same staged tree at a different path; keep a separate SSH config so
 	// IdentityFile/UserKnownHostsFile point at the path that exists inside the container.
 	containerKH := "/safeslop/runtime/.ssh/known_hosts"
-	if err := os.WriteFile(filepath.Join(sshDir, "config.container"), []byte(renderAliasSSHConfig(hostName, port, containerKH, entries, func(p string) string { return "/safeslop/runtime/.ssh/" + filepath.Base(p) })), 0o600); err != nil {
+	containerCfg, err := renderAliasSSHConfig(hostName, port, containerKH, entries, func(p string) string { return "/safeslop/runtime/.ssh/" + filepath.Base(p) })
+	if err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(filepath.Join(sshDir, "config.container"), []byte(containerCfg), 0o600); err != nil {
 		return nil, err
 	}
 
@@ -91,9 +129,18 @@ func stageRepoSSH(stageDir, hostName, port string, knownHosts []byte, entries []
 // renderAliasSSHConfig renders one "Host <hostName>-<slug>" SSH block per entry, each pinned to its
 // own IdentityFile plus the shared known_hosts. keyPath maps a staged key path into the host or
 // container view. Used by the Forgejo per-repo deploy-key staging (specs/0047 P2).
-func renderAliasSSHConfig(hostName, port, knownHostsPath string, entries []aliasEntry, keyPath func(string) string) string {
+func renderAliasSSHConfig(hostName, port, knownHostsPath string, entries []aliasEntry, keyPath func(string) string) (string, error) {
+	if err := validateGitHost(hostName); err != nil {
+		return "", err
+	}
 	var cfg strings.Builder
 	for _, e := range entries {
+		if err := validateRepoComponent("repo alias", e.slug); err != nil {
+			return "", err
+		}
+		if err := validateOwnerRepo(e.owner, e.repo); err != nil {
+			return "", err
+		}
 		alias := hostName + "-" + e.slug
 		fmt.Fprintf(&cfg, "Host %s\n", alias)
 		fmt.Fprintf(&cfg, "  HostName %s\n", hostName)
@@ -106,7 +153,7 @@ func renderAliasSSHConfig(hostName, port, knownHostsPath string, entries []alias
 		fmt.Fprintf(&cfg, "  StrictHostKeyChecking yes\n")
 		fmt.Fprintf(&cfg, "  UserKnownHostsFile %s\n\n", knownHostsPath)
 	}
-	return cfg.String()
+	return cfg.String(), nil
 }
 
 // stageForgejoMulti mints one ephemeral Forgejo/Gitea deploy key per repo in fc.Repos (all on the

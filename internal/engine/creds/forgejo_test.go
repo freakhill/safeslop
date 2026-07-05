@@ -63,6 +63,17 @@ func TestParseForgejoRemote(t *testing.T) {
 	if _, _, _, _, err := parseForgejoRemote([]byte("\n")); err == nil {
 		t.Fatal("expected error on empty remote")
 	}
+	bad := []string{
+		"git@codeberg.org:acme/repo\"\nProxyCommand=sh.git\n",
+		"git@codeberg.org:acme\nHost */repo.git\n",
+		"https://codeberg.org/acme/re po.git\n",
+		"git@codeberg.org\nProxyCommand=sh:acme/repo.git\n",
+	}
+	for _, in := range bad {
+		if _, _, _, _, err := parseForgejoRemote([]byte(in)); err == nil {
+			t.Fatalf("parseForgejoRemote(%q) unexpectedly succeeded", in)
+		}
+	}
 }
 
 func TestForgejoURLs(t *testing.T) {

@@ -27,7 +27,7 @@ M2: Git origin inference accepts owner/repo text from agent-writable `.git/confi
   VERIFY:   `go test ./internal/cli -run 'Test(LoadPolicyForLaunch|SessionCreateFromProfileRecordsLoadedPolicyHash|EnforceTrustGate|VerifySessionTrustDetectsDrift)' -count=1 -v`
   EXPECTED: command exits 0; targeted trust/session tests pass.
 
-- [ ] T2 — M2: reject injected owner/repo components before rendering staged git/ssh config
+- [x] T2 — M2: reject injected owner/repo components before rendering staged git/ssh config
   FILE:     `internal/engine/creds/multirepo.go`, `internal/engine/creds/ssh.go`, `internal/engine/creds/forgejo.go`, tests in `internal/engine/creds/*_test.go`
   CHANGE:   Centralize repo component validation in the shared repo parsing path; apply it to declared repo specs plus GitHub and Forgejo origin inference. Add regression tests with embedded newline/quote config payloads and keep current valid forms green.
   VERIFY:   `go test ./internal/engine/creds -run 'Test(ParseOwnerRepo|ParseForgejoRemote|SplitOwnerRepo|RenderAliasSSHConfigRejects)' -count=1 -v`

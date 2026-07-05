@@ -94,6 +94,9 @@ func parseForgejoRemote(out []byte) (host, port, owner, repo string, err error) 
 	if host == "" {
 		return "", "", "", "", fmt.Errorf("could not parse host from %q", u)
 	}
+	if err := validateGitHost(host); err != nil {
+		return "", "", "", "", fmt.Errorf("origin remote %q: %w", u, err)
+	}
 	if strings.EqualFold(host, "github.com") {
 		return "", "", "", "", fmt.Errorf("origin is github.com (%q); use ssh creds (the GitHub provider) for that", u)
 	}
@@ -101,6 +104,9 @@ func parseForgejoRemote(out []byte) (host, port, owner, repo string, err error) 
 	parts := strings.Split(rest, "/")
 	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
 		return "", "", "", "", fmt.Errorf("could not parse owner/repo from %q", u)
+	}
+	if err := validateOwnerRepo(parts[0], parts[1]); err != nil {
+		return "", "", "", "", fmt.Errorf("origin remote %q: %w", u, err)
 	}
 	return host, port, parts[0], parts[1], nil
 }
