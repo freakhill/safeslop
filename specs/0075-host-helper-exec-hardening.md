@@ -96,7 +96,7 @@ Runtime env additions: `DOCKER_HOST`, `DOCKER_CONTEXT`, `DOCKER_CONFIG`, `DOCKER
   VERIFY:   `go test ./internal/cli ./internal/engine/toolchain -run 'Doctor|Toolchain|Available' -v`
   EXPECTED: PASS; doctor paths come from sanitized resolution; shadowed helper state is visible or conservatively marked unavailable; no raw `exec.LookPath` remains for listed helpers.
 
-- [ ] Add a regression guard for bare host-helper execs.
+- [x] Add a regression guard for bare host-helper execs.
   FILE:     `ci/host-helper-exec-denylist.sh`, `Makefile`, tests if the repo has shell-script gates.
   CHANGE:   Add a `make check` gate that rejects new raw `exec.LookPath` / `exec.CommandContext` uses for the listed helper names outside `hostexec`, `hostenv` internals, and tests. Keep allowlist narrow so generic agent execution (`internal/engine/exec`) and test helper processes are not false positives.
   VERIFY:   `ci/host-helper-exec-denylist.sh && make check`
