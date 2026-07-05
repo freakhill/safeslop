@@ -90,7 +90,7 @@ Runtime env additions: `DOCKER_HOST`, `DOCKER_CONTEXT`, `DOCKER_CONFIG`, `DOCKER
   VERIFY:   `go test ./internal/engine/container/runtime ./internal/engine/container -run 'Detect|Available|Engine|Runtime' -v`
   EXPECTED: PASS; tests assert `Engine.Argv()[0]` is absolute; `Engine.Command().Path` is absolute; shadowed docker errors instead of selecting podman silently; explicit override still uses exactly the selected runtime or fails; teardown callers still use `PolicyAllow`.
 
-- [ ] Move diagnostics and toolchain probes onto sanitized inspection.
+- [x] Move diagnostics and toolchain probes onto sanitized inspection.
   FILE:     `internal/cli/cli.go`, `internal/engine/toolchain/toolchain.go`, affected tests.
   CHANGE:   `doctorReport` and `toolchain.Available` must use `hostexec.Inspect`/sanitized lookup. Diagnostics may report shadowed paths but must not execute a shadowed security-critical helper. Preserve JSON shape unless a new `shadowed_paths` field is explicitly added and tested.
   VERIFY:   `go test ./internal/cli ./internal/engine/toolchain -run 'Doctor|Toolchain|Available' -v`

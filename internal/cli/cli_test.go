@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/freakhill/safeslop/internal/engine/hostexec"
 	"github.com/freakhill/safeslop/internal/engine/policy"
 )
 
@@ -62,6 +63,28 @@ func TestDoctorReportsGkeAuthPlugin(t *testing.T) {
 func TestDoctorReportsGh(t *testing.T) {
 	if _, ok := doctorReport()["gh"]; !ok {
 		t.Fatalf("doctor must probe gh")
+	}
+}
+
+func TestDoctorReportsShadowedHelperWithoutMarkingPresent(t *testing.T) {
+	old := doctorHostExecResolver
+	doctorHostExecResolver = func() *hostexec.Resolver {
+		return hostexec.New(cliFakeHostEnv{path: "/safe/bin:/other/bin", all: map[string][]string{
+			"git": {"/safe/bin/git", "/other/bin/git"},
+		}})
+	}
+	t.Cleanup(func() { doctorHostExecResolver = old })
+
+	row, ok := doctorReport()["git"].(map[string]any)
+	if !ok {
+		t.Fatalf("doctor git row has unexpected shape")
+	}
+	if row["present"] != false || row["path"] != "/safe/bin/git" {
+		t.Fatalf("shadowed git should be marked unavailable with winner path: %+v", row)
+	}
+	shadowed, ok := row["shadowed_paths"].([]string)
+	if !ok || len(shadowed) != 1 || shadowed[0] != "/other/bin/git" {
+		t.Fatalf("shadowed_paths not surfaced: %+v", row)
 	}
 }
 

@@ -142,14 +142,21 @@ func cmdList() *cobra.Command {
 
 // ---- doctor ----
 
+var doctorHostExecResolver = hostexec.Default
+
 // doctorReport probes the external tools and isolation boundaries safeslop can use.
 // Extracted so it is testable and reusable (e.g. a future GUI / installer).
 func doctorReport() map[string]any {
 	tools := []string{"git", "gh", "docker", "op", "claude", "pi", "mise", "nix", "aws", "gcloud", "gke-gcloud-auth-plugin"}
 	report := map[string]any{}
+	resolver := doctorHostExecResolver()
 	for _, t := range tools {
-		p, err := osexec.LookPath(t)
-		report[t] = map[string]any{"present": err == nil, "path": p}
+		insp := resolver.Inspect(t)
+		row := map[string]any{"present": insp.Present && !insp.Shadowed, "path": insp.Path}
+		if insp.Shadowed {
+			row["shadowed_paths"] = append([]string(nil), insp.All[1:]...)
+		}
+		report[t] = row
 	}
 	report["1password-signedin"] = map[string]any{"present": secrets.OpSignedIn(context.Background()), "path": ""}
 	report["container-runtime"] = map[string]any{"present": container.Available(), "path": ""}

@@ -3,7 +3,9 @@
 // with a mise task / nix app. Enabling mise/nix inside each environment is the caller's job.
 package toolchain
 
-import "os/exec"
+import "github.com/freakhill/safeslop/internal/engine/hostexec"
+
+var hostExecResolver = hostexec.Default
 
 // Wrap transforms agentArgv per the toolchain. With run set, it returns the mise task / nix app
 // (the agent is not launched). Without run, it wraps the agent so the pinned toolchain is on
@@ -28,11 +30,11 @@ func Wrap(kind, run string, agentArgv []string) []string {
 // Wraps reports whether kind is a real toolchain (mise/nix) that Wrap will transform.
 func Wraps(kind string) bool { return kind == "mise" || kind == "nix" }
 
-// Available reports whether the kind's CLI is on the host PATH (for safeslop doctor / host runs).
+// Available reports whether the kind's CLI has one unambiguous match on safeslop's sanitized host PATH.
 func Available(kind string) bool {
 	if !Wraps(kind) {
 		return false
 	}
-	_, err := exec.LookPath(kind)
-	return err == nil
+	insp := hostExecResolver().Inspect(kind)
+	return insp.Present && !insp.Shadowed
 }
