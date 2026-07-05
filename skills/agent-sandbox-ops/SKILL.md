@@ -58,9 +58,11 @@ one and drives it, and never installs, upgrades, or manages one. Have one presen
 
 Selection: `SAFESLOP_CONTAINER_RUNTIME=docker|podman|lima` forces one (used or fail closed — no
 silent fallback); otherwise auto-detect **docker → podman → lima** (first with a working compose
-wins); none present fails closed naming all three. A `network: deny` profile is **refused on
-podman/lima** (not yet egress-verified) unless `SAFESLOP_ALLOW_UNVERIFIED_RUNTIME=1` is set;
-teardown (`down`, the startup sweep, session reap) is never gated.
+wins); none present fails closed naming all three. Runtime CLIs are resolved once through safeslop's
+sanitized host PATH and carried as absolute paths into later commands; shadowed runtime CLIs fail
+closed. A `network: deny` profile is **refused on podman/lima** (not yet egress-verified) unless
+`SAFESLOP_ALLOW_UNVERIFIED_RUNTIME=1` is set; teardown (`down`, the startup sweep, session reap) is
+never gated.
 
 ## Default policy
 
@@ -163,7 +165,8 @@ rely on broad host mounts.
 
 - Keep network allowlists narrow and documented.
 - Prefer read-only credentials; use write credentials only for explicit workflows.
-- Verify `safeslop doctor` output before depending on a tier.
+- Verify `safeslop doctor` output before depending on a tier; shadowed protected helpers are unsafe
+  and must be removed/fixed rather than ignored.
 - Run `safeslop down` to clean up safeslop-managed host-container stacks after interrupted work.
 - Run `safeslop gc --keep 2` only when you want to reclaim unreferenced managed images; it preserves profile/lock/live-session anchors.
 

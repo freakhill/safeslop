@@ -1,6 +1,6 @@
 # 0075 — Host-helper exec hardening (0070 H1)
 
-Status: design ready, awaiting execution
+Status: implemented and verified
 Date: 2026-07-05
 Follows: 0070 H1, 0035 (stale shadow-detection plan), 0066 (runtime detect semantics), 0072–0074
 
@@ -102,7 +102,7 @@ Runtime env additions: `DOCKER_HOST`, `DOCKER_CONTEXT`, `DOCKER_CONFIG`, `DOCKER
   VERIFY:   `ci/host-helper-exec-denylist.sh && make check`
   EXPECTED: PASS; intentionally adding `exec.CommandContext(ctx, "op", ...)` outside allowed files fails the gate locally.
 
-- [ ] Docs/skills sync and final verification.
+- [x] Docs/skills sync and final verification.
   FILE:     `README.md`, `skills/agent-sandbox-ops/SKILL.md`, this spec.
   CHANGE:   Document that host helper CLIs are resolved via safeslop's sanitized host PATH and shadowed security-critical helpers fail closed; keep command UX examples unchanged. Mark this spec complete only after real verification.
   VERIFY:   `make check && make build`

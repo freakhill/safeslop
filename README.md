@@ -21,8 +21,11 @@ staged state down on exit.
   only policy-declared secrets/credentials cross the boundary.
 - **Ephemeral credentials**: staged deploy keys, registry tokens, cloud tokens,
   and Kubernetes configs are scoped to the run and wiped on exit.
-- **Pinned tooling checks**: `make check` includes a Go pinning gate that rejects
-  unpinned `latest` references in policy/build config inputs.
+- **Pinned tooling checks**: `make check` includes Go gates that reject unpinned
+  `latest` references and raw protected host-helper exec regressions.
+- **Hardened host helpers**: safeslop-owned helper CLIs (`op`, cloud CLIs, git/ssh
+  helpers, container runtimes) resolve through safeslop's sanitized host PATH;
+  shadowed security-critical helpers fail closed instead of warning through.
 
 ## Quick start
 
@@ -178,7 +181,9 @@ present:
 Selection order: `SAFESLOP_CONTAINER_RUNTIME=docker|podman|lima` (an explicit override — that
 runtime is used or the command fails closed, never a silent fallback to another), else
 auto-detect in the fixed precedence **docker → podman → lima** (first whose CLI *and* working
-compose capability is present wins). With none present/working, the command fails closed and
+compose capability is present wins). Runtime CLIs are resolved once through safeslop's sanitized
+host PATH and carried as absolute paths into later commands, so detection and execution cannot
+drift; shadowed runtime CLIs fail closed. With none present/working, the command fails closed and
 names all three.
 
 **Deny-tier fail-closed:** a `network: deny` profile must place the agent on a network with no
