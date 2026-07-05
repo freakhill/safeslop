@@ -66,7 +66,7 @@ Runtime env additions: `DOCKER_HOST`, `DOCKER_CONTEXT`, `DOCKER_CONFIG`, `DOCKER
   VERIFY:   `go test ./internal/engine/hostexec -v`
   EXPECTED: PASS tests for: missing helper; shadowed helper; absolute helper accepted; relative slash rejected; diagnostic inspect reports shadow without executing; `cmd.Path`/`Args[0]` are absolute; credential env excludes `OP_SESSION`, ambient AWS keys, `GIT_*`, `SSH_*`; runtime env excludes cloud/op/token vars.
 
-- [ ] Route `op` availability/sign-in/read through `hostexec`.
+- [x] Route `op` availability/sign-in/read through `hostexec`.
   FILE:     `internal/engine/secrets/secrets.go`, `internal/engine/secrets/secrets_test.go`, affected credentials-inspection tests if needed.
   CHANGE:   Replace `osexec.LookPath("op")` and bare `exec.CommandContext(ctx, "op", ...)` with `hostexec` resolution/commands. Keep errors generic and value-free; do not wrap helper stderr into user-visible errors. Add a test seam for a fake resolver so tests stay hermetic.
   VERIFY:   `go test ./internal/engine/secrets ./internal/engine/creds -run 'Op|Secret|Inspect' -v`

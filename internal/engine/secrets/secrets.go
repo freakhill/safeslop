@@ -10,14 +10,17 @@ import (
 	"context"
 	"fmt"
 	"os"
-	osexec "os/exec"
 	"strings"
 	"time"
+
+	"github.com/freakhill/safeslop/internal/engine/hostexec"
 )
 
-// OpAvailable reports whether the 1Password CLI is on PATH.
+var hostExecResolver = hostexec.Default
+
+// OpAvailable reports whether the 1Password CLI is on the sanitized host PATH.
 func OpAvailable() bool {
-	_, err := osexec.LookPath("op")
+	_, err := hostExecResolver().Resolve(hostexec.OpSpec("1Password CLI readiness"))
 	return err == nil
 }
 
@@ -31,7 +34,11 @@ func OpSignedIn(ctx context.Context) bool {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	return osexec.CommandContext(ctx, "op", "whoami").Run() == nil
+	cmd, err := hostExecResolver().CommandContext(ctx, hostexec.OpSpec("1Password sign-in probe"), "whoami")
+	if err != nil {
+		return false
+	}
+	return cmd.Run() == nil
 }
 
 // Resolve returns the value for a single secret ref.
@@ -46,15 +53,15 @@ func Resolve(ctx context.Context, ref string) (string, error) {
 		return v, nil
 
 	case strings.HasPrefix(ref, "op://"):
-		if !OpAvailable() {
-			return "", fmt.Errorf("1Password CLI `op` not found on PATH; cannot resolve an op:// secret (install op and run `op signin`)")
-		}
-		// --no-newline so tokens are not corrupted by a trailing newline. The
-		// error is kept generic: op's stderr is not surfaced in case it echoes
-		// the reference or value.
-		out, err := osexec.CommandContext(ctx, "op", "read", "--no-newline", ref).Output()
+		cmd, err := hostExecResolver().CommandContext(ctx, hostexec.OpSpec("op:// secrets"), "read", "--no-newline", ref)
 		if err != nil {
-			return "", fmt.Errorf("op read failed for an op:// secret (is the 1Password app running and signed in?): %w", err)
+			return "", err
+		}
+		// --no-newline so tokens are not corrupted by a trailing newline. The error is kept generic:
+		// op's stderr is not surfaced in case it echoes the reference or value.
+		out, err := cmd.Output()
+		if err != nil {
+			return "", fmt.Errorf("op read failed for an op:// secret (is the 1Password app running and signed in?)")
 		}
 		return string(out), nil
 
