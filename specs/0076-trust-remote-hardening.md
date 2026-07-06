@@ -39,7 +39,7 @@ M2: Git origin inference accepts owner/repo text from agent-writable `.git/confi
   VERIFY:   `rg -n 'M1|M2|origin|owner/repo|A-Za-z0-9' README.md skills/agent-key-lifecycle/SKILL.md specs/0070-security-review.md specs/0076-trust-remote-hardening.md`
   EXPECTED: output shows the new/revised documentation and 0070 status notes.
 
-- [ ] T4 — Full verification
+- [x] T4 — Full verification
   FILE:     whole repo
   CHANGE:   Format and run required gates.
   VERIFY:   `gofmt -w internal/cli/cli.go internal/cli/cli_trust_test.go internal/cli/cli_trust_session_test.go internal/engine/creds/multirepo.go internal/engine/creds/ssh.go internal/engine/creds/forgejo.go internal/engine/creds/multirepo_test.go internal/engine/creds/ssh_test.go internal/engine/creds/forgejo_test.go && make check && make build`
