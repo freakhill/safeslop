@@ -138,9 +138,9 @@ can surface in UI error text. Low secret-probability today, but the 0069 plan re
   **Implemented in specs/0082.** Host-tier `safeslop run` and `safeslop session run`
   now call `HostConsentStatements`/`HostHeadlineBody`/`HostScopeLine` for a
   per-launch yes/no comprehension gate before the agent starts.
-- **L3 — `trust.Store.Revoke` is unreachable (specs/0033).** Well-formed but has no CLI
-  caller — trust can be granted (`safeslop trust`) but never revoked. Add `safeslop
-  untrust [path]`.
+- **L3 — `trust.Store.Revoke` is unreachable (specs/0033).**
+  **Implemented in specs/0083.** `safeslop untrust [path]` now removes the
+  host-side policy approval using the same canonical path key as launch trust checks.
 - **L4 — `.pub` files linger post-keygen** (`multirepo.go:139,208`): removed only after
   registration; a crash leaves a 0644 public key (non-secret, but violates the
   "private key only" doc claim). Remove immediately after read.
@@ -180,4 +180,5 @@ B1 (session-lane trust bypass), B2 (staged secrets in workspace / ro defeat), H1
 (PATH/shadowed-binary exec), M1 (trust TOCTOU), M2 (remote injection), M4
 (orphaned stage dirs), and M3 (PID/PGID reuse guard) have shipped in follow-up
 specs 0072, 0075, 0076, and 0077; M5–M7 shipped in specs 0078–0080; L1 shipped in
-specs 0081; L2 shipped in specs 0082. Remaining order: L3–L5.
+specs 0081; L2 shipped in specs 0082; L3 shipped in specs 0083. Remaining order:
+L4–L5.

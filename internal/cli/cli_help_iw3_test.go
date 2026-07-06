@@ -4,7 +4,7 @@ import "testing"
 
 func TestIW3CommandsRegisteredInRootHelp(t *testing.T) {
 	root := newRoot()
-	for _, want := range []string{"catalog", "profile", "lock"} {
+	for _, want := range []string{"catalog", "profile", "lock", "untrust"} {
 		if _, _, err := root.Find([]string{want}); err != nil {
 			t.Fatalf("root command %q not registered: %v", want, err)
 		}

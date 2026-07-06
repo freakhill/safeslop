@@ -78,6 +78,7 @@ safeslop profile create --name N --agent A --environment E [--bundle B] [--packa
 safeslop profile show <name> --output json         profile + resolved packages + image recipe
 safeslop lock [profile] --output json              write repo-root safeslop.lock.json
 safeslop trust [safeslop.cue]       approve this policy's exact bytes
+safeslop untrust [safeslop.cue]     remove approval so launches must be re-trusted
 safeslop run <profile> [--dry-run]  launch a trusted profile
 safeslop session create --profile <name> [--name <label>] --output json
 safeslop session create --agent <claude|pi|fish|zsh> --environment <host|container> --workspace <dir> [--name <label>] [--trust-host] --output json
@@ -368,12 +369,14 @@ bytes to be trusted:
 ```bash
 safeslop trust
 safeslop run work
+safeslop untrust   # remove approval; future launches fail closed until re-trusted
 ```
 
 For sessions the approval is checked when the session is created from a profile and
 recorded on the session, then re-verified before the agent starts; if an agent or
-editor changes the policy — or trust is revoked — in between, launch is blocked until
-you review and trust the new bytes. An ad-hoc host session (`session create --agent
+editor changes the policy — or `safeslop untrust [safeslop.cue]` revokes the host
+approval — in between, launch is blocked until you review and trust the new bytes.
+An ad-hoc host session (`session create --agent
 … --environment host`) has no `safeslop.cue` to approve and instead requires an
 explicit `--trust-host` acknowledgement that the agent runs unconfined with your
 host credentials.

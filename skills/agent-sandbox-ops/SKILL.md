@@ -32,6 +32,7 @@ file transfer between host and sandboxed runtimes.
 - `safeslop profile show <name> --output json` — inspect a profile with resolved package set and dry-run image recipe.
 - `safeslop lock [profile] --output json` — write repo-root `safeslop.lock.json` for the selected profile's recipe identity.
 - `safeslop trust` — approve a policy's exact bytes for launch. Required by every launch lane: `safeslop run <profile>`, `session create --profile`, and the Emacs client all share this gate (specs/0072); an untrusted or changed `safeslop.cue` is refused with a `TRUST_REQUIRED` envelope.
+- `safeslop untrust [safeslop.cue]` — remove that host approval; future launches fail closed until the current bytes are reviewed and trusted again.
 - `safeslop run <profile>` — launch a trusted profile; host-tier profiles require a per-launch yes/no comprehension gate before the agent starts.
 - `safeslop session create --profile <name> [--name <label>] --output json` — create an Emacs-visible session from an existing profile; the record includes resolved recipe/image metadata for the portal, and the Emacs client streams slow first-use image-build output into `*safeslop session progress*` with the final exit status. `--name` sets an optional display name and is combinable with `--profile`.
 - `safeslop session create --agent <claude|pi|fish|zsh> --environment <host|container> --workspace <dir> [--name <label>] [--trust-host] --output json` — create an ad-hoc Emacs-visible session record (`--environment` is required). A host ad-hoc session runs the agent unconfined with your host credentials, so it requires an explicit `--trust-host` acknowledgement (specs/0072); container ad-hoc sessions do not. `--name` sets an optional display name. `claude-code` remains accepted as a compatibility alias for `claude` but is not advertised in new UI/docs.
@@ -132,6 +133,7 @@ flagged `requires-human-confirm`. The policy is canonized in
 ```bash
 safeslop trust
 safeslop run review
+safeslop untrust   # revoke approval when this repo should no longer launch without review
 ```
 
 ### Container profile

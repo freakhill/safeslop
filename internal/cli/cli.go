@@ -73,7 +73,7 @@ func newRoot() *cobra.Command {
 		SilenceErrors: true,
 	}
 	root.PersistentFlags().BoolVar(&jsonOut, "json", false, "emit machine-readable JSON output")
-	root.AddCommand(cmdValidate(), cmdList(), cmdDoctor(), cmdRun(), cmdSession(), cmdTrust(), cmdDown(), cmdGC(), cmdLaunch(), cmdCatalog(), cmdBundle(), cmdProfile(), cmdCreds(), cmdLock())
+	root.AddCommand(cmdValidate(), cmdList(), cmdDoctor(), cmdRun(), cmdSession(), cmdTrust(), cmdUntrust(), cmdDown(), cmdGC(), cmdLaunch(), cmdCatalog(), cmdBundle(), cmdProfile(), cmdCreds(), cmdLock())
 	return root
 }
 
@@ -1498,6 +1498,18 @@ func approvePolicyBytes(abs string, policyBytes []byte) error {
 	return store.Approve(abs, policyBytes)
 }
 
+func revokePolicyTrust(policyPath string) (string, error) {
+	abs := canonicalPolicyPath(policyPath)
+	store, err := loadTrustStore()
+	if err != nil {
+		return "", err
+	}
+	if err := store.Revoke(abs); err != nil {
+		return "", err
+	}
+	return abs, nil
+}
+
 func policyBytesTrustStatus(abs string, policyBytes []byte) (hash string, status trust.Status, err error) {
 	store, err := loadTrustStore()
 	if err != nil {
@@ -1582,6 +1594,30 @@ func cmdTrust() *cobra.Command {
 				emitJSON(map[string]any{"ok": true, "trusted": abs})
 			} else {
 				fmt.Printf("trusted: %s\n", abs)
+			}
+			return nil
+		},
+	}
+}
+
+func cmdUntrust() *cobra.Command {
+	return &cobra.Command{
+		Use:   "untrust [safeslop.cue]",
+		Short: "Remove approval of a repo's safeslop.cue so launches must be re-trusted",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			path, err := findConfig(arg0(args))
+			if err != nil {
+				return err
+			}
+			abs, err := revokePolicyTrust(path)
+			if err != nil {
+				return err
+			}
+			if jsonOut {
+				emitJSON(map[string]any{"ok": true, "untrusted": abs})
+			} else {
+				fmt.Printf("untrusted: %s\n", abs)
 			}
 			return nil
 		},
