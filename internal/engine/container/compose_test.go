@@ -166,6 +166,27 @@ func TestComposeHasNoHostBridgeLeak(t *testing.T) {
 // allowlist is enforced). In open-egress mode the agent ALSO joins the egress bridge so
 // it has a real route + working DNS (ping/ssh/direct resolution) — otherwise "network:
 // allow" is misleadingly limited to HTTP(S)-via-proxy and DNS fails entirely.
+func TestComposeDenyTierPinsDNSLoopback(t *testing.T) {
+	deny, err := renderCompose(composeParams{RuntimeDir: "/r", Workspace: "/w", StageDir: "/r", OpenEgress: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(deny, "    dns:\n      - 127.0.0.1\n") {
+		t.Fatalf("deny-tier agent must pin external DNS forwarding to container loopback:\n%s", deny)
+	}
+	if n := strings.Count(deny, "    dns:\n"); n != 1 {
+		t.Fatalf("deny-tier compose should render one agent DNS pin, got %d:\n%s", n, deny)
+	}
+
+	open, err := renderCompose(composeParams{RuntimeDir: "/r", Workspace: "/w", StageDir: "/r", OpenEgress: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(open, "    dns:\n") {
+		t.Fatalf("open-egress compose must keep normal runtime DNS:\n%s", open)
+	}
+}
+
 func TestComposeOpenEgressJoinsAgentToBridge(t *testing.T) {
 	deny, err := renderCompose(composeParams{RuntimeDir: "/r", Workspace: "/w", StageDir: "/r", OpenEgress: false})
 	if err != nil {

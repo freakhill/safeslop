@@ -26,7 +26,11 @@ services:
 {{end}}{{if .GitSSHConfig}}      GIT_SSH_COMMAND: ssh -F /safeslop/runtime/.ssh/config.container
 {{end}}      TERM: xterm-256color
       COLORTERM: truecolor
-    volumes:
+{{if not .OpenEgress}}    # Docker keeps 127.0.0.11 for service names, but forwards non-service
+    # DNS to this per-container server; loopback makes deny-tier external DNS fail locally.
+    dns:
+      - 127.0.0.1
+{{end}}    volumes:
       - {{.Workspace}}:/workspace:rw
       - {{.StageDir}}:/safeslop/runtime:ro
     read_only: true
@@ -47,7 +51,8 @@ services:
     security_opt:
       - "no-new-privileges:true"
     # internal-only by default: the squid proxy is the ONLY egress, so the allowlist is
-    # enforced and there is no direct DNS/route (deny tier). In open-egress mode the agent
+    # enforced, external DNS is loopback-pinned, and there is no direct route (deny tier).
+    # In open-egress mode the agent
     # also joins the egress bridge so it has a real route + working DNS (ping, ssh, direct
     # resolution) — "network: allow" means actually-open, not just HTTP(S)-via-proxy.
     networks: [internal{{if .OpenEgress}}, egress{{end}}]

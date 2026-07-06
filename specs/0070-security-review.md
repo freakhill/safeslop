@@ -121,11 +121,12 @@ can surface in UI error text. Low secret-probability today, but the 0069 plan re
   match a bare IP via reverse PTR lookup — an attacker who controlled the PTR of their own
   public IP to an allowlisted name could be matched. Strict-mode Squid now denies numeric
   IP-literal destinations before the allowlist and renders the allowlist as `dstdomain -n`.
-- **M7 — Docker embedded DNS as an exfil channel.** A `network:deny` agent on the
-  internal bridge still reaches Docker's embedded resolver (127.0.0.11), which forwards to
-  the host resolver — low-bandwidth DNS tunnelling out. Documented isolation says
-  "default-deny egress"; DNS exfil is the honest caveat. Consider pinning the agent's
-  resolver to squid or dropping 53 on the internal net.
+- **M7 — Docker embedded DNS as an exfil channel.** **Implemented in specs/0080.**
+  A `network:deny` agent on the internal bridge could still reach Docker's embedded
+  resolver (127.0.0.11), which may forward to the host resolver — low-bandwidth DNS
+  tunnelling out. Deny-tier compose now pins per-container external DNS forwarding to
+  `127.0.0.1`, preserving Docker service-name resolution for `proxy` while making
+  arbitrary external DNS fail inside the container.
 
 ## Low / posture
 
@@ -175,4 +176,4 @@ and the profile name is `[A-Za-z0-9._-]+`-constrained.
 B1 (session-lane trust bypass), B2 (staged secrets in workspace / ro defeat), H1
 (PATH/shadowed-binary exec), M1 (trust TOCTOU), M2 (remote injection), M4
 (orphaned stage dirs), and M3 (PID/PGID reuse guard) have shipped in follow-up
-specs 0072, 0075, 0076, and 0077. Remaining order: M5–M7, L-series.
+specs 0072, 0075, 0076, and 0077; M5–M7 shipped in specs 0078–0080. Remaining order: L-series.

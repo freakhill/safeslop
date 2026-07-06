@@ -373,6 +373,10 @@ services:
 {{if .NpmConfig}}      NPM_CONFIG_USERCONFIG: /slop/runtime/.npmrc
 {{end}}{{if .Term}}      TERM: {{.Term}}
 {{end}}{{if .SSHAuthSock}}      SSH_AUTH_SOCK: /slop/ssh-agent.sock
+{{end}}{{if not .OpenEgress}}    # Docker keeps 127.0.0.11 for service names, but forwards non-service
+    # DNS to this per-container server; loopback makes deny-tier external DNS fail locally.
+    dns:
+      - 127.0.0.1
 {{end}}    volumes:
       - {{.Workspace}}:/workspace:rw
       - {{.StageDir}}:/slop/runtime:ro
@@ -422,6 +426,7 @@ type composeParams struct {
 	SSHAuthSock string
 	Term        string
 	NpmConfig   bool // true if a staged .npmrc exists
+	OpenEgress  bool // true in network:allow; deny-tier pins external DNS to loopback
 }
 
 func renderCompose(p composeParams) (string, error) {
