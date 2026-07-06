@@ -109,8 +109,8 @@ func parseAWSAssumeRole(out []byte) (awsCreds, error) {
 	return r.Credentials, nil
 }
 
-// assumeRoleDownscope runs `aws sts assume-role` with base's SSO creds in the subprocess env
-// (they override any AWS_PROFILE from the host), returning the downscoped creds.
+// assumeRoleDownscope runs `aws sts assume-role` under hostexec's AWS helper env allowlist,
+// injecting only base's freshly minted SSO creds so ambient host AWS authority is not inherited.
 func assumeRoleDownscope(ctx context.Context, base awsCreds, roleArn, sessionPolicy string) (awsCreds, error) {
 	argv := awsAssumeRoleArgv(roleArn, sessionPolicy)
 	cmd, err := hostCommand(ctx, argv, "AWS assume-role downscope")

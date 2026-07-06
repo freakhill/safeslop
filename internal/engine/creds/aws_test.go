@@ -146,6 +146,66 @@ fi
 	}
 }
 
+func TestStageAWSDownscopeUsesMinimalEnv(t *testing.T) {
+	binDir := t.TempDir()
+	envLog := filepath.Join(t.TempDir(), "assume.env")
+	envLogArg := "'" + strings.ReplaceAll(envLog, "'", "'\\''") + "'"
+	script := `#!/bin/sh
+if [ "$2" = "export-credentials" ]; then
+  echo '{"Version":1,"AccessKeyId":"SSO","SecretAccessKey":"ssosek","SessionToken":"ssotok"}'
+elif [ "$2" = "assume-role" ]; then
+  env | sort > ` + envLogArg + `
+  echo '{"Credentials":{"AccessKeyId":"DOWN","SecretAccessKey":"downsek","SessionToken":"downtok"}}'
+fi
+`
+	if err := os.WriteFile(filepath.Join(binDir, "aws"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	withCredsHostExecDir(t, binDir)
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+	t.Setenv("AWS_PROFILE", "prod")
+	t.Setenv("AWS_ACCESS_KEY_ID", "AMBIENT")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "ambientsek")
+	t.Setenv("AWS_SESSION_TOKEN", "ambienttok")
+	t.Setenv("AWS_ROLE_ARN", "arn:aws:iam::123:role/ambient")
+	t.Setenv("AWS_WEB_IDENTITY_TOKEN_FILE", "/tmp/ambient-token")
+	t.Setenv("GITHUB_TOKEN", "ghp_ambient")
+	t.Setenv("OP_SESSION_unit", "ambient-op")
+	t.Setenv("ANTHROPIC_API_KEY", "ambient-anthropic")
+
+	env, err := StageAWS(context.Background(), &policy.Credentials{Aws: &policy.AwsSso{
+		Profile:       "dev",
+		RoleArn:       "arn:aws:iam::123:role/downscope",
+		SessionPolicy: `{"Version":"2012-10-17","Statement":[]}`,
+	}}, t.TempDir())
+	if err != nil {
+		t.Fatalf("StageAWS: %v", err)
+	}
+	if !strings.Contains(strings.Join(env, "\n"), "AWS_ACCESS_KEY_ID=DOWN") {
+		t.Fatalf("expected downscoped creds, got %v", env)
+	}
+
+	recorded, err := os.ReadFile(envLog)
+	if err != nil {
+		t.Fatalf("read assume-role env log: %v", err)
+	}
+	got := string(recorded)
+	for _, want := range []string{"AWS_ACCESS_KEY_ID=SSO", "AWS_SECRET_ACCESS_KEY=ssosek", "AWS_SESSION_TOKEN=ssotok"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("assume-role env missing explicit base cred %q:\n%s", want, got)
+		}
+	}
+	for _, denied := range []string{
+		"AWS_PROFILE=", "AWS_ROLE_ARN=", "AWS_WEB_IDENTITY_TOKEN_FILE=",
+		"AWS_ACCESS_KEY_ID=AMBIENT", "AWS_SECRET_ACCESS_KEY=ambientsek", "AWS_SESSION_TOKEN=ambienttok",
+		"GITHUB_TOKEN=", "OP_SESSION_unit=", "ANTHROPIC_API_KEY=",
+	} {
+		if strings.Contains(got, denied) {
+			t.Fatalf("assume-role env inherited denied ambient variable/value %q:\n%s", denied, got)
+		}
+	}
+}
+
 func TestStageAWSDownscopeDoesNotInheritAmbientAWSProfile(t *testing.T) {
 	binDir := t.TempDir()
 	script := `#!/bin/sh
