@@ -116,11 +116,11 @@ can surface in UI error text. Low secret-probability today, but the 0069 plan re
   `creds/gcp.go:43-48` wrote `gcp-access-token` (0600) that nothing consumed
   (delivery is via `CLOUDSDK_AUTH_ACCESS_TOKEN` env). Removed the dead file
   instead of wiring/documenting it.
-- **M6 — Squid IP-literal / reverse-DNS allowlist edge.** `squid.conf.tmpl` denies
-  metadata + RFC-1918 ranges but `dstdomain` allowlisting can match a bare IP via reverse
-  PTR lookup — an attacker who controls the PTR of their own public IP to an allowlisted
-  name can be matched. Add an explicit deny on numeric-IP destinations. (Bounded: needs
-  attacker DNS control; deny-tier default still blocks unmatched dst.)
+- **M6 — Squid IP-literal / reverse-DNS allowlist edge.** **Implemented in specs/0079.**
+  `squid.conf.tmpl` denied metadata + RFC-1918 ranges but `dstdomain` allowlisting could
+  match a bare IP via reverse PTR lookup — an attacker who controlled the PTR of their own
+  public IP to an allowlisted name could be matched. Strict-mode Squid now denies numeric
+  IP-literal destinations before the allowlist and renders the allowlist as `dstdomain -n`.
 - **M7 — Docker embedded DNS as an exfil channel.** A `network:deny` agent on the
   internal bridge still reaches Docker's embedded resolver (127.0.0.11), which forwards to
   the host resolver — low-bandwidth DNS tunnelling out. Documented isolation says

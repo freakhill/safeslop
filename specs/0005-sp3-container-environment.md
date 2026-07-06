@@ -206,7 +206,11 @@ http_access deny CONNECT !SSL_ports
 acl blocked_dst dst 127.0.0.0/8 169.254.0.0/16 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
 http_access deny blocked_dst
 {{if .Open}}http_access allow all
-{{else}}acl allowed_domains dstdomain "/etc/squid/allowlist.domains"
+{{else}}# Deny IP-literal requests before the domain allowlist. Squid dstdomain ACLs can
+# otherwise try reverse DNS for IP-based URLs; -n below disables those lookups too.
+acl ip_literal_dst dstdom_regex -n ^[0-9]+(\.[0-9]+){3}$ ^[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]+$ ^\[[0-9A-Fa-f:.]+\]$
+http_access deny ip_literal_dst
+acl allowed_domains dstdomain -n "/etc/squid/allowlist.domains"
 http_access allow allowed_domains
 http_access deny all
 {{end}}via off
@@ -318,8 +322,8 @@ func TestRenderSquidConf(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(strict, `dstdomain "/etc/squid/allowlist.domains"`) || !strings.Contains(strict, "http_access deny all") {
-		t.Fatalf("strict squid.conf missing allowlist/deny-all:\n%s", strict)
+	if !strings.Contains(strict, `dstdomain -n "/etc/squid/allowlist.domains"`) || !strings.Contains(strict, "http_access deny all") {
+		t.Fatalf("strict squid.conf missing no-lookup allowlist/deny-all:\n%s", strict)
 	}
 	open, _ := RenderSquidConf(true)
 	if !strings.Contains(open, "http_access allow all") {

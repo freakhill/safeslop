@@ -3,6 +3,7 @@ package container
 import (
 	"bufio"
 	"bytes"
+	"net"
 	"strings"
 	"text/template"
 )
@@ -38,6 +39,7 @@ func BuildAllowlist() ([]string, error) {
 // Decide mirrors squid's enforcement so the policy is testable without a running proxy:
 // a literal IP in a blocked range is always denied; in "deny" only allowlisted domains pass
 // (a leading-dot entry matches the domain and its subdomains); "allow" passes everything else.
+// Strict-mode squid also denies public IP literals before its no-reverse-DNS domain allowlist.
 func Decide(domain, network string) bool {
 	for _, n := range blockedNets {
 		if strings.HasPrefix(domain, n) {
@@ -48,6 +50,9 @@ func Decide(domain, network string) bool {
 		if domain == h {
 			return false
 		}
+	}
+	if network != "allow" && isIPLiteral(domain) {
+		return false
 	}
 	if network == "allow" {
 		return true
@@ -63,6 +68,10 @@ func Decide(domain, network string) bool {
 		}
 	}
 	return false
+}
+
+func isIPLiteral(host string) bool {
+	return net.ParseIP(strings.Trim(host, "[]")) != nil
 }
 
 // RenderSquidConf renders squid.conf for the given mode (open == network "allow").

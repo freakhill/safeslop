@@ -194,10 +194,12 @@ drift; shadowed runtime CLIs fail closed. With none present/working, the command
 names all three.
 
 **Deny-tier fail-closed:** a `network: deny` profile must place the agent on a network with no
-default route. Only docker/OrbStack are egress-verified for this today, so launching a `deny`
-profile on **podman or lima is refused** unless you set `SAFESLOP_ALLOW_UNVERIFIED_RUNTIME=1`
-to accept the (still-unverified) risk. Teardown — `down`, the startup sweep, session reap — is
-never gated, so cleanup works on any detected runtime, verified or not.
+default route. HTTP(S) egress is a domain allowlist: numeric IP-literal destinations are denied
+before domain matching, and Squid reverse-DNS matching is disabled for the allowlist. Only
+docker/OrbStack are egress-verified for this today, so launching a `deny` profile on **podman or
+lima is refused** unless you set `SAFESLOP_ALLOW_UNVERIFIED_RUNTIME=1` to accept the
+(still-unverified) risk. Teardown — `down`, the startup sweep, session reap — is never gated, so
+cleanup works on any detected runtime, verified or not.
 
 ## `safeslop.cue` reference
 
@@ -385,7 +387,7 @@ safeslop launches, only confined accidents).
 | environment | label | summary |
 |---|---|---|
 | `host` | none | No isolation boundary; the agent runs as you. |
-| `container` | egress-allowlisted | An ambient docker/podman/lima container plus proxy topology for per-domain egress control. |
+| `container` | egress-allowlisted | An ambient docker/podman/lima container plus proxy topology for per-domain egress control; deny-tier HTTP(S) rejects IP literals before domain allowlisting. |
 
 Use `container` for routine agent sessions (network-bound agents belong here),
 and `host` only when you accept no isolation.

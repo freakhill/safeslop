@@ -146,7 +146,9 @@ profiles: container_review: {
 ```
 
 The container tier enforces egress by topology: the agent sits on an internal
-network and reaches HTTP(S) through the proxy allowlist.
+network and reaches HTTP(S) through the proxy allowlist. In `network: deny`, the
+proxy allowlist is domain-only: numeric IP-literal destinations are denied before
+matching, and reverse-DNS lookups are disabled for the domain ACL.
 
 ### VM profile
 
