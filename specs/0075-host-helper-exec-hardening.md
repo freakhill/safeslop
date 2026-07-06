@@ -1,10 +1,10 @@
-# 0075 — Host-helper exec hardening (0070 H1)
+# 0075 — Host-helper exec hardening (0070 H1/H2)
 
 Status: implemented and verified
 Date: 2026-07-05
-Follows: 0070 H1, 0035 (stale shadow-detection plan), 0066 (runtime detect semantics), 0072–0074
+Follows: 0070 H1/H2, 0035 (stale shadow-detection plan), 0066 (runtime detect semantics), 0072–0074
 
-SCOPE: close 0070 H1 by making safeslop-owned host helper execution resolve through the sanitized `hostenv` PATH, fail closed on security-critical shadows, execute absolute paths only, and pass minimal helper-specific envs.
+SCOPE: close 0070 H1/H2 by making safeslop-owned host helper execution resolve through the sanitized `hostenv` PATH, fail closed on security-critical shadows, execute absolute paths only, pass minimal helper-specific envs, and avoid surfacing raw helper stderr in user-visible errors.
 OFF-LIMITS: do not reopen 0072/0073/0074; do not revive the stale Swift/cockpit portions of 0035; do not add runtime installers or non-Go runtime dependencies; do not change trust gates, egress policy, or teardown `PolicyAllow` behavior; do not broaden into host-agent binary shadow policy beyond the existing `resolveHostBinary` path.
 WORKTREE: `.worktrees/0075-host-helper-exec-hardening/` on branch `0075-host-helper-exec-hardening` for implementation.
 

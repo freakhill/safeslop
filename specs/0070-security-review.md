@@ -1,6 +1,6 @@
 # 0070 — Security review (whole-system, source-grounded)
 
-**Status:** review, findings open **Date:** 2026-07-03
+**Status:** closed — all findings implemented in specs 0072, 0075–0085. **Date:** 2026-07-03 (closed 2026-07-06)
 Method: four adversarial source-read lanes (credential lifecycle / egress+container /
 host trust+exec) plus host verification of every headline finding against `file:line`.
 Cross-checked against the just-landed `specs/0068` decision and `specs/0069` P1 plan.
@@ -16,6 +16,8 @@ staged secrets sit in the agent-writable workspace behind an illusory read-only 
 ## Blockers
 
 ### B1 — The `session` lane launches agents with no trust gate (the Emacs cockpit is entirely on this lane)
+**Implemented in specs/0072.**
+
 `enforceTrust` is called in exactly two places: `cmdRun` (`internal/cli/cli.go:278`) and
 `cmdTrust` (`cli.go:1211`). The `session` verbs — `createSessionFromProfile`
 (`cli.go:586`), `cmdSessionRun` (`cli.go:803`), `cmdSessionSupervise`/`runProfileCtx`
@@ -41,6 +43,8 @@ the session record at create time and re-verify it at run time (closes B3 too). 
 the trust/comprehension prompt in the Emacs create flow.
 
 ### B2 — Staged secrets live in the agent-writable workspace; the read-only stage mount is illusory
+**Implemented in specs/0072.**
+
 `stageDir := filepath.Join(sess.Workspace, ".safeslop", "runtime", "session-"+sess.ID)`
 (`cli.go:324`, and the same construction on the run path). The container template mounts
 `{{.Workspace}}:/workspace:rw` **and** `{{.StageDir}}:/safeslop/runtime:ro`
@@ -63,6 +67,8 @@ and shrinks the B4 orphan blast radius.
 ## High
 
 ### H1 — No shadowed-binary detection gates exec; host helpers resolve bare names on the raw PATH (specs/0035)
+**Implemented in specs/0075.**
+
 The hostenv PATH hardening (`filterPATH`: strips world-writable / `..` / `DYLD_*`) is
 applied only to the agent's own `argv[0]` and the child env. Every host-side helper is
 spawned by **bare name** against the unsanitized process PATH:
@@ -82,6 +88,8 @@ these run **as the user with full credential access, before any boundary exists*
 specs/0035 detection to refuse/warn on a shadowed security-critical binary.
 
 ### H2 — External-command stderr flows into user-visible error strings (`runSSHCmd`)
+**Implemented in specs/0075.**
+
 `runSSHCmd` (`creds/ssh.go:79-87`) wraps `exec … Output()` errors with `%w`; Go's
 `*exec.ExitError` carries captured stderr. `gh api`/`ssh-keyscan`/`git remote` stderr
 can surface in UI error text. Low secret-probability today, but the 0069 plan replaces
@@ -179,8 +187,9 @@ and the profile name is `[A-Za-z0-9._-]+`-constrained.
 ## Priority
 
 B1 (session-lane trust bypass), B2 (staged secrets in workspace / ro defeat), H1
-(PATH/shadowed-binary exec), M1 (trust TOCTOU), M2 (remote injection), M4
-(orphaned stage dirs), and M3 (PID/PGID reuse guard) have shipped in follow-up
-specs 0072, 0075, 0076, and 0077; M5–M7 shipped in specs 0078–0080; L1 shipped in
-specs 0081; L2 shipped in specs 0082; L3 shipped in specs 0083; L4 shipped in
-specs 0084; L5 shipped in specs 0085. No specs/0070 findings remain open.
+(PATH/shadowed-binary exec), H2 (raw helper stderr in user-visible errors), M1
+(trust TOCTOU), M2 (remote injection), M4 (orphaned stage dirs), and M3
+(PID/PGID reuse guard) have shipped in follow-up specs 0072, 0075, 0076, and
+0077; M5–M7 shipped in specs 0078–0080; L1 shipped in specs 0081; L2 shipped in
+specs 0082; L3 shipped in specs 0083; L4 shipped in specs 0084; L5 shipped in
+specs 0085. No specs/0070 findings remain open.

@@ -1,6 +1,6 @@
 # 0072 — Session-lane trust gate + stage-dir relocation (0070 B1/B2)
 
-**Status:** plan, ready to execute **Date:** 2026-07-03
+**Status:** implemented and verified **Date:** 2026-07-03 (impl 2026-07-04)
 Fixes the two release blockers from `specs/0070-security-review.md`. Must merge
 BEFORE `specs/0069` execution: 0069 T4 stages GitHub App tokens into the stage
 dir, which today sits inside the agent-writable workspace (B2), and the Emacs

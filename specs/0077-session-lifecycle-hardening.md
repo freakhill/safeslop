@@ -1,6 +1,6 @@
 # 0077 — Session lifecycle hardening (0070 M4/M3)
 
-**Status:** plan, executing  **Date:** 2026-07-06
+**Status:** implemented and verified  **Date:** 2026-07-06
 
 SCOPE: Fix `specs/0070-security-review.md` M4 first, then M3. M4 closes the local staged-credential orphan left by SIGKILL/crash paths; M3 prevents detached `session stop` from signalling a reused PID/PGID.
 OFF-LIMITS: No new runtime dependencies, no live network/credential APIs in tests, no trust-store or policy schema change, no broad session protocol redesign, no weakening of container/egress defaults.

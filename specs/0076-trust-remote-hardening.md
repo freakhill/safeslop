@@ -1,6 +1,6 @@
 # 0076 — Trust TOCTOU + git remote injection hardening (0070 M1/M2)
 
-**Status:** plan, executing  **Date:** 2026-07-06
+**Status:** implemented and verified  **Date:** 2026-07-06
 
 SCOPE: Fix `specs/0070-security-review.md` M1, then M2, in that order.
 OFF-LIMITS: No new dependencies, no live network/credential APIs in tests, no trust-store schema change, no broad credential-provider redesign, no changes to egress/container defaults.
