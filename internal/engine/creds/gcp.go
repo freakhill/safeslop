@@ -3,8 +3,6 @@ package creds
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/freakhill/safeslop/internal/engine/policy"
@@ -21,9 +19,10 @@ func gcpTokenArgv(scopes []string) []string {
 	return argv
 }
 
-// StageGCP mints a short-lived ADC access token on the host and stages ONLY that
-// token (the long-lived refresh token is never read or written), exposing it via
-// CLOUDSDK_AUTH_ACCESS_TOKEN for the gcloud CLI. No revoke (token expires ~1h).
+// StageGCP mints a short-lived ADC access token on the host and exposes it only
+// through CLOUDSDK_AUTH_ACCESS_TOKEN for the gcloud CLI. The long-lived refresh
+// token is never read or written, and no dead token file is staged.
+// No revoke (token expires ~1h).
 func StageGCP(ctx context.Context, creds *policy.Credentials, stageDir string) ([]string, error) {
 	if creds == nil || creds.Gcp == nil {
 		return nil, nil
@@ -40,13 +39,6 @@ func StageGCP(ctx context.Context, creds *policy.Credentials, stageDir string) (
 	tok := strings.TrimSpace(string(out))
 	if tok == "" {
 		return nil, fmt.Errorf("gcloud returned an empty access token")
-	}
-	if err := os.MkdirAll(stageDir, 0o700); err != nil {
-		return nil, err
-	}
-	tokFile := filepath.Join(stageDir, "gcp-access-token")
-	if err := os.WriteFile(tokFile, []byte(tok+"\n"), 0o600); err != nil {
-		return nil, err
 	}
 	return []string{"CLOUDSDK_AUTH_ACCESS_TOKEN=" + tok}, nil
 }

@@ -2,6 +2,7 @@ package creds
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,32 +32,25 @@ func TestGcpTokenArgvScopes(t *testing.T) {
 	}
 }
 
-func TestStageGCPStagesAccessTokenOnly(t *testing.T) {
+func TestStageGCPExposesAccessTokenOnlyInEnv(t *testing.T) {
 	binDir := t.TempDir()
 	fakeBin(t, binDir, "gcloud", "ya29.ACCESS_TOKEN_VALUE") // fakeBin from aws_test.go (same package)
 	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
 
-	stage := t.TempDir()
+	stage := filepath.Join(t.TempDir(), "stage")
 	env, err := StageGCP(context.Background(), &policy.Credentials{Gcp: &policy.GcpAdc{}}, stage)
 	if err != nil {
 		t.Fatalf("StageGCP: %v", err)
 	}
-	tokFile := filepath.Join(stage, "gcp-access-token")
-	body, err := os.ReadFile(tokFile)
-	if err != nil {
-		t.Fatalf("token file: %v", err)
-	}
-	if strings.TrimSpace(string(body)) != "ya29.ACCESS_TOKEN_VALUE" {
-		t.Fatalf("token body = %q", body)
-	}
-	if strings.Contains(string(body), "refresh_token") {
-		t.Fatal("refresh_token must never be staged")
-	}
-	if fi, _ := os.Stat(tokFile); fi.Mode().Perm() != 0o600 {
-		t.Fatalf("token file not 0600")
-	}
 	if !strings.Contains(strings.Join(env, " "), "CLOUDSDK_AUTH_ACCESS_TOKEN=ya29.ACCESS_TOKEN_VALUE") {
 		t.Fatalf("env = %v", env)
+	}
+	tokFile := filepath.Join(stage, "gcp-access-token")
+	if _, err := os.Stat(tokFile); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("GCP access token must not be staged in a dead file; stat err=%v", err)
+	}
+	if _, err := os.Stat(stage); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("StageGCP should not create a stage dir for env-only delivery; stat err=%v", err)
 	}
 }
 

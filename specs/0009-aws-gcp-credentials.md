@@ -48,12 +48,13 @@ the existing white-box + PATH-mock test style. `aws` CLI v2 (`configure export-c
    *host* path that breaks inside container/vm (the stage mounts at a different path); the standard
    `AWS_ACCESS_KEY_ID`/`SECRET`/`SESSION_TOKEN` env vars ride `secretEnv` (out of inspect/ps) and
    work uniformly across all four environments. (Discovered during Task 5 wiring.)
-2. **GCP delivery = `CLOUDSDK_AUTH_ACCESS_TOKEN` + a staged token file; SDK-direct is a documented
-   caveat.** `gcloud auth application-default print-access-token` yields a bare ~1h access token.
-   gcloud CLI honors `CLOUDSDK_AUTH_ACCESS_TOKEN`; the google client libraries have **no** bare-token
-   env and no standard "access-token-only" ADC file (an `authorized_user` file *requires* the
-   `refresh_token` we are deliberately dropping). v1 supports the **gcloud-CLI** path robustly and
-   documents the SDK limitation. (Alt: impersonated/downscoped tokens — heavier, later. **Default:
+2. **GCP delivery = `CLOUDSDK_AUTH_ACCESS_TOKEN` only; SDK-direct is a documented caveat.**
+   `gcloud auth application-default print-access-token` yields a bare ~1h access token. gcloud CLI
+   honors `CLOUDSDK_AUTH_ACCESS_TOKEN`; the google client libraries have **no** bare-token env and no
+   standard "access-token-only" ADC file (an `authorized_user` file *requires* the `refresh_token` we
+   are deliberately dropping). v1 supports the **gcloud-CLI** path robustly and documents the SDK
+   limitation. **Updated by specs/0078:** the unused staged token file was removed, so GCP creates no
+   dead on-disk bearer. (Alt: impersonated/downscoped tokens — heavier, later. **Default:
    CLOUDSDK_AUTH_ACCESS_TOKEN + caveat.**)
 3. **AWS profile identity = a named SSO profile.** `#AwsSso.profile` names a profile already
    configured for SSO in the user's `~/.aws/config`; `aws configure export-credentials --profile P`
@@ -424,6 +425,10 @@ git commit -m "feat(creds): StageAWS — short-lived SSO creds staged 0600, deca
 
 **Files:** Create `internal/engine/creds/gcp.go`, `internal/engine/creds/gcp_test.go`.
 
+**Current note (specs/0078):** the original snippets below predate the M5 hardening and are
+historical; current `StageGCP` returns `CLOUDSDK_AUTH_ACCESS_TOKEN` only and does not create
+`gcp-access-token` or a GCP-only stage directory.
+
 - [ ] **Step 1: Write the failing test (PATH-mocked `gcloud`)**
 
 ```go
@@ -753,7 +758,7 @@ git commit -m "test(creds): pin no host cloud-config mount; doctor reports aws/g
 In the credentials section, add: AWS via SSO (`credentials: {aws: {profile: "<sso-profile>"}}` — run
 `aws sso login --profile <p>` first; creds are short-lived, never `~/.aws/credentials`); GCP via ADC
 (`credentials: {gcp: {}}` — `gcloud auth application-default login` first; only the access token is
-staged, `refresh_token` is never exposed; gcloud-CLI access via `CLOUDSDK_AUTH_ACCESS_TOKEN`, SDK
+minted, `refresh_token` is never exposed; gcloud-CLI access via `CLOUDSDK_AUTH_ACCESS_TOKEN`, SDK
 caveat noted). State the **decay-first** model: short TTL is the control; there is no revoke.
 
 - [ ] **Step 2: Record in specs/0001**
@@ -796,10 +801,11 @@ gh pr create --title "AWS(SSO)+GCP(ADC) credential providers — decay-first" \
 ## Verification (what "done" means)
 
 - `make check` + `make build` green; the four fish gates green.
-- A profile with `credentials: {aws:{profile:…}, gcp:{}}` validates, and a real run stages a `0600`
-  AWS credentials file + a GCP access token into `.slop/runtime/<profile>/`, points the agent at
-  them, and wipes the stage on exit.
-- The `refresh_token` is never read or staged; `~/.aws/credentials`/`~/.config/gcloud` never cross
+- A profile with `credentials: {aws:{profile:…}, gcp:{}}` validates, and a real run delivers the
+  short-lived cloud environment variables to the agent without mounting host cloud config; any
+  on-disk staged state is wiped on exit.
+- The GCP access token is not written to a dead file; the `refresh_token` is never read or staged;
+  `~/.aws/credentials`/`~/.config/gcloud` never cross
   any boundary (pinned by the no-host-cloud-mount test).
 - No revoke path exists — cleanup is the stage wipe (decay-first); `slop doctor` reports `aws` +
   `gcloud`.

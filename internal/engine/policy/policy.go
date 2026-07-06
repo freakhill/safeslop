@@ -40,7 +40,7 @@ type AwsSso struct {
 	SessionPolicy string `json:"sessionPolicy,omitempty"`
 }
 
-// GcpAdc stages a short-lived GCP access token from ADC, refresh token stripped (specs/0009).
+// GcpAdc delivers a short-lived GCP access token from ADC, refresh token stripped (specs/0009).
 // Scopes, when set, downscope the minted token to least-privilege (scope-first, specs/0026),
 // e.g. ["https://www.googleapis.com/auth/devstorage.read_only"]; empty = ADC's default scopes.
 type GcpAdc struct {

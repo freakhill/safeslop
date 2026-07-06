@@ -14,10 +14,11 @@ credentials: gcp: {scopes: ["https://www.googleapis.com/auth/devstorage.read_onl
 ```
 
 **Already handled (verified during this slice, not re-done):**
-- **M1 — refresh-token reachability.** GCP stages ONLY the short-lived access token (the
-  long-lived refresh token is never read); AWS `export-credentials` returns short-lived STS
-  creds (the SSO refresh token stays in `~/.aws/sso`, never staged or mounted). The boundary
-  never sees a long-lived credential.
+- **M1 — refresh-token reachability.** GCP delivers ONLY the short-lived access token via
+  `CLOUDSDK_AUTH_ACCESS_TOKEN` (the long-lived refresh token is never read; specs/0078 removed the
+  unused on-disk token copy); AWS `export-credentials` returns short-lived STS creds (the SSO
+  refresh token stays in `~/.aws/sso`, never staged or mounted). The boundary never sees a
+  long-lived credential.
 - **S2 — ambient-authority leak.** Closed by specs/0024 (`childEnv` strict allowlist).
 
 **Deferred (follow-ons, with rationale):**
@@ -29,6 +30,6 @@ credentials: gcp: {scopes: ["https://www.googleapis.com/auth/devstorage.read_onl
   channel is a deliberate choice (uniform across host/sandbox/container/vm with no path
   remapping). Changing it is a design fork, not a clean slice.
 
-**Tests:** `internal/engine/creds/gcp_test.go` — `gcpTokenArgv(nil)` (default argv) and
-`gcpTokenArgv([...])` (comma-joined `--scopes`); the existing stage tests are unchanged (nil
-scopes is a no-op). `make check` + a `validate` smoke (scoped and unscoped profiles) pass.
+**Tests:** `internal/engine/creds/gcp_test.go` — `gcpTokenArgv(nil)` (default argv),
+`gcpTokenArgv([...])` (comma-joined `--scopes`), env-only `StageGCP` delivery, and nil-creds noop.
+`make check` + a `validate` smoke (scoped and unscoped profiles) pass.

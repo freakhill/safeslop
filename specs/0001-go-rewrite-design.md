@@ -206,8 +206,8 @@ research (`specs/research/2026-06-17-startup-usecase-prior-art.md`):
   `~/.aws/credentials` file — the same values then work uniformly in host/sandbox/container/vm with
   no path remapping, riding the existing `secretEnv` channel out of `docker inspect`/`ps`).
 - **GCP** = Application Default Credentials. `credentials: {gcp: {}}`. `gcloud auth
-  application-default print-access-token` mints a short-lived access token, staged **alone** (the
-  long-lived `refresh_token` is never read or written), delivered via `CLOUDSDK_AUTH_ACCESS_TOKEN`.
+  application-default print-access-token` mints a short-lived access token, delivered only via
+  `CLOUDSDK_AUTH_ACCESS_TOKEN` (the long-lived `refresh_token` is never read or written).
 - **Decay-first** (the load-bearing lesson): short TTL is the *primary* control; there is **no
   revoke step**, because `SIGKILL`/force-quit can skip on-exit hooks. Cleanup = the `stageDir` wipe.
 - The host's `~/.aws/credentials` / `~/.config/gcloud` **never** cross a boundary (pinned by a

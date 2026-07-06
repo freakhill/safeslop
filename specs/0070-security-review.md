@@ -112,9 +112,10 @@ can surface in UI error text. Low secret-probability today, but the 0069 plan re
   dir, so a killed session leaves `kubeconfig`/`gcp-access-token`/`.npmrc`/SSH key at a
   known workspace path (compounds B2). Have Stop/Remove/Prune/reconcile wipe the stage
   dir; B2's relocation shrinks the window.
-- **M5 — GCP token written to a dead file.** `creds/gcp.go:43-48` writes
-  `gcp-access-token` (0600) that nothing consumes (delivery is via
-  `CLOUDSDK_AUTH_ACCESS_TOKEN` env). Remove the write, or wire+document it.
+- **M5 — GCP token written to a dead file.** **Implemented in specs/0078.**
+  `creds/gcp.go:43-48` wrote `gcp-access-token` (0600) that nothing consumed
+  (delivery is via `CLOUDSDK_AUTH_ACCESS_TOKEN` env). Removed the dead file
+  instead of wiring/documenting it.
 - **M6 — Squid IP-literal / reverse-DNS allowlist edge.** `squid.conf.tmpl` denies
   metadata + RFC-1918 ranges but `dstdomain` allowlisting can match a bare IP via reverse
   PTR lookup — an attacker who controls the PTR of their own public IP to an allowlisted

@@ -51,8 +51,9 @@ package safeslop
 }
 
 // GCP creds from Application Default Credentials. A short-lived access token is
-// minted via `gcloud auth application-default print-access-token`; the long-lived
-// refresh token is never staged (specs/0009).
+// minted via `gcloud auth application-default print-access-token` and delivered
+// via CLOUDSDK_AUTH_ACCESS_TOKEN only; the long-lived refresh token is never
+// staged (specs/0009, specs/0078).
 #GcpAdc: {
 	// Optional: downscope the minted access token to these OAuth scopes (scope-first
 	// least-privilege). Empty = ADC's default (broad) scopes. E.g.

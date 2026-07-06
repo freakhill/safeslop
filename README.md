@@ -19,8 +19,9 @@ staged state down on exit.
   explicit `--trust-host` acknowledgement.
 - **Scrubbed child environments**: ambient host credentials are not inherited;
   only policy-declared secrets/credentials cross the boundary.
-- **Ephemeral credentials**: staged deploy keys, registry tokens, cloud tokens,
-  and Kubernetes configs are scoped to the run and wiped on exit.
+- **Ephemeral credentials**: staged deploy keys, registry tokens, Kubernetes
+  configs, and short-lived cloud env credentials are scoped to the run; on-disk
+  staged state is wiped on exit.
 - **Pinned tooling checks**: `make check` includes Go gates that reject unpinned
   `latest` references and raw protected host-helper exec regressions.
 - **Hardened host helpers**: safeslop-owned helper CLIs (`op`, cloud CLIs, git/ssh
