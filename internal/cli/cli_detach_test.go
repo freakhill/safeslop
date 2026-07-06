@@ -23,6 +23,7 @@ func TestRunDetachRecordsSupervisorPIDAndReturns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
+	acceptHostConsentForTest(t)
 	id := sess.ID
 
 	const supervisorPID = 4242
@@ -73,6 +74,7 @@ func TestRunDetachWaitsForSocketBeforeSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
+	acceptHostConsentForTest(t)
 	id := sess.ID
 
 	oldLaunch, oldTimeout, oldKill := launchSupervisor, detachReadyTimeout, sessionKillProcess

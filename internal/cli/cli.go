@@ -4,12 +4,14 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"hash/fnv"
 	"io"
+	"math/rand"
 	"net"
 	"net/url"
 	"os"
@@ -289,6 +291,9 @@ func cmdRun() *cobra.Command {
 			if err := enforceLoadedPolicyTrust(loaded, trustFlag); err != nil {
 				return err
 			}
+			if err := requireHostLaunchConsent(name, prof, os.Stdin, os.Stderr); err != nil {
+				return err
+			}
 			if prof.Environment == "container" {
 				if err := sweepManagedOrphans(context.Background()); err != nil {
 					return err
@@ -308,6 +313,76 @@ func cmdRun() *cobra.Command {
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "print the resolved launch plan without executing")
 	c.Flags().BoolVar(&trustFlag, "trust", false, "approve this safeslop.cue, then run it")
 	return c
+}
+
+var hostLaunchConsent = confirmHostLaunchConsent
+
+func requireHostLaunchConsent(name string, prof policy.Profile, in io.Reader, out io.Writer) error {
+	if prof.Environment != "host" {
+		return nil
+	}
+	return hostLaunchConsent(name, prof, in, out)
+}
+
+func confirmHostLaunchConsent(name string, prof policy.Profile, in io.Reader, out io.Writer) error {
+	stmts := policy.HostConsentStatements(3, rand.New(rand.NewSource(time.Now().UnixNano())))
+	return confirmHostLaunchConsentRows(name, prof, mountedVolumes(), stmts, in, out)
+}
+
+func confirmHostLaunchConsentRows(name string, prof policy.Profile, volumes []string, stmts []policy.ConsentStatement, in io.Reader, out io.Writer) error {
+	if in == nil {
+		return fmt.Errorf("host launch consent requires input; launch aborted")
+	}
+	if out == nil {
+		out = io.Discard
+	}
+	reader := bufio.NewReader(in)
+	fmt.Fprintln(out, "host launch consent required")
+	fmt.Fprintln(out, policy.HostHeadlineBody(name))
+	fmt.Fprintln(out, policy.HostScopeLine(prof, volumes))
+	fmt.Fprintln(out, "Answer yes or no for each statement to confirm you understand this host launch:")
+	for i, st := range stmts {
+		for {
+			fmt.Fprintf(out, "%d. %s [yes/no]: ", i+1, st.Text)
+			answer, err := readConsentAnswer(reader)
+			if err != nil {
+				return fmt.Errorf("host launch consent interrupted; launch aborted: %w", err)
+			}
+			got, ok := parseConsentBool(answer)
+			if !ok {
+				fmt.Fprintln(out, "Please answer yes or no.")
+				continue
+			}
+			if got != st.Expected {
+				return fmt.Errorf("host launch consent failed on statement %d; launch aborted", i+1)
+			}
+			break
+		}
+	}
+	fmt.Fprintln(out, "host launch consent passed; launching host agent")
+	return nil
+}
+
+func readConsentAnswer(r *bufio.Reader) (string, error) {
+	line, err := r.ReadString('\n')
+	if err != nil {
+		if errors.Is(err, io.EOF) && strings.TrimSpace(line) != "" {
+			return strings.TrimSpace(line), nil
+		}
+		return "", err
+	}
+	return strings.TrimSpace(line), nil
+}
+
+func parseConsentBool(s string) (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "y", "yes":
+		return true, true
+	case "n", "no":
+		return false, true
+	default:
+		return false, false
+	}
 }
 
 // enforceTrust gates `run` on a host-recorded approval of the policy's exact bytes. With allowTrust
@@ -987,15 +1062,6 @@ func cmdSessionRun() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if detach {
-				// Detached: re-exec a supervisor that owns the agent + its PTY and
-				// serves it over the per-session socket, then return so the issuing
-				// buffer is freed immediately. No local tty is needed here (the
-				// supervisor allocates the PTY; the user attaches later), so the
-				// interactive PTY guard below is intentionally skipped (specs/0051
-				// D1, PR3).
-				return runDetach(store, id)
-			}
 			prof, err := sessionProfile(sess)
 			if err != nil {
 				return err
@@ -1013,9 +1079,23 @@ func cmdSessionRun() *cobra.Command {
 			// pointing at the JSONL status fallback, exits non-zero, and is *not*
 			// marked running — a session that can never start must not be left as a
 			// phantom for liveness/reconcile or `session stop` (specs/0050 PR4).
-			if !sessionHasInteractivePTY() {
+			if !detach && !sessionHasInteractivePTY() {
 				emitContract(jsoncontract.PTYUnavailable())
 				return errOutputEmitted
+			}
+			if err := requireHostLaunchConsent(sessionConsentName(sess), prof, os.Stdin, os.Stderr); err != nil {
+				return err
+			}
+			if detach {
+				// Detached: re-exec a supervisor that owns the agent + its PTY and
+				// serves it over the per-session socket, then return so the issuing
+				// buffer is freed immediately. The host consent gate above runs in
+				// the issuing process before the background supervisor is spawned, so
+				// a detached host session is never born already blocked on a prompt.
+				// Container detach still skips the local PTY guard because the
+				// supervisor allocates the PTY; the user attaches later (specs/0051
+				// D1, PR3).
+				return runDetach(store, id)
 			}
 			if _, err := store.MarkRunning(id, os.Getpid(), time.Now()); err != nil {
 				return err
@@ -1237,9 +1317,20 @@ func attachResizeChannel() <-chan [2]uint16 {
 // keyboard (stdin) and a display (stdout) to be interactive, and Emacs make-term
 // supplies both. Either one being a pipe (the no-controlling-terminal case) means
 // the interactive run path cannot be driven, so the caller must fall back to the
-// JSONL status monitor (specs/0050 PR4).
-func sessionHasInteractivePTY() bool {
+// JSONL status monitor (specs/0050 PR4). It is a var so tests can exercise the
+// pre-launch host consent gate without requiring a real PTY.
+var sessionHasInteractivePTY = func() bool {
 	return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
+}
+
+func sessionConsentName(sess engsession.Session) string {
+	if sess.Profile != "" {
+		return sess.Profile
+	}
+	if sess.Name != "" {
+		return sess.Name
+	}
+	return "session-" + sess.ID
 }
 
 func sessionStore() engsession.Store {
@@ -2013,6 +2104,24 @@ func launchProfile(name, configPath string) (int, error) {
 		return 1, fmt.Errorf("open terminal (%s): %w", uc.Terminal, err)
 	}
 	return 0, nil
+}
+
+// mountedVolumes returns a best-effort snapshot of non-boot macOS volumes for the
+// host consent scope line. Missing /Volumes (Linux CI) or read errors degrade to
+// an empty list because the fixed headline already states the host blast radius.
+func mountedVolumes() []string {
+	entries, err := os.ReadDir("/Volumes")
+	if err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.Name() == "Macintosh HD" {
+			continue
+		}
+		out = append(out, "/Volumes/"+e.Name())
+	}
+	return out
 }
 
 // ---- helpers ----

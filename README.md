@@ -13,10 +13,11 @@ staged state down on exit.
 - **Honest isolation tiers**: `host` and `container`, with the active tier
   printed by `run`/`doctor`. `environment` is required — there is no default, so a
   profile always states its isolation explicitly.
-- **Fail-closed policy trust**: every launch lane — `safeslop run`, `safeslop
-  session run`, and the Emacs client — refuses an unapproved or changed
-  `safeslop.cue` until you review and trust it; an ad-hoc host session requires an
-  explicit `--trust-host` acknowledgement.
+- **Fail-closed policy trust and host consent**: every launch lane — `safeslop
+  run`, `safeslop session run`, and the Emacs client — refuses an unapproved or
+  changed `safeslop.cue` until you review and trust it; an ad-hoc host session
+  requires an explicit `--trust-host` acknowledgement, and every host-tier launch
+  requires a per-launch yes/no comprehension gate before the agent starts.
 - **Scrubbed child environments**: ambient host credentials are not inherited;
   only policy-declared secrets/credentials cross the boundary.
 - **Ephemeral credentials**: staged deploy keys, registry tokens, Kubernetes
@@ -123,10 +124,10 @@ session running, so nothing is left as a phantom. The Emacs client switches to a
 read-only `--output jsonl` status monitor on that code.
 
 `session run --detach` gives a session a life independent of the Emacs buffer that
-started it: it launches a per-session **supervisor** that owns the agent and its
-PTY — which, for a host session, is made the agent's controlling
-terminal so it behaves like a real interactive run (`/dev/tty`, terminal signals,
-hangup) — and
+started it: after the host consent gate passes for host-tier sessions, it launches
+a per-session **supervisor** that owns the agent and its PTY — which, for a host
+session, is made the agent's controlling terminal so it behaves like a real
+interactive run (`/dev/tty`, terminal signals, hangup) — and
 serves that PTY over a per-session unix socket
 (`$SAFESLOP_STATE_DIR/sessions/<id>.sock`, surfaced as the session's `socket`
 field; when that path would exceed the `sun_path` limit it is transparently
@@ -377,6 +378,12 @@ you review and trust the new bytes. An ad-hoc host session (`session create --ag
 explicit `--trust-host` acknowledgement that the agent runs unconfined with your
 host credentials.
 
+Every real host-tier launch (`run`, coupled `session run`, and `session run
+--detach` before the supervisor starts) also asks a per-launch comprehension gate:
+the CLI prints the host blast radius and live scope, then requires matching yes/no
+answers to engine-authored true/false statements. Consent is not persisted; rerun
+the command to draw a fresh gate.
+
 Staged credentials never live under the agent-writable workspace: they are written
 to a host-only stage dir under your user cache dir (`~/Library/Caches/safeslop` on
 macOS, `~/.cache/safeslop` on Linux) and bind-mounted read-only into the container.
@@ -389,11 +396,12 @@ safeslop launches, only confined accidents).
 
 | environment | label | summary |
 |---|---|---|
-| `host` | none | No isolation boundary; the agent runs as you. |
+| `host` | none | No isolation boundary; the agent runs as you after a per-launch comprehension gate. |
 | `container` | egress-allowlisted | An ambient docker/podman/lima container plus proxy topology for per-domain egress control; deny-tier HTTP(S) rejects IP literals, DNS forwarding is loopback-pinned, and the agent launch is hard-set to uid/gid 1000. |
 
 Use `container` for routine agent sessions (network-bound agents belong here),
-and `host` only when you accept no isolation.
+and `host` only when you accept no isolation and can pass the per-launch consent
+check.
 
 ## Credentials
 

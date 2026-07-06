@@ -135,8 +135,9 @@ can surface in UI error text. Low secret-probability today, but the 0069 plan re
   `user: "1000:1000"` for agent launches, matching the image `USER 1000` and the
   uid/gid-owned tmpfs home.
 - **L2 — Comprehension/consent gate (specs/0030) is dead code.**
-  `HostConsentStatements`/`HostHeadlineBody`/`HostScopeLine` (`policy/consent.go`) have no
-  live caller. If the gate is meant to ship, wire it into the launch path (with B1).
+  **Implemented in specs/0082.** Host-tier `safeslop run` and `safeslop session run`
+  now call `HostConsentStatements`/`HostHeadlineBody`/`HostScopeLine` for a
+  per-launch yes/no comprehension gate before the agent starts.
 - **L3 — `trust.Store.Revoke` is unreachable (specs/0033).** Well-formed but has no CLI
   caller — trust can be granted (`safeslop trust`) but never revoked. Add `safeslop
   untrust [path]`.
@@ -179,4 +180,4 @@ B1 (session-lane trust bypass), B2 (staged secrets in workspace / ro defeat), H1
 (PATH/shadowed-binary exec), M1 (trust TOCTOU), M2 (remote injection), M4
 (orphaned stage dirs), and M3 (PID/PGID reuse guard) have shipped in follow-up
 specs 0072, 0075, 0076, and 0077; M5–M7 shipped in specs 0078–0080; L1 shipped in
-specs 0081. Remaining order: L2–L5.
+specs 0081; L2 shipped in specs 0082. Remaining order: L3–L5.
