@@ -197,7 +197,8 @@ names all three.
 default route. HTTP(S) egress is a domain allowlist: numeric IP-literal destinations are denied
 before domain matching, and Squid reverse-DNS matching is disabled for the allowlist. Docker's
 embedded DNS is pinned to the container loopback for external lookups, so deny-tier DNS cannot
-forward to the host resolver while local service names such as `proxy` still work. Only
+forward to the host resolver while local service names such as `proxy` still work. Agent launches
+are hard-set to uid/gid 1000 in Compose, matching the image user and tmpfs home owner. Only
 docker/OrbStack are egress-verified for this today, so launching a `deny` profile on **podman or
 lima is refused** unless you set `SAFESLOP_ALLOW_UNVERIFIED_RUNTIME=1` to accept the
 (still-unverified) risk. Teardown — `down`, the startup sweep, session reap — is never gated, so
@@ -389,7 +390,7 @@ safeslop launches, only confined accidents).
 | environment | label | summary |
 |---|---|---|
 | `host` | none | No isolation boundary; the agent runs as you. |
-| `container` | egress-allowlisted | An ambient docker/podman/lima container plus proxy topology for per-domain egress control; deny-tier HTTP(S) rejects IP literals and DNS forwarding is loopback-pinned. |
+| `container` | egress-allowlisted | An ambient docker/podman/lima container plus proxy topology for per-domain egress control; deny-tier HTTP(S) rejects IP literals, DNS forwarding is loopback-pinned, and the agent launch is hard-set to uid/gid 1000. |
 
 Use `container` for routine agent sessions (network-bound agents belong here),
 and `host` only when you accept no isolation.

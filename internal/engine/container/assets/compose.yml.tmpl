@@ -14,6 +14,9 @@ services:
       safeslop.session: "{{.SessionID}}"
       safeslop.managed: "true"
     working_dir: /workspace
+    # Dockerfile.agent already uses USER 1000; hard-set the launch user too so
+    # future image drift cannot run the agent as root or mismatch the tmpfs home.
+    user: "1000:1000"
     entrypoint: ["/bin/sh", "/safeslop/runtime/entrypoint.sh"]
     environment:
       HTTP_PROXY: http://proxy:3128

@@ -44,6 +44,25 @@ func TestComposeGivesAgentWritableEphemeralHome(t *testing.T) {
 	}
 }
 
+func TestComposeHardSetsAgentUser(t *testing.T) {
+	yml, err := renderCompose(composeParams{RuntimeDir: "/rt", Workspace: "/ws", StageDir: "/st"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(yml, "    user: \"1000:1000\"\n"); n != 1 {
+		t.Fatalf("generated compose must hard-set exactly one agent user, got %d:\n%s", n, yml)
+	}
+
+	legacyPath := filepath.Join("..", "..", "..", "library", "layer", "container", "docker-compose.yml")
+	legacy, err := os.ReadFile(legacyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(legacy), "    user: \"1000:1000\"\n"); n != 2 {
+		t.Fatalf("legacy compose must hard-set agent and agent-tools users, got %d:\n%s", n, legacy)
+	}
+}
+
 func TestEntrypointPreCreatesAgentStateDirs(t *testing.T) {
 	b, err := readAsset("entrypoint.sh")
 	if err != nil {

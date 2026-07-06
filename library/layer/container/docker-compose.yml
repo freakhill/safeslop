@@ -25,6 +25,7 @@ services:
     # /workspace = repo root. `..` from here is library/layer/, three
     # levels up lands at the repo we're orchestrating.
     working_dir: /workspace
+    user: "1000:1000"
     environment:
       HTTP_PROXY: http://proxy:3128
       HTTPS_PROXY: http://proxy:3128
@@ -71,6 +72,7 @@ services:
         AG2_VERSION: ${AG2_VERSION:-0.12.1}
     image: local/agent-sandbox-tools:latest
     working_dir: /workspace
+    user: "1000:1000"
     environment:
       HTTP_PROXY: http://proxy:3128
       HTTPS_PROXY: http://proxy:3128

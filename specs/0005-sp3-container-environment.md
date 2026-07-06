@@ -95,7 +95,8 @@ compose`), `github.com/creack/pty` via the existing `internal/engine/exec.RunInP
    to handing a process an env var, and the boundary protects only against *other host users*,
    `docker inspect`, and persistent disk. If `SSH_AUTH_SOCK` is set, the host agent socket is
    bind-mounted to `/slop/ssh-agent.sock` (keys never touch container disk).
-   Container hardening: `read_only: true`, `cap_drop: ALL`, `no-new-privileges`, `tmpfs /tmp`,
+   Container hardening: Compose hard-sets `user: "1000:1000"`, `read_only: true`,
+   `cap_drop: ALL`, `no-new-privileges`, `tmpfs /tmp` plus a uid/gid 1000 tmpfs home,
    workspace bind-mounted `rw` at `/workspace` (the only writable persistent path).
 
 5. **Lifecycle = reconcile-on-run + flock + explicit `slop down`.** Squid persists between runs

@@ -150,7 +150,8 @@ network and reaches HTTP(S) through the proxy allowlist. In `network: deny`, the
 proxy allowlist is domain-only: numeric IP-literal destinations are denied before
 matching, reverse-DNS lookups are disabled for the domain ACL, and Docker's
 external DNS forwarding is pinned to the container loopback (local service names
-such as `proxy` still resolve).
+such as `proxy` still resolve). Agent launches are hard-set to uid/gid 1000 in
+Compose, matching the image user and writable tmpfs home.
 
 ### VM profile
 

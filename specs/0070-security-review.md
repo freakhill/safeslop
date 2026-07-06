@@ -130,9 +130,10 @@ can surface in UI error text. Low secret-probability today, but the 0069 plan re
 
 ## Low / posture
 
-- **L1 — `user:` directive omitted from compose** (`compose.yml.tmpl`): non-root is
-  enforced only by the image's `USER 1000`, not hard-set at launch. Add `user: "1000:1000"`
-  as belt-and-suspenders (the tmpfs home already assumes uid 1000).
+- **L1 — `user:` directive omitted from compose** (`compose.yml.tmpl`).
+  **Implemented in specs/0081.** Generated and legacy Compose now hard-set
+  `user: "1000:1000"` for agent launches, matching the image `USER 1000` and the
+  uid/gid-owned tmpfs home.
 - **L2 — Comprehension/consent gate (specs/0030) is dead code.**
   `HostConsentStatements`/`HostHeadlineBody`/`HostScopeLine` (`policy/consent.go`) have no
   live caller. If the gate is meant to ship, wire it into the launch path (with B1).
@@ -166,8 +167,9 @@ symlink/`/tmp` aliasing (`cli.go:307-315`); container tier passes **only** `secr
 schema-constrained (`^(op://|env:).+`) and resolved via argv `op read` (no shell), values
 never logged; SSH staging pins `known_hosts` with `StrictHostKeyChecking=yes`,
 `IdentitiesOnly=yes`, `IdentityAgent=none`; revoke-info stores refs, not values; all
-bearers 0600, stage dirs 0700; the container is `read_only: true`, `cap_drop: [ALL]`,
-`no-new-privileges:true`, no docker socket, tmpfs home; `ValidateName` rejects control
+bearers 0600, stage dirs 0700; the container hard-sets `user: "1000:1000"`, is
+`read_only: true`, `cap_drop: [ALL]`, `no-new-privileges:true`, has no docker socket,
+and uses a tmpfs home; `ValidateName` rejects control
 chars (JSONL/bidi defense); terminal-launch strings are shell-quoted/AppleScript-escaped
 and the profile name is `[A-Za-z0-9._-]+`-constrained.
 
@@ -176,4 +178,5 @@ and the profile name is `[A-Za-z0-9._-]+`-constrained.
 B1 (session-lane trust bypass), B2 (staged secrets in workspace / ro defeat), H1
 (PATH/shadowed-binary exec), M1 (trust TOCTOU), M2 (remote injection), M4
 (orphaned stage dirs), and M3 (PID/PGID reuse guard) have shipped in follow-up
-specs 0072, 0075, 0076, and 0077; M5–M7 shipped in specs 0078–0080. Remaining order: L-series.
+specs 0072, 0075, 0076, and 0077; M5–M7 shipped in specs 0078–0080; L1 shipped in
+specs 0081. Remaining order: L2–L5.
