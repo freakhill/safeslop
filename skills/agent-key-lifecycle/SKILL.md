@@ -43,8 +43,11 @@ revocation at `session stop`.
 For Emacs-driven sessions, `safeslop session stop --session-id <id>
 --revoke-credentials` revokes ephemeral credentials before forcing process
 termination and is idempotent (a second stop neither revokes nor kills again).
-Revocation stays best-effort; the decay-first guarantee remains the wipe of
-staged private keys.
+Stop reconciles the recorded PID/process identity before signalling, so a reused
+detached supervisor PGID is not targeted. Revocation stays best-effort; the
+decay-first guarantee remains the local wipe of staged private keys: stop,
+status/list reconcile, remove, and prune all wipe the reconstructed host stage
+dir.
 
 ## GitHub
 
@@ -113,7 +116,7 @@ Forgejo tokens are account-wide, so prefer a dedicated bot account.
 - Keep write access rare and profile-specific.
 - Keep credentialed profiles on `network: "deny"` or a constrained container/VM path.
 - Never commit token values; use `env:` or `op://` secret refs.
-- Verify cleanup by checking staged runtime directories are wiped and deploy-key revocation ran best-effort.
+- Verify cleanup by checking staged runtime directories are wiped on stop/reconcile/rm/prune and deploy-key revocation ran best-effort when requested.
 
 ## Verification
 

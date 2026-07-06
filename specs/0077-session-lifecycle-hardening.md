@@ -34,7 +34,7 @@ M3: Detached `session stop` targets `-sess.PID` as a process group. If the super
   VERIFY:   `go test ./internal/engine/session ./internal/cli -run 'Test(Process|Reconcile|SessionStop).*' -count=1 -v`
   EXPECTED: command exits 0; token mismatch reconciles to stopped and `session stop` does not call the killer for a stale detached record.
 
-- [ ] T3 — Docs/spec sync
+- [x] T3 — Docs/spec sync
   FILE:     `README.md`, `skills/agent-sandbox-ops/SKILL.md`, `skills/agent-key-lifecycle/SKILL.md`, `specs/0070-security-review.md`, `specs/0077-session-lifecycle-hardening.md`
   CHANGE:   Document that stale-session reconcile/stop/rm/prune wipe host stage dirs and that detached stop verifies the recorded supervisor identity before group signalling; mark M4/M3 implemented in 0070 and update this checklist.
   VERIFY:   `rg -n 'M3|M4|stage dir|stage-dir|process identity|reconcile|PID|PGID|wipe' README.md skills/agent-sandbox-ops/SKILL.md skills/agent-key-lifecycle/SKILL.md specs/0070-security-review.md specs/0077-session-lifecycle-hardening.md`

@@ -102,15 +102,16 @@ can surface in UI error text. Low secret-probability today, but the 0069 plan re
   (`creds/multirepo.go:70-78`, `renderAliasSSHConfig`). A crafted remote with an
   embedded quoted newline can inject SSH directives (`ProxyCommand`) or git config.
   Validate `owner`/`repo` against `[A-Za-z0-9._-]` before writing.
-- **M3 — Detached `session stop` signals a stored PID/pgid with no reuse guard**
-  (`session.go` Stop path; `sessionKillProcess`). After a supervisor death + PID recycle,
-  `kill(-pgid, …)` can hit an unrelated group. Record supervisor start-time/generation and
-  verify before signalling; reconcile immediately before Stop.
-- **M4 — SIGKILL orphans staged creds** (defers skipped): neither `reconcile` nor
-  `sessionRevokeCredentials` (`cli.go:317`) deletes the stage dir, so a killed session
-  leaves `kubeconfig`/`gcp-access-token`/`.npmrc`/SSH key at a known workspace path
-  (compounds B2). Have Stop/Remove/Prune/reconcile wipe the stage dir; B2's relocation
-  shrinks the window.
+- **M3 — Detached `session stop` signals a stored PID/pgid with no reuse guard.**
+  **Implemented in specs/0077.** (`session.go` Stop path; `sessionKillProcess`). After a
+  supervisor death + PID recycle, `kill(-pgid, …)` can hit an unrelated group. Record
+  supervisor start-time/generation and verify before signalling; reconcile immediately
+  before Stop.
+- **M4 — SIGKILL orphans staged creds** (defers skipped). **Implemented in specs/0077.**
+  Neither `reconcile` nor `sessionRevokeCredentials` (`cli.go:317`) deletes the stage
+  dir, so a killed session leaves `kubeconfig`/`gcp-access-token`/`.npmrc`/SSH key at a
+  known workspace path (compounds B2). Have Stop/Remove/Prune/reconcile wipe the stage
+  dir; B2's relocation shrinks the window.
 - **M5 — GCP token written to a dead file.** `creds/gcp.go:43-48` writes
   `gcp-access-token` (0600) that nothing consumes (delivery is via
   `CLOUDSDK_AUTH_ACCESS_TOKEN` env). Remove the write, or wire+document it.
@@ -171,6 +172,6 @@ and the profile name is `[A-Za-z0-9._-]+`-constrained.
 ## Priority
 
 B1 (session-lane trust bypass), B2 (staged secrets in workspace / ro defeat), H1
-(PATH/shadowed-binary exec), M1 (trust TOCTOU), and M2 (remote injection) have
-shipped in follow-up specs 0072, 0075, and 0076. Remaining order: M4/M3
-(orphan/PID) → M5–M7, L-series.
+(PATH/shadowed-binary exec), M1 (trust TOCTOU), M2 (remote injection), M4
+(orphaned stage dirs), and M3 (PID/PGID reuse guard) have shipped in follow-up
+specs 0072, 0075, 0076, and 0077. Remaining order: M5–M7, L-series.

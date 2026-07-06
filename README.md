@@ -98,18 +98,21 @@ commands emit the shared versioned JSON contract envelope (`schema_version`,
 jsonl` for a line-delimited monitor stream.
 
 `session status` and `session list` reconcile liveness: a session still marked
-`running` whose run process is gone (crash, kill, host sleep) is reported — and
-persisted — as `stopped`, so status never lies about a session that is no longer
-executing. Container sessions are additionally reaped by their
-`safeslop.session=<id>` labels during stop/reconcile, so teardown does not depend
-on a still-readable session record.
+`running` whose recorded process is gone — or whose PID now names a different
+process identity after reuse — is reported and persisted as `stopped`, so status
+never lies about a session that is no longer executing. Container sessions are
+additionally reaped by their `safeslop.session=<id>` labels during
+stop/reconcile, and the reconstructed host stage dir is wiped, so teardown does
+not depend on a still-readable session record.
 
 `session stop` (and a terminal/buffer close) tears the boundary down rather than
 just killing the wrapper: credentials are revoked before process termination when
-`--revoke-credentials` is requested, the run receives `SIGTERM`/`SIGHUP`, and the
-labelled container boundary is reaped; staged secrets are wiped by run teardown
-or the reap path. Interactive `Ctrl-C` (`SIGINT`) is left for the agent and does
-not tear the session down.
+`--revoke-credentials` is requested, stop reconciles the recorded PID/process
+identity before signalling (so a stale detached PGID is not targeted), the run
+receives `SIGTERM`/`SIGHUP`, and the labelled container boundary is reaped;
+staged secrets are wiped by run teardown or the stop/reconcile cleanup path.
+Interactive `Ctrl-C` (`SIGINT`) is left for the agent and does not tear the
+session down.
 
 `session run` is an interactive attach and needs a controlling terminal — Emacs
 supplies one via `make-term`. Invoked without a usable TTY (a pipe, cron, a
@@ -131,16 +134,18 @@ running agent over that socket — bridging the local terminal, forwarding
 window-size changes, and exiting with the agent's code — with at most one client
 attached at a time. Attaching when no supervisor is serving the socket reports
 `SESSION_NOT_RUNNING` rather than the more specific `SESSION_STOPPED`. `session
-stop` then signals the supervisor's whole process
-group (graceful `SIGTERM`, then `SIGKILL`) so the boundary tree is torn down and
-the socket removed; a supervisor that dies uncleanly has its stale socket swept on
-the next `session status`/`list` reconcile.
+stop` first verifies that the recorded supervisor PID still matches the stored
+process identity, then signals the supervisor's whole process group (graceful
+`SIGTERM`, then `SIGKILL`) so the boundary tree is torn down and the socket
+removed; a supervisor that dies uncleanly has its stale socket and host stage dir
+swept on the next `session status`/`list` reconcile.
 
 Detaching is a deliberate trade-off: a detached agent holds its staged secrets
 (`secrets.env`, deploy keys, kubeconfig) for its whole — possibly long — life,
 where a coupled run bounds them to the buffer's lifetime. `stop
---revoke-credentials` still revokes before the kill, and liveness reconcile plus
-the stale-resource sweep bound the leak if the supervisor dies uncleanly.
+--revoke-credentials` still revokes before the kill, and process-identity
+liveness reconcile plus the stale-resource/stage-dir sweep bound the leak if the
+supervisor dies uncleanly.
 
 An exited session stays listed as `stopped` (with its exit code and last error)
 rather than vanishing, so its outcome is inspectable. `session rm --session-id
@@ -148,9 +153,10 @@ rather than vanishing, so its outcome is inspectable. `session rm --session-id
 one call, so the session list does not accumulate dead-session corpses. Both
 refuse a still-running session — stop it first — and revoke any still-live staged
 credentials before deleting a record, so a removal can never orphan secrets on
-disk. `prune` first runs the liveness reconcile, so a crashed session (marked
-`running` but whose process is gone) is persisted as `stopped` and swept in the
-same pass. The Emacs portal exposes these as `x` (remove one) and `X` (prune).
+disk. `rm`/`prune` also wipe the reconstructed host stage dir. `prune` first runs
+the liveness reconcile, so a crashed session (marked `running` but whose process
+is gone or reused) is persisted as `stopped` and swept in the same pass. The
+Emacs portal exposes these as `x` (remove one) and `X` (prune).
 
 A session can carry an optional human display name. Set it at creation with
 `session create --name <label>` (combinable with `--profile`), or later — in any
