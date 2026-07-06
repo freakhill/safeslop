@@ -141,9 +141,9 @@ can surface in UI error text. Low secret-probability today, but the 0069 plan re
 - **L3 — `trust.Store.Revoke` is unreachable (specs/0033).**
   **Implemented in specs/0083.** `safeslop untrust [path]` now removes the
   host-side policy approval using the same canonical path key as launch trust checks.
-- **L4 — `.pub` files linger post-keygen** (`multirepo.go:139,208`): removed only after
-  registration; a crash leaves a 0644 public key (non-secret, but violates the
-  "private key only" doc claim). Remove immediately after read.
+- **L4 — `.pub` files linger post-keygen** (`multirepo.go:139,208`).
+  **Implemented in specs/0084.** Forgejo deploy-key staging now removes each generated
+  public key file immediately after reading it, before registration or later parsing can fail.
 - **L5 — `assumeRoleDownscope` inherits full host env** into the `aws sts` subprocess
   (`aws.go:91-99`). Pass a minimal allowlist.
 
@@ -180,5 +180,5 @@ B1 (session-lane trust bypass), B2 (staged secrets in workspace / ro defeat), H1
 (PATH/shadowed-binary exec), M1 (trust TOCTOU), M2 (remote injection), M4
 (orphaned stage dirs), and M3 (PID/PGID reuse guard) have shipped in follow-up
 specs 0072, 0075, 0076, and 0077; M5–M7 shipped in specs 0078–0080; L1 shipped in
-specs 0081; L2 shipped in specs 0082; L3 shipped in specs 0083. Remaining order:
-L4–L5.
+specs 0081; L2 shipped in specs 0082; L3 shipped in specs 0083; L4 shipped in
+specs 0084. Remaining order: L5.

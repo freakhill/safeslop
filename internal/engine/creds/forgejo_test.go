@@ -156,6 +156,37 @@ func TestStageForgejoMintsAndStages(t *testing.T) {
 	}
 }
 
+func TestStageForgejoRemovesPubKeyBeforeRegistrationFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"message":"boom"}`))
+	}))
+	defer srv.Close()
+
+	binDir := t.TempDir()
+	fakeStub(t, binDir, "ssh-keygen", `eval "p=\${$#}"; echo PRIV > "$p"; echo "ssh-ed25519 AAAAPUB safeslop" > "$p.pub"`)
+	fakeStub(t, binDir, "ssh-keyscan", `eval "h=\${$#}"; echo "$h ssh-ed25519 AAAAHOSTKEY"`)
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+	t.Setenv("FORGEJO_TOKEN", "secret-tok")
+
+	stage := t.TempDir()
+	host := hostFromURL(srv.URL)
+	creds := &policy.Credentials{Forgejo: &policy.ForgejoCreds{
+		URL:   srv.URL,
+		Repos: []policy.RepoCred{{Repo: "acme/repo"}},
+	}}
+	acc := forgejoAcc(host, "acme", "env:FORGEJO_TOKEN", 0)
+	_, err := StageForgejo(context.Background(), creds, stage, acc)
+	if err == nil || !strings.Contains(err.Error(), "HTTP 500") {
+		t.Fatalf("StageForgejo err = %v, want registration HTTP 500", err)
+	}
+
+	pubPath := filepath.Join(stage, ".ssh", "id_acme-repo.pub")
+	if _, statErr := os.Stat(pubPath); !os.IsNotExist(statErr) {
+		t.Fatalf("public key must be removed before registration can fail; stat err=%v", statErr)
+	}
+}
+
 func TestStageForgejoNilIsNoop(t *testing.T) {
 	env, err := StageForgejo(context.Background(), &policy.Credentials{}, t.TempDir(), nil)
 	if err != nil || env != nil {

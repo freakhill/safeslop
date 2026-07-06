@@ -156,6 +156,18 @@ func renderAliasSSHConfig(hostName, port, knownHostsPath string, entries []alias
 	return cfg.String(), nil
 }
 
+func readAndRemovePublicKey(keyPath, repo string) ([]byte, error) {
+	pubPath := keyPath + ".pub"
+	pub, err := os.ReadFile(pubPath)
+	if err != nil {
+		return nil, fmt.Errorf("read generated public key for %s: %w", repo, err)
+	}
+	if err := os.Remove(pubPath); err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("remove generated public key for %s: %w", repo, err)
+	}
+	return pub, nil
+}
+
 // stageForgejoMulti mints one ephemeral Forgejo/Gitea deploy key per repo in fc.Repos (all on the
 // same instance) and stages them with per-repo SSH aliases + insteadOf (specs/0047 P2). The
 // instance host comes from fc.URL (required here — no single origin to infer it from) and the git
@@ -213,9 +225,9 @@ func stageForgejoMulti(ctx context.Context, fc *policy.ForgejoCreds, stageDir st
 		if _, err := runSSHCmd(ctx, keygenArgv(keyPath, title), "is ssh-keygen on PATH?"); err != nil {
 			return nil, err
 		}
-		pub, err := os.ReadFile(keyPath + ".pub")
+		pub, err := readAndRemovePublicKey(keyPath, rc.Repo)
 		if err != nil {
-			return nil, fmt.Errorf("read generated public key for %s: %w", rc.Repo, err)
+			return nil, err
 		}
 		body := forgejoKeyBody(title, strings.TrimSpace(string(pub)), rc.Write)
 		respBody, code, err := forgejoDo(ctx, http.MethodPost, forgejoKeysURL(base, owner, repo), tok, body)
@@ -229,7 +241,6 @@ func stageForgejoMulti(ctx context.Context, fc *policy.ForgejoCreds, stageDir st
 		if err != nil {
 			return nil, err
 		}
-		_ = os.Remove(keyPath + ".pub")
 		if err := os.Chmod(keyPath, 0o600); err != nil {
 			return nil, err
 		}
