@@ -33,7 +33,7 @@ M2: Git origin inference accepts owner/repo text from agent-writable `.git/confi
   VERIFY:   `go test ./internal/engine/creds -run 'Test(ParseOwnerRepo|ParseForgejoRemote|SplitOwnerRepo|RenderAliasSSHConfigRejects)' -count=1 -v`
   EXPECTED: command exits 0; injected remote/repo strings are rejected and valid examples still pass.
 
-- [ ] T3 — Docs/spec sync
+- [x] T3 — Docs/spec sync
   FILE:     `README.md`, `skills/agent-key-lifecycle/SKILL.md`, `specs/0070-security-review.md`, `specs/0076-trust-remote-hardening.md`
   CHANGE:   Document that origin-inferred repo names are constrained before credentials are staged; mark M1/M2 as implemented in 0070; update this checklist.
   VERIFY:   `rg -n 'M1|M2|origin|owner/repo|A-Za-z0-9' README.md skills/agent-key-lifecycle/SKILL.md specs/0070-security-review.md specs/0076-trust-remote-hardening.md`

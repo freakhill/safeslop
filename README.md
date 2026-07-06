@@ -217,7 +217,8 @@ safeslop: {
 
 			credentials: {
 				// GitHub App tokens over HTTPS: omit repos to infer the current origin, or
-				// declare repos (one token per owner, partitioned by write). Each owner needs
+				// declare repos (one token per owner, partitioned by write). Inferred and
+				// declared owner/repo components must match [A-Za-z0-9._-]+. Each owner needs
 				// a link: safeslop creds link github --app-id N --installation-id N --key-ref op://…
 				github: {
 					repos: [{repo: "owner/web"}, {repo: "owner/api", write: true}]
@@ -392,14 +393,18 @@ decay-first safety guarantee.
   ephemeral, repo-scoped GitHub App installation token (contents + metadata) and
   stages it as a git-over-HTTPS credential — no deploy keys, no `gh` CLI. Each
   owner needs an account link (`safeslop creds link github`); repos are
-  partitioned by `write` so a read-only repo never gets a write token. The P1
-  token lifetime is capped at ~1h (no renewal yet; renewal lands in P2). PAT mode
-  (`mode: "pat"`, `pat: <ref>`) stages one existing fine-grained token instead.
+  partitioned by `write` so a read-only repo never gets a write token. Owner/repo
+  names, whether declared or inferred from `origin`, must match `[A-Za-z0-9._-]+`
+  before any git config is staged. The P1 token lifetime is capped at ~1h (no
+  renewal yet; renewal lands in P2). PAT mode (`mode: "pat"`, `pat: <ref>`)
+  stages one existing fine-grained token instead.
 - Forgejo/Gitea uses `credentials.forgejo` (deploy keys, one per repo, with
   per-repo SSH host aliases + git URL rewrites). The account token that registers
   each key comes from `~/.config/safeslop/accounts.cue`
-  (`safeslop creds link forgejo`), never from `safeslop.cue`. Forgejo account
-  tokens are account-wide — prefer a dedicated bot account.
+  (`safeslop creds link forgejo`), never from `safeslop.cue`. Origin-inferred or
+  declared owner/repo names must match `[A-Za-z0-9._-]+`; malformed remotes fail
+  closed before `.gitconfig`/`.ssh/config` are rendered. Forgejo account tokens
+  are account-wide — prefer a dedicated bot account.
 - Account links live in `~/.config/safeslop/accounts.cue` (0600, host-only): they
   hold non-secret ids + secret *refs* only, never a token or key value, and are
   never serialized into a container or stage dir. Manage them with `safeslop creds

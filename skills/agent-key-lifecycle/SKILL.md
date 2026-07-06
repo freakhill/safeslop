@@ -63,11 +63,13 @@ credentials: github: {
 }
 ```
 
-Omit `repos` to infer a single repository from the current `origin` remote. In
-the default `app` mode safeslop mints an ephemeral, repo-scoped App installation
-token per owner (partitioned by `write`) and stages it over HTTPS — no deploy
-keys, no `gh` CLI. An owner with no account link is a hard error. The P1 token
-lifetime is ~1h with no renewal (renewal is P2).
+Omit `repos` to infer a single repository from the current `origin` remote. The
+inferred owner/repo components — and any declared `repos` entries — must match
+`[A-Za-z0-9._-]+` before safeslop stages git config. In the default `app` mode
+safeslop mints an ephemeral, repo-scoped App installation token per owner
+(partitioned by `write`) and stages it over HTTPS — no deploy keys, no `gh` CLI.
+An owner with no account link is a hard error. The P1 token lifetime is ~1h with
+no renewal (renewal is P2).
 
 PAT fallback (an existing fine-grained token, staged in a wipe-on-exit file, not
 embedded in git config or the environment):
@@ -100,8 +102,10 @@ credentials: forgejo: {
 ```
 
 safeslop mints one deploy key per repo and stages per-repo SSH aliases plus git
-URL rewrites. Each declared owner needs a forgejo account link; Forgejo tokens
-are account-wide, so prefer a dedicated bot account.
+URL rewrites. Origin-inferred and declared owner/repo components must match
+`[A-Za-z0-9._-]+`; malformed remotes fail closed before `.gitconfig` or
+`.ssh/config` is rendered. Each declared owner needs a forgejo account link;
+Forgejo tokens are account-wide, so prefer a dedicated bot account.
 
 ## Safety checklist
 

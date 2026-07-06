@@ -91,16 +91,17 @@ can surface in UI error text. Low secret-probability today, but the 0069 plan re
 
 ## Medium
 
-- **M1 — Trust-check TOCTOU.** `cmdRun` parses the policy at `cli.go:215` (its own
-  `os.ReadFile`) but hashes a *separate* read inside `enforceTrust` (`cli.go:1176`), then
-  runs the already-parsed profile. The bytes validated ≠ the bytes hashed/approved. Read
-  once, hash and parse the *same* bytes (`policy.LoadBytes`).
-- **M2 — git-remote injection into staged config.** `owner`/`repo` parsed from
-  `git remote get-url origin` (agent-writable `.git/config`) are `fmt.Fprintf`'d verbatim
-  into `.gitconfig`/`.ssh/config` bodies (`creds/multirepo.go:70-78`,
-  `renderAliasSSHConfig`). A crafted remote with an embedded quoted newline can inject SSH
-  directives (`ProxyCommand`) or git config. Validate `owner`/`repo` against
-  `[A-Za-z0-9._-]` before writing.
+- **M1 — Trust-check TOCTOU.** **Implemented in specs/0076.** `cmdRun` parses the
+  policy at `cli.go:215` (its own `os.ReadFile`) but hashes a *separate* read inside
+  `enforceTrust` (`cli.go:1176`), then runs the already-parsed profile. The bytes
+  validated ≠ the bytes hashed/approved. Read once, hash and parse the *same* bytes
+  (`policy.LoadBytes`).
+- **M2 — git-remote injection into staged config.** **Implemented in specs/0076.**
+  `owner`/`repo` parsed from `git remote get-url origin` (agent-writable `.git/config`)
+  are `fmt.Fprintf`'d verbatim into `.gitconfig`/`.ssh/config` bodies
+  (`creds/multirepo.go:70-78`, `renderAliasSSHConfig`). A crafted remote with an
+  embedded quoted newline can inject SSH directives (`ProxyCommand`) or git config.
+  Validate `owner`/`repo` against `[A-Za-z0-9._-]` before writing.
 - **M3 — Detached `session stop` signals a stored PID/pgid with no reuse guard**
   (`session.go` Stop path; `sessionKillProcess`). After a supervisor death + PID recycle,
   `kill(-pgid, …)` can hit an unrelated group. Record supervisor start-time/generation and
@@ -169,7 +170,7 @@ and the profile name is `[A-Za-z0-9._-]+`-constrained.
 
 ## Priority
 
-B1 (session-lane trust bypass) → B2 (staged secrets in workspace / ro defeat) → H1
-(PATH/shadowed-binary exec) → M1 (trust TOCTOU) → M2 (remote injection) → M4/M3
-(orphan/PID) → M5–M7, L-series. B1+B2 gate any "safe by default" claim for the Emacs
-cockpit, which is the primary UI.
+B1 (session-lane trust bypass), B2 (staged secrets in workspace / ro defeat), H1
+(PATH/shadowed-binary exec), M1 (trust TOCTOU), and M2 (remote injection) have
+shipped in follow-up specs 0072, 0075, and 0076. Remaining order: M4/M3
+(orphan/PID) → M5–M7, L-series.
