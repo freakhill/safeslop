@@ -65,8 +65,13 @@ type Session struct {
 	RevokedAt          time.Time         `json:"revoked_at,omitempty"`
 	CredentialsRevoked bool              `json:"credentials_revoked"`
 	PID                int               `json:"pid,omitempty"`
-	ExitCode           *int              `json:"exit_code,omitempty"`
-	LastError          string            `json:"last_error,omitempty"`
+	// ProcessToken is a non-secret kernel process-start/generation token paired with PID.
+	// New sessions record it when the platform exposes one so liveness and stop can detect
+	// PID reuse before signalling a stale detached process group (specs/0077 M3). Legacy
+	// records leave it empty and fall back to signal-0 liveness.
+	ProcessToken string `json:"process_token,omitempty"`
+	ExitCode     *int   `json:"exit_code,omitempty"`
+	LastError    string `json:"last_error,omitempty"`
 	// PolicyPath/PolicyHash pin the safeslop.cue that was host-approved when a profile
 	// session was created: the canonical (symlink-free, absolute) path and the sha256 of the
 	// approved bytes. run/supervise rebuild the profile from this record and never re-read the
@@ -196,6 +201,10 @@ func (s Store) markRunning(id string, pid int, detached bool, now time.Time) (Se
 	}
 	sess.Status = StatusRunning
 	sess.PID = pid
+	sess.ProcessToken = ""
+	if token, ok := ProcessStartToken(pid); ok {
+		sess.ProcessToken = token
+	}
 	sess.Detached = detached
 	sess.StartedAt = now.UTC()
 	sess.UpdatedAt = now.UTC()
@@ -209,6 +218,7 @@ func (s Store) Finish(id string, exitCode int, lastErr string, now time.Time) (S
 	}
 	sess.Status = StatusStopped
 	sess.PID = 0
+	sess.ProcessToken = ""
 	sess.ExitCode = &exitCode
 	sess.LastError = lastErr
 	sess.StoppedAt = now.UTC()
@@ -271,10 +281,14 @@ func (s Store) Rename(id, name string, now time.Time) (Session, error) {
 	return sess, s.Save(sess)
 }
 
-// ProcessAlive reports whether pid names a live process. It is the default
-// liveness probe used to reconcile sessions whose run wrapper died without
-// recording an exit. On macOS/unix, signal 0 succeeds for a live process we
-// own, and EPERM means the process is alive but owned by another user.
+// ProcessStartToken returns a non-secret kernel process-start/generation token for pid
+// when the platform exposes one. It is paired with PID to distinguish the original
+// safeslop wrapper/supervisor from a later process that reused the same number.
+func ProcessStartToken(pid int) (string, bool) { return processStartToken(pid) }
+
+// ProcessAlive reports whether pid names a live process. On macOS/unix, signal 0
+// succeeds for a live process we own, and EPERM means the process is alive but
+// owned by another user.
 func ProcessAlive(pid int) bool {
 	if pid <= 0 {
 		return false
@@ -287,21 +301,31 @@ func ProcessAlive(pid int) bool {
 	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
+// ProcessAliveSession reports whether sess still points at the same live process
+// recorded by MarkRunning/MarkRunningDetached. Records without a process token are
+// legacy/unsupported-platform sessions and fall back to signal-0 PID liveness.
+func ProcessAliveSession(sess Session) bool {
+	if sess.ProcessToken == "" {
+		return ProcessAlive(sess.PID)
+	}
+	token, ok := ProcessStartToken(sess.PID)
+	return ok && token == sess.ProcessToken
+}
+
 // reconcile corrects sess for liveness. In the coupled lifecycle the run wrapper
-// holds the agent for the whole run, so a session still marked running whose
-// recorded PID is no longer alive means the run ended without recording an exit
-// (crash, SIGKILL, host sleep): report it as stopped. Pure given isAlive; the
-// bool reports whether sess changed so the caller can persist exactly once.
-//
-// The recorded PID is today the run-wrapper PID — an honest liveness anchor for
-// the coupled model. Surfacing the boundary process PID and a process-group
-// teardown is specs/0050 PR2; PID reuse is a known, accepted limitation here.
-func reconcile(sess Session, now time.Time, isAlive func(int) bool) (Session, bool) {
-	if sess.Status != StatusRunning || sess.PID <= 0 || isAlive(sess.PID) {
+// holds the agent for the whole run; in the detached lifecycle the recorded PID is
+// the supervisor/process-group leader. If that recorded process is no longer alive
+// — or its process-start token no longer matches, meaning the PID was reused — the
+// run ended without recording an exit (crash, SIGKILL, host sleep): report it as
+// stopped. Pure given isAlive; the bool reports whether sess changed so the caller
+// can persist exactly once.
+func reconcile(sess Session, now time.Time, isAlive func(Session) bool) (Session, bool) {
+	if sess.Status != StatusRunning || sess.PID <= 0 || isAlive(sess) {
 		return sess, false
 	}
 	sess.Status = StatusStopped
 	sess.PID = 0
+	sess.ProcessToken = ""
 	sess.LastError = "run process exited without recording status"
 	sess.StoppedAt = now.UTC()
 	sess.UpdatedAt = now.UTC()
@@ -309,8 +333,8 @@ func reconcile(sess Session, now time.Time, isAlive func(int) bool) (Session, bo
 }
 
 // GetReconciled is Get plus a liveness pass: a session marked running whose PID
-// is dead is persisted and returned as stopped, so status never lies.
-func (s Store) GetReconciled(id string, now time.Time, isAlive func(int) bool, reap ...func(Session) error) (Session, error) {
+// is dead/stale is persisted and returned as stopped, so status never lies.
+func (s Store) GetReconciled(id string, now time.Time, isAlive func(Session) bool, reap ...func(Session) error) (Session, error) {
 	sess, err := s.Get(id)
 	if err != nil {
 		return Session{}, err
@@ -333,7 +357,7 @@ func (s Store) GetReconciled(id string, now time.Time, isAlive func(int) bool, r
 }
 
 // ListReconciled is List with the same per-session liveness pass as GetReconciled.
-func (s Store) ListReconciled(now time.Time, isAlive func(int) bool, reap ...func(Session) error) ([]Session, error) {
+func (s Store) ListReconciled(now time.Time, isAlive func(Session) bool, reap ...func(Session) error) ([]Session, error) {
 	sessions, err := s.List()
 	if err != nil {
 		return nil, err
@@ -403,6 +427,7 @@ func (s Store) Stop(id string, revoke bool, now time.Time, revokeCredentials fun
 	}
 	sess.Status = StatusStopped
 	sess.PID = 0
+	sess.ProcessToken = ""
 	sess.StoppedAt = now.UTC()
 	sess.UpdatedAt = now.UTC()
 	return sess, s.Save(sess)

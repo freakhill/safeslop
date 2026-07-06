@@ -102,7 +102,7 @@ func TestReconcileRemovesStaleSocket(t *testing.T) {
 		t.Fatalf("seed socket: %v", err)
 	}
 
-	got, err := store.GetReconciled(sess.ID, testNow(), func(int) bool { return false }) // supervisor dead
+	got, err := store.GetReconciled(sess.ID, testNow(), func(Session) bool { return false }) // supervisor dead
 	if err != nil {
 		t.Fatalf("get reconciled: %v", err)
 	}
@@ -190,9 +190,61 @@ func TestGetNormalizesLegacySystemBackend(t *testing.T) {
 	}
 }
 
+func TestProcessTokenRecordedOnMarkRunning(t *testing.T) {
+	token, ok := ProcessStartToken(os.Getpid())
+	if !ok {
+		t.Skip("platform does not expose a process start token")
+	}
+	store := NewStore(t.TempDir())
+	sess, err := store.Create("claude", "host", t.TempDir(), testNow())
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	running, err := store.MarkRunning(sess.ID, os.Getpid(), testNow())
+	if err != nil {
+		t.Fatalf("mark running: %v", err)
+	}
+	if running.ProcessToken != token {
+		t.Fatalf("process token = %q, want %q", running.ProcessToken, token)
+	}
+	stored, err := store.Get(sess.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if stored.ProcessToken != token {
+		t.Fatalf("stored process token = %q, want %q", stored.ProcessToken, token)
+	}
+}
+
+func TestReconcileStopsProcessTokenMismatch(t *testing.T) {
+	old := processStartToken
+	processStartToken = func(pid int) (string, bool) {
+		if pid != 4242 {
+			t.Fatalf("unexpected pid probe %d", pid)
+		}
+		return "new-token", true
+	}
+	defer func() { processStartToken = old }()
+
+	sess := Session{ID: "sess-x", Status: StatusRunning, PID: 4242, ProcessToken: "old-token"}
+	got, changed := reconcile(sess, testNow(), ProcessAliveSession)
+	if !changed || got.Status != StatusStopped || got.PID != 0 {
+		t.Fatalf("token-mismatched session not reconciled to stopped: changed=%v got=%+v", changed, got)
+	}
+}
+
+func TestProcessAliveSessionFallsBackForLegacyEmptyToken(t *testing.T) {
+	old := processStartToken
+	processStartToken = func(int) (string, bool) { return "", false }
+	defer func() { processStartToken = old }()
+	if !ProcessAliveSession(Session{Status: StatusRunning, PID: os.Getpid()}) {
+		t.Fatal("legacy session without a process token should fall back to signal-0 liveness")
+	}
+}
+
 func TestReconcileMarksDeadRunningSessionStopped(t *testing.T) {
 	sess := Session{ID: "sess-x", Status: StatusRunning, PID: 4242}
-	got, changed := reconcile(sess, testNow(), func(int) bool { return false })
+	got, changed := reconcile(sess, testNow(), func(Session) bool { return false })
 	if !changed {
 		t.Fatalf("dead running session should be reconciled")
 	}
@@ -212,7 +264,7 @@ func TestReconcileMarksDeadRunningSessionStopped(t *testing.T) {
 
 func TestReconcileLeavesLiveSessionRunning(t *testing.T) {
 	sess := Session{ID: "sess-x", Status: StatusRunning, PID: 4242}
-	got, changed := reconcile(sess, testNow(), func(int) bool { return true })
+	got, changed := reconcile(sess, testNow(), func(Session) bool { return true })
 	if changed {
 		t.Fatalf("live running session should not be reconciled")
 	}
@@ -224,7 +276,7 @@ func TestReconcileLeavesLiveSessionRunning(t *testing.T) {
 func TestReconcileIsIdempotentOnStopped(t *testing.T) {
 	for _, st := range []string{StatusStopped, StatusCreated} {
 		sess := Session{ID: "sess-x", Status: st, PID: 0}
-		got, changed := reconcile(sess, testNow(), func(int) bool { return false })
+		got, changed := reconcile(sess, testNow(), func(Session) bool { return false })
 		if changed {
 			t.Fatalf("%s session should not be reconciled", st)
 		}
@@ -244,7 +296,7 @@ func TestGetReconciledPersistsDeadTransition(t *testing.T) {
 		t.Fatalf("mark running: %v", err)
 	}
 
-	got, err := store.GetReconciled(sess.ID, testNow(), func(int) bool { return false })
+	got, err := store.GetReconciled(sess.ID, testNow(), func(Session) bool { return false })
 	if err != nil {
 		t.Fatalf("get reconciled: %v", err)
 	}
@@ -277,7 +329,7 @@ func TestListReconciledCorrectsDeadSessions(t *testing.T) {
 		t.Fatalf("create created: %v", err)
 	}
 
-	sessions, err := store.ListReconciled(testNow(), func(int) bool { return false })
+	sessions, err := store.ListReconciled(testNow(), func(Session) bool { return false })
 	if err != nil {
 		t.Fatalf("list reconciled: %v", err)
 	}

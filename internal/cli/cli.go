@@ -412,10 +412,10 @@ var sessionKillProcess = func(target int) error {
 	return syscall.Kill(target, syscall.SIGKILL)
 }
 
-// sessionProcessAlive probes whether a recorded session PID is still live, so
-// status/list can reconcile a session whose run wrapper died without recording
-// an exit. Overridable in tests.
-var sessionProcessAlive = engsession.ProcessAlive
+// sessionProcessAlive verifies whether a recorded session still points at the same
+// live wrapper/supervisor process, so status/list/stop can reconcile a dead or
+// PID-reused session before reporting or signalling it. Overridable in tests.
+var sessionProcessAlive = engsession.ProcessAliveSession
 
 // sessionReapKey is the safeslop.session label value the launch path stamps on a session's
 // boundary: SessionIDFromStageDir(stageDir), NOT the bare session id. The stage dir carries an
@@ -862,7 +862,17 @@ func cmdSessionStop() *cobra.Command {
 			if output != "json" {
 				return fmt.Errorf("session stop requires --output json")
 			}
-			sess, err := sessionStore().Stop(id, revoke, time.Now(), sessionRevokeCredentials, sessionKillProcess, sessionReapBoundary, sessionWipeStageDir)
+			store := sessionStore()
+			// Reconcile immediately before signalling: if the recorded wrapper/supervisor
+			// died, or its PID was reused, persist it stopped and clean local stage/socket
+			// state instead of sending SIGTERM to an unrelated process/group.
+			if _, err := store.GetReconciled(id, time.Now(), sessionProcessAlive, sessionReapBoundary, sessionWipeStageDir); err != nil {
+				if errors.Is(err, engsession.ErrNotFound) {
+					return emitContractError(jsoncontract.CodeSessionNotFound, "session not found", map[string]any{"session_id": id})
+				}
+				return emitContractError(jsoncontract.CodeIOError, "reconcile session", map[string]any{"error": err.Error()})
+			}
+			sess, err := store.Stop(id, revoke, time.Now(), sessionRevokeCredentials, sessionKillProcess, sessionReapBoundary, sessionWipeStageDir)
 			if err != nil {
 				if errors.Is(err, engsession.ErrNotFound) {
 					return emitContractError(jsoncontract.CodeSessionNotFound, "session not found", map[string]any{"session_id": id})

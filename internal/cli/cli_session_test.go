@@ -377,10 +377,13 @@ func TestSessionStopRevokesBeforeKillAndIsIdempotent(t *testing.T) {
 	ws := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
 	var order []string
-	oldRevoke, oldKill := sessionRevokeCredentials, sessionKillProcess
+	oldRevoke, oldKill, oldAlive := sessionRevokeCredentials, sessionKillProcess, sessionProcessAlive
 	sessionRevokeCredentials = func(_ engsession.Session) error { order = append(order, "revoke"); return nil }
 	sessionKillProcess = func(_ int) error { order = append(order, "kill"); return nil }
-	defer func() { sessionRevokeCredentials, sessionKillProcess = oldRevoke, oldKill }()
+	sessionProcessAlive = func(engsession.Session) bool { return true }
+	defer func() {
+		sessionRevokeCredentials, sessionKillProcess, sessionProcessAlive = oldRevoke, oldKill, oldAlive
+	}()
 
 	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
 	if err != nil {
@@ -441,11 +444,48 @@ func TestSessionStopWipesStageDirWithoutRevoke(t *testing.T) {
 	assertStageDirRemovedForTest(t, stageDir)
 }
 
+func TestSessionStopSkipsKillForStaleDetachedProcess(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+	oldAlive, oldKill := sessionProcessAlive, sessionKillProcess
+	sessionProcessAlive = func(engsession.Session) bool { return false } // supervisor PID is gone/stale before stop
+	killed := false
+	sessionKillProcess = func(int) error { killed = true; return nil }
+	defer func() { sessionProcessAlive, sessionKillProcess = oldAlive, oldKill }()
+
+	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	id := parseEnvelopeForTest(t, out).Data["session_id"].(string)
+	if _, err := sessionStore().MarkRunningDetached(id, 4242, nowForTest(t)); err != nil {
+		t.Fatalf("mark detached: %v", err)
+	}
+	sess, err := sessionStore().Get(id)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	stageDir := seedSessionStageDirForTest(t, sess)
+
+	out, err = runRootForTest(t, ws, "session", "stop", "--session-id", id, "--output", "json")
+	if err != nil {
+		t.Fatalf("stop: %v\nout=%s", err, out)
+	}
+	if killed {
+		t.Fatal("stop signalled a stale/reconciled detached PID")
+	}
+	env := parseEnvelopeForTest(t, out)
+	if !env.OK || env.Data["status"] != "stopped" {
+		t.Fatalf("stop envelope = %+v, want stopped", env)
+	}
+	assertStageDirRemovedForTest(t, stageDir)
+}
+
 func TestSessionStatusReportsReconciledState(t *testing.T) {
 	ws := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
 	oldAlive := sessionProcessAlive
-	sessionProcessAlive = func(int) bool { return false } // run wrapper is gone
+	sessionProcessAlive = func(engsession.Session) bool { return false } // run wrapper is gone
 	defer func() { sessionProcessAlive = oldAlive }()
 
 	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
@@ -474,7 +514,7 @@ func TestSessionStatusReconcileWipesStageDir(t *testing.T) {
 	ws := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
 	oldAlive := sessionProcessAlive
-	sessionProcessAlive = func(int) bool { return false }
+	sessionProcessAlive = func(engsession.Session) bool { return false }
 	defer func() { sessionProcessAlive = oldAlive }()
 
 	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
@@ -502,7 +542,7 @@ func TestSessionListReconcileWipesStageDir(t *testing.T) {
 	ws := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
 	oldAlive := sessionProcessAlive
-	sessionProcessAlive = func(int) bool { return false }
+	sessionProcessAlive = func(engsession.Session) bool { return false }
 	defer func() { sessionProcessAlive = oldAlive }()
 
 	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
@@ -888,7 +928,7 @@ func TestSessionPruneRemovesStoppedIncludingCrashed(t *testing.T) {
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
 	oldAlive := sessionProcessAlive
 	// A recorded PID of 4242 is our crashed session; everything else is "alive".
-	sessionProcessAlive = func(pid int) bool { return pid != 4242 }
+	sessionProcessAlive = func(sess engsession.Session) bool { return sess.PID != 4242 }
 	defer func() { sessionProcessAlive = oldAlive }()
 
 	mk := func(agent string) string {

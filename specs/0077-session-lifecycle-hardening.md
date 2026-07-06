@@ -28,7 +28,7 @@ M3: Detached `session stop` targets `-sess.PID` as a process group. If the super
   VERIFY:   `go test ./internal/cli ./internal/engine/session -run 'Test(Session(Status|List|Stop|Remove|Prune).*Stage|TestStoreStop|TestReconcile)' -count=1 -v`
   EXPECTED: command exits 0; orphaned stage dirs are removed on the local cleanup paths while existing stop/reconcile behavior remains green.
 
-- [ ] T2 — M3: bind PID/PGID stop decisions to a process identity token
+- [x] T2 — M3: bind PID/PGID stop decisions to a process identity token
   FILE:     `internal/engine/session/session.go`, `internal/engine/session/process_token_*.go`, `internal/engine/session/session_test.go`, `internal/cli/cli.go`, `internal/cli/cli_session_test.go`
   CHANGE:   Add a `process_token` field to session records; record it in `MarkRunning`/`MarkRunningDetached` from an OS process-start token (`/proc/<pid>/stat` starttime + boot id on Linux; `kern.proc.pid` `p_starttime` on Darwin; empty fallback elsewhere). Change liveness reconcile to accept the full session, verify token match when present, and update `session stop` to run reconcile+cleanup before calling `Store.Stop`. Add tests for token mismatch, legacy-empty fallback, and stop not signalling a stale/reused detached PID.
   VERIFY:   `go test ./internal/engine/session ./internal/cli -run 'Test(Process|Reconcile|SessionStop).*' -count=1 -v`
