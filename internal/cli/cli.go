@@ -349,6 +349,17 @@ var sessionRevokeCredentials = func(sess engsession.Session) error {
 	return nil
 }
 
+// sessionWipeStageDir is local, idempotent cleanup for a session's staged bearer
+// files. It intentionally does not call forge/cloud APIs, so liveness reconcile
+// can use it safely while status/list repair stale records from a SIGKILLed run.
+var sessionWipeStageDir = func(sess engsession.Session) error {
+	stageDir, err := sessionStageDir(sess)
+	if err != nil {
+		return err
+	}
+	return os.RemoveAll(stageDir)
+}
+
 // stageDirFor returns the host directory where a run's credentials/squid config are
 // staged, OUTSIDE the agent-writable workspace (specs/0072 F2, closing 0070 B2). The
 // stage tree used to live at <ws>/.safeslop/runtime/<name>, so the agent saw every
@@ -778,7 +789,7 @@ func cmdSessionList() *cobra.Command {
 			if output != "json" {
 				return fmt.Errorf("session list requires --output json")
 			}
-			sessions, err := sessionStore().ListReconciled(time.Now(), sessionProcessAlive, sessionReapBoundary)
+			sessions, err := sessionStore().ListReconciled(time.Now(), sessionProcessAlive, sessionReapBoundary, sessionWipeStageDir)
 			if err != nil {
 				return emitContractError(jsoncontract.CodeIOError, "list sessions", map[string]any{"error": err.Error()})
 			}
@@ -804,7 +815,7 @@ func cmdSessionStatus() *cobra.Command {
 			if output != "json" && output != "jsonl" {
 				return fmt.Errorf("session status requires --output json or jsonl")
 			}
-			sess, err := sessionStore().GetReconciled(id, time.Now(), sessionProcessAlive, sessionReapBoundary)
+			sess, err := sessionStore().GetReconciled(id, time.Now(), sessionProcessAlive, sessionReapBoundary, sessionWipeStageDir)
 			if err != nil {
 				if errors.Is(err, engsession.ErrNotFound) {
 					return emitContractError(jsoncontract.CodeSessionNotFound, "session not found", map[string]any{"session_id": id})
@@ -851,12 +862,18 @@ func cmdSessionStop() *cobra.Command {
 			if output != "json" {
 				return fmt.Errorf("session stop requires --output json")
 			}
-			sess, err := sessionStore().Stop(id, revoke, time.Now(), sessionRevokeCredentials, sessionKillProcess, sessionReapBoundary)
+			sess, err := sessionStore().Stop(id, revoke, time.Now(), sessionRevokeCredentials, sessionKillProcess, sessionReapBoundary, sessionWipeStageDir)
 			if err != nil {
 				if errors.Is(err, engsession.ErrNotFound) {
 					return emitContractError(jsoncontract.CodeSessionNotFound, "session not found", map[string]any{"session_id": id})
 				}
 				return emitContractError(jsoncontract.CodeCredentialRevokeFailed, "stop session", map[string]any{"error": err.Error()})
+			}
+			// Store.Stop intentionally does not run reap callbacks for an already-stopped
+			// record; still wipe the deterministic local stage dir here so repeated/operator
+			// stop can clear a SIGKILL orphan without needing credential revocation.
+			if err := sessionWipeStageDir(sess); err != nil {
+				return emitContractError(jsoncontract.CodeIOError, "wipe session stage dir", map[string]any{"error": err.Error()})
 			}
 			emitContract(jsoncontract.OK(sessionData(sess)))
 			return nil
@@ -883,7 +900,7 @@ func cmdSessionRemove() *cobra.Command {
 			if output != "json" {
 				return fmt.Errorf("session rm requires --output json")
 			}
-			sess, err := sessionStore().Remove(id, sessionRevokeCredentials, sessionReapBoundary)
+			sess, err := sessionStore().Remove(id, sessionRevokeCredentials, sessionReapBoundary, sessionWipeStageDir)
 			if err != nil {
 				switch {
 				case errors.Is(err, engsession.ErrNotFound):
@@ -921,10 +938,10 @@ func cmdSessionPrune() *cobra.Command {
 			store := sessionStore()
 			// Reconcile first so a crashed session (still marked running but whose
 			// process is gone) is persisted as stopped and swept in this same pass.
-			if _, err := store.ListReconciled(time.Now(), sessionProcessAlive, sessionReapBoundary); err != nil {
+			if _, err := store.ListReconciled(time.Now(), sessionProcessAlive, sessionReapBoundary, sessionWipeStageDir); err != nil {
 				return emitContractError(jsoncontract.CodeIOError, "list sessions", map[string]any{"error": err.Error()})
 			}
-			removed, err := store.PruneStopped(sessionRevokeCredentials, sessionReapBoundary)
+			removed, err := store.PruneStopped(sessionRevokeCredentials, sessionReapBoundary, sessionWipeStageDir)
 			if err != nil {
 				return emitContractError(jsoncontract.CodeIOError, "prune sessions", map[string]any{"error": err.Error(), "removed": removed})
 			}

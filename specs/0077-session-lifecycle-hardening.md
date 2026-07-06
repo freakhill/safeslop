@@ -22,7 +22,7 @@ M3: Detached `session stop` targets `-sess.PID` as a process group. If the super
 
 ## Tasks
 
-- [ ] T1 — M4: wipe orphaned stage dirs on stop/remove/prune/reconcile
+- [x] T1 — M4: wipe orphaned stage dirs on stop/remove/prune/reconcile
   FILE:     `internal/cli/cli.go`, `internal/cli/cli_session_test.go`, `internal/engine/session/session_test.go`
   CHANGE:   Add a local `sessionWipeStageDir` cleanup callback using `sessionStageDir` + `os.RemoveAll`; thread it through status/list reconcile, stop, rm, and prune. Keep credential revocation separate so reconcile does not call live forge APIs. Add regression tests for crashed-session reconcile and stop without `--revoke-credentials` removing a seeded stage dir.
   VERIFY:   `go test ./internal/cli ./internal/engine/session -run 'Test(Session(Status|List|Stop|Remove|Prune).*Stage|TestStoreStop|TestReconcile)' -count=1 -v`

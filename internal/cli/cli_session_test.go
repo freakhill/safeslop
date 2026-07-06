@@ -70,6 +70,29 @@ func parseEnvelopeForTest(t *testing.T, out string) jsoncontract.Envelope {
 	return env
 }
 
+func seedSessionStageDirForTest(t *testing.T, sess engsession.Session) string {
+	t.Helper()
+	stageDir, err := sessionStageDir(sess)
+	if err != nil {
+		t.Fatalf("session stage dir: %v", err)
+	}
+	if err := os.MkdirAll(stageDir, 0o700); err != nil {
+		t.Fatalf("mkdir stage dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(stageDir, "secrets.env"), []byte("TEST_ONLY=1\n"), 0o600); err != nil {
+		t.Fatalf("seed stage dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(stageDir) })
+	return stageDir
+}
+
+func assertStageDirRemovedForTest(t *testing.T, stageDir string) {
+	t.Helper()
+	if _, err := os.Stat(stageDir); !os.IsNotExist(err) {
+		t.Fatalf("stage dir %q still exists (stat err = %v)", stageDir, err)
+	}
+}
+
 // TestSessionCreateGoldenMatchesEmittedEnvelope pins ok-session-create.golden.json
 // to the exact envelope `session create` emits for a freshly created session, so
 // the fixture cannot drift from reality (the daemon-shaped nested session{} +
@@ -390,6 +413,34 @@ func TestSessionStopRevokesBeforeKillAndIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestSessionStopWipesStageDirWithoutRevoke(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+	oldKill := sessionKillProcess
+	sessionKillProcess = func(int) error { return nil }
+	defer func() { sessionKillProcess = oldKill }()
+
+	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	id := parseEnvelopeForTest(t, out).Data["session_id"].(string)
+	if _, err := sessionStore().MarkRunning(id, 4242, nowForTest(t)); err != nil {
+		t.Fatalf("mark running: %v", err)
+	}
+	sess, err := sessionStore().Get(id)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	stageDir := seedSessionStageDirForTest(t, sess)
+
+	out, err = runRootForTest(t, ws, "session", "stop", "--session-id", id, "--output", "json")
+	if err != nil {
+		t.Fatalf("stop: %v\nout=%s", err, out)
+	}
+	assertStageDirRemovedForTest(t, stageDir)
+}
+
 func TestSessionStatusReportsReconciledState(t *testing.T) {
 	ws := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
@@ -417,6 +468,62 @@ func TestSessionStatusReportsReconciledState(t *testing.T) {
 	if _, ok := env.Data["last_error"].(string); !ok {
 		t.Fatalf("expected last_error on a reconciled session: %+v", env.Data)
 	}
+}
+
+func TestSessionStatusReconcileWipesStageDir(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+	oldAlive := sessionProcessAlive
+	sessionProcessAlive = func(int) bool { return false }
+	defer func() { sessionProcessAlive = oldAlive }()
+
+	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	id := parseEnvelopeForTest(t, out).Data["session_id"].(string)
+	if _, err := sessionStore().MarkRunning(id, 4242, nowForTest(t)); err != nil {
+		t.Fatalf("mark running: %v", err)
+	}
+	sess, err := sessionStore().Get(id)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	stageDir := seedSessionStageDirForTest(t, sess)
+
+	out, err = runRootForTest(t, ws, "session", "status", "--session-id", id, "--output", "json")
+	if err != nil {
+		t.Fatalf("status: %v\nout=%s", err, out)
+	}
+	assertStageDirRemovedForTest(t, stageDir)
+}
+
+func TestSessionListReconcileWipesStageDir(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+	oldAlive := sessionProcessAlive
+	sessionProcessAlive = func(int) bool { return false }
+	defer func() { sessionProcessAlive = oldAlive }()
+
+	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	id := parseEnvelopeForTest(t, out).Data["session_id"].(string)
+	if _, err := sessionStore().MarkRunning(id, 4242, nowForTest(t)); err != nil {
+		t.Fatalf("mark running: %v", err)
+	}
+	sess, err := sessionStore().Get(id)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	stageDir := seedSessionStageDirForTest(t, sess)
+
+	out, err = runRootForTest(t, ws, "session", "list", "--output", "json")
+	if err != nil {
+		t.Fatalf("list: %v\nout=%s", err, out)
+	}
+	assertStageDirRemovedForTest(t, stageDir)
 }
 
 func TestSessionStatusNotFoundUsesContractCode(t *testing.T) {
@@ -747,6 +854,31 @@ func TestSessionRemoveNotFound(t *testing.T) {
 	}
 }
 
+func TestSessionRemoveWipesStageDir(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+
+	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
+	if err != nil {
+		t.Fatalf("create: %v\n%s", err, out)
+	}
+	id := parseEnvelopeForTest(t, out).Data["session_id"].(string)
+	if _, err := sessionStore().Finish(id, 1, "boom", nowForTest(t)); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	sess, err := sessionStore().Get(id)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	stageDir := seedSessionStageDirForTest(t, sess)
+
+	out, err = runRootForTest(t, ws, "session", "rm", "--session-id", id, "--output", "json")
+	if err != nil {
+		t.Fatalf("rm: %v\n%s", err, out)
+	}
+	assertStageDirRemovedForTest(t, stageDir)
+}
+
 // TestSessionPruneRemovesStoppedIncludingCrashed proves `session prune` clears
 // every stopped session in one call — including a crashed session (still marked
 // running but whose process is gone) via the reconcile pass — while leaving
@@ -795,6 +927,31 @@ func TestSessionPruneRemovesStoppedIncludingCrashed(t *testing.T) {
 	if _, err := sessionStore().Get(created); err != nil {
 		t.Fatalf("created session wrongly pruned: %v", err)
 	}
+}
+
+func TestSessionPruneWipesStageDir(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+
+	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
+	if err != nil {
+		t.Fatalf("create: %v\n%s", err, out)
+	}
+	id := parseEnvelopeForTest(t, out).Data["session_id"].(string)
+	if _, err := sessionStore().Finish(id, 1, "boom", nowForTest(t)); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	sess, err := sessionStore().Get(id)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	stageDir := seedSessionStageDirForTest(t, sess)
+
+	out, err = runRootForTest(t, ws, "session", "prune", "--output", "json")
+	if err != nil {
+		t.Fatalf("prune: %v\n%s", err, out)
+	}
+	assertStageDirRemovedForTest(t, stageDir)
 }
 
 func TestSessionRmAndPruneRegistered(t *testing.T) {
