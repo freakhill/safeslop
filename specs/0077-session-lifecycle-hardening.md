@@ -40,7 +40,7 @@ M3: Detached `session stop` targets `-sess.PID` as a process group. If the super
   VERIFY:   `rg -n 'M3|M4|stage dir|stage-dir|process identity|reconcile|PID|PGID|wipe' README.md skills/agent-sandbox-ops/SKILL.md skills/agent-key-lifecycle/SKILL.md specs/0070-security-review.md specs/0077-session-lifecycle-hardening.md`
   EXPECTED: output shows the new/revised lifecycle cleanup and PID/PGID guard documentation.
 
-- [ ] T4 — Full verification
+- [x] T4 — Full verification
   FILE:     whole repo
   CHANGE:   Format and run required gates.
   VERIFY:   `gofmt -w internal/cli/cli.go internal/cli/cli_session_test.go internal/engine/session/session.go internal/engine/session/session_test.go internal/engine/session/process_token_*.go && make check && make build`
