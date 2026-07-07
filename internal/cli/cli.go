@@ -800,10 +800,129 @@ func createSessionFromProfile(store engsession.Store, profile string) (engsessio
 	sess.Resolved = resolvedMetadata(resolved)
 	sess.PolicyPath = loaded.trustPath
 	sess.PolicyHash = loaded.hash
+	// Compute value-free credential scopes from the trusted, in-memory policy.Profile
+	// before saving, so create/list/status all surface the same legibility rows and no
+	// later re-read of the policy is needed (specs/0086 T1).
+	sess.CredentialScopes = credentialScopesFromProfile(prof)
 	if err := store.Save(sess); err != nil {
 		return engsession.Session{}, emitContractError(jsoncontract.CodeIOError, "save session", map[string]any{"error": err.Error()})
 	}
 	return sess, nil
+}
+
+// credentialScopesFromProfile derives the value-free credential legibility rows for
+// a profile-backed session from its trusted policy.Profile, mirroring the access
+// semantics of the staging path (creds.StageGithub/StageForgejo/StagePnpm/StageAWS/
+// StageGCP/StageKube). Declared repo entries use their own RepoCred.Write; an
+// origin-inferred git-forge credential (no repos) uses the provider-level Write and
+// is keyed on "origin" because the real owner/repo is resolved from the cwd remote
+// only at stage time — keeping this pure and hermetic. Mode/deploy-key/TTL is scope
+// text only. Rows carry only non-secret targets (repo, registry host, cloud profile,
+// cluster) and NEVER a token value, secret ref (op://, env:), staged file path,
+// session policy, or private-key ref (specs/0086 T1). Returns nil for an ad-hoc or
+// credential-less profile so the JSON field is omitted.
+func credentialScopesFromProfile(prof policy.Profile) []engsession.CredentialScope {
+	c := prof.Credentials
+	if c == nil {
+		return nil
+	}
+	var out []engsession.CredentialScope
+	if c.Github != nil {
+		out = append(out, githubCredentialScopes(c.Github)...)
+	}
+	if c.Forgejo != nil {
+		out = append(out, forgejoCredentialScopes(c.Forgejo)...)
+	}
+	for _, r := range c.Pnpm {
+		host := r.Host
+		if host == "" {
+			host = "registry.npmjs.org"
+		}
+		out = append(out, engsession.CredentialScope{Kind: "pnpm", Name: host, Scope: r.Scope})
+	}
+	if c.Aws != nil {
+		// roleArn is a non-secret identity ARN (surfaced, per the spec example);
+		// sessionPolicy is an inline JSON policy document and is deliberately excluded.
+		out = append(out, engsession.CredentialScope{Kind: "aws", Name: c.Aws.Profile, Scope: joinScope(c.Aws.Region, c.Aws.RoleArn)})
+	}
+	if c.Gcp != nil {
+		// ADC is the ambient target; declared OAuth scopes are non-secret scope text
+		// and mirror StageGCP's --scopes downscoping without exposing the access token.
+		out = append(out, engsession.CredentialScope{Kind: "gcp", Name: "adc", Scope: strings.Join(c.Gcp.Scopes, ",")})
+	}
+	if c.Kube != nil {
+		out = append(out, kubeCredentialScopes(c.Kube)...)
+	}
+	return out
+}
+
+// githubCredentialScopes renders the GitHub App/PAT rows. Declared repos become one
+// row each keyed on "owner/name" with their own RepoCred.Write; with no repos the
+// single row is keyed on "origin" using the provider-level Write. Mode ("app"/"pat")
+// and any TTL are scope text only — never the PAT secret ref or the App private key.
+func githubCredentialScopes(gc *policy.GithubCreds) []engsession.CredentialScope {
+	mode := gc.Mode
+	if mode == "" {
+		mode = "app" // schema default; be robust to a directly-constructed Profile
+	}
+	if len(gc.Repos) == 0 {
+		return []engsession.CredentialScope{{Kind: "github", Name: "origin", Scope: joinScope(mode, access(gc.Write), gc.Ttl)}}
+	}
+	out := make([]engsession.CredentialScope, 0, len(gc.Repos))
+	for _, r := range gc.Repos {
+		out = append(out, engsession.CredentialScope{Kind: "github", Name: r.Repo, Scope: joinScope(mode, access(r.Write), gc.Ttl)})
+	}
+	return out
+}
+
+// forgejoCredentialScopes renders the Forgejo/Gitea deploy-key rows with the same
+// repo/origin + access semantics as GitHub; "deploy-key" and any TTL are scope text
+// only. The instance URL is intentionally not embedded — it can name a private,
+// self-hosted forge host, and the repo/origin target already answers "which".
+func forgejoCredentialScopes(fc *policy.ForgejoCreds) []engsession.CredentialScope {
+	if len(fc.Repos) == 0 {
+		return []engsession.CredentialScope{{Kind: "forgejo", Name: "origin", Scope: joinScope("deploy-key", access(fc.Write), fc.Ttl)}}
+	}
+	out := make([]engsession.CredentialScope, 0, len(fc.Repos))
+	for _, r := range fc.Repos {
+		out = append(out, engsession.CredentialScope{Kind: "forgejo", Name: r.Repo, Scope: joinScope("deploy-key", access(r.Write), fc.Ttl)})
+	}
+	return out
+}
+
+// kubeCredentialScopes renders the single Kubernetes cluster row: the cluster name
+// is the target and the provider (eks/gke) + region/location/project are scope. All
+// are non-secret identifiers; the staged bearer token never appears.
+func kubeCredentialScopes(k *policy.KubeCluster) []engsession.CredentialScope {
+	switch {
+	case k.Eks != nil:
+		return []engsession.CredentialScope{{Kind: "kube", Name: k.Eks.Name, Scope: joinScope("eks", k.Eks.Region)}}
+	case k.Gke != nil:
+		return []engsession.CredentialScope{{Kind: "kube", Name: k.Gke.Name, Scope: joinScope("gke", k.Gke.Location, k.Gke.Project)}}
+	}
+	return nil
+}
+
+// access maps a write flag to the compact rw/ro label used across the credential
+// scope rows, matching the staging read/write partition semantics.
+func access(write bool) string {
+	if write {
+		return "rw"
+	}
+	return "ro"
+}
+
+// joinScope joins non-empty scope fields with a single space into the compact,
+// value-free Scope string; empty fields are dropped so a missing region/ttl never
+// leaves stray whitespace.
+func joinScope(parts ...string) string {
+	kept := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p != "" {
+			kept = append(kept, p)
+		}
+	}
+	return strings.Join(kept, " ")
 }
 
 func resolvedMetadata(resolved *policy.Resolved) *engsession.ResolvedMetadata {
@@ -1371,6 +1490,9 @@ func sessionData(sess engsession.Session) map[string]any {
 	}
 	if sess.Resolved != nil {
 		out["resolved"] = sess.Resolved
+	}
+	if len(sess.CredentialScopes) > 0 {
+		out["credential_scopes"] = sess.CredentialScopes
 	}
 	if !sess.StartedAt.IsZero() {
 		out["started_at"] = sess.StartedAt.Format(time.RFC3339Nano)

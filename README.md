@@ -100,6 +100,13 @@ commands emit the shared versioned JSON contract envelope (`schema_version`,
 `ok`, `data`, `warnings`, `errors`). Session status also supports `--output
 jsonl` for a line-delimited monitor stream.
 
+`session create --profile`, `session status`, and `session list` include
+value-free credential scope in the JSON contract as `credential_scopes` for
+profile-backed sessions. Each row names only the credential kind, non-secret
+target, and access/scope; it does not include token values, source references,
+or staged file paths. Ad-hoc sessions and profiles without credentials omit it
+or return an empty array.
+
 `session status` and `session list` reconcile liveness: a session still marked
 `running` whose recorded process is gone — or whose PID now names a different
 process identity after reuse — is reported and persisted as `stopped`, so status
@@ -167,7 +174,9 @@ status — with `session rename --session-id <id> --name <label>`; an empty
 `--name` clears it. The name is validated (control, format, and bidi characters
 are rejected so it cannot break the JSONL line protocol or spoof a status) and,
 when set, is surfaced in the session's `status`/`list` envelope and the Emacs
-portal.
+portal. Live Emacs buffers are also named and annotated with profile/project,
+tier/net, and value-free credential scope, so a running or attached terminal is
+legible without opening session details.
 
 `safeslop down` removes safeslop-managed host-container stacks by label. Container
 startup also sweeps managed, record-less orphan boundaries on the detected
@@ -322,10 +331,14 @@ uses `net/http`. Add `--output json` for the enveloped machine contract.
 `safeslop session create --profile <name> --output json` creates an Emacs-visible
 session from an existing `safeslop.cue` profile: it uses the profile's agent,
 environment, network, and workspace, resolves its catalog package set, and includes
-`recipeID`/`image` metadata for the portal Recipe/Image columns. In Emacs, this
+`recipeID`/`image` metadata for the portal Recipe/Image columns. Its create/list/status
+JSON includes `credential_scopes` for profile-backed sessions: a value-free summary of
+credential kind, non-secret target, and access/scope only. In Emacs, this
 profile-backed path opens `*safeslop session progress*` so slow first-use image
-build logs stream live and end with the subprocess exit status. The ad-hoc
-`--agent` form remains available for one-off sessions.
+build logs stream live and end with the subprocess exit status. The Sessions portal
+shows the same value-free credential scope in its `Creds` column, and live buffers
+use profile/project plus `[tier/net]` names with headers that repeat the value-free
+scope. The ad-hoc `--agent` form remains available for one-off sessions.
 
 ### Starter profiles (presets)
 

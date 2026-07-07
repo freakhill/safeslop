@@ -354,18 +354,32 @@ envelope via the callback, never a crash."
             (should (string-match-p "failed (exit 2)" s))))))))
 
 (ert-deftest safeslop-test-session-attach-uses-term-pty-exact-argv ()
-  (let* ((argv '("session" "run" "--session-id" "sess-term"))
-         (routes `((,(safeslop-test--json-key argv) .
+  "Attach prefetches `session status' best-effort to self-describe the buffer,
+then runs `session run' under a term PTY (specs/0086 T3).  The argv log shows the
+value-free status prefetch immediately before the exact run argv."
+  (let* ((status-argv '("session" "status" "--session-id" "sess-term" "--output" "json"))
+         (argv '("session" "run" "--session-id" "sess-term"))
+         (routes `((,(safeslop-test--json-key status-argv) .
+                   ((stdout . ,(concat "{\"schema_version\":1,\"ok\":true,\"data\":"
+                                       "{\"session_id\":\"sess-term\",\"profile\":\"be-dev\","
+                                       "\"workspace\":\"/w/payments\",\"environment\":\"container\","
+                                       "\"network\":\"deny\"},\"warnings\":[],\"errors\":[]}"))
+                    (exit . 0)))
+                   (,(safeslop-test--json-key argv) .
                    ((stdout . "")
                     (exit . 0))))))
     (safeslop-test--with-fake-cli routes
       (let ((buf (safeslop-session-attach "sess-term")))
         (with-current-buffer buf
           (should (derived-mode-p 'term-mode))
+          ;; The buffer-local id is the portal's addressing handle post-T3.
+          (should (equal safeslop-session-id "sess-term"))
           (let ((proc (get-buffer-process buf)))
             (while (and proc (process-live-p proc))
               (accept-process-output proc 0.1))))
-        (should (equal (safeslop-test--argv-log-lines) (list (safeslop-test--json-key argv))))))))
+        (should (equal (safeslop-test--argv-log-lines)
+                       (list (safeslop-test--json-key status-argv)
+                             (safeslop-test--json-key argv))))))))
 
 (ert-deftest safeslop-test-session-run-detached-args ()
   (should (equal (safeslop-session--run-detached-args "sess-detached")
@@ -381,9 +395,18 @@ envelope via the callback, never a crash."
 
 (ert-deftest safeslop-test-reattach-uses-attach-argv ()
   "Reattach builds `session attach --session-id ...' argv under a term PTY
-\(specs/0051 PR4): the detached session is rejoined over its socket, not re-run."
-  (let* ((argv '("session" "attach" "--session-id" "sess-reattach"))
-         (routes `((,(safeslop-test--json-key argv) .
+\(specs/0051 PR4): the detached session is rejoined over its socket, not re-run.
+Post-T3 it also prefetches `session status' best-effort to self-describe the
+buffer, so the argv log shows the status prefetch before the exact attach argv."
+  (let* ((status-argv '("session" "status" "--session-id" "sess-reattach" "--output" "json"))
+         (argv '("session" "attach" "--session-id" "sess-reattach"))
+         (routes `((,(safeslop-test--json-key status-argv) .
+                   ((stdout . ,(concat "{\"schema_version\":1,\"ok\":true,\"data\":"
+                                       "{\"session_id\":\"sess-reattach\",\"profile\":\"be-dev\","
+                                       "\"workspace\":\"/w/payments\",\"environment\":\"container\","
+                                       "\"network\":\"deny\"},\"warnings\":[],\"errors\":[]}"))
+                    (exit . 0)))
+                   (,(safeslop-test--json-key argv) .
                    ((stdout . "")
                     (exit . 0))))))
     (safeslop-test--with-fake-cli routes
@@ -393,7 +416,9 @@ envelope via the callback, never a crash."
           (let ((proc (get-buffer-process buf)))
             (while (and proc (process-live-p proc))
               (accept-process-output proc 0.1))))
-        (should (equal (safeslop-test--argv-log-lines) (list (safeslop-test--json-key argv))))))))
+        (should (equal (safeslop-test--argv-log-lines)
+                       (list (safeslop-test--json-key status-argv)
+                             (safeslop-test--json-key argv))))))))
 
 (ert-deftest safeslop-test-fallback-compilation-mode-on-pty-unavailable ()
   (let* ((argv '("session" "status" "--session-id" "sess-pty" "--output" "jsonl"))
@@ -414,9 +439,17 @@ envelope via the callback, never a crash."
 attach must switch to the read-only JSONL status fallback for the same session
 \(specs/0050 PR4).  The fake CLI replays the Go golden over the term PTY and the
 status route, and the argv log proves both the run and the keyed fallback ran."
-  (let* ((run-argv '("session" "run" "--session-id" "sess-pty"))
+  (let* ((prefetch-argv '("session" "status" "--session-id" "sess-pty" "--output" "json"))
+         (run-argv '("session" "run" "--session-id" "sess-pty"))
          (status-argv '("session" "status" "--session-id" "sess-pty" "--output" "jsonl"))
-         (routes `((,(safeslop-test--json-key run-argv) .
+         ;; Post-T3 attach prefetches `session status --output json' best-effort to
+         ;; self-describe the buffer before running; route it so the round-trip is
+         ;; hermetic.  A non-ok prefetch is fine too — the buffer just falls back to
+         ;; the legacy name — but here it succeeds so the log order is deterministic.
+         (routes `((,(safeslop-test--json-key prefetch-argv) .
+                   ((stdout . "{\"schema_version\":1,\"ok\":true,\"data\":{\"session_id\":\"sess-pty\"},\"warnings\":[],\"errors\":[]}\n")
+                    (exit . 0)))
+                   (,(safeslop-test--json-key run-argv) .
                    ((stdout . ,(safeslop-test--fixture "error-pty-unavailable.golden.json"))
                     (exit . 1)))
                    (,(safeslop-test--json-key status-argv) .
@@ -441,9 +474,11 @@ status route, and the argv log proves both the run and the keyed fallback ran."
             (let ((fproc (get-buffer-process fb)))
               (while (and fproc (process-live-p fproc))
                 (accept-process-output fproc 0.1)))))
-        ;; both legs ran, in order: the run first, then the keyed status fallback
+        ;; all legs ran, in order: the value-free status prefetch (specs/0086 T3),
+        ;; then the run, then the keyed JSONL status fallback on PTY_UNAVAILABLE.
         (should (equal (safeslop-test--argv-log-lines)
-                       (list (safeslop-test--json-key run-argv)
+                       (list (safeslop-test--json-key prefetch-argv)
+                             (safeslop-test--json-key run-argv)
                              (safeslop-test--json-key status-argv))))))))
 
 (provide 'safeslop-contract-test)

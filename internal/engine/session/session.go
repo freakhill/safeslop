@@ -42,21 +42,38 @@ type ResolvedMetadata struct {
 	RuntimeEgress []string `json:"runtimeEgress,omitempty"`
 }
 
+// CredentialScope is one value-free row describing a credential a profile-backed
+// session stages: the provider Kind (github/forgejo/pnpm/aws/gcp/kube), the
+// non-secret target Name (repo, registry host, cloud profile, cluster), and
+// access/mode/ttl Scope text. It deliberately carries no token value, secret ref
+// (op://, env:), staged file path, or account private-key ref — only what an
+// operator needs to answer "which credentials?" at a glance (specs/0086 T1).
+type CredentialScope struct {
+	Kind  string `json:"kind"`
+	Name  string `json:"name"`
+	Scope string `json:"scope"`
+}
+
 // Session is the durable, non-secret state for an Emacs-visible session. Do not
 // add staged credential values or resolved secret material here; the JSONL status
 // path serializes this object for clients.
 type Session struct {
-	ID                 string            `json:"session_id"`
-	Profile            string            `json:"profile,omitempty"`
-	Name               string            `json:"name,omitempty"`
-	Agent              string            `json:"agent"`
-	Workspace          string            `json:"workspace"`
-	Environment        string            `json:"environment"`
-	Network            string            `json:"network"`
-	Backend            string            `json:"backend"`
-	RecipeID           string            `json:"recipeID,omitempty"`
-	Image              string            `json:"image,omitempty"`
-	Resolved           *ResolvedMetadata `json:"resolved,omitempty"`
+	ID          string            `json:"session_id"`
+	Profile     string            `json:"profile,omitempty"`
+	Name        string            `json:"name,omitempty"`
+	Agent       string            `json:"agent"`
+	Workspace   string            `json:"workspace"`
+	Environment string            `json:"environment"`
+	Network     string            `json:"network"`
+	Backend     string            `json:"backend"`
+	RecipeID    string            `json:"recipeID,omitempty"`
+	Image       string            `json:"image,omitempty"`
+	Resolved    *ResolvedMetadata `json:"resolved,omitempty"`
+	// CredentialScopes is the value-free credential legibility array for a
+	// profile-backed session, computed from the trusted policy.Profile at create
+	// time and surfaced by session create/list/status. Empty (omitted) for ad-hoc
+	// sessions and profiles without credentials (specs/0086 T1).
+	CredentialScopes   []CredentialScope `json:"credential_scopes,omitempty"`
 	Status             string            `json:"status"`
 	CreatedAt          time.Time         `json:"created_at"`
 	UpdatedAt          time.Time         `json:"updated_at"`

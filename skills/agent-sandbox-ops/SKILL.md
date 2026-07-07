@@ -34,11 +34,11 @@ file transfer between host and sandboxed runtimes.
 - `safeslop trust` — approve a policy's exact bytes for launch. Required by every launch lane: `safeslop run <profile>`, `session create --profile`, and the Emacs client all share this gate (specs/0072); an untrusted or changed `safeslop.cue` is refused with a `TRUST_REQUIRED` envelope.
 - `safeslop untrust [safeslop.cue]` — remove that host approval; future launches fail closed until the current bytes are reviewed and trusted again.
 - `safeslop run <profile>` — launch a trusted profile; host-tier profiles require a per-launch yes/no comprehension gate before the agent starts.
-- `safeslop session create --profile <name> [--name <label>] --output json` — create an Emacs-visible session from an existing profile; the record includes resolved recipe/image metadata for the portal, and the Emacs client streams slow first-use image-build output into `*safeslop session progress*` with the final exit status. `--name` sets an optional display name and is combinable with `--profile`.
+- `safeslop session create --profile <name> [--name <label>] --output json` — create an Emacs-visible session from an existing profile; create/list/status JSON includes value-free `credential_scopes` (credential kind, non-secret target, and access/scope only), the record includes resolved recipe/image metadata for the portal, and the Emacs client streams slow first-use image-build output into `*safeslop session progress*` with the final exit status. `--name` sets an optional display name and is combinable with `--profile`.
 - `safeslop session create --agent <claude|pi|fish|zsh> --environment <host|container> --workspace <dir> [--name <label>] [--trust-host] --output json` — create an ad-hoc Emacs-visible session record (`--environment` is required). A host ad-hoc session runs the agent unconfined with your host credentials, so it requires an explicit `--trust-host` acknowledgement (specs/0072); container ad-hoc sessions do not. `--name` sets an optional display name. `claude-code` remains accepted as a compatibility alias for `claude` but is not advertised in new UI/docs.
 - `safeslop session run --session-id <id> [--detach]` — run the session agent under safeslop isolation. Host-tier sessions require the per-launch yes/no comprehension gate first; for `--detach`, the gate runs before the supervisor is spawned. Coupled (default) needs a controlling terminal (Emacs supplies one via `make-term`); with no usable TTY it emits the `PTY_UNAVAILABLE` contract error and the caller switches to the `--output jsonl` status monitor. `--detach` launches a per-session supervisor that owns the agent + its PTY, serves it over a per-session unix socket, and returns immediately (the buffer is freed).
 - `safeslop session attach --session-id <id>` — rejoin a detached session's agent over its socket under a controlling terminal, exiting with the agent's code; one active attach at a time. No usable TTY emits `PTY_UNAVAILABLE`.
-- `safeslop session status --session-id <id> --output <json|jsonl>` — inspect or monitor session state; a running detached session also reports its `socket`.
+- `safeslop session status --session-id <id> --output <json|jsonl>` — inspect or monitor session state; JSON/JSONL carries value-free credential scope for profile-backed sessions, and a running detached session also reports its `socket`.
 - `safeslop session stop --session-id <id> --revoke-credentials --output json` — stop idempotently, reconciling liveness/process identity before signalling, revoking ephemeral credentials before termination when requested, terminating the process (a detached supervisor's whole process group), removing the socket, and wiping the host stage dir.
 - `safeslop session rm --session-id <id> --output json` — permanently remove one stopped/created session record so the portal does not accumulate dead-session corpses. Refuses a running session (stop it first); revokes any still-live staged credentials and wipes the host stage dir before deleting, so removal never orphans secrets. Returns `data.removed` (the removed id).
 - `safeslop session rename --session-id <id> --name <label> --output json` — set (or, with an empty `--name`, clear) a session's human display name. Allowed in any status (created, running, or stopped) since a label touches no boundary, credential, or process state. The name is validated (control/format/bidi characters rejected, so it cannot break the JSONL line protocol or spoof a status) and, when set, is surfaced as `data.name` in the session envelope and shown in the portal. Unknown id → `SESSION_NOT_FOUND`; a rejected name → `INVALID_ARGUMENT`.
@@ -97,13 +97,17 @@ after an isolation/network summary, `e` to edit the CUE at that profile's block,
 
 `C-c s P` opens the Sessions portal. The tab strip shows each surface's direct
 switch key (`P` Sessions, `F` Profiles); `TAB`/`S-TAB` or `[`/`]`
-cycle between them, and the strip is mouse-clickable. Portal row keys: `RET`/`o`
+cycle between them, and the strip is mouse-clickable. Portal rows include a
+value-free `Creds` column sourced from `credential_scopes`, showing only credential
+kind, non-secret target, and access/scope. Portal row keys: `RET`/`o`
 state-aware open, `R` reattach, `i` details, `k` stop/revoke, `x` remove one
 stopped session, `X` prune all stopped sessions, `n` new, `g` refresh, `a`
-pause/resume auto-refresh. Each in-place refresh keeps point on the same session
-and preserves window scroll, so it never jumps the cursor out from under a row
-action key; session-mutating row actions refresh the portal in place instead of
-popping a JSON result buffer over the dashboard.
+pause/resume auto-refresh. Live buffers opened from the portal are named and
+annotated with profile/project, tier/net, and value-free credential scope. Each
+in-place refresh keeps point on the same session and preserves window scroll, so
+it never jumps the cursor out from under a row action key; session-mutating row
+actions refresh the portal in place instead of popping a JSON result buffer over
+the dashboard.
 
 ### Maintain the catalog (bump / propose / add / audit)
 

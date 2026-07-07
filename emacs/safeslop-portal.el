@@ -20,6 +20,7 @@
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'subr-x)
 (require 'tabulated-list)
 (require 'iso8601)
@@ -180,6 +181,84 @@ terminal cells, so a wide-rune name (CJK/emoji, N1) can't overflow the row."
           ((string-match ":\\([^:]+\\)\\'" image) (match-string 1 image))
           (t "—"))))
 
+;;; Credential scope (specs/0086 T2) ----------------------------------------
+;; The engine emits `credential_scopes' as value-free {kind,name,scope} rows
+;; (specs/0086 T1).  These pure helpers only reformat that already-safe data, so
+;; the UI cannot synthesize a secret the JSON did not carry.  The field is
+;; `--omitempty', so ad-hoc sessions and pre-0086 records simply lack it and
+;; render an em dash.
+
+(defconst safeslop-portal--creds-width 22
+  "Display width of the compact Creds column.
+Kept in sync with the Creds entry in `tabulated-list-format'.")
+
+(defconst safeslop-portal--creds-unsafe-patterns
+  '("op://" "\\benv:" "private[-_ ]?key" "begin .*key" "\\btoken\\b" "\\`[~/]")
+  "Case-insensitive patterns never rendered from credential scope fields.")
+
+(defun safeslop-portal--creds-safe-field (value)
+  "Return VALUE when it is a non-empty, display-safe credential scope field.
+Unsafe-looking refs, token markers, staged paths, and private-key refs are
+suppressed defensively so the portal never renders them even if JSON regresses."
+  (when (and (stringp value) (not (string-empty-p value)))
+    (let ((case-fold-search t))
+      (unless (cl-some (lambda (re) (string-match-p re value))
+                       safeslop-portal--creds-unsafe-patterns)
+        value))))
+
+(defun safeslop-portal--creds-scopes (sess)
+  "Return SESS's non-empty `credential_scopes' rows.
+A list or vector is accepted.  Rows whose kind/name/scope all render empty are
+ignored so malformed old/partial data still displays as no staged credentials."
+  (cl-remove-if #'string-empty-p
+                (safeslop-portal--list-field sess '(credential_scopes))
+                :key #'safeslop-portal--creds-scope-string))
+
+(defun safeslop-portal--creds-scope-string (scope)
+  "Return one credential SCOPE alist as a compact \"kind name scope\" string.
+SCOPE carries only the engine's non-secret kind/name/scope fields; empty fields
+are dropped so a missing scope leaves no trailing whitespace."
+  (string-join
+   (delq nil
+         (mapcar (lambda (key)
+                   (safeslop-portal--creds-safe-field (alist-get key scope)))
+                 '(kind name scope)))
+   " "))
+
+(defun safeslop-portal--creds-help (sess)
+  "Return SESS's full value-free credential scope summary for the tooltip.
+Comma-joins every scope as \"kind name scope\"; a session with no staged
+credentials yields an honest note."
+  (let ((scopes (safeslop-portal--creds-scopes sess)))
+    (if scopes
+        (mapconcat #'safeslop-portal--creds-scope-string scopes ", ")
+      "no staged credentials")))
+
+(defun safeslop-portal--creds-compact (first extra)
+  "Return compact Creds text for FIRST plus EXTRA hidden scopes.
+When a +N suffix is needed, keep that suffix visible inside
+`safeslop-portal--creds-width'."
+  (if (<= extra 0)
+      (truncate-string-to-width first safeslop-portal--creds-width nil nil "…")
+    (let* ((suffix (format " +%d" extra))
+           (head-width (max 1 (- safeslop-portal--creds-width
+                                 (string-width suffix)))))
+      (concat (truncate-string-to-width first head-width nil nil "…") suffix))))
+
+(defun safeslop-portal--creds-cell (sess)
+  "Return SESS's compact Creds cell.
+The cell shows the first scope plus a visible \"+N\" overflow count, with the
+full comma-joined list on help-echo.  Credential-less and old records render an
+em dash.  Shows only display-safe kind/name/scope, never refs, staged paths, or
+key refs."
+  (let ((scopes (safeslop-portal--creds-scopes sess)))
+    (if (null scopes)
+        "—"
+      (propertize (safeslop-portal--creds-compact
+                   (safeslop-portal--creds-scope-string (car scopes))
+                   (1- (length scopes)))
+                  'help-echo (safeslop-portal--creds-help sess)))))
+
 (defun safeslop-portal--sessions-from (envelope)
   "Return the parsed sessions (a list of alists) from a `session list' ENVELOPE.
 Pure extraction: a failed list yields nil, and the shared render engine owns
@@ -222,6 +301,7 @@ builder never blocks on I/O."
                      (safeslop-portal--age sess)
                      (safeslop-portal--recipe-cell sess)
                      (safeslop-portal--image-cell sess)
+                     (safeslop-portal--creds-cell sess)
                      (abbreviate-file-name (safeslop-portal--field sess 'workspace))))))
    (sort (copy-sequence sessions) #'safeslop-portal--session<)))
 
@@ -237,6 +317,17 @@ builder never blocks on I/O."
   (let ((id (safeslop-portal--id-at-point)))
     (or (alist-get id safeslop-portal--sessions-by-id nil nil #'equal)
         (user-error "No session data for this row; press g to refresh"))))
+
+(defun safeslop-portal--live-buffer (id)
+  "Return the live terminal buffer running session ID, or nil.
+Live buffers are named descriptively now (specs/0086 T3), so the id is no
+longer recoverable from the buffer name: scan for the buffer-local
+`safeslop-session-id' instead.  Falls back to the legacy `*safeslop-<id>*'
+name so pre-0086 terminals (which have no buffer-local id) are still found."
+  (or (seq-find (lambda (buf)
+                  (equal id (buffer-local-value 'safeslop-session-id buf)))
+                (buffer-list))
+      (get-buffer (concat "*safeslop-" id "*"))))
 
 (defun safeslop-portal--primary-action (status socket)
   "Return the obvious primary action for STATUS and SOCKET."
@@ -256,7 +347,7 @@ builder never blocks on I/O."
       ('run (when (safeslop-portal--confirm-run sess)
               (safeslop-session-attach id)))
       ('reattach (safeslop-session-reattach id))
-      ('live (if-let* ((buf (get-buffer (concat "*safeslop-" id "*"))))
+      ('live (if-let* ((buf (safeslop-portal--live-buffer id)))
                  (pop-to-buffer buf)
                (message "safeslop: %s is already running coupled; press i for details or s to stop/revoke"
                         (safeslop-portal--short-id id))))
@@ -598,6 +689,7 @@ A nil or non-positive interval leaves the portal static (manual `g' only)."
                 '("Age" 6 nil)
                 '("Recipe" 24 nil)
                 '("Image" 13 nil)
+                (list "Creds" safeslop-portal--creds-width nil)
                 '("Workspace" 32 nil)))
   (setq tabulated-list-padding 1)
   (tabulated-list-init-header)

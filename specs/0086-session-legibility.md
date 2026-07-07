@@ -24,31 +24,31 @@ WORKTREE: `.worktrees/0086-session-legibility/`
 
 ## Tasks
 
-- [ ] T1 — Add value-free credential scopes to session records and JSON envelopes
+- [x] T1 — Add value-free credential scopes to session records and JSON envelopes
   FILE:     `internal/engine/session/session.go`, `internal/cli/cli.go`, `internal/cli/cli_session_test.go`, `internal/jsoncontract/testdata/ok-session-create.golden.json`, `internal/jsoncontract/testdata/ok-session-detached.golden.json`
   CHANGE:   Add `CredentialScope {kind,name,scope}` and `Session.CredentialScopes []CredentialScope` (`json:"credential_scopes,omitempty"`). Compute it in `createSessionFromProfile` from the trusted loaded `policy.Profile` before saving. Include it from `sessionData`. Use the same access semantics as staging: declared repo entries use `RepoCred.Write`; origin-inferred GitHub/Forgejo rows use provider-level `Write`; PAT/App/deploy-key/TTL text is scope only. Include pnpm/aws/gcp/kube targets, but never refs or values. Leave ad-hoc sessions empty.
   VERIFY:   `go test ./internal/cli ./internal/engine/session -run 'Test(SessionCreate.*CredentialScope|SessionData.*CredentialScope|SessionCreateGolden|DetachedGolden)' -count=1 -v`
   EXPECTED: command exits 0; create/list/status JSON carries value-free credential scopes for profile sessions, golden envelopes remain valid, and tests assert no `op://`, `env:`, token, or private-key ref text appears.
 
-- [ ] T2 — Show credential scope in the portal row
+- [x] T2 — Show credential scope in the portal row
   FILE:     `emacs/safeslop-portal.el`, `emacs/test/safeslop-test.el`
   CHANGE:   Add pure helpers to format `credential_scopes` into a compact cell and full help text. Add a `Creds` column (truncated, value-free) before `Workspace`; render `—` when empty. Update portal row/header tests for the new column and tooltip.
   VERIFY:   `emacs --batch -L emacs -l ert -l emacs/test/safeslop-test.el -l emacs/test/safeslop-contract-test.el -l emacs/test/safeslop-profiles-test.el -l emacs/test/safeslop-credentials-test.el --eval '(ert-run-tests-batch-and-exit "safeslop-test-portal-.*credential")'`
   EXPECTED: command exits 0; portal rows display compact credential scope without showing refs/values and empty-scope sessions display `—`.
 
-- [ ] T3 — Make live terminal buffers self-describing and findable by session id
-  FILE:     `emacs/safeslop-session.el`, `emacs/safeslop-portal.el`, `emacs/test/safeslop-test.el`
-  CHANGE:   Add buffer-local `safeslop-session-id`. Add pure builders for a safe buffer label (`profile-or-name`, workspace basename, `[env/net]`, fallback old id) and a header-line summary including credential scope. Have `safeslop-session--launch-term` fetch current session data best-effort before naming/headering the buffer; set the buffer-local id after terminal creation. Replace portal's live-buffer lookup from `(get-buffer "*safeslop-<id>*")` to a helper that scans buffers for `safeslop-session-id`, falling back to the old name for legacy buffers.
-  VERIFY:   `emacs --batch -L emacs -l ert -l emacs/test/safeslop-test.el -l emacs/test/safeslop-contract-test.el -l emacs/test/safeslop-profiles-test.el -l emacs/test/safeslop-credentials-test.el --eval '(ert-run-tests-batch-and-exit "safeslop-test-session-.*\(buffer\|header\|live\)")'`
+- [x] T3 — Make live terminal buffers self-describing and findable by session id
+  FILE:     `emacs/safeslop-session.el`, `emacs/safeslop-portal.el`, `emacs/test/safeslop-test.el`, `emacs/test/safeslop-contract-test.el`
+  CHANGE:   Add buffer-local `safeslop-session-id`. Add pure builders for a safe buffer label (`profile-or-name`, workspace basename, `[env/net]`, fallback old id) and a header-line summary including credential scope. Have `safeslop-session--launch-term` fetch current session data best-effort before naming/headering the buffer; set the buffer-local id after terminal creation. Replace portal's live-buffer lookup from `(get-buffer "*safeslop-<id>*")` to a helper that scans buffers for `safeslop-session-id`, falling back to the old name for legacy buffers, and update exact-argv contract tests for the added status prefetch.
+  VERIFY:   `emacs --batch -L emacs -l ert -l emacs/test/safeslop-test.el -l emacs/test/safeslop-contract-test.el -l emacs/test/safeslop-profiles-test.el -l emacs/test/safeslop-credentials-test.el --eval '(ert-run-tests-batch-and-exit "safeslop-test-session-.*\\(buffer\\|header\\|live\\)")'`
   EXPECTED: command exits 0; generated labels match the 0071 example shape, header text includes only value-free scope, and portal live-open finds renamed buffers by session id.
 
-- [ ] T4 — Docs and skill sync
+- [x] T4 — Docs and skill sync
   FILE:     `README.md`, `skills/agent-sandbox-ops/SKILL.md`, `specs/0071-ergonomics-review.md`, `specs/0086-session-legibility.md`
   CHANGE:   Document that session list/status and the Emacs portal surface value-free credential scope, and that live buffers are named/annotated with profile/project/tier/net. Mark 0071 recommendation #3 as planned/covered by this spec; do not mark the broader 100-repo template/filter recommendations done.
   VERIFY:   `rg -n 'credential scope|credential_scopes|live buffer|profile/project|0086|recommendation #3' README.md skills/agent-sandbox-ops/SKILL.md specs/0071-ergonomics-review.md specs/0086-session-legibility.md`
   EXPECTED: output shows the new value-free legibility docs and the 0071 cross-reference.
 
-- [ ] T5 — Full verification
+- [x] T5 — Full verification
   FILE:     whole repo
   CHANGE:   Format Go touched by T1 and run the repo gates.
   VERIFY:   `gofmt -w internal/engine/session/session.go internal/cli/cli.go internal/cli/cli_session_test.go && make check && make build`

@@ -469,8 +469,8 @@ fix."
   (with-temp-buffer
     (safeslop-portal-mode)
     (setq tabulated-list-entries
-          '(("sess-1" ["sess-1" "claude" "host" "deny" "running" "1" "now" "—" "—" "/ws"])
-            ("sess-2" ["sess-2" "pi" "container" "allow" "created" "2" "now" "—" "—" "/ws"])))
+          '(("sess-1" ["sess-1" "claude" "host" "deny" "running" "1" "now" "—" "—" "—" "/ws"])
+            ("sess-2" ["sess-2" "pi" "container" "allow" "created" "2" "now" "—" "—" "—" "/ws"])))
     (tabulated-list-print)
     (should (safeslop-portal--goto-id "sess-2"))
     (should (equal (tabulated-list-get-id) "sess-2"))
@@ -884,14 +884,319 @@ without popping a result buffer over the dashboard."
 
 (ert-deftest safeslop-test-portal-session-cell-shows-name ()
   "The Session cell suffixes the display name inline (specs/0065 N2) without
-adding an 11th column; a name-less row keeps the plain short id."
+adding a Name column; a name-less row keeps the plain short id."
   (let* ((named '((session_id . "sess-abc") (agent . "claude")
                   (environment . "host") (network . "deny")
                   (status . "running") (workspace . "/w") (name . "prod")))
          (rows (safeslop-portal--rows (list named)))
          (cols (cadr (car rows))))
-    (should (= (length cols) 10))                 ; no 11th column
+    ;; Session keeps the name inline (specs/0065 N2 adds no name column); the
+    ;; 11th column now present is the new Creds column (specs/0086 T2).
+    (should (= (length cols) 11))
     (should (string-match-p "prod" (aref cols 0)))
     (should (string-match-p "sess-abc" (aref cols 0))))
   (should (equal (safeslop-portal--session-cell '((session_id . "sess-xyz")))
                  (safeslop-portal--short-id "sess-xyz"))))
+
+;;; Portal Creds column: value-free credential scope (specs/0086 T2) ----------
+
+(ert-deftest safeslop-test-portal-credential-scope-string ()
+  "One credential scope alist renders as a compact value-free \"kind name scope\".
+Empty fields are dropped so a missing scope never leaves trailing whitespace."
+  (should (equal (safeslop-portal--creds-scope-string
+                  '((kind . "github") (name . "acme/web") (scope . "app rw")))
+                 "github acme/web app rw"))
+  (should (equal (safeslop-portal--creds-scope-string
+                  '((kind . "pnpm") (name . "npm.pkg.github.com") (scope . "@org")))
+                 "pnpm npm.pkg.github.com @org"))
+  (should (equal (safeslop-portal--creds-scope-string
+                  '((kind . "gcp") (name . "adc") (scope . "")))
+                 "gcp adc")))
+
+(ert-deftest safeslop-test-portal-credential-help-text ()
+  "The full help/tooltip text comma-joins every scope; empty yields an honest note."
+  (let ((sess '((credential_scopes . (((kind . "github") (name . "acme/web") (scope . "app rw"))
+                                      ((kind . "pnpm") (name . "npm.pkg.github.com") (scope . "@org")))))))
+    (should (equal (safeslop-portal--creds-help sess)
+                   "github acme/web app rw, pnpm npm.pkg.github.com @org")))
+  (should (equal (safeslop-portal--creds-help '((session_id . "sess-x")))
+                 "no staged credentials")))
+
+(ert-deftest safeslop-test-portal-credential-cell-compact ()
+  "The Creds cell keeps +N visible inside the compact column width.
+The full untruncated list rides help-echo."
+  (let* ((sess '((credential_scopes . (((kind . "github") (name . "acme/web") (scope . "app rw"))
+                                       ((kind . "pnpm") (name . "npm.pkg.github.com") (scope . "@org"))
+                                       ((kind . "aws") (name . "dev") (scope . "us-east-1"))))))
+         (cell (safeslop-portal--creds-cell sess))
+         (text (substring-no-properties cell)))
+    (should (string-prefix-p "github" text))
+    (should (string-match-p "\\+2\\'" text))
+    (should (<= (string-width text) safeslop-portal--creds-width))
+    (should (equal (get-text-property 0 'help-echo cell)
+                   "github acme/web app rw, pnpm npm.pkg.github.com @org, aws dev us-east-1"))))
+
+(ert-deftest safeslop-test-portal-credential-cell-empty-em-dash ()
+  "Ad-hoc / credential-less sessions (and old records) render the Creds cell as an em dash."
+  (should (equal (safeslop-portal--creds-cell '((session_id . "sess-adhoc"))) "—"))
+  (should (equal (safeslop-portal--creds-cell '((credential_scopes . ()))) "—"))
+  (should (equal (safeslop-portal--creds-cell
+                  '((credential_scopes . (((kind . "") (name . "") (scope . ""))))))
+                 "—")))
+
+(ert-deftest safeslop-test-portal-credential-old-json-renders-em-dash ()
+  "An old session record with no credential_scopes field renders Creds as an em dash.
+The field is additive and `--omitempty', so pre-0086 JSON simply lacks it (specs/0086)."
+  (let* ((env (safeslop-contract-parse-string
+               (concat "{\"schema_version\":1,\"ok\":true,\"data\":{\"sessions\":"
+                       "[{\"session_id\":\"sess-old\",\"agent\":\"claude\",\"environment\":\"host\","
+                       "\"network\":\"deny\",\"status\":\"running\",\"workspace\":\"/w\"}]},"
+                       "\"warnings\":[],\"errors\":[]}")))
+         (rows (safeslop-portal--rows (safeslop-portal--sessions-from env)))
+         (cols (cadr (car rows))))
+    (should (= (length cols) 11))
+    (should (equal (aref cols 9) "—"))))          ; Creds column, empty for old records
+
+(ert-deftest safeslop-test-portal-credential-row-has-creds-cell ()
+  "`safeslop-portal--rows' places the compact Creds cell at index 9, before Workspace."
+  (let* ((env (safeslop-contract-parse-string
+               (concat "{\"schema_version\":1,\"ok\":true,\"data\":{\"sessions\":"
+                       "[{\"session_id\":\"sess-c\",\"agent\":\"pi\",\"environment\":\"container\","
+                       "\"network\":\"deny\",\"status\":\"running\",\"workspace\":\"/w\","
+                       "\"credential_scopes\":[{\"kind\":\"github\",\"name\":\"acme/web\",\"scope\":\"app rw\"}]}]},"
+                       "\"warnings\":[],\"errors\":[]}")))
+         (rows (safeslop-portal--rows (safeslop-portal--sessions-from env)))
+         (cols (cadr (car rows))))
+    (should (= (length cols) 11))
+    (should (string-prefix-p "github acme/web app rw"
+                             (substring-no-properties (aref cols 9))))
+    (should (equal (aref cols 10) "/w"))))       ; Workspace shifted one right
+
+(ert-deftest safeslop-test-portal-credential-column-before-workspace ()
+  "The portal defines a Creds column immediately before Workspace (specs/0086 T2)."
+  (with-temp-buffer
+    (safeslop-portal-mode)
+    (let* ((titles (mapcar #'car (append tabulated-list-format nil)))
+           (creds (cl-position "Creds" titles :test #'equal))
+           (ws (cl-position "Workspace" titles :test #'equal)))
+      (should creds)
+      (should ws)
+      (should (= (1+ creds) ws)))))
+
+(ert-deftest safeslop-test-portal-credential-cell-value-free ()
+  "The Creds cell/help render only safe kind/name/scope fields.
+If a future JSON envelope regresses and carries token/ref/path-looking strings,
+the Emacs portal still refuses to display them."
+  (let* ((sess '((credential_scopes . (((kind . "github") (name . "acme/web") (scope . "app rw"))
+                                       ((kind . "pnpm") (name . "op://vault/npm/token") (scope . "env:NPM_TOKEN"))
+                                       ((kind . "ssh") (name . "/tmp/stage/key") (scope . "BEGIN PRIVATE KEY"))))))
+         (cell (substring-no-properties (safeslop-portal--creds-cell sess)))
+         (help (safeslop-portal--creds-help sess)))
+    (dolist (leak '("op://" "env:" "token" "BEGIN" "PRIVATE KEY" "/tmp/stage"))
+      (should-not (string-match-p (regexp-quote leak) cell))
+      (should-not (string-match-p (regexp-quote leak) help)))
+    (should (string-match-p "github acme/web app rw" help))
+    (should (string-match-p "pnpm" help))
+    (should (string-match-p "ssh" help))))
+
+;;; Self-describing live buffers: name + header + id lookup (specs/0086 T3) ----
+
+(ert-deftest safeslop-test-session-buffer-label-descriptive ()
+  "A profile-backed session labels the buffer by profile, project, and tier/net,
+matching the specs/0071 rec #3 example shape."
+  (should (equal (safeslop-session--buffer-label
+                  "sess-abc"
+                  '((session_id . "sess-abc") (profile . "be-dev")
+                    (workspace . "/home/me/payments")
+                    (environment . "container") (network . "deny")))
+                 "safeslop:be-dev payments [container/deny]")))
+
+(ert-deftest safeslop-test-session-buffer-label-adhoc-and-name ()
+  "No profile falls back to the display name; no profile/name uses the project."
+  ;; name (no profile) becomes the identifier
+  (should (equal (safeslop-session--buffer-label
+                  "sess-1"
+                  '((name . "prod-fix") (workspace . "/w/web")
+                    (environment . "host") (network . "deny")))
+                 "safeslop:prod-fix web [host/deny]"))
+  ;; ad-hoc: neither profile nor name -> project + tier/net only
+  (should (equal (safeslop-session--buffer-label
+                  "sess-2"
+                  '((workspace . "/w/api") (environment . "container") (network . "allow")))
+                 "safeslop:api [container/allow]")))
+
+(ert-deftest safeslop-test-session-buffer-label-fallback-old-id ()
+  "With no legible data the label falls back to the legacy `safeslop-<id>' name,
+so the buffer is still created and the portal legacy lookup still finds it."
+  (should (equal (safeslop-session--buffer-label "sess-xyz" nil)
+                 "safeslop-sess-xyz"))
+  (should (equal (safeslop-session--buffer-label "sess-xyz" '((session_id . "sess-xyz")))
+                 "safeslop-sess-xyz")))
+
+(ert-deftest safeslop-test-session-buffer-label-value-free ()
+  "The label embeds only the workspace basename and never a credential ref/value."
+  (let ((label (safeslop-session--buffer-label
+                "sess-1"
+                '((profile . "be-dev") (workspace . "/home/secret/op-vault/payments")
+                  (environment . "container") (network . "deny")
+                  (credential_scopes . (((kind . "github") (name . "acme/web") (scope . "app rw"))))))))
+    (should (equal label "safeslop:be-dev payments [container/deny]"))
+    (should-not (string-match-p "/home/secret\\|op-vault\\|github\\|acme" label))))
+
+(ert-deftest safeslop-test-session-buffer-label-sanitizes-unsafe-components ()
+  "Unsafe profile/name/project text is dropped before building the label."
+  (let ((label (safeslop-session--buffer-label
+                "sess-safe"
+                '((profile . "op://vault/profile")
+                  (name . "env:NPM_TOKEN")
+                  (workspace . "/w/env:NPM_TOKEN")
+                  (environment . "container") (network . "deny")))))
+    ;; With no safe profile/name/project left, do not render a bare tier-only
+    ;; label; fall back to the legacy id form instead.
+    (should (equal label "safeslop-sess-safe"))
+    (dolist (leak '("op://" "env:" "TOKEN"))
+      (should-not (string-match-p (regexp-quote leak) label))))
+  (should (equal (safeslop-session--buffer-label
+                  "sess-safe"
+                  '((profile . "op://vault/profile") (name . "prod-fix")
+                    (workspace . "/w/payments")
+                    (environment . "container") (network . "deny")))
+                 "safeslop:prod-fix payments [container/deny]")))
+
+(ert-deftest safeslop-test-session-header-line-includes-creds ()
+  "The header restates profile/project/tier/net and appends the value-free creds
+list; the profile wins over the display name."
+  (let ((header (safeslop-session--header-line
+                 '((profile . "be-dev") (name . "ignored")
+                   (workspace . "/srv/payments") (environment . "container")
+                   (network . "deny")
+                   (credential_scopes . (((kind . "github") (name . "acme/web") (scope . "app rw"))
+                                         ((kind . "pnpm") (name . "npm.pkg.github.com") (scope . "@org"))))))))
+    (should (string-match-p "be-dev" header))
+    (should-not (string-match-p "ignored" header))
+    (should (string-match-p "payments" header))
+    (should (string-match-p "container/deny" header))
+    (should (string-match-p "creds: github acme/web app rw, pnpm npm.pkg.github.com @org" header))))
+
+(ert-deftest safeslop-test-session-header-line-old-record-safe ()
+  "A pre-0086 record without credential_scopes (and empty/blank scope arrays)
+produces a safe `creds: —' header (specs/0086 T3)."
+  (let ((header (safeslop-session--header-line
+                 '((profile . "legacy") (workspace . "/w/proj")
+                   (environment . "host") (network . "deny")))))
+    (should (string-match-p "creds: —" header))
+    (should-not (string-match-p "op://\\|env:\\|token" header)))
+  (should (string-match-p "creds: —"
+                          (safeslop-session--header-line
+                           '((profile . "p") (workspace . "/w/x")
+                             (environment . "host") (network . "deny")
+                             (credential_scopes . ())))))
+  (should (string-match-p "creds: —"
+                          (safeslop-session--header-line
+                           '((profile . "p") (workspace . "/w/x")
+                             (environment . "host") (network . "deny")
+                             (credential_scopes . (((kind . "") (name . "") (scope . "")))))))))
+
+(ert-deftest safeslop-test-session-header-line-value-free ()
+  "The header renders only safe kind/name/scope; a regressed envelope carrying a
+ref/value/staged path is still refused (mirrors the portal T2 guarantee)."
+  (let* ((data '((profile . "be-dev") (workspace . "/home/me/payments")
+                 (environment . "container") (network . "deny")
+                 (credential_scopes . (((kind . "github") (name . "acme/web") (scope . "app rw"))
+                                       ((kind . "pnpm") (name . "op://vault/npm/token") (scope . "env:NPM_TOKEN"))
+                                       ((kind . "ssh") (name . "/tmp/stage/key") (scope . "BEGIN PRIVATE KEY"))))))
+         (header (safeslop-session--header-line data)))
+    (dolist (leak '("op://" "env:" "token" "BEGIN" "PRIVATE KEY" "/tmp/stage" "/home/me"))
+      (should-not (string-match-p (regexp-quote leak) header)))
+    (should (string-match-p "github acme/web app rw" header))
+    (should (string-match-p "pnpm" header))
+    (should (string-match-p "ssh" header))))
+
+(ert-deftest safeslop-test-session-header-line-sanitizes-label-fields ()
+  "The header must not leak unsafe profile/name/project label components."
+  (let ((header (safeslop-session--header-line
+                 '((session_id . "sess-safe")
+                   (profile . "op://vault/profile")
+                   (name . "env:NPM_TOKEN")
+                   (workspace . "/w/env:NPM_TOKEN")
+                   (environment . "container") (network . "deny")))))
+    (should (string-prefix-p "safeslop-sess-safe" header))
+    (should (string-match-p "creds: —" header))
+    (dolist (leak '("op://" "env:" "TOKEN"))
+      (should-not (string-match-p (regexp-quote leak) header)))))
+
+(ert-deftest safeslop-test-session-launch-term-sets-buffer-local-id-and-header ()
+  "launch-term fetches data best-effort, names the buffer descriptively, sets the
+buffer-local id after terminal creation, and installs a value-free creds header."
+  (let ((made-name nil) (buf nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'safeslop-session--fetch-data)
+                   (lambda (_id)
+                     '((session_id . "sess-xyz") (profile . "be-dev")
+                       (workspace . "/home/me/payments")
+                       (environment . "container") (network . "deny")
+                       (credential_scopes . (((kind . "github") (name . "acme/web") (scope . "app rw")))))))
+                  ((symbol-function 'safeslop-session--make-terminal)
+                   (lambda (name _program _argv)
+                     (setq made-name name)
+                     (setq buf (get-buffer-create (concat "*" name "*")))))
+                  ((symbol-function 'pop-to-buffer) (lambda (b &rest _) b)))
+          (safeslop-session--launch-term "sess-xyz" '("session" "run" "--session-id" "sess-xyz"))
+          (should (equal made-name "safeslop:be-dev payments [container/deny]"))
+          (with-current-buffer buf
+            (should (equal safeslop-session-id "sess-xyz"))
+            (should (stringp header-line-format))
+            (should (string-match-p "creds: github acme/web app rw" header-line-format))
+            (should-not (string-match-p "op://\\|env:\\|/home/me" header-line-format))))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest safeslop-test-session-launch-term-fallback-legacy-buffer-name ()
+  "A best-effort fetch miss must not block the launch: the buffer keeps the
+legacy `safeslop-<id>' name and installs no header."
+  (let ((made-name nil) (buf nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'safeslop-session--fetch-data) (lambda (_id) nil))
+                  ((symbol-function 'safeslop-session--make-terminal)
+                   (lambda (name _program _argv)
+                     (setq made-name name)
+                     (setq buf (get-buffer-create (concat "*" name "*")))))
+                  ((symbol-function 'pop-to-buffer) (lambda (b &rest _) b)))
+          (safeslop-session--launch-term "sess-none" '("session" "run"))
+          (should (equal made-name "safeslop-sess-none"))
+          (with-current-buffer buf
+            (should (equal safeslop-session-id "sess-none"))
+            (should (null header-line-format))))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(ert-deftest safeslop-test-session-live-buffer-found-by-id ()
+  "The portal live lookup scans for the buffer-local session id, so a buffer
+renamed to its descriptive form is still found (specs/0086 T3)."
+  (let ((buf (get-buffer-create "*safeslop:be-dev payments [container/deny]*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer buf (setq-local safeslop-session-id "sess-live"))
+          (should (eq (safeslop-portal--live-buffer "sess-live") buf))
+          (should-not (safeslop-portal--live-buffer "sess-missing")))
+      (kill-buffer buf))))
+
+(ert-deftest safeslop-test-session-live-buffer-legacy-fallback ()
+  "A legacy buffer named `*safeslop-<id>*' without a buffer-local id is still
+found by name, so pre-0086 terminals keep working."
+  (let ((buf (get-buffer-create "*safeslop-sess-old*")))
+    (unwind-protect
+        (should (eq (safeslop-portal--live-buffer "sess-old") buf))
+      (kill-buffer buf))))
+
+(ert-deftest safeslop-test-session-live-open-pops-renamed-buffer ()
+  "Portal `open' on a running coupled session pops to the id-tagged buffer even
+after its name became descriptive (specs/0086 T3)."
+  (let ((buf (get-buffer-create "*safeslop:be-dev payments [container/deny]*"))
+        (popped nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'safeslop-portal--session-at-point)
+                   (lambda () '((session_id . "sess-live") (status . "running") (socket . ""))))
+                  ((symbol-function 'pop-to-buffer) (lambda (b &rest _) (setq popped b))))
+          (with-current-buffer buf (setq-local safeslop-session-id "sess-live"))
+          (safeslop-portal-open)
+          (should (eq popped buf)))
+      (kill-buffer buf))))

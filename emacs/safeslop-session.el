@@ -18,6 +18,7 @@
 
 (require 'subr-x)
 (require 'seq)
+(require 'cl-lib)
 (require 'term)
 (require 'safeslop-contract)
 (require 'safeslop-client)
@@ -330,6 +331,129 @@ Idempotent per buffer via `safeslop-session--fallback-done'."
         (setq safeslop-session--fallback-done t)
         (safeslop-session-status-fallback session-id)))))
 
+;;; Self-describing live buffers (specs/0086 T3) -----------------------------
+;; A live agent buffer used to be named by opaque session id (`*safeslop-<id>*'),
+;; so an operator with several sessions could not answer "which buffer, which
+;; project, which credentials?" without opening details one by one (specs/0071 rec
+;; #3).  These pure builders derive a value-free, self-describing buffer label and
+;; header line from a `session status' record; the buffer keys on a buffer-local
+;; id so the portal still finds it after the name becomes descriptive.
+
+(defvar-local safeslop-session-id nil
+  "The safeslop session id this terminal buffer is running, or nil.
+Set after terminal creation so the portal can find a live buffer by id even
+after its displayed name becomes descriptive (specs/0086 T3).  The id is the
+sole addressing handle; the buffer name is a pure, renamable label.")
+
+(defconst safeslop-session--creds-unsafe-patterns
+  '("op://" "\\benv:" "private[-_ ]?key" "begin .*key" "\\btoken\\b" "\\`[~/]")
+  "Case-insensitive patterns never rendered from credential scope fields.
+Mirrors `safeslop-portal--creds-unsafe-patterns' (specs/0086 T2): the header
+is a second credential-scope surface, so it keeps the same defensive
+value-free floor even if a future JSON envelope regresses and carries a
+ref/value/path.")
+
+(defun safeslop-session--field (data key)
+  "Return DATA's KEY as a trimmed display string, or nil when empty/absent."
+  (let ((v (alist-get key data)))
+    (when (and (stringp v) (not (string-empty-p v))) v)))
+
+(defun safeslop-session--safe-display-field (value)
+  "Return VALUE when it is non-empty and safe to render, else nil.
+Refs, token markers, staged paths, and key refs are suppressed defensively so
+a buffer name/header never renders them even if the JSON regresses
+(specs/0086 T3)."
+  (when (and (stringp value) (not (string-empty-p value)))
+    (let ((case-fold-search t))
+      (unless (cl-some (lambda (re) (string-match-p re value))
+                       safeslop-session--creds-unsafe-patterns)
+        value))))
+
+(defun safeslop-session--creds-safe-field (value)
+  "Return VALUE when it is a safe credential-scope display field."
+  (safeslop-session--safe-display-field value))
+
+(defun safeslop-session--creds-scope-string (scope)
+  "Return one credential SCOPE alist as a compact \"kind name scope\" string.
+Only the engine's non-secret kind/name/scope fields are used; empty or unsafe
+fields are dropped so nothing but value-free text reaches the header."
+  (string-join
+   (delq nil
+         (mapcar (lambda (key)
+                   (safeslop-session--creds-safe-field (alist-get key scope)))
+                 '(kind name scope)))
+   " "))
+
+(defun safeslop-session--creds-summary (data)
+  "Return DATA's value-free credential-scope summary, or an em dash when none.
+Comma-joins every scope as \"kind name scope\"; old records without
+`credential_scopes' (and empty/blank arrays) yield an em dash (specs/0086 T3)."
+  (let* ((scopes (let ((v (alist-get 'credential_scopes data)))
+                   (if (vectorp v) (append v nil) v)))
+         (rendered (delq nil
+                         (mapcar (lambda (s)
+                                   (let ((str (safeslop-session--creds-scope-string s)))
+                                     (unless (string-empty-p str) str)))
+                                 scopes))))
+    (if rendered (string-join rendered ", ") "\u2014")))
+
+(defun safeslop-session--project (data)
+  "Return DATA's safe workspace basename, value-free, or nil.
+Only the final path component is used so a private parent path never leaks
+into a buffer name or header (specs/0086 value-free invariant).  The basename
+is still filtered because workspace names are host-controlled text."
+  (when-let* ((ws (safeslop-session--field data 'workspace)))
+    (safeslop-session--safe-display-field
+     (file-name-nondirectory (directory-file-name (expand-file-name ws))))))
+
+(defun safeslop-session--buffer-label (session-id data)
+  "Return a self-describing, value-free buffer label for SESSION-ID from DATA.
+Shape follows specs/0071 rec #3:
+`safeslop:<profile-or-name> <project> [env/net]'.  The profile wins over the
+display name; the project is the workspace basename; tier/net is
+`[environment/network]'.  With no legible identity/project data it falls back
+to the legacy `safeslop-<id>' name so the buffer is still created and the
+portal legacy lookup still finds it (specs/0086 T3)."
+  (let* ((who (or (safeslop-session--safe-display-field
+                   (safeslop-session--field data 'profile))
+                  (safeslop-session--safe-display-field
+                   (safeslop-session--field data 'name))))
+         (project (safeslop-session--project data))
+         (env (safeslop-session--safe-display-field
+               (safeslop-session--field data 'environment)))
+         (net (safeslop-session--safe-display-field
+               (safeslop-session--field data 'network)))
+         (tier (and env net (format "[%s/%s]" env net)))
+         (parts (delq nil (list (and who (concat "safeslop:" who))
+                                (and (null who) project (concat "safeslop:" project))
+                                (and who project project)
+                                (and (or who project) tier)))))
+    (if parts
+        (string-join parts " ")
+      (concat "safeslop-"
+              (or (safeslop-session--safe-display-field session-id) "unknown")))))
+
+(defun safeslop-session--header-line (data)
+  "Return the value-free header-line summary string for session DATA.
+Restates profile/project/tier/net (the buffer label shape) and appends the
+value-free credential-scope list as `creds: ...'
+(or `creds: \u2014' for old records
+and credential-less sessions).  Never includes token values, secret refs,
+staged paths, or key refs (specs/0086 T3)."
+  (let ((label (safeslop-session--buffer-label
+                (or (safeslop-session--field data 'session_id) "") data)))
+    (format "%s  creds: %s" label (safeslop-session--creds-summary data))))
+
+(defun safeslop-session--fetch-data (session-id)
+  "Return SESSION-ID's `session status' data alist, best effort, or nil.
+Synchronous but best-effort: a failed or slow status must never block launching
+the terminal, so any non-ok envelope simply yields nil and the caller falls back
+to the legacy buffer name (specs/0086 T3)."
+  (let ((env (safeslop--call-json
+              (list "session" "status" "--session-id" session-id "--output" "json"))))
+    (when (safeslop-contract-ok-p env)
+      (safeslop-contract-data env))))
+
 (defun safeslop-session--make-terminal (name program argv)
   "Create terminal buffer *NAME* running PROGRAM with ARGV; return the buffer.
 Prefer the eat terminal (pure-elisp, 24-bit color) when it can be loaded,
@@ -357,8 +481,22 @@ Uses the eat terminal (24-bit truecolor) when available, else the built-in
 term-mode (see `safeslop-session--make-terminal').  If the process reports the
 PTY_UNAVAILABLE contract error (no usable controlling terminal), switch to the
 read-only JSONL status fallback (`safeslop-session-status-fallback')."
-  (let ((buf (safeslop-session--make-terminal
-              (concat "safeslop-" session-id) safeslop-program argv)))
+  ;; Fetch the session record best-effort BEFORE naming so the buffer is
+  ;; self-describing from the first frame (specs/0086 T3).  A miss yields nil and
+  ;; `safeslop-session--buffer-label' falls back to the legacy `safeslop-<id>'
+  ;; name, so a slow/failed status never blocks the launch.
+  (let* ((data (safeslop-session--fetch-data session-id))
+         (buf (safeslop-session--make-terminal
+               (safeslop-session--buffer-label session-id data)
+               safeslop-program argv)))
+    ;; Set the buffer-local id AFTER terminal creation: the terminal major mode
+    ;; runs `kill-all-local-variables', which would wipe an id set beforehand.
+    ;; The header rides only on real record data, so a fallback-named legacy
+    ;; launch (no data) stays header-less.
+    (with-current-buffer buf
+      (setq-local safeslop-session-id session-id)
+      (when data
+        (setq header-line-format (safeslop-session--header-line data))))
     (let ((proc (get-buffer-process buf)))
       (when proc
         ;; Capture raw stdout ahead of term's renderer, then key on it when the

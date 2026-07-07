@@ -1188,3 +1188,306 @@ func TestSessionRenameRequiresOutputJSON(t *testing.T) {
 		t.Fatalf("rename without --output json must be a usage error; out=%s", out)
 	}
 }
+
+// ---- T1: value-free credential scopes (specs/0086) ----
+
+// credentialScopeStringsForTest flattens the envelope/sessionData credential_scopes
+// array into "kind name scope" lines so a test can assert the exact value-free rows
+// (and their order) in one comparison.
+func credentialScopeStringsForTest(t *testing.T, data map[string]any) []string {
+	t.Helper()
+	raw, ok := data["credential_scopes"].([]any)
+	if !ok {
+		t.Fatalf("credential_scopes missing or not an array: %#v", data["credential_scopes"])
+	}
+	rows := make([]string, 0, len(raw))
+	for _, r := range raw {
+		m, ok := r.(map[string]any)
+		if !ok {
+			t.Fatalf("credential scope row is not an object: %#v", r)
+		}
+		kind, _ := m["kind"].(string)
+		name, _ := m["name"].(string)
+		scope, _ := m["scope"].(string)
+		rows = append(rows, strings.TrimSpace(kind+" "+name+" "+scope))
+	}
+	return rows
+}
+
+// writeProfileCueAndTrust writes a safeslop.cue at ws, creates its "project"
+// workspace subdir, and host-approves the policy so `session create --profile`
+// passes the specs/0072 F1 trust gate — the shared fixture for the credential
+// scope tests.
+func writeProfileCueAndTrust(t *testing.T, ws, cue string) {
+	t.Helper()
+	if err := os.Mkdir(filepath.Join(ws, "project"), 0o755); err != nil {
+		t.Fatalf("mkdir project workspace: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, "safeslop.cue"), []byte(cue), 0o644); err != nil {
+		t.Fatalf("write safeslop.cue: %v", err)
+	}
+	trustFixtureForTest(t, ws)
+}
+
+// TestSessionCreateFromProfileComputesCredentialScopes proves a profile-backed
+// session's create envelope AND its persisted record carry value-free
+// credential_scopes computed from the trusted policy: declared github repos use
+// their own RepoCred.Write (rw/ro), and pnpm/aws/gcp/kube contribute non-secret
+// targets only. No token value, secret ref (op://), or session policy leaks
+// (specs/0086 T1).
+func TestSessionCreateFromProfileComputesCredentialScopes(t *testing.T) {
+	ws := t.TempDir()
+	state := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", state)
+	cue := `package safeslop
+
+safeslop: {
+	version: 1
+	profiles: {
+		full: {
+			agent: "pi"
+			environment: "container"
+			network: "deny"
+			workspace: "project"
+			credentials: {
+				github: {repos: [{repo: "acme/web", write: true}, {repo: "acme/api"}]}
+				pnpm: [{host: "npm.pkg.github.com", token: "op://vault/npm/token", scope: "@acme"}]
+				aws: {profile: "dev-admin", region: "us-east-1", roleArn: "arn:aws:iam::123456789012:role/dev-admin", sessionPolicy: "{\"Statement\":\"leak-canary\"}"}
+				gcp: {scopes: ["https://www.googleapis.com/auth/devstorage.read_only"]}
+				kube: {eks: {name: "prod", region: "eu-west-1"}}
+			}
+		}
+	}
+}
+`
+	writeProfileCueAndTrust(t, ws, cue)
+
+	out, err := runRootForTest(t, ws, "session", "create", "--profile", "full", "--output", "json")
+	if err != nil {
+		t.Fatalf("session create --profile: %v\nout=%s", err, out)
+	}
+	env := parseEnvelopeForTest(t, out)
+	if !env.OK {
+		t.Fatalf("create returned error envelope: %+v", env.Errors)
+	}
+
+	want := []string{
+		"github acme/web app rw",
+		"github acme/api app ro",
+		"pnpm npm.pkg.github.com @acme",
+		"aws dev-admin us-east-1 arn:aws:iam::123456789012:role/dev-admin",
+		"gcp adc https://www.googleapis.com/auth/devstorage.read_only",
+		"kube prod eks eu-west-1",
+	}
+	if got := credentialScopeStringsForTest(t, env.Data); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("credential_scopes envelope rows =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+
+	// The scopes must be persisted (computed before save), so status/list see them too.
+	id := env.Data["session_id"].(string)
+	stored, err := sessionStore().Get(id)
+	if err != nil {
+		t.Fatalf("load stored session: %v", err)
+	}
+	if len(stored.CredentialScopes) != len(want) {
+		t.Fatalf("stored CredentialScopes = %+v, want %d rows", stored.CredentialScopes, len(want))
+	}
+
+	// list and status must carry the same persisted value-free rows, not just create.
+	listOut, err := runRootForTest(t, ws, "session", "list", "--output", "json")
+	if err != nil {
+		t.Fatalf("session list: %v\nout=%s", err, listOut)
+	}
+	listEnv := parseEnvelopeForTest(t, listOut)
+	sessions, ok := listEnv.Data["sessions"].([]any)
+	if !ok || len(sessions) != 1 {
+		t.Fatalf("session list sessions = %#v", listEnv.Data["sessions"])
+	}
+	listed, ok := sessions[0].(map[string]any)
+	if !ok {
+		t.Fatalf("session list row is not an object: %#v", sessions[0])
+	}
+	if got := credentialScopeStringsForTest(t, listed); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("session list credential_scopes =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+
+	statusOut, err := runRootForTest(t, ws, "session", "status", "--session-id", id, "--output", "json")
+	if err != nil {
+		t.Fatalf("session status: %v\nout=%s", err, statusOut)
+	}
+	statusEnv := parseEnvelopeForTest(t, statusOut)
+	if got := credentialScopeStringsForTest(t, statusEnv.Data); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("session status credential_scopes =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+
+	// Value-free invariant: no secret ref, token value, or session policy text.
+	for _, bad := range []string{"op://", "env:", "leak-canary", "vault/npm/token"} {
+		if strings.Contains(out, bad) {
+			t.Fatalf("credential scope output leaked %q: %s", bad, out)
+		}
+	}
+}
+
+// TestSessionCreateFromProfileCredentialScopesOriginInferred proves that a git
+// forge credential with no declared repos yields a single value-free row keyed
+// on "origin" (the real owner/repo is only resolved at run time) carrying the
+// provider-level access, and that App mode + TTL text land in scope only, never
+// in the target name (specs/0086 T1).
+func TestSessionCreateFromProfileCredentialScopesOriginInferred(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+	cue := `package safeslop
+
+safeslop: {
+	version: 1
+	profiles: {
+		inferred: {
+			agent: "pi"
+			environment: "container"
+			network: "deny"
+			workspace: "project"
+			credentials: {
+				github: {write: true, ttl: "30m"}
+				forgejo: {url: "https://codeberg.org"}
+			}
+		}
+	}
+}
+`
+	writeProfileCueAndTrust(t, ws, cue)
+
+	out, err := runRootForTest(t, ws, "session", "create", "--profile", "inferred", "--output", "json")
+	if err != nil {
+		t.Fatalf("session create --profile: %v\nout=%s", err, out)
+	}
+	env := parseEnvelopeForTest(t, out)
+	if !env.OK {
+		t.Fatalf("create returned error envelope: %+v", env.Errors)
+	}
+	want := []string{
+		"github origin app rw 30m",
+		"forgejo origin deploy-key ro",
+	}
+	if got := credentialScopeStringsForTest(t, env.Data); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("origin-inferred credential_scopes =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	if strings.Contains(out, "codeberg.org") {
+		t.Fatalf("origin-inferred forgejo row must not embed the instance URL: %s", out)
+	}
+}
+
+// TestSessionCreateFromProfileCredentialScopesPATValueFree proves PAT mode keeps
+// the PAT ref out of the session envelope while still showing the non-secret mode
+// and per-repo access in scope. It also covers the GKE kube target shape.
+func TestSessionCreateFromProfileCredentialScopesPATValueFree(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+	cue := `package safeslop
+
+safeslop: {
+	version: 1
+	profiles: {
+		pat: {
+			agent: "pi"
+			environment: "container"
+			network: "deny"
+			workspace: "project"
+			credentials: {
+				github: {mode: "pat", pat: "env:GITHUB_FINE_GRAINED_PAT", repos: [{repo: "acme/web", write: true}, {repo: "acme/api"}]}
+				kube: {gke: {name: "prod", location: "europe-west1", project: "acme-prod"}}
+			}
+		}
+	}
+}
+`
+	writeProfileCueAndTrust(t, ws, cue)
+
+	out, err := runRootForTest(t, ws, "session", "create", "--profile", "pat", "--output", "json")
+	if err != nil {
+		t.Fatalf("session create --profile: %v\nout=%s", err, out)
+	}
+	env := parseEnvelopeForTest(t, out)
+	want := []string{
+		"github acme/web pat rw",
+		"github acme/api pat ro",
+		"kube prod gke europe-west1 acme-prod",
+	}
+	if got := credentialScopeStringsForTest(t, env.Data); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("PAT credential_scopes =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	for _, bad := range []string{"env:", "GITHUB_FINE_GRAINED_PAT"} {
+		if strings.Contains(out, bad) {
+			t.Fatalf("PAT credential scope output leaked %q: %s", bad, out)
+		}
+	}
+}
+
+// TestSessionCreateAdHocOmitsCredentialScopes proves an ad-hoc (--agent) session,
+// which carries no policy credentials, omits credential_scopes entirely rather
+// than emitting an empty array or a null (specs/0086 T1: leave ad-hoc empty).
+func TestSessionCreateAdHocOmitsCredentialScopes(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+
+	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
+	if err != nil {
+		t.Fatalf("session create: %v\nout=%s", err, out)
+	}
+	env := parseEnvelopeForTest(t, out)
+	if _, present := env.Data["credential_scopes"]; present {
+		t.Fatalf("ad-hoc session must omit credential_scopes, got: %#v", env.Data["credential_scopes"])
+	}
+}
+
+// TestSessionDataSurfacesCredentialScopes proves sessionData surfaces a session's
+// value-free credential scopes into the JSON data object with their kind/name/scope
+// fields intact (specs/0086 T1).
+func TestSessionDataSurfacesCredentialScopes(t *testing.T) {
+	sess := engsession.Session{
+		ID:          "sess-cred0000",
+		Agent:       "pi",
+		Workspace:   "/workspace/project",
+		Environment: "container",
+		Network:     "deny",
+		Status:      engsession.StatusCreated,
+		CreatedAt:   nowForTest(t),
+		UpdatedAt:   nowForTest(t),
+		CredentialScopes: []engsession.CredentialScope{
+			{Kind: "github", Name: "acme/web", Scope: "app rw"},
+			{Kind: "pnpm", Name: "npm.pkg.github.com", Scope: "@acme"},
+		},
+	}
+	// sessionData is called directly (no JSON round-trip), so the value is the typed
+	// slice sessionData stored, not a JSON-decoded []any.
+	scopes, ok := sessionData(sess)["credential_scopes"].([]engsession.CredentialScope)
+	if !ok {
+		t.Fatalf("credential_scopes missing or wrong type: %#v", sessionData(sess)["credential_scopes"])
+	}
+	got := make([]string, 0, len(scopes))
+	for _, s := range scopes {
+		got = append(got, strings.TrimSpace(s.Kind+" "+s.Name+" "+s.Scope))
+	}
+	want := []string{"github acme/web app rw", "pnpm npm.pkg.github.com @acme"}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("sessionData credential_scopes =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// TestSessionDataOmitsEmptyCredentialScopes proves a session with no scopes (an
+// ad-hoc or legacy record) omits the key, so old records still render cleanly
+// (specs/0086 T1: backward compatible).
+func TestSessionDataOmitsEmptyCredentialScopes(t *testing.T) {
+	sess := engsession.Session{
+		ID:          "sess-nocreds0",
+		Agent:       "claude",
+		Workspace:   "/workspace/project",
+		Environment: "host",
+		Network:     "deny",
+		Status:      engsession.StatusCreated,
+		CreatedAt:   nowForTest(t),
+		UpdatedAt:   nowForTest(t),
+	}
+	if _, present := sessionData(sess)["credential_scopes"]; present {
+		t.Fatalf("empty credential scopes must be omitted from sessionData")
+	}
+}

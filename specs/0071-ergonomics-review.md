@@ -180,7 +180,10 @@ scale**, not frame rate: flat unfilterable tables and hand-authored CUE, not lag
 3. **Make the live agent buffer self-describing.** Name/annotate `*safeslop-<id>*` with
    profile + project + tier + net (e.g. `*safeslop:be-dev payments [container/deny]*`), and
    put a one-line credential-scope banner (repos + kinds, value-free) in the buffer header.
-   Directly answers "which buffer, which project, which creds."
+   Directly answers "which buffer, which project, which creds." Planned/covered by
+   `specs/0086-session-legibility.md` (recommendation #3 only; the broader 100-repo
+   template, filter/search/grouping, credential-authoring, and bulk-trust recommendations
+   remain open).
 4. **Filter/search/group in the portal and profiles** (by workspace, agent, status,
    persona) — the flat table breaks down well before 100.
 5. **Authoring affordances in the Credentials surface** — add a repo/scope to a profile from
