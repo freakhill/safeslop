@@ -544,7 +544,15 @@ go test ./internal/engine/policy/ -run 'Pinned|Latest' -v
 go test ./internal/cli/ -v
 go test ./internal/engine/session ./internal/jsoncontract -v
 make test-emacs EMACS=/absolute/path/to/emacs
+make test-emacs-ui-matrix
 ```
+
+`make test-emacs-ui-matrix` is the local Emacs compatibility gate: raw Emacs and
+Doom-shim slots always run; real Evil/Doom+Evil slots run when a local Evil build
+is auto-detected or `SAFESLOP_EVIL_LOAD_PATH` supplies colon-separated load dirs.
+A personal config probe is opt-in via `SAFESLOP_UI_PERSONAL_CMD`, and
+`SAFESLOP_UI_REQUIRE_PERSONAL=1` makes that slot mandatory for your local run.
+`make check` stays hermetic and does not require private Doom/Evil state.
 
 The checked Emacs package consumes the Go golden JSON fixtures directly from
 `internal/jsoncontract/testdata/*.golden.json`; there is no copied fixture set.

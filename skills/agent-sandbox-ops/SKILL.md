@@ -205,3 +205,9 @@ rely on broad host mounts.
 go test ./internal/engine/container/ ./internal/engine/vm/ -v
 make check
 ```
+
+For Emacs surface, Doom, or Evil binding changes, also run the local UI matrix:
+`make test-emacs-ui-matrix`.  It keeps `make check` hermetic while covering raw
+Emacs, a Doom `map!` shim, locally installed Evil, Doom+Evil, and an opt-in
+personal command via `SAFESLOP_UI_PERSONAL_CMD` (`SAFESLOP_UI_REQUIRE_PERSONAL=1`
+makes that personal slot mandatory locally).

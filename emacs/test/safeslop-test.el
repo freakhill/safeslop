@@ -50,15 +50,22 @@ real maps: defining `gr' would turn the raw `g' refresh binding into a prefix."
                          bindings)))))
       (unless (featurep 'evil)
         (provide 'evil))
-      ;; Both the output buffers and the portal dashboard enter Evil normal state.
+      ;; All read-only/operator surfaces, including the Profiles compose buffer,
+      ;; enter Evil normal state so local action keys beat Evil motions.
       (should (member '(safeslop-output-mode normal) initial-states))
       (should (member '(safeslop-portal-mode normal) initial-states))
+      (should (member '(safeslop-profiles-compose-mode normal) initial-states))
       ;; Refresh rides gr, the portal auto-toggle ga (evil-collection style);
       ;; the shared keys are still applied through Evil.
       (should (member (list safeslop-output-mode-map "g r" #'safeslop-output-refresh) bindings))
       (should (member (list safeslop-portal-mode-map "g r" #'safeslop-portal-refresh) bindings))
       (should (member (list safeslop-portal-mode-map "g a" #'safeslop-portal-toggle-auto-refresh) bindings))
       (should (member (list safeslop-portal-mode-map "s" #'safeslop-portal-stop) bindings))
+      (should (member (list safeslop-profiles-compose-mode-map "SPC" #'safeslop-profiles-compose-toggle) bindings))
+      (should (member (list safeslop-profiles-compose-mode-map "?" #'safeslop-profiles-compose-help) bindings))
+      (should (member (list safeslop-profiles-compose-mode-map "g r" #'safeslop-profiles-compose-refresh) bindings))
+      (should (member (list safeslop-profiles-compose-mode-map "C-c C-c" #'safeslop-profiles-compose-preview-save) bindings))
+      (should (member (list safeslop-profiles-compose-mode-map "q" #'safeslop-profiles-compose-cancel) bindings))
       (should (member (list safeslop-output-mode-map "d" #'safeslop-doctor) bindings))
       (should (member (list safeslop-output-mode-map "E" #'safeslop-show-last-error) bindings))
       (should (member (list safeslop-output-mode-map "q" #'quit-window) bindings))

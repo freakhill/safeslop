@@ -14,7 +14,7 @@ CONTAINER_SRC := library/layer/container
 CONTAINER_DST := internal/engine/container/assets
 SYNCED        := allowlist.domains Dockerfile.agent Dockerfile.agent.tools
 
-.PHONY: build test test-emacs vet fmt fmtcheck check check-assets check-catalog-sync check-pivot-denylist check-host-helper-exec sync-container-assets render-catalog install install-emacs install-mcp dist clean
+.PHONY: build test test-emacs test-emacs-ui-matrix vet fmt fmtcheck check check-assets check-catalog-sync check-pivot-denylist check-host-helper-exec sync-container-assets render-catalog install install-emacs install-mcp dist clean
 
 ## Build the local binary (static — no cgo, immune to the WARP/uv install path).
 build:
@@ -26,7 +26,7 @@ test:
 test-emacs:
 	@$(EMACS) --batch --eval '(princ (format "emacs %s\n" emacs-version))'
 	@$(EMACS) --batch --eval '(if (version< emacs-version "$(EMACS_MIN)") (progn (princ (format "emacs %s is older than required $(EMACS_MIN)\n" emacs-version)) (kill-emacs 1)))'
-	$(EMACS) --batch -L emacs -l ert -l emacs/test/safeslop-test.el -l emacs/test/safeslop-contract-test.el -l emacs/test/safeslop-profiles-test.el -l emacs/test/safeslop-credentials-test.el -f ert-run-tests-batch-and-exit
+	$(EMACS) --batch -L emacs -l ert -l emacs/test/safeslop-test.el -l emacs/test/safeslop-contract-test.el -l emacs/test/safeslop-profiles-test.el -l emacs/test/safeslop-credentials-test.el -l emacs/test/safeslop-ui-probe.el -f ert-run-tests-batch-and-exit
 	$(EMACS) --batch -L emacs -l emacs/safeslop.el -l emacs/safeslop-doom.el -l emacs/safeslop-session.el --eval '(message "safeslop emacs ok")'
 	## Byte-compile gate (specs/0063 F10): fails on ERRORS; warnings stay advisory
 	## because warning sets differ across the local floor vs CI-pinned Emacs.
@@ -35,6 +35,9 @@ test-emacs:
 	  --eval '(let ((d (make-temp-file "safeslop-elc" t))) (setq byte-compile-dest-file-function (lambda (f) (expand-file-name (concat (file-name-nondirectory f) "c") d))))' \
 	  --eval '(setq byte-compile-error-on-warn (not (null (getenv "SAFESLOP_ELISP_WERROR"))))' \
 	  -f batch-byte-compile emacs/*.el
+
+test-emacs-ui-matrix:
+	EMACS="$(EMACS)" ci/emacs-ui-matrix.sh
 
 vet:
 	go vet ./...

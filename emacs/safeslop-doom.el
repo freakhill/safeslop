@@ -58,7 +58,8 @@
     ("TAB" . safeslop-surface-next)
     ("<backtab>" . safeslop-surface-prev))
   "Keys every safeslop buffer offers in Evil normal state, as (KEY . COMMAND).
-Applied to each mode in `safeslop-doom--evil-mode-keys' after its own keys.")
+Applied to each mode in `safeslop-doom--evil-mode-keys' before its own keys,
+so mode-specific actions may override shared help/quit where needed.")
 
 (defconst safeslop-doom--evil-mode-keys
   '((safeslop-output-mode safeslop-output-mode-map
@@ -89,6 +90,12 @@ Applied to each mode in `safeslop-doom--evil-mode-keys' after its own keys.")
      ("v"   . safeslop-profiles-validate)
      ("D"   . safeslop-profiles-delete)
      ("gr"  . safeslop-profiles-refresh))
+    (safeslop-profiles-compose-mode safeslop-profiles-compose-mode-map
+     ("SPC"     . safeslop-profiles-compose-toggle)
+     ("?"       . safeslop-profiles-compose-help)
+     ("gr"      . safeslop-profiles-compose-refresh)
+     ("C-c C-c" . safeslop-profiles-compose-preview-save)
+     ("q"       . safeslop-profiles-compose-cancel))
     (safeslop-credentials-mode safeslop-credentials-mode-map
      ("RET" . safeslop-credentials-inspect)
      ("i"   . safeslop-credentials-inspect)
@@ -104,9 +111,11 @@ F1); `gr'/`ga' carry refresh and the portal auto-refresh toggle instead.")
     (let ((mode (nth 0 entry))
           (map (symbol-value (nth 1 entry))))
       ;; Read-only single-key UIs: make normal state explicit, then install the
-      ;; mode's own actions and the shared keys through Evil.
+      ;; Shared keys are installed first so a mode can deliberately override
+      ;; help/quit semantics (the compose buffer's `?' and `q' are row/help and
+      ;; cancel, not generic describe/quit).
       (evil-set-initial-state mode 'normal)
-      (dolist (binding (append (cddr entry) safeslop-doom--evil-shared-keys))
+      (dolist (binding (append safeslop-doom--evil-shared-keys (cddr entry)))
         (evil-define-key* 'normal map (kbd (car binding)) (cdr binding))))))
 
 ;;;###autoload

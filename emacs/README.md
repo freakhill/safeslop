@@ -225,3 +225,26 @@ Under Evil, dashboard keys follow evil-collection convention (specs/0063):
 `gr`, and the portal auto-refresh toggle is `ga`.  The raw (non-Evil) keymaps
 keep single-key actions such as `g` refresh, portal `a` auto-toggle, and
 Credentials `a` account-link.
+
+## Local UI compatibility matrix
+
+Run `make test-emacs-ui-matrix` after changing safeslop Emacs surfaces, Doom
+integration, or Evil bindings.  The matrix runs raw Emacs, a tiny Doom `map!`
+shim, real Evil when locally available, Doom-shim+Evil, and an opt-in personal
+config slot.  The real Evil slots auto-detect local straight/elpaca build dirs;
+if needed, provide colon-separated load paths explicitly:
+
+```sh
+SAFESLOP_EVIL_LOAD_PATH="$HOME/.emacs.d/.local/straight/build-31.0.50/compat:$HOME/.emacs.d/.local/straight/build-31.0.50/goto-chg:$HOME/.emacs.d/.local/straight/build-31.0.50/undo-fu:$HOME/.emacs.d/.local/straight/build-31.0.50/evil" \
+  make test-emacs-ui-matrix
+```
+
+The personal slot is never part of `make check` and never reads config files on
+its own.  To opt in, provide the batch Emacs command prefix that loads your
+config; the runner appends the repository load path and probe arguments and
+redacts the command in logs:
+
+```sh
+SAFESLOP_UI_PERSONAL_CMD='emacs --batch -l ~/.emacs.d/init.el' make test-emacs-ui-matrix
+SAFESLOP_UI_REQUIRE_PERSONAL=1 SAFESLOP_UI_PERSONAL_CMD='emacs --batch -l ~/.emacs.d/init.el' make test-emacs-ui-matrix
+```
