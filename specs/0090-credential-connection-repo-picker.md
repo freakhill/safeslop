@@ -120,7 +120,7 @@ Extend `C-c s K` / `safeslop-credentials`:
   VERIFY:   `emacs --batch -L emacs -l ert -l emacs/test/safeslop-test.el -l emacs/test/safeslop-contract-test.el -l emacs/test/safeslop-profiles-test.el -l emacs/test/safeslop-credentials-test.el --eval '(ert-run-tests-batch-and-exit "safeslop-test-credentials-.*\\(account\\|link\\|unlink\\)")'`
   EXPECTED: command exits 0; tests prove account rows render without refs/values, link/unlink argv are exact, fake token/key material is absent, and failed status fetch degrades without hiding existing credential rows.
 
-- [ ] T4 — Add Emacs repository/scope picker
+- [x] T4 — Add Emacs repository/scope picker
   FILE:     `emacs/safeslop-credentials.el`, `emacs/safeslop-profiles.el` if shared helpers are needed, `emacs/test/safeslop-credentials-test.el`, `emacs/test/safeslop-profiles-test.el`
   CHANGE:   Add `p` picker flow: choose profile, choose provider, choose origin inference or explicit repos, add/remove repos manually, toggle read/write, confirm a value-free summary, call `profile credentials set`, then refresh Credentials and Profiles buffers in place.
   VERIFY:   `emacs --batch -L emacs -l ert -l emacs/test/safeslop-test.el -l emacs/test/safeslop-contract-test.el -l emacs/test/safeslop-profiles-test.el -l emacs/test/safeslop-credentials-test.el --eval '(ert-run-tests-batch-and-exit "safeslop-test-credentials-.*\\(repo\\|picker\\|profile-credentials\\)")'`

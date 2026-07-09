@@ -177,6 +177,85 @@ one even if a future envelope regressed to carrying it."
     (should (equal captured '("creds" "unlink" "github.com/acme")))
     (should refreshed)))
 
+(ert-deftest safeslop-test-credentials-profile-credentials-args-github-origin ()
+  (should (equal (safeslop-credentials--profile-credentials-args
+                  "app" "/ws/safeslop.cue" "github" t nil nil nil nil)
+                 '("profile" "credentials" "set" "app" "/ws/safeslop.cue"
+                   "--provider" "github" "--use-origin" "--output" "json"))))
+
+(ert-deftest safeslop-test-credentials-profile-credentials-args-github-repos ()
+  (should (equal (safeslop-credentials--profile-credentials-args
+                  "app" nil "github" nil '("acme/web") '("acme/api") nil nil)
+                 '("profile" "credentials" "set" "app"
+                   "--provider" "github" "--repo" "acme/web"
+                   "--write-repo" "acme/api" "--output" "json"))))
+
+(ert-deftest safeslop-test-credentials-profile-credentials-args-forgejo-repos ()
+  (should (equal (safeslop-credentials--profile-credentials-args
+                  "app" "/ws/safeslop.cue" "forgejo" nil '("acme/web") '("acme/api")
+                  "https://forgejo.example.com" "2222")
+                 '("profile" "credentials" "set" "app" "/ws/safeslop.cue"
+                   "--provider" "forgejo" "--url" "https://forgejo.example.com"
+                   "--ssh-port" "2222" "--repo" "acme/web"
+                   "--write-repo" "acme/api" "--output" "json"))))
+
+(ert-deftest safeslop-test-credentials-repo-picker-saves-and-refreshes-in-place ()
+  "The picker confirms a value-free write summary, calls the CLI, and refreshes dashboards."
+  (let (captured confirmation credentials-refreshed profiles-refreshed popped)
+    (let ((profiles-buf (get-buffer-create safeslop-profiles-buffer-name)))
+      (unwind-protect
+          (progn
+            (with-current-buffer profiles-buf
+              (safeslop-profiles-mode))
+            (with-temp-buffer
+              (safeslop-credentials-mode)
+              (setq safeslop-credentials--config-path "/ws/safeslop.cue")
+              (setq tabulated-list-entries
+                    '(("app/github/origin" ["app" "github" "origin" "deploy-key ro" "ephemeral"])))
+              (cl-letf (((symbol-function 'completing-read)
+                         (let ((answers '("app" "github" "explicit repos")))
+                           (lambda (&rest _) (pop answers))))
+                        ((symbol-function 'read-string)
+                         (let ((answers '("acme/web" "acme/api")))
+                           (lambda (&rest _) (pop answers))))
+                        ((symbol-function 'yes-or-no-p)
+                         (lambda (prompt) (setq confirmation prompt) t))
+                        ((symbol-function 'safeslop--call-json-async)
+                         (lambda (args callback &optional _stderr)
+                           (setq captured args)
+                           (funcall callback (safeslop-contract-parse-string
+                                              "{\"schema_version\":1,\"ok\":true,\"data\":{\"credential_scopes\":[]},\"warnings\":[],\"errors\":[]}"))))
+                        ((symbol-function 'safeslop-credentials-refresh)
+                         (lambda () (setq credentials-refreshed t)))
+                        ((symbol-function 'safeslop-profiles-refresh)
+                         (lambda () (setq profiles-refreshed t)))
+                        ((symbol-function 'safeslop--show-envelope-buffer)
+                         (lambda (&rest _) (setq popped t))))
+                (safeslop-credentials-pick-repositories))))
+        (kill-buffer profiles-buf)))
+    (should (equal captured '("profile" "credentials" "set" "app" "/ws/safeslop.cue"
+                              "--provider" "github" "--repo" "acme/web"
+                              "--write-repo" "acme/api" "--output" "json")))
+    (should (string-match-p "WRITE: acme/api" (substring-no-properties confirmation)))
+    (should credentials-refreshed)
+    (should profiles-refreshed)
+    (should-not popped)))
+
+(ert-deftest safeslop-test-credentials-repo-picker-cancel-aborts-before-cli ()
+  (let ((called nil))
+    (with-temp-buffer
+      (safeslop-credentials-mode)
+      (setq tabulated-list-entries
+            '(("app/github/origin" ["app" "github" "origin" "deploy-key ro" "ephemeral"])))
+      (cl-letf (((symbol-function 'completing-read)
+                 (let ((answers '("app" "github" "origin inference")))
+                   (lambda (&rest _) (pop answers))))
+                ((symbol-function 'yes-or-no-p) (lambda (&rest _) nil))
+                ((symbol-function 'safeslop--call-json-async)
+                 (lambda (&rest _) (setq called t))))
+        (safeslop-credentials-pick-repositories)))
+    (should-not called)))
+
 (ert-deftest safeslop-test-credentials-op-legend ()
   "The op legend names each 1Password state, faced, and stays value-free."
   (should (string-match-p "signed in"
@@ -206,6 +285,7 @@ one even if a future envelope regressed to carrying it."
   (should (eq (lookup-key safeslop-credentials-mode-map (kbd "g")) #'safeslop-credentials-refresh))
   (should (eq (lookup-key safeslop-credentials-mode-map (kbd "a")) #'safeslop-credentials-link-account))
   (should (eq (lookup-key safeslop-credentials-mode-map (kbd "u")) #'safeslop-credentials-unlink-account))
+  (should (eq (lookup-key safeslop-credentials-mode-map (kbd "p")) #'safeslop-credentials-pick-repositories))
   ;; read-only surface: no launch/create/delete affordances
   (should-not (lookup-key safeslop-credentials-mode-map (kbd "r")))
   (should-not (lookup-key safeslop-credentials-mode-map (kbd "c")))

@@ -217,7 +217,7 @@ When OP is nil (before the first fetch) a neutral checking hint is shown."
 
 (defconst safeslop-credentials--key-hints
   '(("RET" . "inspect") ("a" . "link account") ("u" . "unlink account")
-    ("e" . "edit") ("g" . "refresh")
+    ("p" . "pick repos") ("e" . "edit") ("g" . "refresh")
     ("d" . "doctor") ("E" . "error") ("L" . "debug") ("?" . "help") ("q" . "quit"))
   "Key/action pairs shown in the credentials surface's in-buffer legend.")
 
@@ -604,6 +604,108 @@ values.  CALLBACK receives a contract-shaped envelope."
        "*safeslop creds unlink*"
        (list "creds" "unlink" key)))))
 
+;;; ---- repository/scope picker --------------------------------------------
+
+(defun safeslop-credentials--repeat-flags (flag values)
+  "Return repeated FLAG argv entries for VALUES."
+  (apply #'append (mapcar (lambda (v) (list flag v)) values)))
+
+(defun safeslop-credentials--profile-credentials-args
+    (profile config-path provider use-origin read-repos write-repos url ssh-port)
+  "Return exact argv for `profile credentials set' from picker fields."
+  (append (list "profile" "credentials" "set" profile)
+          (when (and config-path (not (string-empty-p config-path)))
+            (list config-path))
+          (list "--provider" provider)
+          (when (and (equal provider "forgejo") url (not (string-empty-p url)))
+            (list "--url" url))
+          (when (and (equal provider "forgejo") ssh-port (not (string-empty-p ssh-port)))
+            (list "--ssh-port" ssh-port))
+          (if use-origin
+              (list "--use-origin")
+            (append (safeslop-credentials--repeat-flags "--repo" read-repos)
+                    (safeslop-credentials--repeat-flags "--write-repo" write-repos)))
+          (list "--output" "json")))
+
+(defun safeslop-credentials--profile-candidates ()
+  "Return profile candidates visible in the credentials table."
+  (delete-dups
+   (delq nil (mapcar (lambda (entry) (safeslop-credentials--row-profile (car entry)))
+                     tabulated-list-entries))))
+
+(defun safeslop-credentials--split-repo-list (text)
+  "Split comma/space separated repo TEXT into a list, dropping blanks."
+  (split-string (or text "") "[ ,\t\n]+" t))
+
+(defun safeslop-credentials--profile-credentials-summary
+    (profile provider use-origin read-repos write-repos url ssh-port)
+  "Return the value-free confirmation summary for a profile credential write."
+  (concat
+   (format "Profile: %s\nProvider: %s\n" profile provider)
+   (if use-origin
+       "Repositories: origin inference (resolved at stage time)\n"
+     (concat
+      (format "Read-only repos: %s\n" (if read-repos (string-join read-repos ", ") "(none)"))
+      (if write-repos
+          (propertize (format "WRITE: %s\n" (string-join write-repos ", "))
+                      'face 'safeslop-cred-attention)
+        "WRITE: (none)\n")))
+   (when (equal provider "forgejo")
+     (format "Forgejo URL: %s%s\n" (or url "(origin inferred)")
+             (if (and ssh-port (not (string-empty-p ssh-port)))
+                 (format "  ssh-port=%s" ssh-port)
+               "")))))
+
+(defun safeslop-credentials--refresh-after-profile-credential-save (source)
+  "Refresh Credentials SOURCE and the Profiles buffer, if present."
+  (when (and (buffer-live-p source)
+             (with-current-buffer source (derived-mode-p 'safeslop-credentials-mode)))
+    (with-current-buffer source (safeslop-credentials-refresh)))
+  (when-let* ((profiles (get-buffer safeslop-profiles-buffer-name)))
+    (with-current-buffer profiles
+      (when (derived-mode-p 'safeslop-profiles-mode)
+        (safeslop-profiles-refresh)))))
+
+(defun safeslop-credentials-pick-repositories ()
+  "Pick repo scopes for a profile and call `profile credentials set'."
+  (interactive)
+  (let* ((source (current-buffer))
+         (profiles (safeslop-credentials--profile-candidates))
+         (default-profile (safeslop-credentials--row-profile (tabulated-list-get-id)))
+         (profile (completing-read "Profile: " profiles nil nil nil nil default-profile))
+         (provider (completing-read "Forge provider: " '("github" "forgejo") nil t nil nil "github"))
+         (mode (completing-read "Repository mode: " '("origin inference" "explicit repos") nil t nil nil "origin inference"))
+         (use-origin (equal mode "origin inference"))
+         (read-repos nil)
+         (write-repos nil)
+         (url nil)
+         (ssh-port nil))
+    (unless use-origin
+      (setq read-repos (safeslop-credentials--split-repo-list
+                        (read-string "Read-only repos (owner/name, comma-separated): "))
+            write-repos (safeslop-credentials--split-repo-list
+                         (read-string "Write repos (owner/name, comma-separated): ")))
+      (when (and (null read-repos) (null write-repos))
+        (user-error "At least one read or write repo is required for explicit mode")))
+    (when (and (equal provider "forgejo") (not use-origin))
+      (setq url (safeslop-credentials--nonempty-read-string "Forgejo URL: ")
+            ssh-port (read-string "Forgejo SSH port (blank for default): ")))
+    (let* ((summary (safeslop-credentials--profile-credentials-summary
+                     profile provider use-origin read-repos write-repos url ssh-port))
+           (args (safeslop-credentials--profile-credentials-args
+                  profile safeslop-credentials--config-path provider use-origin
+                  read-repos write-repos url ssh-port)))
+      (if (yes-or-no-p (concat "Save profile credential scopes?\n" summary))
+          (safeslop--call-json-async
+           args
+           (lambda (env)
+             (if (safeslop-contract-ok-p env)
+                 (progn
+                   (message "safeslop: profile credentials updated for %s" profile)
+                   (safeslop-credentials--refresh-after-profile-credential-save source))
+               (safeslop--show-envelope-buffer "*safeslop profile credentials*" args env))))
+        (message "safeslop: profile credential update cancelled")))))
+
 ;;; ---- mode + entry --------------------------------------------------------
 
 (defvar safeslop-credentials-mode-map
@@ -614,6 +716,7 @@ values.  CALLBACK receives a contract-shaped envelope."
     (define-key map (kbd "g")   #'safeslop-credentials-refresh)
     (define-key map (kbd "a")   #'safeslop-credentials-link-account)
     (define-key map (kbd "u")   #'safeslop-credentials-unlink-account)
+    (define-key map (kbd "p")   #'safeslop-credentials-pick-repositories)
     (set-keymap-parent map safeslop-surface-mode-map)
     map)
   "Keymap for `safeslop-credentials-mode'.")
