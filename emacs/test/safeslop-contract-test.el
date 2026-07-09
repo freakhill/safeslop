@@ -530,19 +530,15 @@ The argv log proves the terminal subprocess starts only after status+doctor."
                       "\"warnings\":[],\"errors\":[]}"))))
     (should (equal (safeslop-session--session-id-candidates env) '("sess-a" "sess-b")))))
 
-(ert-deftest safeslop-test-session-runtime-preflight-reattach-uses-attach-argv ()
-  "Reattach preflights container runtime shadows before the attach PTY starts."
+(ert-deftest safeslop-test-session-reattach-skips-runtime-preflight ()
+  "Reattach uses the existing supervisor socket and does not run doctor preflight."
   (let* ((status-argv '("session" "status" "--session-id" "sess-reattach" "--output" "json"))
-         (doctor-argv '("doctor" "--json"))
          (argv '("session" "attach" "--session-id" "sess-reattach"))
          (routes `((,(safeslop-test--json-key status-argv) .
                    ((stdout . ,(concat "{\"schema_version\":1,\"ok\":true,\"data\":"
                                        "{\"session_id\":\"sess-reattach\",\"profile\":\"be-dev\","
                                        "\"workspace\":\"/w/payments\",\"environment\":\"container\","
                                        "\"network\":\"deny\"},\"warnings\":[],\"errors\":[]}"))
-                    (exit . 0)))
-                   (,(safeslop-test--json-key doctor-argv) .
-                   ((stdout . "{\"schema_version\":1,\"ok\":true,\"data\":{\"tools\":{\"docker\":{\"present\":true,\"path\":\"/safe/bin/docker\"}}},\"warnings\":[],\"errors\":[]}")
                     (exit . 0)))
                    (,(safeslop-test--json-key argv) .
                    ((stdout . "")
@@ -556,7 +552,6 @@ The argv log proves the terminal subprocess starts only after status+doctor."
               (accept-process-output proc 0.1))))
         (should (equal (safeslop-test--argv-log-lines)
                        (list (safeslop-test--json-key status-argv)
-                             (safeslop-test--json-key doctor-argv)
                              (safeslop-test--json-key argv))))))))
 
 (ert-deftest safeslop-test-fallback-compilation-mode-on-pty-unavailable ()

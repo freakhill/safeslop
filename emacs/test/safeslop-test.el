@@ -61,7 +61,8 @@ real maps: defining `gr' would turn the raw `g' refresh binding into a prefix."
       (should (member (list safeslop-portal-mode-map "g r" #'safeslop-portal-refresh) bindings))
       (should (member (list safeslop-portal-mode-map "g a" #'safeslop-portal-toggle-auto-refresh) bindings))
       (should (member (list safeslop-portal-mode-map "s" #'safeslop-portal-stop) bindings))
-      (should (member (list safeslop-profiles-compose-mode-map "SPC" #'safeslop-profiles-compose-toggle) bindings))
+      (should (member (list safeslop-profiles-compose-mode-map "RET" #'safeslop-profiles-compose-toggle) bindings))
+      (should-not (member (list safeslop-profiles-compose-mode-map "SPC" #'safeslop-profiles-compose-toggle) bindings))
       (should (member (list safeslop-profiles-compose-mode-map "?" #'safeslop-profiles-compose-help) bindings))
       (should (member (list safeslop-profiles-compose-mode-map "g r" #'safeslop-profiles-compose-refresh) bindings))
       (should (member (list safeslop-profiles-compose-mode-map "C-c C-c" #'safeslop-profiles-compose-preview-save) bindings))
@@ -1298,7 +1299,7 @@ buffer-local id after terminal creation, and installs a value-free creds header.
                      (setq made-name name)
                      (setq buf (get-buffer-create (concat "*" name "*")))))
                   ((symbol-function 'pop-to-buffer) (lambda (b &rest _) b)))
-          (safeslop-session--launch-term "sess-xyz" '("session" "run" "--session-id" "sess-xyz"))
+          (safeslop-session--launch-term "sess-xyz" '("session" "run" "--session-id" "sess-xyz") t)
           (should (equal (alist-get 'session_id preflighted) "sess-xyz"))
           (should (equal made-name "safeslop:be-dev payments [container/deny]"))
           (with-current-buffer buf

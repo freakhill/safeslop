@@ -50,10 +50,12 @@ file transfer between host and sandboxed runtimes.
 - `safeslop down` — tear down safeslop-managed host-container stacks by label, on the detected container runtime.
 - `safeslop gc [--until <age>] [--keep <N>]` — remove only unreferenced safeslop-managed images; current resolving profiles, the repo lockfile, and live sessions anchor images.
 
-Emacs-specific session guards: container run, attach/reattach, and detached launch
-actions perform a best-effort runtime preflight via `safeslop doctor --json`; a
-shadowed Docker helper aborts before launching the terminal/subprocess and lists
-the selected/shadowed paths, while failed/old doctor output proceeds to the CLI.
+Emacs-specific session guards: coupled and detached container run actions perform
+a best-effort runtime preflight via `safeslop doctor --json`; a shadowed Docker
+helper aborts before launching the terminal/subprocess and lists the
+selected/shadowed paths, while failed/old doctor output proceeds to the CLI.
+Socket reattach does not preflight Docker because it rejoins an existing
+supervisor rather than selecting a runtime.
 
 ## Container runtime
 
@@ -104,7 +106,7 @@ after an isolation/network summary, `e` to edit the CUE at that profile's block,
 `c` to open `*safeslop profile compose*`, `C` to clone, `D` for guided manual
 deletion, and `g` to refresh. The compose buffer shows catalog defaults as
 selected/locked inherited rows, marks local project-language suggestions, and uses
-`SPC` to toggle unlocked rows, `?` for bundle/package help, `g` to refresh,
+`RET` to toggle unlocked rows, `?` for bundle/package help, `g` to refresh,
 `C-c C-c` to request the engine `profile create --dry-run` safety preview before
 the final write, and `q` to cancel. File reach is workspace-only here; arbitrary
 custom host mounts are deferred until a mount capability model is specified.
@@ -118,10 +120,11 @@ switch key (`P` Sessions, `F` Profiles, `K` Credentials); `TAB`/`S-TAB` or
 `[`/`]` cycle between them, and the strip is mouse-clickable. Portal rows include a
 value-free `Creds` column sourced from `credential_scopes`, showing only credential
 kind, non-secret target, and access/scope. Portal row keys: `RET`/`o`
-state-aware open, `R` reattach, `i` details, `k` stop/revoke, `x` remove one
-stopped session, `X` prune all stopped sessions, `n` new, `g` refresh, `a`
-pause/resume auto-refresh. Live buffers opened from the portal are named and
-annotated with profile/project, tier/net, and value-free credential scope. Each
+state-aware open, `r` run, `R` run detached, `A` reattach, `i` details, `s`
+stop/revoke, `x` remove one stopped session, `X` prune all stopped sessions, `c`
+new, `g` refresh, `a` pause/resume auto-refresh. Live buffers opened from the
+portal are named and annotated with profile/project, tier/net, and value-free
+credential scope. Each
 in-place refresh keeps point on the same session and preserves window scroll, so
 it never jumps the cursor out from under a row action key; session-mutating row
 actions refresh the portal in place instead of popping a JSON result buffer over

@@ -135,12 +135,13 @@ headless shell), it emits the `PTY_UNAVAILABLE` contract error
 session running, so nothing is left as a phantom. The Emacs client switches to a
 read-only `--output jsonl` status monitor on that code.
 
-Before Emacs runs, attaches/reattaches, or starts a detached container session,
-it performs a best-effort runtime preflight with `safeslop doctor --json`. If the
-doctor JSON reports a shadowed `docker` helper (`shadowed_paths`), Emacs aborts
-before opening the terminal/subprocess and shows the selected and shadowed paths;
-if doctor fails or emits older JSON, launch continues and the CLI remains
-authoritative.
+Before Emacs starts a coupled or detached container session, it performs a
+best-effort runtime preflight with `safeslop doctor --json`. If the doctor JSON
+reports a shadowed `docker` helper (`shadowed_paths`), Emacs aborts before
+opening the launch subprocess and shows the selected and shadowed paths; if
+doctor fails or emits older JSON, launch continues and the CLI remains
+authoritative. Reattaching to an already-detached session uses the existing
+supervisor socket and does not preflight Docker.
 
 `session run --detach` gives a session a life independent of the Emacs buffer that
 started it: after the host consent gate passes for host-tier sessions, it launches
@@ -387,7 +388,7 @@ deletion (pick the target, confirm, then remove the block by hand); `g` refreshe
 
 The compose buffer defaults to a container/deny profile and uses the catalog
 bundle defaults (`data.defaults`) to show inherited packages as selected and
-locked. `SPC` toggles unlocked bundle/package rows, `?` shows bundle/package help,
+locked. `RET` toggles unlocked bundle/package rows, `?` shows bundle/package help,
 `g` refreshes catalog data, `C-c C-c` asks the engine for `profile create
 --dry-run --output json` and shows the returned risk lines/resolved packages/image
 recipe before a final write, and `q` cancels without writing. Project marker

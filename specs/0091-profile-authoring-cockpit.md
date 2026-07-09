@@ -47,7 +47,7 @@ Deferred explicitly: custom mounts. The compose buffer should show the current f
 
 - [x] Replace the interactive create prompt with a checkbox compose buffer
   FILE:     `emacs/safeslop-profiles.el`, `emacs/test/safeslop-profiles-test.el`
-  CHANGE:   Keep the noninteractive `safeslop-profiles-create` function signature working for tests/automation, but make interactive `c` open a `*safeslop profile compose*` buffer. The buffer must show profile fields, bundle rows, package rows, lock/source columns, and key hints. `SPC` toggles unlocked rows, `?` opens help for the row (bundle description/packages or package kind/version/requires/conflicts/runtime egress/note), `g` refreshes catalog data, `C-c C-c` proceeds to preview/save, and `q` cancels without writing.
+  CHANGE:   Keep the noninteractive `safeslop-profiles-create` function signature working for tests/automation, but make interactive `c` open a `*safeslop profile compose*` buffer. The buffer must show profile fields, bundle rows, package rows, lock/source columns, and key hints. `RET` toggles unlocked rows (changed from `SPC` by `specs/0093` after Evil/Doom operator feedback), `?` opens help for the row (bundle description/packages or package kind/version/requires/conflicts/runtime egress/note), `g` refreshes catalog data, `C-c C-c` proceeds to preview/save, and `q` cancels without writing.
   VERIFY:   `make test-emacs EMACS=$(command -v emacs)`
   EXPECTED: ERT covers key bindings, rendering of checked/locked rows, help text for bundle/package rows, and confirms locked rows cannot be toggled directly.
 

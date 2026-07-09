@@ -3,6 +3,10 @@
 Status: complete
 Date: 2026-07-09
 
+Follow-up: `specs/0093` keeps the UI matrix but moves the compose toggle from
+`SPC` to `RET`; the matrix now asserts `RET` and rejects a safeslop-owned `SPC`
+toggle binding.
+
 SCOPE: add a reproducible Emacs UI compatibility test matrix and fix the reported Profiles compose-buffer `SPC` toggle regression under Evil/Doom. The matrix must cover raw Emacs, Doom-shim Emacs, Emacs with real Evil when available, Doom-shim Emacs with real Evil when available, and an opt-in personal-config probe. This builds on `specs/0063` and `specs/0091`.
 
 OFF-LIMITS: do not install Emacs packages, fetch packages from the network, weaken safeslop safety defaults, or make `make check` depend on a user's private Doom/personal config. Do not read or log personal config contents; the personal slot only runs a caller-provided command and reports pass/fail.

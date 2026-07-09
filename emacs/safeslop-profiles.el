@@ -731,7 +731,7 @@ save is re-validated."
 
 (defvar safeslop-profiles-compose-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "SPC") #'safeslop-profiles-compose-toggle)
+    (define-key map (kbd "RET") #'safeslop-profiles-compose-toggle)
     (define-key map (kbd "?") #'safeslop-profiles-compose-help)
     (define-key map (kbd "g") #'safeslop-profiles-compose-refresh)
     (define-key map (kbd "C-c C-c") #'safeslop-profiles-compose-preview-save)
@@ -758,7 +758,7 @@ save is re-validated."
         (state safeslop-profiles-compose--state))
     (erase-buffer)
     (insert "safeslop Profiles compose buffer\n")
-    (insert "Keys: SPC toggle unlocked, ? help, g refresh catalog, C-c C-c preview/save, q cancel\n\n")
+    (insert "Keys: RET toggle unlocked, ? help, g refresh catalog, C-c C-c preview/save, q cancel\n\n")
     (insert (format "Name: %s\nAgent: %s\nEnvironment: %s\nNetwork: %s\nWorkspace: %s\n\n"
                     (alist-get 'name state) (alist-get 'agent state)
                     (alist-get 'environment state) (alist-get 'network state)

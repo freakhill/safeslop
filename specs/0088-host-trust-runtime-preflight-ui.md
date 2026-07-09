@@ -4,6 +4,10 @@ Status: implemented
 Date: 2026-07-09
 Follows: `specs/0087-product-activation.md` track 1.
 
+Follow-up: `specs/0093` narrows the Emacs runtime preflight so socket reattach
+no longer runs the Docker-shadow launch preflight; coupled/detached runtime-start
+actions still do.
+
 SCOPE: fix the immediate UI dead ends reported after local install: Emacs ad-hoc host session creation must offer the explicit `--trust-host` acknowledgement, and container session launch from Emacs must preflight obvious shadowed runtime helpers before creating another confusing stopped session.
 
 OFF-LIMITS: no policy schema changes; no weakening host-helper shadow refusal; no automatic trust; no persistent host trust; no runtime path chooser/override; no network model redesign; no credential UI redesign; no live Docker/OrbStack calls in tests.
@@ -22,7 +26,7 @@ Two activation paths fail as raw CLI errors from the Emacs UI:
 - Interactive Emacs ad-hoc host creation asks a high-friction yes/no acknowledgement and, only on yes, includes `--trust-host` in the `session create` argv.
 - If an interactive host create still receives host `TRUST_REQUIRED` without a policy path, Emacs offers one retry with `--trust-host` instead of offering `safeslop trust` or dead-ending on the raw envelope.
 - Noninteractive/test callers retain the old default unless they explicitly pass the host-trust flag.
-- Container attach/run/reattach/detached launch from Emacs preflights `safeslop doctor --json` for a shadowed `docker` helper and aborts with an actionable message before launching the terminal/subprocess.
+- Container coupled-run and detached-run launches from Emacs preflight `safeslop doctor --json` for a shadowed `docker` helper and abort with an actionable message before launching the terminal/subprocess. Socket reattach was originally included here, but `specs/0093` removes that launch-only preflight from reattach because it uses an existing supervisor socket.
 - The preflight is best-effort and value-free: if doctor itself fails or returns old JSON, launch continues and the CLI remains authoritative.
 - Security stays fail-closed in the CLI; the UI only improves timing and explanation.
 
@@ -42,7 +46,7 @@ Two activation paths fail as raw CLI errors from the Emacs UI:
 
 - [x] T3 — Add Emacs container runtime preflight for shadowed Docker
   FILE:     `emacs/safeslop-session.el`, `emacs/test/safeslop-test.el`, `emacs/test/safeslop-contract-test.el`
-  CHANGE:   Add pure helpers to parse `doctor --json` tool rows and detect a shadowed `docker` helper (`tools.docker.shadowed_paths`). Before `safeslop-session-attach`, `safeslop-session-reattach`, and detached run call into the CLI for a container session, fetch session status (already best-effort for terminal naming), run the doctor preflight, and abort with an actionable `user-error` if docker is shadowed. Keep old/failed doctor JSON best-effort-pass. Update exact-argv tests for the added doctor preflight where necessary.
+  CHANGE:   Add pure helpers to parse `doctor --json` tool rows and detect a shadowed `docker` helper (`tools.docker.shadowed_paths`). Before `safeslop-session-attach` and detached run call into the CLI for a container session, fetch session status (already best-effort for terminal naming), run the doctor preflight, and abort with an actionable `user-error` if docker is shadowed. `specs/0093` removed this preflight from `safeslop-session-reattach` because it uses an existing supervisor socket rather than starting a runtime. Keep old/failed doctor JSON best-effort-pass. Update exact-argv tests for the added doctor preflight where necessary.
   VERIFY:   `emacs --batch -L emacs -l ert -l emacs/test/safeslop-test.el -l emacs/test/safeslop-contract-test.el -l emacs/test/safeslop-profiles-test.el -l emacs/test/safeslop-credentials-test.el --eval '(ert-run-tests-batch-and-exit "safeslop-test-session-.*\\(runtime\\|shadow\\|preflight\\)")'`
   EXPECTED: command exits 0; tests prove shadowed docker aborts before launch, a clean doctor permits launch, doctor failure permits launch, and the error message lists the selected/shadowed paths without secrets.
 

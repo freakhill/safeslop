@@ -260,8 +260,10 @@
 
 (ert-deftest safeslop-test-profiles-compose-keymap ()
   "Compose buffer binds checkbox/help/refresh/save/cancel keys."
-  (should (eq (lookup-key safeslop-profiles-compose-mode-map (kbd "SPC"))
+  (should (eq (lookup-key safeslop-profiles-compose-mode-map (kbd "RET"))
               #'safeslop-profiles-compose-toggle))
+  (should-not (eq (lookup-key safeslop-profiles-compose-mode-map (kbd "SPC"))
+                  #'safeslop-profiles-compose-toggle))
   (should (eq (lookup-key safeslop-profiles-compose-mode-map (kbd "?"))
               #'safeslop-profiles-compose-help))
   (should (eq (lookup-key safeslop-profiles-compose-mode-map (kbd "g"))

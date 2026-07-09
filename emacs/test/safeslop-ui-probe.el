@@ -146,9 +146,12 @@
       (safeslop-ui-probe--assert-key "P" #'safeslop-portal))))
 
 (ert-deftest safeslop-ui-probe-compose-keys-resolve ()
-  "Profiles compose `SPC' resolves to the checkbox toggle, including Evil normal state."
+  "Profiles compose `RET' resolves to checkbox toggle; `SPC' is not used."
   (safeslop-ui-probe--with-mode #'safeslop-profiles-compose-mode
-    (safeslop-ui-probe--assert-key "SPC" #'safeslop-profiles-compose-toggle)
+    (safeslop-ui-probe--assert-key "RET" #'safeslop-profiles-compose-toggle)
+    (when (eq (key-binding (kbd "SPC")) #'safeslop-profiles-compose-toggle)
+      (ert-fail (format "slot=%s mode=%s key=SPC still toggles compose rows"
+                        safeslop-ui-probe--slot major-mode)))
     (safeslop-ui-probe--assert-key "?" #'safeslop-profiles-compose-help)
     (safeslop-ui-probe--assert-key (if safeslop-ui-probe--evil-active "gr" "g")
                                    #'safeslop-profiles-compose-refresh)

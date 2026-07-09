@@ -108,11 +108,12 @@ called. If a host ad-hoc create still returns `TRUST_REQUIRED` with no policy
 path, Emacs offers one retry with `--trust-host` rather than sending you to
 policy trust.
 
-Before `RET`/`o`, `r`, `R`, or `A` launches or attaches a container session,
-Emacs runs a best-effort runtime preflight via `safeslop doctor --json`. A
-shadowed Docker helper aborts the action before the terminal/subprocess starts
-and lists the selected/shadowed paths; old or failed doctor output is allowed
-through, leaving the CLI as source of truth.
+Before `RET`/`o`, `r`, or `R` starts a container session, Emacs runs a
+best-effort runtime preflight via `safeslop doctor --json`. A shadowed Docker
+helper aborts the launch before the terminal/subprocess starts and lists the
+selected/shadowed paths; old or failed doctor output is allowed through, leaving
+the CLI as source of truth. `A` reattaches over an existing supervisor socket and
+does not preflight Docker.
 
 While the portal is displayed, it **auto-refreshes** every
 `safeslop-portal-refresh-interval` seconds (default 5; set to nil to disable).
@@ -147,6 +148,9 @@ safety legends as the portal.
 The intended flow is profile → inspect → launch → portal.  Inspect buffers are no
 longer dead ends: `r`, `e`, and `C` act from the detail view too; `g` (Evil:
 `gr`) re-fetches and re-renders the faced view, and `RET` returns to the list.
+The compose buffer uses `RET` to toggle unlocked bundle/package rows, `?` for
+row help, `g` (Evil: `gr`) to refresh, `C-c C-c` to preview/save, and `q` to
+cancel.
 
 ## Credentials
 

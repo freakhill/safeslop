@@ -580,6 +580,16 @@ enforce the authoritative launch policy."
     (safeslop-session--run-runtime-preflight data)
     data))
 
+(defun safeslop-session--fetch-data-for-terminal (session-id preflight-runtime)
+  "Fetch SESSION-ID status for terminal naming.
+When PREFLIGHT-RUNTIME is non-nil, also preflight container runtime shadows.
+Socket reattach does not need a runtime helper, so it passes nil and leaves any
+attach failure to the CLI/socket path."
+  (let ((data (safeslop-session--fetch-data session-id)))
+    (when preflight-runtime
+      (safeslop-session--run-runtime-preflight data))
+    data))
+
 (defun safeslop-session--make-terminal (name program argv)
   "Create terminal buffer *NAME* running PROGRAM with ARGV; return the buffer.
 Prefer the eat terminal (pure-elisp, 24-bit color) when it can be loaded,
@@ -601,18 +611,21 @@ term-mode, so every caller and test of the term path is unaffected."
         (term-char-mode))
       buf)))
 
-(defun safeslop-session--launch-term (session-id argv)
+(defun safeslop-session--launch-term (session-id argv &optional preflight-runtime)
   "Launch ARGV for SESSION-ID under a terminal PTY; return the buffer.
 Uses the eat terminal (24-bit truecolor) when available, else the built-in
-term-mode (see `safeslop-session--make-terminal').  If the process reports the
-PTY_UNAVAILABLE contract error (no usable controlling terminal), switch to the
-read-only JSONL status fallback (`safeslop-session-status-fallback')."
+term-mode (see `safeslop-session--make-terminal').  If PREFLIGHT-RUNTIME is
+non-nil, preflight a known container record for shadowed docker before the
+terminal subprocess starts.  If the process reports the PTY_UNAVAILABLE contract
+error (no usable controlling terminal), switch to the read-only JSONL status
+fallback (`safeslop-session-status-fallback')."
   ;; Fetch the session record best-effort BEFORE naming so the buffer is
-  ;; self-describing from the first frame (specs/0086 T3), and preflight a known
-  ;; container record for shadowed docker before any terminal subprocess starts.
+  ;; self-describing from the first frame (specs/0086 T3).  Coupled run preflights
+  ;; known container records before spawning; socket reattach deliberately does
+  ;; not, because it rejoins an existing supervisor and does not execute docker.
   ;; A status miss yields nil and falls back to the legacy `safeslop-<id>' name;
   ;; failed/old doctor JSON also passes through so the CLI stays authoritative.
-  (let* ((data (safeslop-session--fetch-data-and-runtime-preflight session-id))
+  (let* ((data (safeslop-session--fetch-data-for-terminal session-id preflight-runtime))
          (buf (safeslop-session--make-terminal
                (safeslop-session--buffer-label session-id data)
                safeslop-program argv)))
@@ -651,7 +664,7 @@ read-only JSONL status fallback (`safeslop-session-status-fallback')."
 On PTY_UNAVAILABLE (no usable controlling terminal), switch to the read-only
 JSONL status fallback (`safeslop-session-status-fallback')."
   (interactive (list (safeslop-session--read-id "Run session: ")))
-  (safeslop-session--launch-term session-id (safeslop-session--run-args session-id)))
+  (safeslop-session--launch-term session-id (safeslop-session--run-args session-id) t))
 
 ;;;###autoload
 (defun safeslop-session-run-detached (&optional session-id callback quiet)

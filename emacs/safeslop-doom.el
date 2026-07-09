@@ -91,7 +91,7 @@ so mode-specific actions may override shared help/quit where needed.")
      ("D"   . safeslop-profiles-delete)
      ("gr"  . safeslop-profiles-refresh))
     (safeslop-profiles-compose-mode safeslop-profiles-compose-mode-map
-     ("SPC"     . safeslop-profiles-compose-toggle)
+     ("RET"     . safeslop-profiles-compose-toggle)
      ("?"       . safeslop-profiles-compose-help)
      ("gr"      . safeslop-profiles-compose-refresh)
      ("C-c C-c" . safeslop-profiles-compose-preview-save)
