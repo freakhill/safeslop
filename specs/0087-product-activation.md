@@ -56,6 +56,6 @@ After `specs/0086` and local install, safeslop is safer and more legible but sti
 - [x] 0088 host trust + runtime preflight UI implemented.
 - [ ] Credential connection + repo picker spec written.
 - [ ] Profile authoring cockpit spec written.
-- [ ] Network authority ayo-flo decision landed.
+- [x] Network authority ayo-flo decision landed (`specs/0089-network-authority-ayo-flo.md`).
 - [ ] Session safety chrome spec written.
 - [ ] Profile safety evaluation spec written.
