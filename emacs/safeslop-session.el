@@ -38,12 +38,12 @@
 ;; Defined once `compilation-mode' runs in the JSONL status fallback buffer.
 (defvar compilation-mode-map)
 
-(defun safeslop-session--create-args (agent workspace &optional environment network)
+(defun safeslop-session--create-args (agent workspace &optional environment network trust-host)
   "Return exact argv for creating an ad-hoc session with AGENT in WORKSPACE.
 ENVIRONMENT (host|container) and NETWORK (deny|allow) default to container/deny
 when nil, because the engine requires an explicit environment (specs/0053).  An
 explicit empty string omits that flag for legacy/test callers that need to assert
-raw argv shape."
+raw argv shape.  TRUST-HOST appends `--trust-host' only for ad-hoc host sessions."
   (let ((environment (if (null environment) "container" environment))
         (network (if (null network) "deny" network)))
     (append
@@ -52,6 +52,8 @@ raw argv shape."
        (list "--environment" environment))
      (when (and (stringp network) (not (string-empty-p network)))
        (list "--network" network))
+     (when (and trust-host (equal environment "host"))
+       (list "--trust-host"))
      (list "--output" "json"))))
 
 (defun safeslop-session--create-profile-args (profile)
@@ -164,34 +166,40 @@ need a slow lazy first image build."
     ;; host-recorded approval of the safeslop.cue bytes (specs/0072 F1), so offer
     ;; to approve and retry rather than leaving the operator at a raw error.
     (unless (safeslop-contract-ok-p envelope)
-      (safeslop-session--maybe-offer-trust args callback envelope)))
+      (or (safeslop-session--maybe-offer-host-trust-retry args callback envelope)
+          (safeslop-session--maybe-offer-trust args callback envelope))))
   (when callback (funcall callback envelope)))
 
 ;;;###autoload
-(defun safeslop-session-new (&optional agent workspace callback environment network profile)
+(defun safeslop-session-new (&optional agent workspace callback environment network profile trust-host)
   "Create a safeslop session and show the JSON envelope.
 Interactively, first offer an existing PROFILE from `safeslop profile list'; if a
 profile is chosen, `session create --profile' creates the session from the stored
 policy.  Choosing `<ad hoc>' falls back to AGENT/WORKSPACE/ENVIRONMENT/NETWORK
-prompts.  Noninteractive callers can pass AGENT/WORKSPACE as before; nil
-ENVIRONMENT/NETWORK default to container/deny, while explicit empty strings omit
-those flags for compatibility tests.  CALLBACK, when given, receives the envelope."
+prompts.  Interactive ad-hoc host creation asks for explicit TRUST-HOST
+acknowledgement before passing `--trust-host'.  Noninteractive callers can pass
+AGENT/WORKSPACE as before; nil ENVIRONMENT/NETWORK default to container/deny,
+while explicit empty strings omit those flags for compatibility tests.  CALLBACK,
+when given, receives the envelope."
   (interactive
    (let ((profile (safeslop-session--read-profile-choice)))
      (if profile
-         (list nil nil nil nil nil profile)
-       (list (completing-read "Agent: " '("claude" "pi" "fish" "zsh") nil t nil nil "claude")
-             (read-directory-name "Workspace: " nil nil t)
-             nil ; callback: interactive use shows the envelope buffer, no extra hook
-             (completing-read "Environment: " '("container" "host") nil t nil nil "container")
-             (completing-read "Network: " '("deny" "allow") nil t nil nil "deny")
-             nil))))
+         (list nil nil nil nil nil profile nil)
+       (let* ((agent (completing-read "Agent: " '("claude" "pi" "fish" "zsh") nil t nil nil "claude"))
+              (workspace (read-directory-name "Workspace: " nil nil t))
+              (environment (completing-read "Environment: " '("container" "host") nil t nil nil "container"))
+              (trust-host (when (equal environment "host")
+                            (unless (safeslop-session--confirm-ad-hoc-host-trust)
+                              (user-error "Host session creation cancelled"))
+                            t))
+              (network (completing-read "Network: " '("deny" "allow") nil t nil nil "deny")))
+         (list agent workspace nil environment network nil trust-host)))))
   (let* ((profile-p (and (stringp profile) (not (string-empty-p profile))))
          (args (if profile-p
                    (safeslop-session--create-profile-args profile)
                  (safeslop-session--create-args (or agent "claude")
                                                 (or workspace default-directory)
-                                                environment network)))
+                                                environment network trust-host)))
          (progress-p (or profile-p (equal (or environment "container") "container"))))
     (safeslop-session--create-async
      args progress-p
@@ -229,6 +237,54 @@ ARGS so a trust-retry re-dispatches with the same progress behaviour as the firs
       (let ((env (cadr (member "--environment" args))))
         (or (null env) (equal env "container")))))
 
+(defun safeslop-session--confirm-ad-hoc-host-trust ()
+  "Ask for explicit acknowledgement before adding `--trust-host'."
+  (yes-or-no-p
+   "Create ad-hoc host session? This runs the agent unconfined with your host credentials; answer yes to pass --trust-host. "))
+
+(defun safeslop-session--arg-value (args flag)
+  "Return ARGS' value immediately after FLAG, or nil."
+  (cadr (member flag args)))
+
+(defun safeslop-session--ad-hoc-host-create-args-p (args)
+  "Return non-nil when ARGS describe an ad-hoc host session create."
+  (and (equal (car args) "session")
+       (equal (cadr args) "create")
+       (member "--agent" args)
+       (not (member "--profile" args))
+       (equal (safeslop-session--arg-value args "--environment") "host")))
+
+(defun safeslop-session--trust-required-path (envelope)
+  "Return TRUST_REQUIRED policy path from ENVELOPE, or nil when absent."
+  (when (equal (safeslop-contract-first-error-code envelope) "TRUST_REQUIRED")
+    (let* ((err (car (safeslop-contract-errors envelope)))
+           (path (alist-get 'path (alist-get 'details err))))
+      (and (stringp path) (not (string-empty-p path)) path))))
+
+(defun safeslop-session--with-host-trust-arg (args)
+  "Return ARGS with one `--trust-host' inserted before `--output' when possible."
+  (if (member "--trust-host" args)
+      args
+    (if-let* ((pos (cl-position "--output" args :test #'equal)))
+        (append (cl-subseq args 0 pos) '("--trust-host") (nthcdr pos args))
+      (append args '("--trust-host")))))
+
+(defun safeslop-session--maybe-offer-host-trust-retry (args callback envelope)
+  "Offer one `--trust-host' retry for ad-hoc host TRUST_REQUIRED without a path.
+This is separate from policy trust: it never calls `safeslop trust' and only runs
+for interactive creates (CALLBACK nil)."
+  (when (and (null callback)
+             (equal (safeslop-contract-first-error-code envelope) "TRUST_REQUIRED")
+             (safeslop-session--ad-hoc-host-create-args-p args)
+             (not (safeslop-session--trust-required-path envelope))
+             (not (member "--trust-host" args)))
+    (when (safeslop-session--confirm-ad-hoc-host-trust)
+      (let ((retry-args (safeslop-session--with-host-trust-arg args)))
+        (safeslop-session--create-async
+         retry-args (safeslop-session--create-progress-p retry-args)
+         (lambda (env) (safeslop-session--handle-create-result retry-args callback env)))
+        t))))
+
 (defun safeslop-session--maybe-offer-trust (args callback envelope)
   "Offer to approve the policy and retry when ENVELOPE is a TRUST_REQUIRED refusal.
 `session create --profile' is gated on a host-recorded approval of the safeslop.cue
@@ -237,8 +293,7 @@ the create with ARGS.  Interactive only (CALLBACK nil), so tests see the raw ref
 Returns non-nil when a retry was launched."
   (when (and (null callback)
              (equal (safeslop-contract-first-error-code envelope) "TRUST_REQUIRED"))
-    (let* ((err (car (safeslop-contract-errors envelope)))
-           (path (alist-get 'path (alist-get 'details err))))
+    (let ((path (safeslop-session--trust-required-path envelope)))
       (when (and path
                  (y-or-n-p
                   (format "safeslop.cue at %s is not host-approved; review, trust, and retry? "
@@ -454,6 +509,77 @@ to the legacy buffer name (specs/0086 T3)."
     (when (safeslop-contract-ok-p env)
       (safeslop-contract-data env))))
 
+(defconst safeslop-session--doctor-args '("doctor" "--json")
+  "Exact argv for the runtime-helper preflight doctor probe.")
+
+(defun safeslop-session--doctor-tool-row (envelope tool)
+  "Return TOOL's `doctor --json' row from ENVELOPE, or nil.
+This is intentionally tolerant: failed doctor calls and old JSON without a
+`data.tools' object carry no preflight signal, so launch continues and the CLI
+remains authoritative."
+  (when (and (safeslop-contract-ok-p envelope) (stringp tool))
+    (let* ((data (safeslop-contract-data envelope))
+           (tools (and (listp data) (alist-get 'tools data)))
+           (row (and (listp tools) (alist-get (intern tool) tools))))
+      (and (listp row) row))))
+
+(defun safeslop-session--doctor-string-list (value)
+  "Return VALUE's string elements as a list, ignoring malformed entries."
+  (let ((items (cond
+                ((vectorp value) (append value nil))
+                ((listp value) value)
+                (t nil))))
+    (seq-filter #'stringp items)))
+
+(defun safeslop-session--doctor-shadowed-docker (envelope)
+  "Return docker shadow info from a doctor ENVELOPE, or nil when clean/old.
+The returned alist has `path' for the selected helper and `shadowed_paths' for
+lower-priority docker helpers reported by `tools.docker.shadowed_paths'."
+  (when-let* ((row (safeslop-session--doctor-tool-row envelope "docker"))
+              (shadowed (safeslop-session--doctor-string-list
+                         (alist-get 'shadowed_paths row))))
+    (let ((path (alist-get 'path row)))
+      (list (cons 'path (and (stringp path) path))
+            (cons 'shadowed_paths shadowed)))))
+
+(defun safeslop-session--message-path (path)
+  "Return PATH for a one-line diagnostic, suppressing control characters."
+  (if (and (stringp path) (not (string-empty-p path)))
+      (replace-regexp-in-string "[[:cntrl:]]+" "?" path)
+    "<unknown>"))
+
+(defun safeslop-session--docker-shadow-message (shadow)
+  "Return an actionable, value-free user message for docker SHADOW info."
+  (let* ((selected (safeslop-session--message-path (alist-get 'path shadow)))
+         (shadowed (mapcar #'safeslop-session--message-path
+                           (alist-get 'shadowed_paths shadow))))
+    (format (concat "safeslop: docker helper is shadowed; selected path: %s; "
+                    "shadowed paths: %s. Remove or reorder the shadowed docker "
+                    "entries on PATH, then retry.")
+            selected (string-join shadowed ", "))))
+
+(defun safeslop-session--container-session-data-p (data)
+  "Return non-nil when status DATA identifies a container session."
+  (and (listp data)
+       (equal (alist-get 'environment data) "container")))
+
+(defun safeslop-session--run-runtime-preflight (data)
+  "Run best-effort runtime preflight for container session DATA.
+Only a positive `doctor --json' signal that docker has `shadowed_paths' aborts;
+failed doctor calls and old JSON are pass-through UI misses, leaving the CLI to
+enforce the authoritative launch policy."
+  (when (safeslop-session--container-session-data-p data)
+    (when-let* ((shadow (safeslop-session--doctor-shadowed-docker
+                         (safeslop--call-json safeslop-session--doctor-args))))
+      (user-error "%s" (safeslop-session--docker-shadow-message shadow))))
+  data)
+
+(defun safeslop-session--fetch-data-and-runtime-preflight (session-id)
+  "Fetch SESSION-ID status, preflight container runtime shadows, and return data."
+  (let ((data (safeslop-session--fetch-data session-id)))
+    (safeslop-session--run-runtime-preflight data)
+    data))
+
 (defun safeslop-session--make-terminal (name program argv)
   "Create terminal buffer *NAME* running PROGRAM with ARGV; return the buffer.
 Prefer the eat terminal (pure-elisp, 24-bit color) when it can be loaded,
@@ -482,10 +608,11 @@ term-mode (see `safeslop-session--make-terminal').  If the process reports the
 PTY_UNAVAILABLE contract error (no usable controlling terminal), switch to the
 read-only JSONL status fallback (`safeslop-session-status-fallback')."
   ;; Fetch the session record best-effort BEFORE naming so the buffer is
-  ;; self-describing from the first frame (specs/0086 T3).  A miss yields nil and
-  ;; `safeslop-session--buffer-label' falls back to the legacy `safeslop-<id>'
-  ;; name, so a slow/failed status never blocks the launch.
-  (let* ((data (safeslop-session--fetch-data session-id))
+  ;; self-describing from the first frame (specs/0086 T3), and preflight a known
+  ;; container record for shadowed docker before any terminal subprocess starts.
+  ;; A status miss yields nil and falls back to the legacy `safeslop-<id>' name;
+  ;; failed/old doctor JSON also passes through so the CLI stays authoritative.
+  (let* ((data (safeslop-session--fetch-data-and-runtime-preflight session-id))
          (buf (safeslop-session--make-terminal
                (safeslop-session--buffer-label session-id data)
                safeslop-program argv)))
@@ -529,9 +656,12 @@ JSONL status fallback (`safeslop-session-status-fallback')."
 ;;;###autoload
 (defun safeslop-session-run-detached (&optional session-id callback quiet)
   "Start SESSION-ID under a detached supervisor, asynchronously.
-When QUIET is non-nil, do not pop the JSON envelope buffer; this is used by the
-portal so row actions refresh in place instead of stealing the operator window."
+Container sessions are preflighted for a shadowed docker helper before spawning
+the supervisor.  When QUIET is non-nil, do not pop the JSON envelope buffer; this
+is used by the portal so row actions refresh in place instead of stealing the
+operator window."
   (interactive (list (safeslop-session--read-id "Run detached: ") nil nil))
+  (safeslop-session--fetch-data-and-runtime-preflight session-id)
   (let ((args (safeslop-session--run-detached-args session-id)))
     (safeslop--call-json-async
      args

@@ -550,6 +550,8 @@ the standalone `safeslop-session-*' commands may still show their envelope buffe
                              (lambda () '((session_id . "sess-dead") (status . "stopped"))))
                             ((symbol-function 'yes-or-no-p) (lambda (&rest _) t))
                             ((symbol-function 'y-or-n-p) (lambda (&rest _) t))
+                            ((symbol-function 'safeslop-session--fetch-data)
+                             (lambda (&rest _) nil))
                             ((symbol-function 'safeslop--call-json-async)
                              (lambda (args cb) (push args calls) (funcall cb ok)))
                             ((symbol-function 'safeslop--show-envelope-buffer)
@@ -790,6 +792,112 @@ flight, so slow `session list' calls can't stack up."
   (should (equal (safeslop-session--trust-args "/w/safeslop.cue")
                  '("trust" "/w/safeslop.cue"))))
 
+(ert-deftest safeslop-test-session-create-host-trust-args ()
+  "Ad-hoc host create appends --trust-host only when explicitly requested."
+  (let ((workspace "/w"))
+    (let ((trusted (condition-case nil
+                       (safeslop-session--create-args "claude" workspace "host" "deny" t)
+                     (wrong-number-of-arguments nil))))
+      (should (equal trusted
+                     '("session" "create" "--agent" "claude" "--workspace" "/w"
+                       "--environment" "host" "--network" "deny"
+                       "--trust-host" "--output" "json"))))
+    (should-not (member "--trust-host"
+                        (safeslop-session--create-args "claude" workspace "host" "deny")))
+    (should-not (member "--trust-host"
+                        (safeslop-session--create-args "claude" workspace "container" "deny" t)))))
+
+(ert-deftest safeslop-test-session-new-host-trust-ack-adds-flag ()
+  "Interactive ad-hoc host creation asks for acknowledgement, then passes --trust-host."
+  (let ((answers '("claude" "host" "deny"))
+        prompt
+        called)
+    (cl-letf (((symbol-function 'safeslop-session--read-profile-choice) (lambda () nil))
+              ((symbol-function 'completing-read)
+               (lambda (&rest _) (pop answers)))
+              ((symbol-function 'read-directory-name) (lambda (&rest _) "/w"))
+              ((symbol-function 'yes-or-no-p) (lambda (p) (setq prompt p) t))
+              ((symbol-function 'safeslop-session--create-async)
+               (lambda (args progress-p _callback)
+                 (setq called (list args progress-p)))))
+      (call-interactively #'safeslop-session-new))
+    (should prompt)
+    (should (string-match-p "unconfined" prompt))
+    (should (equal called
+                   '(("session" "create" "--agent" "claude" "--workspace" "/w"
+                      "--environment" "host" "--network" "deny"
+                      "--trust-host" "--output" "json")
+                     nil)))))
+
+(ert-deftest safeslop-test-session-new-host-trust-decline-aborts-before-cli ()
+  "Declining the interactive host acknowledgement aborts before session create."
+  (let ((answers '("claude" "host" "deny"))
+        called)
+    (cl-letf (((symbol-function 'safeslop-session--read-profile-choice) (lambda () nil))
+              ((symbol-function 'completing-read)
+               (lambda (&rest _) (pop answers)))
+              ((symbol-function 'read-directory-name) (lambda (&rest _) "/w"))
+              ((symbol-function 'yes-or-no-p) (lambda (&rest _) nil))
+              ((symbol-function 'safeslop-session--create-async)
+               (lambda (&rest _) (setq called t))))
+      (should-error (call-interactively #'safeslop-session-new) :type 'user-error))
+    (should-not called)))
+
+(ert-deftest safeslop-test-session-host-trust-required-retries-with-flag-not-safeslop-trust ()
+  "Ad-hoc host TRUST_REQUIRED without policy path retries with --trust-host only."
+  (let ((args '("session" "create" "--agent" "claude" "--workspace" "/w"
+                "--environment" "host" "--network" "deny" "--output" "json"))
+        retried
+        trust-called
+        prompt)
+    (cl-letf (((symbol-function 'yes-or-no-p) (lambda (p) (setq prompt p) t))
+              ((symbol-function 'safeslop--show-envelope-buffer) (lambda (&rest _) nil))
+              ((symbol-function 'safeslop--call-json)
+               (lambda (trust-args)
+                 (setq trust-called trust-args)
+                 (safeslop-contract-parse-string
+                  "{\"schema_version\":1,\"ok\":true,\"data\":{},\"warnings\":[],\"errors\":[]}")))
+              ((symbol-function 'safeslop-session--create-async)
+               (lambda (retry-args progress-p _callback)
+                 (setq retried (list retry-args progress-p)))))
+      (safeslop-session--handle-create-result
+       args nil
+       (safeslop-contract-parse-string
+        (concat "{\"schema_version\":1,\"ok\":false,\"data\":{},\"warnings\":[],"
+                "\"errors\":[{\"code\":\"TRUST_REQUIRED\",\"message\":\"host acknowledgement required\","
+                "\"retryable\":false,\"details\":{\"environment\":\"host\",\"hint\":\"add --trust-host\"}}]}"))))
+    (should prompt)
+    (should (string-match-p "--trust-host" prompt))
+    (should-not trust-called)
+    (should (equal retried
+                   '(("session" "create" "--agent" "claude" "--workspace" "/w"
+                      "--environment" "host" "--network" "deny"
+                      "--trust-host" "--output" "json")
+                     nil)))))
+
+(ert-deftest safeslop-test-session-host-trust-does-not-change-profile-policy-trust ()
+  "Profile TRUST_REQUIRED with a policy path still uses safeslop trust, not --trust-host."
+  (let ((trusted nil)
+        (retried nil))
+    (cl-letf (((symbol-function 'y-or-n-p) (lambda (&rest _) t))
+              ((symbol-function 'yes-or-no-p) (lambda (&rest _) (error "unexpected host trust prompt")))
+              ((symbol-function 'safeslop--show-envelope-buffer) (lambda (&rest _) nil))
+              ((symbol-function 'safeslop--call-json)
+               (lambda (args)
+                 (setq trusted args)
+                 (safeslop-contract-parse-string
+                  "{\"schema_version\":1,\"ok\":true,\"data\":{},\"warnings\":[],\"errors\":[]}")))
+              ((symbol-function 'safeslop-session--create-async)
+               (lambda (args _p _cb) (setq retried args))))
+      (safeslop-session--handle-create-result
+       '("session" "create" "--profile" "dev" "--output" "json") nil
+       (safeslop-contract-parse-string
+        (concat "{\"schema_version\":1,\"ok\":false,\"data\":{},\"warnings\":[],"
+                "\"errors\":[{\"code\":\"TRUST_REQUIRED\",\"message\":\"policy trust required\","
+                "\"retryable\":false,\"details\":{\"path\":\"/w/safeslop.cue\"}}]}"))))
+    (should (equal trusted '("trust" "/w/safeslop.cue")))
+    (should (equal retried '("session" "create" "--profile" "dev" "--output" "json")))))
+
 (ert-deftest safeslop-test-session-create-progress-p ()
   "Spinner-worthy: profile and container ad-hoc creates; not host ad-hoc creates."
   (should (safeslop-session--create-progress-p
@@ -801,6 +909,46 @@ flight, so slow `session list' calls can't stack up."
            '("session" "create" "--agent" "claude" "--workspace" "/w")))
   (should-not (safeslop-session--create-progress-p
                '("session" "create" "--agent" "claude" "--environment" "host" "--workspace" "/w"))))
+
+(ert-deftest safeslop-test-session-runtime-preflight-shadowed-docker-aborts-attach-before-terminal ()
+  "A shadowed docker helper aborts attach before terminal/subprocess launch."
+  (let ((calls nil)
+        (terminal-called nil)
+        (message nil))
+    (cl-letf (((symbol-function 'safeslop--call-json)
+               (lambda (args)
+                 (push args calls)
+                 (cond
+                  ((equal args '("session" "status" "--session-id" "sess-shadow" "--output" "json"))
+                   (safeslop-contract-parse-string
+                    "{\"schema_version\":1,\"ok\":true,\"data\":{\"session_id\":\"sess-shadow\",\"environment\":\"container\"},\"warnings\":[],\"errors\":[]}"))
+                  ((equal args '("doctor" "--json"))
+                   (safeslop-contract-parse-string
+                    (concat "{\"schema_version\":1,\"ok\":true,\"data\":{\"tools\":{\"docker\":{"
+                            "\"present\":false,\"path\":\"/safe/bin/docker\","
+                            "\"shadowed_paths\":[\"/usr/local/bin/docker\"],"
+                            "\"secret\":\"op://vault/item/token\"}}},\"warnings\":[],\"errors\":[]}")))
+                  (t (error "unexpected argv: %S" args)))))
+              ((symbol-function 'safeslop-session--make-terminal)
+               (lambda (&rest _)
+                 (setq terminal-called t)
+                 (get-buffer-create "*unexpected safeslop terminal*")))
+              ((symbol-function 'pop-to-buffer) (lambda (buf &rest _) buf)))
+      (unwind-protect
+          (condition-case err
+              (progn
+                (safeslop-session-attach "sess-shadow")
+                (ert-fail "expected shadowed docker preflight to abort"))
+            (user-error (setq message (cadr err))))
+        (when (get-buffer "*unexpected safeslop terminal*")
+          (kill-buffer "*unexpected safeslop terminal*"))))
+    (should-not terminal-called)
+    (should (equal (nreverse calls)
+                   '(("session" "status" "--session-id" "sess-shadow" "--output" "json")
+                     ("doctor" "--json"))))
+    (should (string-match-p "/safe/bin/docker" message))
+    (should (string-match-p "/usr/local/bin/docker" message))
+    (should-not (string-match-p "op://\\|token" message))))
 
 (ert-deftest safeslop-test-session-create-trust-required-retries ()
   "A TRUST_REQUIRED refusal offers to trust the policy and re-dispatches the create."
@@ -1128,7 +1276,7 @@ ref/value/staged path is still refused (mirrors the portal T2 guarantee)."
 (ert-deftest safeslop-test-session-launch-term-sets-buffer-local-id-and-header ()
   "launch-term fetches data best-effort, names the buffer descriptively, sets the
 buffer-local id after terminal creation, and installs a value-free creds header."
-  (let ((made-name nil) (buf nil))
+  (let ((made-name nil) (buf nil) (preflighted nil))
     (unwind-protect
         (cl-letf (((symbol-function 'safeslop-session--fetch-data)
                    (lambda (_id)
@@ -1136,12 +1284,15 @@ buffer-local id after terminal creation, and installs a value-free creds header.
                        (workspace . "/home/me/payments")
                        (environment . "container") (network . "deny")
                        (credential_scopes . (((kind . "github") (name . "acme/web") (scope . "app rw")))))))
+                  ((symbol-function 'safeslop-session--run-runtime-preflight)
+                   (lambda (data) (setq preflighted data) data))
                   ((symbol-function 'safeslop-session--make-terminal)
                    (lambda (name _program _argv)
                      (setq made-name name)
                      (setq buf (get-buffer-create (concat "*" name "*")))))
                   ((symbol-function 'pop-to-buffer) (lambda (b &rest _) b)))
           (safeslop-session--launch-term "sess-xyz" '("session" "run" "--session-id" "sess-xyz"))
+          (should (equal (alist-get 'session_id preflighted) "sess-xyz"))
           (should (equal made-name "safeslop:be-dev payments [container/deny]"))
           (with-current-buffer buf
             (should (equal safeslop-session-id "sess-xyz"))

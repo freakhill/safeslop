@@ -35,7 +35,7 @@ file transfer between host and sandboxed runtimes.
 - `safeslop untrust [safeslop.cue]` — remove that host approval; future launches fail closed until the current bytes are reviewed and trusted again.
 - `safeslop run <profile>` — launch a trusted profile; host-tier profiles require a per-launch yes/no comprehension gate before the agent starts.
 - `safeslop session create --profile <name> [--name <label>] --output json` — create an Emacs-visible session from an existing profile; create/list/status JSON includes value-free `credential_scopes` (credential kind, non-secret target, and access/scope only), the record includes resolved recipe/image metadata for the portal, and the Emacs client streams slow first-use image-build output into `*safeslop session progress*` with the final exit status. `--name` sets an optional display name and is combinable with `--profile`.
-- `safeslop session create --agent <claude|pi|fish|zsh> --environment <host|container> --workspace <dir> [--name <label>] [--trust-host] --output json` — create an ad-hoc Emacs-visible session record (`--environment` is required). A host ad-hoc session runs the agent unconfined with your host credentials, so it requires an explicit `--trust-host` acknowledgement (specs/0072); container ad-hoc sessions do not. `--name` sets an optional display name. `claude-code` remains accepted as a compatibility alias for `claude` but is not advertised in new UI/docs.
+- `safeslop session create --agent <claude|pi|fish|zsh> --environment <host|container> --workspace <dir> [--name <label>] [--trust-host] --output json` — create an ad-hoc Emacs-visible session record (`--environment` is required). A host ad-hoc session runs the agent unconfined with your host credentials, so it requires an explicit `--trust-host` acknowledgement (specs/0072); container ad-hoc sessions do not. The interactive Emacs new-session flow prompts for that host acknowledgement before appending `--trust-host`, and if a host ad-hoc create returns `TRUST_REQUIRED` without a policy path, it offers one retry with the flag. `--name` sets an optional display name. `claude-code` remains accepted as a compatibility alias for `claude` but is not advertised in new UI/docs.
 - `safeslop session run --session-id <id> [--detach]` — run the session agent under safeslop isolation. Host-tier sessions require the per-launch yes/no comprehension gate first; for `--detach`, the gate runs before the supervisor is spawned. Coupled (default) needs a controlling terminal (Emacs supplies one via `make-term`); with no usable TTY it emits the `PTY_UNAVAILABLE` contract error and the caller switches to the `--output jsonl` status monitor. `--detach` launches a per-session supervisor that owns the agent + its PTY, serves it over a per-session unix socket, and returns immediately (the buffer is freed).
 - `safeslop session attach --session-id <id>` — rejoin a detached session's agent over its socket under a controlling terminal, exiting with the agent's code; one active attach at a time. No usable TTY emits `PTY_UNAVAILABLE`.
 - `safeslop session status --session-id <id> --output <json|jsonl>` — inspect or monitor session state; JSON/JSONL carries value-free credential scope for profile-backed sessions, and a running detached session also reports its `socket`.
@@ -46,6 +46,11 @@ file transfer between host and sandboxed runtimes.
 - `safeslop doctor` — report available tools and isolation tiers.
 - `safeslop down` — tear down safeslop-managed host-container stacks by label, on the detected container runtime.
 - `safeslop gc [--until <age>] [--keep <N>]` — remove only unreferenced safeslop-managed images; current resolving profiles, the repo lockfile, and live sessions anchor images.
+
+Emacs-specific session guards: container run, attach/reattach, and detached launch
+actions perform a best-effort runtime preflight via `safeslop doctor --json`; a
+shadowed Docker helper aborts before launching the terminal/subprocess and lists
+the selected/shadowed paths, while failed/old doctor output proceeds to the CLI.
 
 ## Container runtime
 

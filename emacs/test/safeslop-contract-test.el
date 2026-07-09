@@ -353,17 +353,20 @@ envelope via the callback, never a crash."
             (should (string-match-p "build failed" s))
             (should (string-match-p "failed (exit 2)" s))))))))
 
-(ert-deftest safeslop-test-session-attach-uses-term-pty-exact-argv ()
-  "Attach prefetches `session status' best-effort to self-describe the buffer,
-then runs `session run' under a term PTY (specs/0086 T3).  The argv log shows the
-value-free status prefetch immediately before the exact run argv."
+(ert-deftest safeslop-test-session-runtime-preflight-attach-uses-term-pty-exact-argv ()
+  "Attach fetches status, preflights doctor for container sessions, then runs.
+The argv log proves the terminal subprocess starts only after status+doctor."
   (let* ((status-argv '("session" "status" "--session-id" "sess-term" "--output" "json"))
+         (doctor-argv '("doctor" "--json"))
          (argv '("session" "run" "--session-id" "sess-term"))
          (routes `((,(safeslop-test--json-key status-argv) .
                    ((stdout . ,(concat "{\"schema_version\":1,\"ok\":true,\"data\":"
                                        "{\"session_id\":\"sess-term\",\"profile\":\"be-dev\","
                                        "\"workspace\":\"/w/payments\",\"environment\":\"container\","
                                        "\"network\":\"deny\"},\"warnings\":[],\"errors\":[]}"))
+                    (exit . 0)))
+                   (,(safeslop-test--json-key doctor-argv) .
+                   ((stdout . "{\"schema_version\":1,\"ok\":true,\"data\":{\"tools\":{\"docker\":{\"present\":true,\"path\":\"/safe/bin/docker\"}}},\"warnings\":[],\"errors\":[]}")
                     (exit . 0)))
                    (,(safeslop-test--json-key argv) .
                    ((stdout . "")
@@ -379,12 +382,112 @@ value-free status prefetch immediately before the exact run argv."
               (accept-process-output proc 0.1))))
         (should (equal (safeslop-test--argv-log-lines)
                        (list (safeslop-test--json-key status-argv)
+                             (safeslop-test--json-key doctor-argv)
                              (safeslop-test--json-key argv))))))))
 
 (ert-deftest safeslop-test-session-run-detached-args ()
   (should (equal (safeslop-session--run-detached-args "sess-detached")
                  '("session" "run" "--session-id" "sess-detached" "--detach")))
   (should-not (member "--output" (safeslop-session--run-detached-args "sess-detached"))))
+
+(ert-deftest safeslop-test-session-runtime-preflight-detached-exact-argv ()
+  "Detached run fetches status, preflights doctor, then starts the supervisor."
+  (let* ((status-argv '("session" "status" "--session-id" "sess-detached" "--output" "json"))
+         (doctor-argv '("doctor" "--json"))
+         (run-argv '("session" "run" "--session-id" "sess-detached" "--detach"))
+         (routes `((,(safeslop-test--json-key status-argv) .
+                   ((stdout . "{\"schema_version\":1,\"ok\":true,\"data\":{\"session_id\":\"sess-detached\",\"environment\":\"container\"},\"warnings\":[],\"errors\":[]}")
+                    (exit . 0)))
+                   (,(safeslop-test--json-key doctor-argv) .
+                   ((stdout . "{\"schema_version\":1,\"ok\":true,\"data\":{\"tools\":{\"docker\":{\"present\":true,\"path\":\"/safe/bin/docker\"}}},\"warnings\":[],\"errors\":[]}")
+                    (exit . 0)))
+                   (,(safeslop-test--json-key run-argv) .
+                   ((stdout . "{\"schema_version\":1,\"ok\":true,\"data\":{},\"warnings\":[],\"errors\":[]}")
+                    (exit . 0))))))
+    (safeslop-test--with-fake-cli routes
+      (let ((env (safeslop-test--await
+                  (lambda (cb) (safeslop-session-run-detached "sess-detached" cb t)))))
+        (should (safeslop-contract-ok-p env))
+        (should (equal (safeslop-test--argv-log-lines)
+                       (list (safeslop-test--json-key status-argv)
+                             (safeslop-test--json-key doctor-argv)
+                             (safeslop-test--json-key run-argv))))))))
+
+(ert-deftest safeslop-test-session-runtime-preflight-doctor-failure-permits-detached-run ()
+  "A failed/stale doctor probe is best-effort and does not block CLI launch."
+  (let* ((status-argv '("session" "status" "--session-id" "sess-doctor-fail" "--output" "json"))
+         (doctor-argv '("doctor" "--json"))
+         (run-argv '("session" "run" "--session-id" "sess-doctor-fail" "--detach"))
+         (routes `((,(safeslop-test--json-key status-argv) .
+                   ((stdout . "{\"schema_version\":1,\"ok\":true,\"data\":{\"session_id\":\"sess-doctor-fail\",\"environment\":\"container\"},\"warnings\":[],\"errors\":[]}")
+                    (exit . 0)))
+                   (,(safeslop-test--json-key doctor-argv) .
+                   ((stdout . "safeslop: unknown command")
+                    (exit . 1)))
+                   (,(safeslop-test--json-key run-argv) .
+                   ((stdout . "{\"schema_version\":1,\"ok\":true,\"data\":{},\"warnings\":[],\"errors\":[]}")
+                    (exit . 0))))))
+    (safeslop-test--with-fake-cli routes
+      (let ((env (safeslop-test--await
+                  (lambda (cb) (safeslop-session-run-detached "sess-doctor-fail" cb t)))))
+        (should (safeslop-contract-ok-p env))
+        (should (equal (safeslop-test--argv-log-lines)
+                       (list (safeslop-test--json-key status-argv)
+                             (safeslop-test--json-key doctor-argv)
+                             (safeslop-test--json-key run-argv))))))))
+
+(ert-deftest safeslop-test-session-runtime-preflight-old-doctor-json-permits-detached-run ()
+  "Old doctor JSON without tools.docker.shadowed_paths is treated as no preflight signal."
+  (let* ((status-argv '("session" "status" "--session-id" "sess-old-doctor" "--output" "json"))
+         (doctor-argv '("doctor" "--json"))
+         (run-argv '("session" "run" "--session-id" "sess-old-doctor" "--detach"))
+         (routes `((,(safeslop-test--json-key status-argv) .
+                   ((stdout . "{\"schema_version\":1,\"ok\":true,\"data\":{\"session_id\":\"sess-old-doctor\",\"environment\":\"container\"},\"warnings\":[],\"errors\":[]}")
+                    (exit . 0)))
+                   (,(safeslop-test--json-key doctor-argv) .
+                   ((stdout . "{\"schema_version\":1,\"ok\":true,\"data\":{},\"warnings\":[],\"errors\":[]}")
+                    (exit . 0)))
+                   (,(safeslop-test--json-key run-argv) .
+                   ((stdout . "{\"schema_version\":1,\"ok\":true,\"data\":{},\"warnings\":[],\"errors\":[]}")
+                    (exit . 0))))))
+    (safeslop-test--with-fake-cli routes
+      (let ((env (safeslop-test--await
+                  (lambda (cb) (safeslop-session-run-detached "sess-old-doctor" cb t)))))
+        (should (safeslop-contract-ok-p env))
+        (should (equal (safeslop-test--argv-log-lines)
+                       (list (safeslop-test--json-key status-argv)
+                             (safeslop-test--json-key doctor-argv)
+                             (safeslop-test--json-key run-argv))))))))
+
+(ert-deftest safeslop-test-session-runtime-preflight-shadowed-docker-aborts-detached-before-run ()
+  "A shadowed docker helper aborts detached launch before the supervisor subprocess."
+  (let ((async-called nil)
+        (message nil))
+    (cl-letf (((symbol-function 'safeslop--call-json)
+               (lambda (args)
+                 (cond
+                  ((equal args '("session" "status" "--session-id" "sess-shadow" "--output" "json"))
+                   (safeslop-contract-parse-string
+                    "{\"schema_version\":1,\"ok\":true,\"data\":{\"session_id\":\"sess-shadow\",\"environment\":\"container\"},\"warnings\":[],\"errors\":[]}"))
+                  ((equal args '("doctor" "--json"))
+                   (safeslop-contract-parse-string
+                    (concat "{\"schema_version\":1,\"ok\":true,\"data\":{\"tools\":{\"docker\":{"
+                            "\"present\":false,\"path\":\"/safe/bin/docker\","
+                            "\"shadowed_paths\":[\"/usr/local/bin/docker\",\"/opt/orbstack/bin/docker\"],"
+                            "\"secret\":\"op://vault/item/token\"}}},\"warnings\":[],\"errors\":[]}")))
+                  (t (error "unexpected argv: %S" args)))))
+              ((symbol-function 'safeslop--call-json-async)
+               (lambda (&rest _) (setq async-called t))))
+      (condition-case err
+          (progn
+            (safeslop-session-run-detached "sess-shadow" (lambda (_env) nil) t)
+            (ert-fail "expected shadowed docker preflight to abort"))
+        (user-error (setq message (cadr err)))))
+    (should-not async-called)
+    (should (string-match-p "/safe/bin/docker" message))
+    (should (string-match-p "/usr/local/bin/docker" message))
+    (should (string-match-p "/opt/orbstack/bin/docker" message))
+    (should-not (string-match-p "op://\\|token" message))))
 
 (ert-deftest safeslop-test-session-id-candidates-from-list ()
   (let ((env (safeslop-contract-parse-string
@@ -393,18 +496,19 @@ value-free status prefetch immediately before the exact run argv."
                       "\"warnings\":[],\"errors\":[]}"))))
     (should (equal (safeslop-session--session-id-candidates env) '("sess-a" "sess-b")))))
 
-(ert-deftest safeslop-test-reattach-uses-attach-argv ()
-  "Reattach builds `session attach --session-id ...' argv under a term PTY
-\(specs/0051 PR4): the detached session is rejoined over its socket, not re-run.
-Post-T3 it also prefetches `session status' best-effort to self-describe the
-buffer, so the argv log shows the status prefetch before the exact attach argv."
+(ert-deftest safeslop-test-session-runtime-preflight-reattach-uses-attach-argv ()
+  "Reattach preflights container runtime shadows before the attach PTY starts."
   (let* ((status-argv '("session" "status" "--session-id" "sess-reattach" "--output" "json"))
+         (doctor-argv '("doctor" "--json"))
          (argv '("session" "attach" "--session-id" "sess-reattach"))
          (routes `((,(safeslop-test--json-key status-argv) .
                    ((stdout . ,(concat "{\"schema_version\":1,\"ok\":true,\"data\":"
                                        "{\"session_id\":\"sess-reattach\",\"profile\":\"be-dev\","
                                        "\"workspace\":\"/w/payments\",\"environment\":\"container\","
                                        "\"network\":\"deny\"},\"warnings\":[],\"errors\":[]}"))
+                    (exit . 0)))
+                   (,(safeslop-test--json-key doctor-argv) .
+                   ((stdout . "{\"schema_version\":1,\"ok\":true,\"data\":{\"tools\":{\"docker\":{\"present\":true,\"path\":\"/safe/bin/docker\"}}},\"warnings\":[],\"errors\":[]}")
                     (exit . 0)))
                    (,(safeslop-test--json-key argv) .
                    ((stdout . "")
@@ -418,6 +522,7 @@ buffer, so the argv log shows the status prefetch before the exact attach argv."
               (accept-process-output proc 0.1))))
         (should (equal (safeslop-test--argv-log-lines)
                        (list (safeslop-test--json-key status-argv)
+                             (safeslop-test--json-key doctor-argv)
                              (safeslop-test--json-key argv))))))))
 
 (ert-deftest safeslop-test-fallback-compilation-mode-on-pty-unavailable ()

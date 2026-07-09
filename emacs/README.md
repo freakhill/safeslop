@@ -101,6 +101,19 @@ reconciles a crashed session (marked running but whose process is gone) to
 Detached sessions are explicit because they survive the Emacs buffer and keep
 staged credentials until stop/revoke.  Coupled run remains the default.
 
+Creating a new ad-hoc host session (`c` / `safeslop-session-new` with
+environment `host`) asks an explicit yes/no host acknowledgement before passing
+`--trust-host` to `safeslop session create`; a no answer aborts before the CLI is
+called. If a host ad-hoc create still returns `TRUST_REQUIRED` with no policy
+path, Emacs offers one retry with `--trust-host` rather than sending you to
+policy trust.
+
+Before `RET`/`o`, `r`, `R`, or `A` launches or attaches a container session,
+Emacs runs a best-effort runtime preflight via `safeslop doctor --json`. A
+shadowed Docker helper aborts the action before the terminal/subprocess starts
+and lists the selected/shadowed paths; old or failed doctor output is allowed
+through, leaving the CLI as source of truth.
+
 While the portal is displayed, it **auto-refreshes** every
 `safeslop-portal-refresh-interval` seconds (default 5; set to nil to disable).
 Each in-place redraw preserves every showing window's scroll position and keeps

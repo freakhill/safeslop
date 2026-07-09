@@ -131,6 +131,13 @@ headless shell), it emits the `PTY_UNAVAILABLE` contract error
 session running, so nothing is left as a phantom. The Emacs client switches to a
 read-only `--output jsonl` status monitor on that code.
 
+Before Emacs runs, attaches/reattaches, or starts a detached container session,
+it performs a best-effort runtime preflight with `safeslop doctor --json`. If the
+doctor JSON reports a shadowed `docker` helper (`shadowed_paths`), Emacs aborts
+before opening the terminal/subprocess and shows the selected and shadowed paths;
+if doctor fails or emits older JSON, launch continues and the CLI remains
+authoritative.
+
 `session run --detach` gives a session a life independent of the Emacs buffer that
 started it: after the host consent gate passes for host-tier sessions, it launches
 a per-session **supervisor** that owns the agent and its PTY — which, for a host
@@ -338,7 +345,12 @@ profile-backed path opens `*safeslop session progress*` so slow first-use image
 build logs stream live and end with the subprocess exit status. The Sessions portal
 shows the same value-free credential scope in its `Creds` column, and live buffers
 use profile/project plus `[tier/net]` names with headers that repeat the value-free
-scope. The ad-hoc `--agent` form remains available for one-off sessions.
+scope. The ad-hoc `--agent` form remains available for one-off sessions. In
+Emacs, choosing `host` for an ad-hoc session asks an explicit yes/no host
+acknowledgement before adding `--trust-host` to `session create`; declining
+aborts before the CLI is called. If the CLI still returns host `TRUST_REQUIRED`
+without a policy path, Emacs offers one retry with `--trust-host` instead of
+routing you to `safeslop trust`.
 
 ### Starter profiles (presets)
 
