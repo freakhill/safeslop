@@ -102,7 +102,7 @@ Extend `C-c s K` / `safeslop-credentials`:
 
 ## Tasks
 
-- [ ] T1 — Add account-status JSON contract for Emacs
+- [x] T1 — Add account-status JSON contract for Emacs
   FILE:     `internal/cli/creds_link.go`, `internal/cli/*test.go`, `emacs/safeslop-contract.el`, `emacs/test/safeslop-contract-test.el`
   CHANGE:   Add `creds status --output json` as a shared envelope whose `data.links` rows contain only forge, host, owner, non-secret ids, value-free probe class, ssh port, and TTL model. Preserve human output and the current raw `--json` output; Emacs must not depend on the raw form.
   VERIFY:   `go test ./internal/cli -run 'Creds(Status|Link|Unlink)' -v && emacs --batch -L emacs -l ert -l emacs/test/safeslop-contract-test.el --eval '(ert-run-tests-batch-and-exit "safeslop-test-.*creds.*status")'`

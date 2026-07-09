@@ -144,5 +144,60 @@
   "Return the first error code in ENVELOPE, or nil."
   (alist-get 'code (car (safeslop-contract-errors envelope))))
 
+(defconst safeslop-contract-creds-status-probes
+  '("ok" "secret-unresolved" "unreachable" "denied" "error")
+  "Value-free probe classes returned by `creds status --output json'.")
+
+(defconst safeslop-contract-creds-status--forbidden-link-keys
+  '(privateKeyRef tokenRef keyRef ref token value stagedPath path)
+  "Secret-bearing or stage-path fields forbidden in account-link status rows.")
+
+(defun safeslop-contract--nonempty-string-p (value)
+  "Return non-nil when VALUE is a non-empty string."
+  (and (stringp value) (not (string-empty-p value))))
+
+(defun safeslop-contract--optional-int-p (value)
+  "Return non-nil when VALUE is absent/null or an integer."
+  (or (null value) (eq value :json-null) (integerp value)))
+
+(defun safeslop-contract--creds-status-link-valid-p (link)
+  "Return non-nil when LINK has the value-free account-status row shape."
+  (and (safeslop-contract--alist-p link)
+       (not (cl-some (lambda (key) (assq key link))
+                     safeslop-contract-creds-status--forbidden-link-keys))
+       (let ((forge (alist-get 'forge link))
+             (host (alist-get 'host link))
+             (owner (alist-get 'owner link))
+             (probe (alist-get 'probe link))
+             (ttl (alist-get 'ttl link))
+             (app-id (alist-get 'appID link))
+             (installation-id (alist-get 'installationID link))
+             (ssh-port (alist-get 'sshPort link)))
+         (and (member forge '("github" "forgejo"))
+              (safeslop-contract--nonempty-string-p host)
+              (safeslop-contract--nonempty-string-p owner)
+              (member probe safeslop-contract-creds-status-probes)
+              (safeslop-contract--nonempty-string-p ttl)
+              (safeslop-contract--optional-int-p app-id)
+              (safeslop-contract--optional-int-p installation-id)
+              (safeslop-contract--optional-int-p ssh-port)))))
+
+(defun safeslop-contract-creds-status-links (envelope)
+  "Return validated `data.links' from a `creds status --output json' ENVELOPE.
+Rows are value-free account-link status records: forge, host, owner,
+non-secret ids, probe class, SSH port, and TTL model only.  Secret refs/values
+and staged paths are rejected rather than silently ignored."
+  (safeslop-contract-validate envelope)
+  (unless (safeslop-contract-ok-p envelope)
+    (signal 'safeslop-contract-error '("creds status envelope must be ok")))
+  (let* ((data (safeslop-contract-data envelope))
+         (links (alist-get 'links data)))
+    (unless (listp links)
+      (signal 'safeslop-contract-error '("data.links must be an array")))
+    (dolist (link links)
+      (unless (safeslop-contract--creds-status-link-valid-p link)
+        (signal 'safeslop-contract-error '("invalid creds status link"))))
+    links))
+
 (provide 'safeslop-contract)
 ;;; safeslop-contract.el ends here

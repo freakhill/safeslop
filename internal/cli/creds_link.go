@@ -13,6 +13,7 @@ import (
 	"github.com/freakhill/safeslop/internal/engine/creds/githubapp"
 	"github.com/freakhill/safeslop/internal/engine/secrets"
 	"github.com/freakhill/safeslop/internal/engine/userconfig"
+	"github.com/freakhill/safeslop/internal/jsoncontract"
 )
 
 // The account store (~/.config/safeslop/accounts.cue) holds forge account links: secret refs plus
@@ -104,17 +105,28 @@ func cmdCredsUnlink() *cobra.Command {
 }
 
 func cmdCredsStatus() *cobra.Command {
-	var jsonOut bool
+	var rawJSON bool
+	var output string
 	c := &cobra.Command{
-		Use:   "status [--json]",
+		Use:   "status [--json|--output json]",
 		Short: "Show linked forge accounts with a value-free probe result + TTL model",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if output != "" && output != "json" {
+				return fmt.Errorf("creds status --output must be json")
+			}
 			path, err := accountsPathOrErr()
 			if err != nil {
 				return err
 			}
-			out, err := runCredsStatus(cmd.Context(), path, jsonOut, githubapp.New(githubapp.NewHTTP(), ""), func(host string) string { return "https://" + host })
+			client := githubapp.New(githubapp.NewHTTP(), "")
+			base := func(host string) string { return "https://" + host }
+			var out string
+			if output == "json" {
+				out, err = runCredsStatusContract(cmd.Context(), path, client, base)
+			} else {
+				out, err = runCredsStatus(cmd.Context(), path, rawJSON, client, base)
+			}
 			if err != nil {
 				return err
 			}
@@ -122,7 +134,8 @@ func cmdCredsStatus() *cobra.Command {
 			return nil
 		},
 	}
-	c.Flags().BoolVar(&jsonOut, "json", false, "emit JSON")
+	c.Flags().BoolVar(&rawJSON, "json", false, "emit legacy raw JSON")
+	c.Flags().StringVar(&output, "output", "", "output format: json")
 	return c
 }
 
@@ -223,11 +236,57 @@ type statusRow struct {
 }
 
 // runCredsStatus lists every link with a value-free probe result + TTL model. Probe failures are
-// captured per-row (never abort the listing).
+// captured per-row (never abort the listing). Its jsonOut mode is the legacy raw `--json` shape;
+// Emacs uses runCredsStatusContract via `--output json`.
 func runCredsStatus(ctx context.Context, accountsPath string, jsonOut bool, ghClient *githubapp.Client, forgejoBase func(string) string) (string, error) {
-	acc, err := userconfig.LoadAccounts(accountsPath)
+	rows, err := credsStatusRows(ctx, accountsPath, ghClient, forgejoBase)
 	if err != nil {
 		return "", err
+	}
+	if jsonOut {
+		bs, _ := json.MarshalIndent(struct {
+			Links []statusRow `json:"links"`
+		}{linksOrEmpty(rows)}, "", "  ")
+		return string(bs) + "\n", nil
+	}
+	if len(rows) == 0 {
+		return "no forge account links (run: safeslop creds link github|forgejo)\n", nil
+	}
+	var b strings.Builder
+	for _, r := range rows {
+		switch r.Forge {
+		case "github":
+			fmt.Fprintf(&b, "github   %s/%s  app=%d inst=%d  probe=%s  ttl=%s\n", r.Host, r.Owner, r.AppID, r.InstallationID, r.Probe, r.TTL)
+		case "forgejo":
+			port := ""
+			if r.SSHPort != 0 {
+				port = fmt.Sprintf(" ssh-port=%d", r.SSHPort)
+			}
+			fmt.Fprintf(&b, "forgejo  %s/%s%s  probe=%s  ttl=%s\n", r.Host, r.Owner, port, r.Probe, r.TTL)
+		}
+	}
+	return b.String(), nil
+}
+
+// runCredsStatusContract emits the shared v1 JSON envelope consumed by Emacs. It deliberately
+// omits secret-bearing refs (privateKeyRef/tokenRef) and exposes only non-secret ids plus probe
+// classes.
+func runCredsStatusContract(ctx context.Context, accountsPath string, ghClient *githubapp.Client, forgejoBase func(string) string) (string, error) {
+	rows, err := credsStatusRows(ctx, accountsPath, ghClient, forgejoBase)
+	if err != nil {
+		return "", err
+	}
+	bs, err := jsoncontract.Marshal(jsoncontract.OK(map[string]any{"links": linksOrEmpty(rows)}))
+	if err != nil {
+		return "", err
+	}
+	return string(bs), nil
+}
+
+func credsStatusRows(ctx context.Context, accountsPath string, ghClient *githubapp.Client, forgejoBase func(string) string) ([]statusRow, error) {
+	acc, err := userconfig.LoadAccounts(accountsPath)
+	if err != nil {
+		return nil, err
 	}
 	keys := make([]string, 0, len(acc.Accounts))
 	for k := range acc.Accounts {
@@ -264,30 +323,14 @@ func runCredsStatus(ctx context.Context, accountsPath string, jsonOut bool, ghCl
 		}
 		rows = append(rows, row)
 	}
+	return rows, nil
+}
 
-	if jsonOut {
-		bs, _ := json.MarshalIndent(struct {
-			Links []statusRow `json:"links"`
-		}{rows}, "", "  ")
-		return string(bs) + "\n", nil
+func linksOrEmpty(rows []statusRow) []statusRow {
+	if rows == nil {
+		return []statusRow{}
 	}
-	if len(rows) == 0 {
-		return "no forge account links (run: safeslop creds link github|forgejo)\n", nil
-	}
-	var b strings.Builder
-	for _, r := range rows {
-		switch r.Forge {
-		case "github":
-			fmt.Fprintf(&b, "github   %s/%s  app=%d inst=%d  probe=%s  ttl=%s\n", r.Host, r.Owner, r.AppID, r.InstallationID, r.Probe, r.TTL)
-		case "forgejo":
-			port := ""
-			if r.SSHPort != 0 {
-				port = fmt.Sprintf(" ssh-port=%d", r.SSHPort)
-			}
-			fmt.Fprintf(&b, "forgejo  %s/%s%s  probe=%s  ttl=%s\n", r.Host, r.Owner, port, r.Probe, r.TTL)
-		}
-	}
-	return b.String(), nil
+	return rows
 }
 
 // probeClass reduces a probe error to a short, value-free class (never secret bytes).

@@ -141,6 +141,76 @@ func TestRunUnlink(t *testing.T) {
 	}
 }
 
+func TestCredsStatusOutputJSONEmitsContractEnvelope(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	out, err := runRootForTest(t, t.TempDir(), "creds", "status", "--output", "json")
+	if err != nil {
+		t.Fatalf("creds status --output json: %v\nout=%s", err, out)
+	}
+	env := parseEnvelopeForTest(t, out)
+	if !env.OK {
+		t.Fatalf("error envelope: %+v", env.Errors)
+	}
+	links, ok := env.Data["links"].([]any)
+	if !ok {
+		t.Fatalf("data.links not an array: %#v", env.Data["links"])
+	}
+	if len(links) != 0 {
+		t.Fatalf("empty account store should emit links: [], got %#v", links)
+	}
+}
+
+func TestRunCredsStatusOutputJSONContractValueFree(t *testing.T) {
+	keyRef := ghKeyRefEnv(t)
+	t.Setenv("TEST_FJ_TOKEN", "fj_secret_value")
+	accPath := filepath.Join(t.TempDir(), "accounts.cue")
+	acc := &userconfig.Accounts{Accounts: map[string]userconfig.Account{}}
+	acc.Upsert(userconfig.Account{Forge: "github", Host: "github.com", Owner: "acme",
+		Github: &userconfig.GithubAccount{AppID: 42, InstallationID: 99, PrivateKeyRef: keyRef}})
+	acc.Upsert(userconfig.Account{Forge: "forgejo", Host: "git.example.org", Owner: "bob",
+		Forgejo: &userconfig.ForgejoAccount{TokenRef: "env:TEST_FJ_TOKEN", SSHPort: 2222}})
+	if err := userconfig.SaveAccounts(accPath, acc); err != nil {
+		t.Fatal(err)
+	}
+
+	ghClient := githubapp.New(fakeGHHTTP{login: "acme"}, "http://x")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer srv.Close()
+	base := func(string) string { return srv.URL }
+
+	out, err := runCredsStatusContract(context.Background(), accPath, ghClient, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := parseEnvelopeForTest(t, out)
+	if !env.OK {
+		t.Fatalf("error envelope: %+v", env.Errors)
+	}
+	links, ok := env.Data["links"].([]any)
+	if !ok || len(links) != 2 {
+		t.Fatalf("links shape wrong: %#v", env.Data["links"])
+	}
+	for _, raw := range links {
+		row := raw.(map[string]any)
+		for _, forbidden := range []string{"privateKeyRef", "tokenRef", "keyRef", "ref", "token", "value"} {
+			if _, ok := row[forbidden]; ok {
+				t.Fatalf("contract leaked secret-bearing field %q in %#v", forbidden, row)
+			}
+		}
+		if row["probe"] != "ok" {
+			t.Fatalf("probe should be ok: %#v", row)
+		}
+	}
+	for _, secret := range []string{"fj_secret_value", "PRIVATE KEY", "BEGIN RSA"} {
+		if strings.Contains(out, secret) {
+			t.Fatalf("status contract leaked %q:\n%s", secret, out)
+		}
+	}
+}
+
 func TestRunCredsStatusValueFree(t *testing.T) {
 	keyRef := ghKeyRefEnv(t)
 	t.Setenv("TEST_FJ_TOKEN", "fj_secret_value")
@@ -184,6 +254,9 @@ func TestRunCredsStatusValueFree(t *testing.T) {
 	}
 	if !strings.Contains(js, `"links"`) || !strings.Contains(js, `"probe": "ok"`) {
 		t.Fatalf("json status shape wrong:\n%s", js)
+	}
+	if strings.Contains(js, "schema_version") {
+		t.Fatalf("legacy --json must stay raw, not the shared envelope:\n%s", js)
 	}
 	if strings.Contains(js, "fj_secret_value") {
 		t.Fatalf("json status leaked the token:\n%s", js)

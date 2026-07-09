@@ -143,6 +143,40 @@ parsed envelope to its callback (the non-blocking substitute for `call-json')."
         (should (equal (safeslop-test--argv-log-lines)
                        (list (safeslop-test--json-key argv))))))))
 
+(ert-deftest safeslop-test-creds-status-output-json-exact-argv-and-empty-links ()
+  "Emacs callers use the shared `creds status --output json' envelope, not raw --json."
+  (let* ((argv '("creds" "status" "--output" "json"))
+         (routes `((,(safeslop-test--json-key argv) .
+                   ((stdout . "{\"schema_version\":1,\"ok\":true,\"data\":{\"links\":[]},\"warnings\":[],\"errors\":[]}")
+                    (exit . 0))))))
+    (safeslop-test--with-fake-cli routes
+      (let ((envelope (safeslop-test--await
+                       (lambda (cb) (safeslop--call-json-async argv cb)))))
+        (should (safeslop-contract-ok-p envelope))
+        (should (equal (safeslop-contract-creds-status-links envelope) nil))
+        (should (equal (safeslop-test--argv-log-lines)
+                       (list (safeslop-test--json-key argv))))))))
+
+(ert-deftest safeslop-test-creds-status-contract-validates-value-free-links ()
+  (let* ((secret "op://vault/fake/private-key")
+         (json (concat "{\"schema_version\":1,\"ok\":true,\"data\":{\"links\":["
+                       "{\"forge\":\"github\",\"host\":\"github.com\",\"owner\":\"acme\","
+                       "\"appID\":123,\"installationID\":456,\"probe\":\"ok\",\"ttl\":\"1h-renewable\"},"
+                       "{\"forge\":\"forgejo\",\"host\":\"forgejo.example.com\",\"owner\":\"bot\","
+                       "\"sshPort\":2222,\"probe\":\"secret-unresolved\",\"ttl\":\"account-wide token\"}"
+                       "]},\"warnings\":[],\"errors\":[]}"))
+         (envelope (safeslop-contract-parse-string json))
+         (links (safeslop-contract-creds-status-links envelope)))
+    (should (= (length links) 2))
+    (should (equal (alist-get 'probe (cadr links)) "secret-unresolved"))
+    (should-not (string-match-p (regexp-quote secret) json))))
+
+(ert-deftest safeslop-test-creds-status-contract-rejects-secret-fields ()
+  (let ((envelope (safeslop-contract-parse-string
+                   "{\"schema_version\":1,\"ok\":true,\"data\":{\"links\":[{\"forge\":\"github\",\"host\":\"github.com\",\"owner\":\"acme\",\"appID\":1,\"installationID\":2,\"probe\":\"ok\",\"ttl\":\"1h-renewable\",\"privateKeyRef\":\"op://vault/fake/private-key\"}]},\"warnings\":[],\"errors\":[]}")))
+    (should-error (safeslop-contract-creds-status-links envelope)
+                  :type 'safeslop-contract-error)))
+
 (ert-deftest safeslop-test-call-json-async-degrades-on-non-json ()
   "Async path degrades like the sync one: non-JSON stdout yields a CLIENT_NON_JSON
 envelope via the callback, never a crash."
