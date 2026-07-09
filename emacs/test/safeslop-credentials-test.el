@@ -87,6 +87,96 @@ one even if a future envelope regressed to carrying it."
   (should (equal (safeslop-credentials--source-cell "" "" "ambient") "(ambient)"))
   (should (equal (safeslop-credentials--source-cell "" "" "missing") "")))
 
+(ert-deftest safeslop-test-credentials-account-section-value-free ()
+  "Linked account status renders non-secret ids/probe classes only."
+  (with-temp-buffer
+    (safeslop-credentials-mode)
+    (setq safeslop-credentials--account-links
+          '(((forge . "github") (host . "github.com") (owner . "acme")
+             (appID . 123) (installationID . 456) (probe . "ok") (ttl . "1h-renewable"))
+            ((forge . "forgejo") (host . "forgejo.example.com") (owner . "bot")
+             (sshPort . 2222) (probe . "secret-unresolved") (ttl . "account-wide token"))))
+    (let ((section (safeslop-credentials--account-section)))
+      (should (string-match-p "github.com/acme" section))
+      (should (string-match-p "app=123" section))
+      (should (string-match-p "forgejo.example.com/bot" section))
+      (should (string-match-p "secret-unresolved" section))
+      (should-not (string-match-p "privateKeyRef\\|tokenRef\\|op://\\|TOKEN_VALUE\\|PRIVATE KEY" section)))))
+
+(ert-deftest safeslop-test-credentials-account-status-failure-keeps-credential-rows ()
+  "A failed account-link status fetch degrades the header, not the credential table."
+  (let ((calls nil))
+    (cl-letf (((symbol-function 'safeslop--call-json-async)
+               (lambda (args callback &optional _stderr)
+                 (push args calls)
+                 (funcall callback
+                          (cond
+                           ((equal args '("creds" "status" "--output" "json"))
+                            (safeslop-contract-parse-string
+                             "{\"schema_version\":1,\"ok\":false,\"data\":{},\"warnings\":[],\"errors\":[{\"code\":\"IO_ERROR\",\"message\":\"status failed\",\"details\":{},\"retryable\":false}]}"))
+                           ((equal args '("creds" "list" "--output" "json"))
+                            (safeslop-contract-parse-string safeslop-test-creds-list-json))
+                           (t (error "unexpected argv: %S" args)))))))
+      (with-temp-buffer
+        (safeslop-credentials-mode)
+        (safeslop-credentials--render)
+        (should (equal (nreverse calls)
+                       '(("creds" "status" "--output" "json")
+                         ("creds" "list" "--output" "json"))))
+        (should (= (length tabulated-list-entries) 4))
+        (should safeslop-credentials--account-status-error)
+        (should (string-match-p "account links: unavailable" (buffer-string)))))))
+
+(ert-deftest safeslop-test-credentials-link-account-github-argv ()
+  "The account-link action shells out with refs/ids only, never key material."
+  (let (captured refreshed shown)
+    (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "github"))
+              ((symbol-function 'read-string)
+               (let ((answers '("github.com" "op://vault/app/private-key")))
+                 (lambda (&rest _)
+                   (pop answers))))
+              ((symbol-function 'read-number)
+               (let ((answers '(123 456)))
+                 (lambda (&rest _)
+                   (pop answers))))
+              ((symbol-function 'safeslop-credentials--call-raw-async)
+               (lambda (args callback)
+                 (setq captured args)
+                 (funcall callback (safeslop-contract-parse-string
+                                    "{\"schema_version\":1,\"ok\":true,\"data\":{\"message\":\"linked\"},\"warnings\":[],\"errors\":[]}"))))
+              ((symbol-function 'safeslop--show-envelope-buffer)
+               (lambda (_name _args env) (setq shown env)))
+              ((symbol-function 'safeslop-credentials-refresh)
+               (lambda () (setq refreshed t))))
+      (safeslop-credentials-link-account))
+    (should (equal captured '("creds" "link" "github" "--host" "github.com"
+                              "--app-id" "123" "--installation-id" "456"
+                              "--key-ref" "op://vault/app/private-key")))
+    (should (safeslop-contract-ok-p shown))
+    (should refreshed)
+    (should-not (member "PRIVATE KEY" captured))))
+
+(ert-deftest safeslop-test-credentials-unlink-account-argv ()
+  "The unlink action chooses host/owner from value-free status rows and refreshes."
+  (let (captured refreshed)
+    (with-temp-buffer
+      (safeslop-credentials-mode)
+      (setq safeslop-credentials--account-links
+            '(((forge . "github") (host . "github.com") (owner . "acme")
+               (appID . 123) (installationID . 456) (probe . "ok") (ttl . "1h-renewable"))))
+      (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "github.com/acme"))
+                ((symbol-function 'yes-or-no-p) (lambda (&rest _) t))
+                ((symbol-function 'safeslop-credentials--call-raw-async)
+                 (lambda (args callback)
+                   (setq captured args)
+                   (funcall callback (safeslop-contract-parse-string
+                                      "{\"schema_version\":1,\"ok\":true,\"data\":{\"message\":\"unlinked\"},\"warnings\":[],\"errors\":[]}"))))
+                ((symbol-function 'safeslop--show-envelope-buffer) (lambda (&rest _) nil))
+                ((symbol-function 'safeslop-credentials-refresh) (lambda () (setq refreshed t))))
+        (safeslop-credentials-unlink-account)))
+    (should (equal captured '("creds" "unlink" "github.com/acme")))
+    (should refreshed)))
+
 (ert-deftest safeslop-test-credentials-op-legend ()
   "The op legend names each 1Password state, faced, and stays value-free."
   (should (string-match-p "signed in"
@@ -114,6 +204,8 @@ one even if a future envelope regressed to carrying it."
   (should (eq (lookup-key safeslop-credentials-mode-map (kbd "i")) #'safeslop-credentials-inspect))
   (should (eq (lookup-key safeslop-credentials-mode-map (kbd "e")) #'safeslop-credentials-edit))
   (should (eq (lookup-key safeslop-credentials-mode-map (kbd "g")) #'safeslop-credentials-refresh))
+  (should (eq (lookup-key safeslop-credentials-mode-map (kbd "a")) #'safeslop-credentials-link-account))
+  (should (eq (lookup-key safeslop-credentials-mode-map (kbd "u")) #'safeslop-credentials-unlink-account))
   ;; read-only surface: no launch/create/delete affordances
   (should-not (lookup-key safeslop-credentials-mode-map (kbd "r")))
   (should-not (lookup-key safeslop-credentials-mode-map (kbd "c")))

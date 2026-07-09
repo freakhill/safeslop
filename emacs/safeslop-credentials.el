@@ -56,6 +56,12 @@ The edit key acts on this file; nil until a config is found.")
 Set by the fetch so the header can explain op-signed-out/op-unavailable statuses
 without re-probing; nil before the first fetch returns.")
 
+(defvar-local safeslop-credentials--account-links nil
+  "Value-free account-link rows from `creds status --output json'.")
+
+(defvar-local safeslop-credentials--account-status-error nil
+  "Last value-free account-link status fetch error, or nil when status is fresh.")
+
 ;;; ---- status faces + honest meaning ---------------------------------------
 ;; Colour reinforces the always-present status word (specs/0031): the label is
 ;; the signal, the face is redundant emphasis.
@@ -165,18 +171,62 @@ When OP is nil (before the first fetch) a neutral checking hint is shown."
                  'help-echo "op:// refs can be resolved"))
     (t (propertize "not signed in" 'face 'safeslop-cred-attention
                    'help-echo "run `op signin`, then refresh, to resolve op:// refs")))
-   "\n\n"))
+   "\n"))
+
+(defun safeslop-credentials--account-probe-cell (probe)
+  "Return PROBE faced as a value-free account-link status cell."
+  (propertize (or probe "")
+              'face (if (equal probe "ok") 'safeslop-cred-ready 'safeslop-cred-attention)))
+
+(defun safeslop-credentials--account-key (link)
+  "Return the stable host/owner account key for LINK."
+  (format "%s/%s" (or (alist-get 'host link) "") (or (alist-get 'owner link) "")))
+
+(defun safeslop-credentials--account-line (link)
+  "Return one value-free account-link status line for LINK."
+  (let ((forge (or (alist-get 'forge link) ""))
+        (key (safeslop-credentials--account-key link))
+        (probe (safeslop-credentials--account-probe-cell (alist-get 'probe link)))
+        (ttl (or (alist-get 'ttl link) "")))
+    (pcase forge
+      ("github"
+       (format "  github  %s  app=%s inst=%s  probe=%s  ttl=%s\n"
+               key (alist-get 'appID link) (alist-get 'installationID link) probe ttl))
+      ("forgejo"
+       (let ((port (alist-get 'sshPort link)))
+         (format "  forgejo %s%s  probe=%s  ttl=%s\n"
+                 key (if port (format " ssh-port=%s" port) "") probe ttl)))
+      (_ (format "  %s  %s  probe=%s  ttl=%s\n" forge key probe ttl)))))
+
+(defun safeslop-credentials--account-section ()
+  "Return the value-free linked-account status section for the header."
+  (cond
+   (safeslop-credentials--account-status-error
+    (concat "account links: unavailable — "
+            (propertize safeslop-credentials--account-status-error 'face 'safeslop-cred-attention)
+            "\n\n"))
+   (safeslop-credentials--account-links
+    (concat "account links:\n"
+            (mapconcat #'safeslop-credentials--account-line
+                       safeslop-credentials--account-links "")
+            "\n"))
+   (t
+    (concat "account links: none — "
+            (propertize "a" 'face 'help-key-binding) " link account, "
+            (propertize "u" 'face 'help-key-binding) " unlink\n\n"))))
 
 (defconst safeslop-credentials--key-hints
-  '(("RET" . "inspect") ("e" . "edit") ("g" . "refresh")
+  '(("RET" . "inspect") ("a" . "link account") ("u" . "unlink account")
+    ("e" . "edit") ("g" . "refresh")
     ("d" . "doctor") ("E" . "error") ("L" . "debug") ("?" . "help") ("q" . "quit"))
   "Key/action pairs shown in the credentials surface's in-buffer legend.")
 
 (defun safeslop-credentials--header ()
-  "Return the credentials header block: tab strip, status + op legends, shortcuts."
+  "Return the credentials header block: tab strip, status + op/account legends, shortcuts."
   (concat (safeslop-surface--tab-strip 'credentials)
           (safeslop-credentials--status-legend)
           (safeslop-credentials--op-legend safeslop-credentials--op)
+          (safeslop-credentials--account-section)
           (safeslop-surface--legend safeslop-credentials--key-hints)))
 
 (defun safeslop-credentials--empty-state (&optional config-path)
@@ -195,12 +245,24 @@ When OP is nil (before the first fetch) a neutral checking hint is shown."
 
 ;;; ---- render --------------------------------------------------------------
 
-(defun safeslop-credentials--render (&optional keep-point then)
-  "Fetch `creds list' and redraw the current surface buffer in place.
-Thin wrapper over the shared `safeslop-surface-render' engine (async, never
-freezes Emacs): contributes the argv, the row builder (which also records the
-backing safeslop.cue path and op state for the header/edit), the header, and the
-empty state.  KEEP-POINT/THEN are the engine's."
+(defun safeslop-credentials--record-account-status (envelope)
+  "Record account-link status ENVELOPE for the next header render.
+Failures are deliberately localized to the account-link section; they must not
+hide the existing `creds list' rows."
+  (condition-case err
+      (if (safeslop-contract-ok-p envelope)
+          (setq safeslop-credentials--account-links
+                (safeslop-contract-creds-status-links envelope)
+                safeslop-credentials--account-status-error nil)
+        (setq safeslop-credentials--account-links nil
+              safeslop-credentials--account-status-error
+              (safeslop-surface--error-message envelope "creds status failed")))
+    (error
+     (setq safeslop-credentials--account-links nil
+           safeslop-credentials--account-status-error (error-message-string err)))))
+
+(defun safeslop-credentials--render-list (&optional keep-point then)
+  "Fetch `creds list' and redraw the current surface buffer in place."
   (safeslop-surface-render
    :argv '("creds" "list" "--output" "json")
    :label "creds list"
@@ -218,6 +280,20 @@ empty state.  KEEP-POINT/THEN are the engine's."
                    nil))
    :keep-point keep-point
    :then then))
+
+(defun safeslop-credentials--render (&optional keep-point then)
+  "Fetch account links and `creds list', then redraw the surface.
+The account-link fetch is best-effort and value-free (`creds status --output
+json'); a failure degrades only the account-link section and still proceeds to
+the credential posture table.  KEEP-POINT/THEN are the surface engine's."
+  (let ((buf (current-buffer)))
+    (safeslop--call-json-async
+     '("creds" "status" "--output" "json")
+     (lambda (envelope)
+       (when (buffer-live-p buf)
+         (with-current-buffer buf
+           (safeslop-credentials--record-account-status envelope)
+           (safeslop-credentials--render-list keep-point then)))))))
 
 (defun safeslop-credentials-refresh ()
   "Re-fetch the credential posture (re-probing readiness), keeping point on its row."
@@ -394,6 +470,140 @@ value stays in 1Password or the environment, never in the config or this UI."
       (message "Editing %s — saves re-validate; `C-c s K' returns to the credentials list"
                path))))
 
+;;; ---- account link/unlink actions ----------------------------------------
+
+(defun safeslop-credentials--raw-ok-envelope (stdout)
+  "Build a small ok envelope around raw command STDOUT."
+  (list (cons 'schema_version safeslop-contract-schema-version)
+        (cons 'ok t)
+        (cons 'data (list (cons 'message (string-trim (or stdout "")))))
+        (cons 'warnings nil)
+        (cons 'errors nil)))
+
+(defun safeslop-credentials--raw-error-envelope (message)
+  "Build a small error envelope for raw command MESSAGE."
+  (list (cons 'schema_version safeslop-contract-schema-version)
+        (cons 'ok :json-false)
+        (cons 'data nil)
+        (cons 'warnings nil)
+        (cons 'errors (list (list (cons 'code "IO_ERROR")
+                                  (cons 'message message)
+                                  (cons 'details nil)
+                                  (cons 'retryable :json-false))))))
+
+(defun safeslop-credentials--call-raw-async (args callback)
+  "Run safeslop ARGS asynchronously and wrap raw stdout into a result envelope.
+Used for existing `creds link|unlink' verbs, whose CLI output is human text.
+ARGS are passed as argv (no shell) and contain refs/ids only, never secret
+values.  CALLBACK receives a contract-shaped envelope."
+  (safeslop--debug :event 'call :argv (string-join args " "))
+  (let* ((out-buf (generate-new-buffer " *safeslop-creds-raw*"))
+         (err-buf (generate-new-buffer " *safeslop-creds-raw-stderr*")))
+    (condition-case err
+        (let ((proc
+               (make-process
+                :name "safeslop-creds-raw"
+                :buffer out-buf
+                :command (cons safeslop-program args)
+                :connection-type 'pipe
+                :noquery t
+                :stderr err-buf
+                :sentinel
+                (lambda (proc _event)
+                  (unless (process-live-p proc)
+                    (let* ((status (process-exit-status proc))
+                           (stdout (when (buffer-live-p out-buf)
+                                     (with-current-buffer out-buf (buffer-string))))
+                           (stderr (when (buffer-live-p err-buf)
+                                     (with-current-buffer err-buf (string-trim (buffer-string))))))
+                      (when (buffer-live-p out-buf) (kill-buffer out-buf))
+                      (when (buffer-live-p err-buf) (kill-buffer err-buf))
+                      (funcall callback
+                               (if (equal status 0)
+                                   (safeslop-credentials--raw-ok-envelope stdout)
+                                 (safeslop-credentials--raw-error-envelope
+                                  (if (and stderr (not (string-empty-p stderr)))
+                                      stderr
+                                    (format "safeslop exited with status %s" status)))))))))))
+          (set-process-query-on-exit-flag proc nil)
+          proc)
+      (error
+       (when (buffer-live-p out-buf) (kill-buffer out-buf))
+       (when (buffer-live-p err-buf) (kill-buffer err-buf))
+       (funcall callback (safeslop-credentials--raw-error-envelope (error-message-string err)))
+       nil))))
+
+(defun safeslop-credentials--nonempty-read-string (prompt &optional default)
+  "Read a non-empty string with PROMPT and optional DEFAULT."
+  (let ((value (read-string prompt nil nil default)))
+    (when (string-empty-p value)
+      (user-error "%s is required" (string-trim-right prompt "[: ]+")))
+    value))
+
+(defun safeslop-credentials--link-github-args (host app-id installation-id key-ref)
+  "Return exact argv for linking a GitHub App account."
+  (list "creds" "link" "github"
+        "--host" host
+        "--app-id" (number-to-string app-id)
+        "--installation-id" (number-to-string installation-id)
+        "--key-ref" key-ref))
+
+(defun safeslop-credentials--link-forgejo-args (host owner token-ref ssh-port)
+  "Return exact argv for linking a Forgejo account."
+  (append (list "creds" "link" "forgejo"
+                "--host" host
+                "--owner" owner
+                "--token-ref" token-ref)
+          (when (and ssh-port (not (string-empty-p ssh-port)))
+            (list "--ssh-port" ssh-port))))
+
+(defun safeslop-credentials--run-account-mutation (buffer-name args)
+  "Run mutating account ARGS, show a result buffer, and refresh this surface on ok."
+  (let ((source (current-buffer)))
+    (safeslop-credentials--call-raw-async
+     args
+     (lambda (env)
+       (when (safeslop-contract-ok-p env)
+         (if (and (buffer-live-p source)
+                  (with-current-buffer source (derived-mode-p 'safeslop-credentials-mode)))
+             (with-current-buffer source (safeslop-credentials-refresh))
+           (safeslop-credentials-refresh)))
+       (safeslop--show-envelope-buffer buffer-name args env)))))
+
+(defun safeslop-credentials-link-account ()
+  "Prompt for non-secret forge link refs/ids and run `safeslop creds link'."
+  (interactive)
+  (let ((provider (completing-read "Link account provider: " '("github" "forgejo") nil t)))
+    (pcase provider
+      ("github"
+       (let* ((host (safeslop-credentials--nonempty-read-string "GitHub host: " "github.com"))
+              (app-id (read-number "GitHub App id: "))
+              (installation-id (read-number "GitHub installation id: "))
+              (key-ref (safeslop-credentials--nonempty-read-string "App private key ref (op:// or env:): "))
+              (args (safeslop-credentials--link-github-args host app-id installation-id key-ref)))
+         (safeslop-credentials--run-account-mutation "*safeslop creds link*" args)))
+      ("forgejo"
+       (let* ((host (safeslop-credentials--nonempty-read-string "Forgejo host: "))
+              (owner (safeslop-credentials--nonempty-read-string "Forgejo owner/login: "))
+              (token-ref (safeslop-credentials--nonempty-read-string "Forgejo token ref (op:// or env:): "))
+              (ssh-port (read-string "Forgejo SSH port (blank for default): "))
+              (args (safeslop-credentials--link-forgejo-args host owner token-ref ssh-port)))
+         (safeslop-credentials--run-account-mutation "*safeslop creds link*" args)))
+      (_ (user-error "Unknown provider %s" provider)))))
+
+(defun safeslop-credentials-unlink-account ()
+  "Choose a linked account and run `safeslop creds unlink'."
+  (interactive)
+  (unless safeslop-credentials--account-links
+    (user-error "No account links are loaded; press `a' to link one or `g' to refresh"))
+  (let* ((keys (delete-dups (mapcar #'safeslop-credentials--account-key
+                                    safeslop-credentials--account-links)))
+         (key (completing-read "Unlink account: " keys nil t)))
+    (when (yes-or-no-p (format "Unlink %s? " key))
+      (safeslop-credentials--run-account-mutation
+       "*safeslop creds unlink*"
+       (list "creds" "unlink" key)))))
+
 ;;; ---- mode + entry --------------------------------------------------------
 
 (defvar safeslop-credentials-mode-map
@@ -402,6 +612,8 @@ value stays in 1Password or the environment, never in the config or this UI."
     (define-key map (kbd "i")   #'safeslop-credentials-inspect)
     (define-key map (kbd "e")   #'safeslop-credentials-edit)
     (define-key map (kbd "g")   #'safeslop-credentials-refresh)
+    (define-key map (kbd "a")   #'safeslop-credentials-link-account)
+    (define-key map (kbd "u")   #'safeslop-credentials-unlink-account)
     (set-keymap-parent map safeslop-surface-mode-map)
     map)
   "Keymap for `safeslop-credentials-mode'.")

@@ -114,7 +114,7 @@ Extend `C-c s K` / `safeslop-credentials`:
   VERIFY:   `go test ./internal/cli -run 'ProfileCredentials|CredentialScopes' -v`
   EXPECTED: command exits 0; tests cover github origin inference, github explicit ro/rw repos, forgejo explicit repos requiring URL, clear preserving pnpm/aws/gcp/kube/secrets, one-forge clearing, duplicate/conflict failures, and no secret/ref values in `credential_scopes`.
 
-- [ ] T3 — Surface account links in Emacs Credentials
+- [x] T3 — Surface account links in Emacs Credentials
   FILE:     `emacs/safeslop-credentials.el`, `emacs/test/safeslop-credentials-test.el`, `emacs/test/safeslop-test.el`
   CHANGE:   Fetch `creds status --output json` alongside `creds list --output json` and render a value-free account-link section/header. Add `a` account-link and `u` unlink actions that call the existing CLI verbs with refs/ids only, show result envelopes, and refresh in place.
   VERIFY:   `emacs --batch -L emacs -l ert -l emacs/test/safeslop-test.el -l emacs/test/safeslop-contract-test.el -l emacs/test/safeslop-profiles-test.el -l emacs/test/safeslop-credentials-test.el --eval '(ert-run-tests-batch-and-exit "safeslop-test-credentials-.*\\(account\\|link\\|unlink\\)")'`
