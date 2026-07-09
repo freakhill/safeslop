@@ -108,7 +108,7 @@ Extend `C-c s K` / `safeslop-credentials`:
   VERIFY:   `go test ./internal/cli -run 'Creds(Status|Link|Unlink)' -v && emacs --batch -L emacs -l ert -l emacs/test/safeslop-contract-test.el --eval '(ert-run-tests-batch-and-exit "safeslop-test-.*creds.*status")'`
   EXPECTED: command exits 0; JSON contract tests show `links: []` when empty, probe failures are per-row, and a fake token/key string never appears in output.
 
-- [ ] T2 — Add profile forge-credential mutation CLI
+- [x] T2 — Add profile forge-credential mutation CLI
   FILE:     `internal/cli/cli.go` or `internal/cli/profile_credentials.go`, `internal/cli/*profile*test.go`, `internal/engine/policy/policy.go` if pure helpers are needed
   CHANGE:   Add `safeslop profile credentials set|clear` with the contract above. Implement pure repo parsing/merge helpers; preserve all unrelated profile fields; enforce one forge per profile; reject malformed/duplicate/conflicting repos before rendering CUE; return an enveloped updated profile plus `credential_scopes`.
   VERIFY:   `go test ./internal/cli -run 'ProfileCredentials|CredentialScopes' -v`

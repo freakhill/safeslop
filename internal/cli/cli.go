@@ -1991,7 +1991,7 @@ func credRowsOrEmpty(rows []creds.CredRow) []creds.CredRow {
 
 func cmdProfile() *cobra.Command {
 	c := &cobra.Command{Use: "profile", Short: "Inspect and author safeslop.cue profiles"}
-	c.AddCommand(cmdProfileList(), cmdProfilePresets(), cmdProfileShow(), cmdProfileCreate())
+	c.AddCommand(cmdProfileList(), cmdProfilePresets(), cmdProfileShow(), cmdProfileCreate(), cmdProfileCredentials())
 	return c
 }
 
