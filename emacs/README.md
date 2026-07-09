@@ -29,16 +29,16 @@ scroll/cursor preservation from specs/0061 lives in exactly one place:
 
 ## Operator UI navigation
 
-The Emacs package is a small operator UI with two surfaces: **Sessions** (`P`)
-and **Profiles** (`F`).  The tab strip at the top of every
+The Emacs package is a small operator UI with three surfaces: **Sessions** (`P`),
+**Profiles** (`F`), and **Credentials** (`K`).  The tab strip at the top of every
 surface shows each surface's direct switch key next to its name
-(`P Sessions │ F Profiles   TAB/[] cycle surface`), and every label
+(`P Sessions │ F Profiles │ K Credentials   TAB/[] cycle surface`), and every label
 and key in the strip is clickable with the mouse — so switching surface is never a
 guess.  In any operator UI surface and most result buffers, the shared keys are:
 
 | key | action |
 |---|---|
-| `P` / `F` | switch directly to Sessions / Profiles |
+| `P` / `F` / `K` | switch directly to Sessions / Profiles / Credentials |
 | `TAB` / `S-TAB` | cycle next / previous surface |
 | `[` / `]` | cycle previous / next surface |
 | `g` (Evil: `gr`) | refresh this view (result buffers rerun read-only commands; detail/inspect views re-render faced, never a raw dump) |
@@ -148,6 +148,31 @@ The intended flow is profile → inspect → launch → portal.  Inspect buffers
 longer dead ends: `r`, `e`, and `C` act from the detail view too; `g` (Evil:
 `gr`) re-fetches and re-renders the faced view, and `RET` returns to the list.
 
+## Credentials
+
+`M-x safeslop-credentials` (`C-c s K`) opens the **Credentials** surface. It
+combines declared credential posture (`creds list --output json`) with
+value-free account-link status (`creds status --output json`): account rows show
+only forge, host/owner, non-secret GitHub App ids or Forgejo SSH port, probe
+class, and TTL model — never token/key refs or values.
+
+| key | action |
+|---|---|
+| `RET` / `i` | inspect one profile's credential posture (`creds show`) |
+| `a` | link a GitHub App or Forgejo account; prompts collect refs/ids only |
+| `u` | unlink a linked account (`host/owner`) |
+| `p` | repo picker: choose profile/provider, origin inference or explicit `owner/repo` rows, and read/write scope |
+| `e` | edit the CUE block directly |
+| `g` | refresh account status and credential readiness |
+
+The repo picker writes through `safeslop profile credentials set|clear --output
+json`; Emacs does not rewrite CUE itself. It preserves non-forge credential
+providers and clears only the opposite forge because staging currently supports
+one forge per profile. live repo discovery is deliberately deferred: GitHub
+discovery would require a minted installation token and Forgejo discovery
+would use the account-wide token, so this slice accepts origin inference and
+manual `owner/repo` entries only.
+
 ## Debug buffer
 
 `M-x safeslop-debug-log` (`C-c s L`) opens `*safeslop debug*`, a redacted client
@@ -198,4 +223,5 @@ alias for the canonical `claude` engine agent.
 Under Evil, dashboard keys follow evil-collection convention (specs/0063):
 `j`/`k`, `gg`/`G`, `/`+`n`, `f`, and `a` stay pure motions/searches; refresh is
 `gr`, and the portal auto-refresh toggle is `ga`.  The raw (non-Evil) keymaps
-keep `g` refresh and `a` auto-toggle.
+keep single-key actions such as `g` refresh, portal `a` auto-toggle, and
+Credentials `a` account-link.

@@ -17,19 +17,21 @@
 ;; right now.  This serves safeslop's north star: work safely with ephemeral
 ;; credentials and limited network/file access.
 ;;
-;; Security posture (specs/0067): the surface is read + status + jump-to-edit; it
-;; NEVER handles or shows a secret value.  The Status column comes from a
-;; value-free probe in the engine (the resolved value is discarded); the Source
-;; column shows the op://.../env:NAME *ref*, which is not a secret.  Authoring
-;; stays CUE-canonical (specs/0029), mirroring the Profiles surface: `e' opens
-;; safeslop.cue anchored at the profile's credentials block and validates on save.
-;; There is no in-UI mint/revoke — ephemeral deploy keys live and die with a
-;; session, owned by `run'/`session', not this view.
+;; Security posture (specs/0067/0090): the surface NEVER handles or shows a
+;; secret value.  The Status column comes from a value-free probe in the engine
+;; (the resolved value is discarded); the Source column shows op://.../env:NAME
+;; *refs*, which are not values.  Account-link rows expose non-secret ids/probe
+;; classes only.  Profile repo-scope writes go through the CLI-owned
+;; `profile credentials set|clear' contract rather than ad-hoc Emacs CUE edits;
+;; `e' still opens safeslop.cue for manual ref editing.  There is no in-UI mint
+;; or standalone revoke — ephemeral deploy keys live and die with `run'/`session'.
 ;;
 ;; Ergonomics mirror the Profiles surface:
 ;;   - RET / i  inspect: a read-only per-profile detail view (`creds show').
+;;   - a / u    link or unlink host account refs/ids.
+;;   - p        pick GitHub/Forgejo repos/scopes via the CLI mutation contract.
 ;;   - e        edit: open the CUE file at the profile's credentials block.
-;;   - g        refresh: re-fetch, which re-probes readiness.
+;;   - g        refresh: re-fetch account status and readiness.
 ;;   All slow calls are async (specs/0052 #7) through the shared surface engine.
 
 ;;; Code:

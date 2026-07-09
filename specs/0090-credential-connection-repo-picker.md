@@ -1,6 +1,6 @@
 # 0090 — Credential connection + repository picker
 
-Status: planned
+Status: implemented
 Date: 2026-07-09
 Follows: `specs/0087-product-activation.md` track 2; builds on `specs/0067-emacs-credentials-ui.md`, `specs/0068-forge-account-ephemeral-creds-flo.md`, and `specs/0069-forge-account-creds-p1.md`.
 
@@ -126,7 +126,7 @@ Extend `C-c s K` / `safeslop-credentials`:
   VERIFY:   `emacs --batch -L emacs -l ert -l emacs/test/safeslop-test.el -l emacs/test/safeslop-contract-test.el -l emacs/test/safeslop-profiles-test.el -l emacs/test/safeslop-credentials-test.el --eval '(ert-run-tests-batch-and-exit "safeslop-test-credentials-.*\\(repo\\|picker\\|profile-credentials\\)")'`
   EXPECTED: command exits 0; tests prove exact argv for github/forgejo/origin/ro/rw cases, confirmation highlights write repos, cancellation aborts before CLI, and saved profiles refresh without popping an unrelated buffer.
 
-- [ ] T5 — Docs and skills sync
+- [x] T5 — Docs and skills sync
   FILE:     `README.md`, `emacs/README.md`, `skills/agent-key-lifecycle/SKILL.md`, `skills/agent-sandbox-ops/SKILL.md`, `specs/0087-product-activation.md`, `specs/0090-credential-connection-repo-picker.md`
   CHANGE:   Document account-link UI, `creds status --output json`, `profile credentials set|clear`, repo picker limitations, and the deliberate deferral of live forge repo discovery. Mark only this 0090 implementation complete after verification.
   VERIFY:   `rg -n 'profile credentials|creds status --output json|repo picker|GitHub App|Forgejo|account link|live repo discovery|0090' README.md emacs/README.md skills/agent-key-lifecycle/SKILL.md skills/agent-sandbox-ops/SKILL.md specs/0087-product-activation.md specs/0090-credential-connection-repo-picker.md`

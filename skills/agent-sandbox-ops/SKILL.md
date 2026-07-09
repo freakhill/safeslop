@@ -28,7 +28,10 @@ file transfer between host and sandboxed runtimes.
 - `safeslop bundle add|remove <name> <pkg>...` — mutate bundle membership, re-validating references.
 - `safeslop bundle list --output json` — list curated bundles.
 - `safeslop profile create --name N --agent A --environment E [--bundle B] [--package P] --output json` — create or update a `safeslop.cue` profile.
+- `safeslop profile credentials set <profile> [safeslop.cue] --provider github|forgejo [--use-origin] [--repo owner/name] [--write-repo owner/name] --output json` — engine-owned CUE mutation for GitHub/Forgejo repo scopes; preserves other credential providers/secrets and clears only the opposite forge.
+- `safeslop profile credentials clear <profile> [safeslop.cue] --output json` — remove only `credentials.github`/`credentials.forgejo`, deleting the `credentials` object if it becomes empty.
 - `safeslop creds list|show [<profile>] --output json` — inspect the credential posture of `safeslop.cue` profiles (declared creds + value-free readiness status); read-only, never reveals secret values.
+- `safeslop creds link|unlink|status` — manage host-only account links in `~/.config/safeslop/accounts.cue` (refs + non-secret ids only); `creds status --output json` is the Emacs account-link status envelope.
 - `safeslop profile show <name> --output json` — inspect a profile with resolved package set and dry-run image recipe.
 - `safeslop lock [profile] --output json` — write repo-root `safeslop.lock.json` for the selected profile's recipe identity.
 - `safeslop trust` — approve a policy's exact bytes for launch. Required by every launch lane: `safeslop run <profile>`, `session create --profile`, and the Emacs client all share this gate (specs/0072); an untrusted or changed `safeslop.cue` is refused with a `TRUST_REQUIRED` envelope.
@@ -99,10 +102,14 @@ In Emacs, `C-c s F` opens the Profiles surface. Use `RET`/`i` to inspect a
 profile's resolved packages/egress/recipe, `x` to launch a session from the row
 after an isolation/network summary, `e` to edit the CUE at that profile's block,
 `n` to create, `c` to clone, `D` for guided manual deletion, and `g` to refresh.
+`C-c s K` opens the Credentials surface: `a` links GitHub App / Forgejo accounts
+using refs/ids only, `u` unlinks, and `p` opens the repo picker that writes
+through `profile credentials set` (origin inference or manual `owner/repo` rows;
+live repo discovery is deferred).
 
 `C-c s P` opens the Sessions portal. The tab strip shows each surface's direct
-switch key (`P` Sessions, `F` Profiles); `TAB`/`S-TAB` or `[`/`]`
-cycle between them, and the strip is mouse-clickable. Portal rows include a
+switch key (`P` Sessions, `F` Profiles, `K` Credentials); `TAB`/`S-TAB` or
+`[`/`]` cycle between them, and the strip is mouse-clickable. Portal rows include a
 value-free `Creds` column sourced from `credential_scopes`, showing only credential
 kind, non-secret target, and access/scope. Portal row keys: `RET`/`o`
 state-aware open, `R` reattach, `i` details, `k` stop/revoke, `x` remove one

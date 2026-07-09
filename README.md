@@ -76,6 +76,10 @@ safeslop bundle list --output json               curated bundles for UIs
 safeslop profile list|presets --output json       profiles + preset library as the JSON contract
 safeslop profile create --name N --agent A --environment E [--bundle B] [--package P] --output json
 safeslop profile show <name> --output json         profile + resolved packages + image recipe
+safeslop profile credentials set <profile> [safeslop.cue] --provider <github|forgejo> [--use-origin|--repo owner/name ...] [--write-repo owner/name ...] --output json
+safeslop profile credentials clear <profile> [safeslop.cue] --output json
+safeslop creds link|unlink|status                 manage value-free forge account links
+safeslop creds status --output json               account-link status envelope for UIs
 safeslop lock [profile] --output json              write repo-root safeslop.lock.json
 safeslop trust [safeslop.cue]       approve this policy's exact bytes
 safeslop untrust [safeslop.cue]     remove approval so launches must be re-trusted
@@ -456,7 +460,9 @@ decay-first safety guarantee.
 - Account links live in `~/.config/safeslop/accounts.cue` (0600, host-only): they
   hold non-secret ids + secret *refs* only, never a token or key value, and are
   never serialized into a container or stage dir. Manage them with `safeslop creds
-  link|unlink|status`.
+  link|unlink|status`; UI clients use `safeslop creds status --output json`, whose
+  `data.links` rows expose only forge, host, owner, non-secret ids, value-free
+  probe class, SSH port, and TTL model.
 - When github creds are staged on a `network: "deny"` profile, the egress
   allowlist gains `github.com`, `codeload.github.com`, and
   `objects.githubusercontent.com` (clone + LFS). `api.github.com` is not added in
@@ -470,16 +476,26 @@ and credential with its **source ref** (`op://…`/`env:NAME` — a reference, n
 value), whether it is **ephemeral** (a deploy key minted per session and wiped on
 exit) or **ref-backed**, and — for the ref-backed ones — a value-free **readiness
 status**: `resolvable`, `missing`, `op-signed-out`, `op-unavailable`, `ephemeral`,
-or `ambient` (host SSO/ADC). `RET`/`i` inspect a profile's credentials, `e` opens
-the `safeslop.cue` credentials block (authoring stays CUE-canonical — you edit
-refs, not values), and `g` re-probes.
+or `ambient` (host SSO/ADC). The header also shows linked GitHub App / Forgejo
+account links from `creds status --output json` without token/key refs or values.
+Keys: `RET`/`i` inspect, `a` link a GitHub App or Forgejo account using refs/ids
+only, `u` unlink an account, `p` open the repo picker, `e` opens the
+`safeslop.cue` credentials block, and `g` re-probes.
 
-The surface is backed by `safeslop creds list [safeslop.cue] --output json` and
-`safeslop creds show <profile> --output json`. The readiness probe resolves each
-ref only to keep the pass/fail result and **discards the value**, so no secret is
-ever read into the UI or the envelope. There is no in-UI mint/revoke — ephemeral
-keys live and die with a session (`run`/`session`), so the surface is read +
-status + jump-to-edit, never a secret vault.
+The surface is backed by `safeslop creds list [safeslop.cue] --output json`,
+`safeslop creds show <profile> --output json`, `safeslop creds status --output
+json`, and `safeslop profile credentials set|clear ... --output json` for
+structured profile credential mutation. The repo picker can choose origin
+inference or manually entered `owner/repo` rows with read/write access and writes
+`credentials.github` or `credentials.forgejo` while preserving other credential
+providers; setting one forge clears the other. live repo discovery is
+deliberately deferred: GitHub listing would require an installation token and
+Forgejo listing would use an account-wide token outside this slice's
+session-owned lifecycle. The readiness probe resolves each ref only to keep the
+pass/fail result and **discards the value**, so no secret is ever read into the UI
+or the envelope. There is no in-UI mint/revoke — ephemeral keys live and die with
+a session (`run`/`session`), so the surface is account linking + repo scope
+selection, not a secret vault.
 
 ## Development
 

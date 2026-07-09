@@ -54,7 +54,7 @@ After `specs/0086` and local install, safeslop is safer and more legible but sti
 ## Status
 
 - [x] 0088 host trust + runtime preflight UI implemented.
-- [x] Credential connection + repo picker spec written (`specs/0090-credential-connection-repo-picker.md`).
+- [x] Credential connection + repo picker implemented (`specs/0090-credential-connection-repo-picker.md`): account-link status/UI, `profile credentials set|clear`, and manual repo picker shipped; live repo discovery remains deferred.
 - [ ] Profile authoring cockpit spec written.
 - [x] Network authority ayo-flo decision landed (`specs/0089-network-authority-ayo-flo.md`).
 - [ ] Session safety chrome spec written.
