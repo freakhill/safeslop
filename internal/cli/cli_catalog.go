@@ -65,7 +65,7 @@ func cmdCatalogList() *cobra.Command {
 			}
 			cat := policy.DefaultCatalog()
 			if bundles {
-				emitContract(jsoncontract.OK(map[string]any{"bundles": cat.Bundles()}))
+				emitContract(jsoncontract.OK(map[string]any{"bundles": cat.Bundles(), "defaults": cat.Defaults()}))
 				return nil
 			}
 			emitContract(jsoncontract.OK(map[string]any{"packages": cat.Packages()}))

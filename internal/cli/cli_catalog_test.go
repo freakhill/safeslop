@@ -92,6 +92,13 @@ func TestCatalogListBundlesEnvelope(t *testing.T) {
 			t.Fatalf("missing bundle %q in catalog list --bundles: %v", want, seen)
 		}
 	}
+	defaults, ok := env.Data["defaults"].(map[string]any)
+	if !ok {
+		t.Fatalf("data.defaults is not an object: %#v", env.Data)
+	}
+	if defaults["claude"] != "claude" || defaults["pi"] != "pi" {
+		t.Fatalf("data.defaults missing agent bundle defaults: %#v", defaults)
+	}
 }
 
 func TestCatalogListRequiresOutputJSON(t *testing.T) {

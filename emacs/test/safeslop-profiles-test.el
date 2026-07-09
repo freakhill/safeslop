@@ -198,6 +198,212 @@
     (should (equal (safeslop-profiles--catalog-names data 'bundles) '("base-tools" "pi")))
     (should (equal (safeslop-profiles--catalog-names data 'packages) '("node" "pnpm")))))
 
+(defconst safeslop-test-profiles--bundle-envelope
+  '((bundles . [((name . "claude") (description . "Claude Code")
+                 (packages . ["node" "claude-code"]))
+                ((name . "web") (description . "Web stack")
+                 (packages . ["node" "pnpm"]))])
+    (defaults . ((claude . "claude"))))
+  "Synthetic bundle catalog data for profile compose tests.")
+
+(defconst safeslop-test-profiles--package-envelope
+  '((packages . [((name . "node") (kind . "binary") (version . "22"))
+                 ((name . "claude-code") (kind . "npm") (version . "1")
+                  (requires . ["node"]))
+                 ((name . "pnpm") (kind . "npm") (version . "9")
+                  (requires . ["node"]))
+                 ((name . "ripgrep") (kind . "binary") (version . "14"))]))
+  "Synthetic package catalog data for profile compose tests.")
+
+(ert-deftest safeslop-test-profiles-catalog-index-default-and-requires ()
+  "Catalog helpers make inherited/default/required packages selected and locked."
+  (let* ((catalog (safeslop-profiles--catalog-indexes
+                   safeslop-test-profiles--bundle-envelope
+                   safeslop-test-profiles--package-envelope))
+         (state (safeslop-profiles--compose-state
+                 "review" "claude" "container" nil '("ripgrep") "deny" "." nil catalog))
+         (rows (alist-get 'package-rows state)))
+    (let ((node (assoc "node" rows))
+          (claude (assoc "claude-code" rows))
+          (direct (assoc "ripgrep" rows)))
+      (should (equal (alist-get 'source (cdr node)) "default:claude"))
+      (should (alist-get 'locked (cdr node)))
+      (should (equal (alist-get 'source (cdr claude)) "default:claude"))
+      (should (alist-get 'locked (cdr claude)))
+      (should (equal (alist-get 'source (cdr direct)) "direct"))
+      (should-not (alist-get 'locked (cdr direct))))))
+
+(ert-deftest safeslop-test-profiles-bundle-and-requires-lock-package-rows ()
+  "Selected bundles and recursive requirements are locked with source labels."
+  (let* ((catalog (safeslop-profiles--catalog-indexes
+                   '((bundles . [((name . "web") (description . "Web")
+                                  (packages . ["pnpm"]))]))
+                   safeslop-test-profiles--package-envelope))
+         (state (safeslop-profiles--compose-state
+                 "review" "fish" "container" '("web") nil "deny" "." nil catalog))
+         (rows (alist-get 'package-rows state)))
+    (should (equal (alist-get 'source (cdr (assoc "pnpm" rows))) "bundle:web"))
+    (should (alist-get 'locked (cdr (assoc "pnpm" rows))))
+    (should (equal (alist-get 'source (cdr (assoc "node" rows))) "requires:pnpm"))
+    (should (alist-get 'locked (cdr (assoc "node" rows))))))
+
+(ert-deftest safeslop-test-profiles-marker-suggestions ()
+  "Local project markers map to visible bundle suggestions."
+  (let ((dir (make-temp-file "safeslop-markers" t)))
+    (unwind-protect
+        (progn
+          (dolist (file '("go.mod" "package.json" "pyproject.toml" "Cargo.toml"))
+            (write-region "" nil (expand-file-name file dir)))
+          (should (equal (safeslop-profiles--bundle-suggestions dir)
+                         '("go" "web" "python" "rust"))))
+      (delete-directory dir t))))
+
+(ert-deftest safeslop-test-profiles-compose-keymap ()
+  "Compose buffer binds checkbox/help/refresh/save/cancel keys."
+  (should (eq (lookup-key safeslop-profiles-compose-mode-map (kbd "SPC"))
+              #'safeslop-profiles-compose-toggle))
+  (should (eq (lookup-key safeslop-profiles-compose-mode-map (kbd "?"))
+              #'safeslop-profiles-compose-help))
+  (should (eq (lookup-key safeslop-profiles-compose-mode-map (kbd "g"))
+              #'safeslop-profiles-compose-refresh))
+  (should (eq (lookup-key safeslop-profiles-compose-mode-map (kbd "C-c C-c"))
+              #'safeslop-profiles-compose-preview-save))
+  (should (eq (lookup-key safeslop-profiles-compose-mode-map (kbd "q"))
+              #'safeslop-profiles-compose-cancel)))
+
+(ert-deftest safeslop-test-profiles-compose-render-help-and-locked-toggle ()
+  "Compose rendering marks checked/locked rows, help uses catalog detail, and locks do not toggle."
+  (let* ((catalog (safeslop-profiles--catalog-indexes
+                   safeslop-test-profiles--bundle-envelope
+                   safeslop-test-profiles--package-envelope))
+         (state (safeslop-profiles--compose-state
+                 "review" "claude" "container" nil '("ripgrep") "deny" "." nil catalog))
+         help)
+    (with-current-buffer (get-buffer-create "*safeslop profile compose test*")
+      (unwind-protect
+          (progn
+            (safeslop-profiles-compose-mode)
+            (setq safeslop-profiles-compose--state state)
+            (safeslop-profiles-compose--render)
+            (goto-char (point-min))
+            (should (search-forward "[x] L bundle claude" nil t))
+            (should (search-forward "default:claude" nil t))
+            (goto-char (point-min))
+            (should (search-forward "[x] L node" nil t))
+            (should (search-forward "default:claude" nil t))
+            (cl-letf (((symbol-function 'message) (lambda (fmt &rest args)
+                                                    (setq help (apply #'format fmt args)))))
+              (goto-char (point-min))
+              (search-forward "bundle claude")
+              (safeslop-profiles-compose-help)
+              (should (string-match-p "Claude Code" help))
+              (goto-char (point-min))
+              (search-forward "node")
+              (let ((before (alist-get 'package-rows safeslop-profiles-compose--state)))
+                (safeslop-profiles-compose-toggle)
+                (should (equal before (alist-get 'package-rows safeslop-profiles-compose--state))))
+              (goto-char (point-min))
+              (search-forward "bundle claude")
+              (let ((before (alist-get 'bundles safeslop-profiles-compose--state)))
+                (safeslop-profiles-compose-toggle)
+                (should (equal before (alist-get 'bundles safeslop-profiles-compose--state))))))
+        (kill-buffer (current-buffer))))))
+
+(ert-deftest safeslop-test-profiles-compose-renders-all-catalog-packages ()
+  "Package picker includes unchecked catalog packages that can become direct selections."
+  (let* ((catalog (safeslop-profiles--catalog-indexes
+                   safeslop-test-profiles--bundle-envelope
+                   safeslop-test-profiles--package-envelope))
+         (state (safeslop-profiles--compose-state
+                 "review" "claude" "container" nil nil "deny" "." nil catalog)))
+    (with-current-buffer (get-buffer-create "*safeslop profile packages test*")
+      (unwind-protect
+          (progn
+            (safeslop-profiles-compose-mode)
+            (setq safeslop-profiles-compose--state state)
+            (safeslop-profiles-compose--render)
+            (goto-char (point-min))
+            (should (search-forward "[ ]   ripgrep" nil t))
+            (safeslop-profiles-compose-toggle)
+            (should (member "ripgrep" (alist-get 'packages safeslop-profiles-compose--state)))
+            (goto-char (point-min))
+            (should (search-forward "[x]   ripgrep" nil t)))
+        (kill-buffer (current-buffer))))))
+
+(ert-deftest safeslop-test-profiles-interactive-create-opens-compose-buffer ()
+  "Interactive create opens the compose buffer instead of writing immediately."
+  (let (called)
+    (cl-letf (((symbol-function 'called-interactively-p) (lambda (&rest _) t))
+              ((symbol-function 'safeslop-profiles-compose-open)
+               (lambda () (setq called t))))
+      (safeslop-profiles-create)
+      (should called))))
+
+(ert-deftest safeslop-test-profiles-preview-save-dry-run-before-write ()
+  "Preview save runs dry-run first, shows engine safety text, then writes only on yes."
+  (let* ((catalog (safeslop-profiles--catalog-indexes nil nil))
+         (state (safeslop-profiles--compose-state
+                 "review" "claude" "container" nil nil "deny" "." nil catalog))
+         calls shown)
+    (cl-letf (((symbol-function 'safeslop--call-json-async)
+               (lambda (args cb)
+                 (push args calls)
+                 (funcall cb (safeslop-contract-parse-string
+                              (concat "{\"schema_version\":1,\"ok\":true,\"data\":{"
+                                      "\"risk\":{\"headline\":\"container deny is allowlisted\","
+                                      "\"lines\":[\"host: unconfined only for host profiles\","
+                                      "\"credential scope: value-free\","
+                                      "\"mounts/file reach: workspace-only\"]},"
+                                      "\"resolved\":{\"identitySet\":[\"node\"]},"
+                                      "\"recipeID\":\"abc\"},\"warnings\":[],\"errors\":[]}")))))
+              ((symbol-function 'yes-or-no-p) (lambda (_prompt) t))
+              ((symbol-function 'safeslop-profiles-create)
+               (lambda (&rest args) (push (cons 'write args) calls)))
+              ((symbol-function 'safeslop-profiles--show-preview)
+               (lambda (_args env) (setq shown (safeslop-profiles--preview-text (safeslop-contract-data env))))))
+      (with-temp-buffer
+        (safeslop-profiles-compose-mode)
+        (setq safeslop-profiles-compose--state state)
+        (safeslop-profiles-compose-preview-save))
+      (should (member "--dry-run" (car (last calls))))
+      (should (eq (caar calls) 'write))
+      (should (string-match-p "container deny is allowlisted" shown))
+      (should (string-match-p "workspace-only" shown)))))
+
+(ert-deftest safeslop-test-profiles-preview-text-only-uses-engine-safety-lines ()
+  "Preview text does not append Emacs-authored posture claims."
+  (let* ((env (safeslop-contract-parse-string
+               (concat "{\"schema_version\":1,\"ok\":true,\"data\":{"
+                       "\"risk\":{\"headline\":\"engine headline\",\"lines\":[\"engine line\"]},"
+                       "\"resolved\":{\"identitySet\":[\"node\"]},\"recipeID\":\"abc\"},"
+                       "\"warnings\":[],\"errors\":[]}")))
+         (shown (safeslop-profiles--preview-text (safeslop-contract-data env))))
+    (should (string-match-p "engine headline" shown))
+    (should (string-match-p "engine line" shown))
+    (should-not (string-match-p "host: unconfined" shown))
+    (should-not (string-match-p "container deny: allowlisted" shown))
+    (should-not (string-match-p "credential scope: value-free" shown))
+    (should-not (string-match-p "mounts/file reach: workspace-only" shown))))
+
+(ert-deftest safeslop-test-profiles-preview-save-decline-prevents-write ()
+  "Declining engine preview confirmation prevents the non-dry-run write call."
+  (let* ((catalog (safeslop-profiles--catalog-indexes nil nil))
+         (state (safeslop-profiles--compose-state
+                 "review" "claude" "container" nil nil "deny" "." nil catalog))
+         wrote)
+    (cl-letf (((symbol-function 'safeslop--call-json-async)
+               (lambda (_args cb)
+                 (funcall cb (safeslop-contract-parse-string
+                              "{\"schema_version\":1,\"ok\":true,\"data\":{\"risk\":{\"headline\":\"engine\",\"lines\":[\"line\"]}},\"warnings\":[],\"errors\":[]}"))))
+              ((symbol-function 'yes-or-no-p) (lambda (_prompt) nil))
+              ((symbol-function 'safeslop-profiles-create) (lambda (&rest _) (setq wrote t)))
+              ((symbol-function 'safeslop-profiles--show-preview) (lambda (&rest _) nil)))
+      (with-temp-buffer
+        (safeslop-profiles-compose-mode)
+        (setq safeslop-profiles-compose--state state)
+        (safeslop-profiles-compose-preview-save))
+      (should-not wrote))))
+
 (ert-deftest safeslop-test-profiles-create-args-repeat-selectors ()
   "Profile create uses exact argv flags for repeated bundle/package selectors."
   (should (equal (safeslop-profiles--create-args

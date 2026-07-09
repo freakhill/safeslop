@@ -188,6 +188,9 @@ func (c *Catalog) Bundles() []Bundle {
 	return out
 }
 
+// Defaults returns a copy of the agent -> default bundle map for UI inheritance.
+func (c *Catalog) Defaults() map[string]string { return cloneStringMap(c.defaults) }
+
 // DefaultBundle returns the bundle name implied by selecting agent, or "" if none.
 func (c *Catalog) DefaultBundle(agent string) string { return c.defaults[NormalizeAgent(agent)] }
 

@@ -66,7 +66,7 @@ safeslop doctor
 ```text
 safeslop validate [safeslop.cue]    check against the embedded schema
 safeslop list [safeslop.cue]        list profiles and resolved tiers
-safeslop catalog list [--bundles] --output json   curated package catalog for UIs
+safeslop catalog list [--bundles] --output json   curated package catalog for UIs (bundle JSON includes defaults)
 safeslop catalog bump <pkg> --to V [--security]   bump a pin: resolve all-arch digests, enforce the policy, write a plan sheet
 safeslop catalog propose-version <pkg>            list upstream candidates + would-be digests + blast radius (read-only)
 safeslop catalog add <pkg> --kind K --version V   add a pinned entry (channel ban + full validate)
@@ -74,7 +74,7 @@ safeslop catalog audit                           report staleness, yanked/unmain
 safeslop bundle add|remove <name> <pkg>...       mutate bundle membership (re-validates references)
 safeslop bundle list --output json               curated bundles for UIs
 safeslop profile list|presets --output json       profiles + preset library as the JSON contract
-safeslop profile create --name N --agent A --environment E [--bundle B] [--package P] --output json
+safeslop profile create --name N --agent A --environment E [--bundle B] [--package P] [--dry-run] --output json
 safeslop profile show <name> --output json         profile + resolved packages + image recipe
 safeslop profile credentials set <profile> [safeslop.cue] --provider <github|forgejo> [--use-origin|--repo owner/name ...] [--write-repo owner/name ...] --output json
 safeslop profile credentials clear <profile> [safeslop.cue] --output json
@@ -287,9 +287,11 @@ normalized to the canonical `claude` engine value, so it launches the same
 
 `bundles` and `packages` select build-time packages from the curated catalog. Use
 `safeslop catalog list --output json` or `safeslop catalog list --bundles --output
-json` to inspect available entries; `profile show` reports the resolved package
-set and dry-run image `recipeID` without building. `safeslop lock [profile]
---output json` writes the repo-root `safeslop.lock.json` for review/commit.
+json` to inspect available entries; the bundle-list envelope includes
+`data.defaults` (agent -> default bundle) so UIs can inherit defaults without
+hardcoding policy internals. `profile show` reports the resolved package set and
+dry-run image `recipeID` without building. `safeslop lock [profile] --output
+json` writes the repo-root `safeslop.lock.json` for review/commit.
 
 The curated bundles (`catalog list --bundles`) cover common toolchains. Declaring a
 bundle pulls in its packages' `requires`-closure in topological install order and
@@ -377,16 +379,25 @@ Each preset is a complete, validated `safeslop.cue` with a one-line description:
 
 The Emacs Profiles surface (`C-c s F`) is a list of your `safeslop.cue` profiles
 with ergonomic CRUD and launch keys: `RET`/`i` inspect a profile's resolved
-packages, egress, and image recipe (read-only, no file edit); `x` launches a
+packages, egress, and image recipe (read-only, no file edit); `r` launches a
 session from the selected profile after an isolation/network summary; `e` opens
-the CUE file jumped to that profile's block; `n` creates one with structured
-prompts (the name is validated and overwriting an existing profile is confirmed);
-`c` clones the row at point (only a new name is required); `D` guides deletion
-(pick the target, confirm, then remove the block by hand); `g` refreshes. Creating
-is backed by the catalog/bundle lists and routes through `profile create`, while
-CUE stays the stored source of truth. This repo also dogfoods a checked-in
-`safeslop.cue` with `default`, `pi`, and `shell` profiles so the Profiles surface
-has useful local rows immediately.
+the CUE file jumped to that profile's block; `c` opens `*safeslop profile
+compose*`; `C` clones the row at point (only a new name is required); `D` guides
+deletion (pick the target, confirm, then remove the block by hand); `g` refreshes.
+
+The compose buffer defaults to a container/deny profile and uses the catalog
+bundle defaults (`data.defaults`) to show inherited packages as selected and
+locked. `SPC` toggles unlocked bundle/package rows, `?` shows bundle/package help,
+`g` refreshes catalog data, `C-c C-c` asks the engine for `profile create
+--dry-run --output json` and shows the returned risk lines/resolved packages/image
+recipe before a final write, and `q` cancels without writing. Project marker
+suggestions (`go.mod`, `package.json`, `pyproject.toml`, `Cargo.toml`) are visible
+suggestions rather than automatic authority expansion. File reach is workspace-only
+in this slice; arbitrary custom host mounts are deferred until a mount capability
+model is specified. Creating still routes through `profile create`, while CUE stays
+the stored source of truth. This repo also dogfoods a checked-in `safeslop.cue`
+with `default`, `pi`, and `shell` profiles so the Profiles surface has useful
+local rows immediately.
 
 ### Trust model
 

@@ -2076,9 +2076,9 @@ func cmdProfileShow() *cobra.Command {
 func cmdProfileCreate() *cobra.Command {
 	var name, agent, environment, workspace, network, output string
 	var bundles, packages []string
-	var noDefaultBundle bool
+	var dryRun, noDefaultBundle bool
 	c := &cobra.Command{
-		Use:   "create --name N --agent A --environment E [--bundle B ...] [--package P ...] --output json",
+		Use:   "create --name N --agent A --environment E [--bundle B ...] [--package P ...] [--dry-run] --output json",
 		Short: "Create or update a safeslop.cue profile",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -2091,9 +2091,16 @@ func cmdProfileCreate() *cobra.Command {
 			if network == "" {
 				network = "deny"
 			}
-			path, cfg, err := loadOrNewConfigForCreate()
+			var cfg *policy.Config
+			path, err := profileCreatePathForOutput()
 			if err != nil {
 				return emitContractError(jsoncontract.CodeIOError, "load safeslop.cue", map[string]any{"error": err.Error()})
+			}
+			if !dryRun {
+				path, cfg, err = loadOrNewConfigForCreate()
+				if err != nil {
+					return emitContractError(jsoncontract.CodeIOError, "load safeslop.cue", map[string]any{"error": err.Error()})
+				}
 			}
 			prof := policy.Profile{
 				Agent:       policy.NormalizeAgent(agent),
@@ -2110,6 +2117,11 @@ func cmdProfileCreate() *cobra.Command {
 			data, err := profileResolvedData(path, name, prof)
 			if err != nil {
 				return emitContractError(jsoncontract.CodeInvalidArgument, "resolve profile image recipe", map[string]any{"profile": name, "error": err.Error()})
+			}
+			if dryRun {
+				data["dryRun"] = true
+				emitContract(jsoncontract.OK(data))
+				return nil
 			}
 			cfg.Profiles[name] = prof
 			rendered, err := renderConfigCUE(cfg)
@@ -2134,9 +2146,22 @@ func cmdProfileCreate() *cobra.Command {
 	c.Flags().StringArrayVar(&packages, "package", nil, "catalog package to include (repeatable)")
 	c.Flags().StringVar(&workspace, "workspace", "", "workspace directory")
 	c.Flags().StringVar(&network, "network", "deny", "network policy: deny or allow")
+	c.Flags().BoolVar(&dryRun, "dry-run", false, "resolve and print the profile without writing safeslop.cue")
 	c.Flags().BoolVar(&noDefaultBundle, "no-default-bundle", false, "do not include the agent's default package bundle")
 	c.Flags().StringVar(&output, "output", "", "output format: json")
 	return c
+}
+
+func profileCreatePathForOutput() (string, error) {
+	path, err := findConfig("")
+	if err == nil {
+		return path, nil
+	}
+	wd, werr := os.Getwd()
+	if werr != nil {
+		return "", werr
+	}
+	return filepath.Join(wd, "safeslop.cue"), nil
 }
 
 func loadOrNewConfigForCreate() (string, *policy.Config, error) {
@@ -2183,6 +2208,8 @@ func profileResolvedData(path, name string, prof policy.Profile) (map[string]any
 		"path":      path,
 		"name":      name,
 		"profile":   prof,
+		"risk":      policy.RiskSummary(prof),
+		"risk_axes": policy.RiskAxes(prof),
 		"resolved":  resolved,
 		"recipeID":  recipe.RecipeID,
 		"image":     recipe.AgentImage,

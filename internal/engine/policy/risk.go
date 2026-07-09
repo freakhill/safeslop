@@ -10,9 +10,9 @@ import (
 // load-bearing cross-model finding). Lines are break-glass sentences the user reads before trusting;
 // Headline is a one-liner for the Launch row; Level is a coarse band used only for color.
 type Risk struct {
-	Headline string
-	Lines    []string
-	Level    string // "high" | "elevated" | "contained"
+	Headline string   `json:"headline"`
+	Lines    []string `json:"lines"`
+	Level    string   `json:"level"` // "high" | "elevated" | "contained"
 }
 
 // RiskSummary computes the break-glass capability summary for a profile. It states what the agent
@@ -46,10 +46,10 @@ func RiskSummary(p Profile) Risk {
 // UNRESTRICTED as loudly as what is restricted (ayo S2 — hiding an absence is a dark pattern). Computed
 // alongside RiskSummary so callers never re-derive "is this open" (single source of truth).
 type RiskAxis struct {
-	Name       string // "network" | "files"
-	Value      string // short status: "unrestricted" | "open egress" | "whole account" | "workspace-only" | ...
-	Restricted bool   // true = bounded; false = unrestricted/open (the loud, amber/red case)
-	Severity   string // "high" | "elevated" | "contained" — color only; Value carries the meaning
+	Name       string `json:"name"`       // "network" | "files"
+	Value      string `json:"value"`      // short status: "unrestricted" | "open egress" | "whole account" | "workspace-only" | ...
+	Restricted bool   `json:"restricted"` // true = bounded; false = unrestricted/open (the loud, amber/red case)
+	Severity   string `json:"severity"`   // "high" | "elevated" | "contained" — color only; Value carries the meaning
 }
 
 // RiskAxes returns the per-dimension restriction status for a profile — network + files, the two

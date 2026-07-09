@@ -91,6 +91,54 @@ safeslop: {
 	}
 }
 
+func TestProfileCreateDryRunIncludesRiskAndDoesNotWrite(t *testing.T) {
+	dir := t.TempDir()
+	out, err := runRootForTest(t, dir,
+		"profile", "create",
+		"--dry-run",
+		"--name", "review",
+		"--agent", "claude-code",
+		"--environment", "container",
+		"--bundle", "pi",
+		"--package", "pnpm",
+		"--workspace", ".",
+		"--network", "deny",
+		"--output", "json",
+	)
+	if err != nil {
+		t.Fatalf("profile create --dry-run --output json: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "safeslop.cue")); !os.IsNotExist(err) {
+		t.Fatalf("dry-run profile create should not write safeslop.cue; stat err=%v", err)
+	}
+	env := parseEnvelopeForTest(t, out)
+	if !env.OK {
+		t.Fatalf("profile create dry-run returned error envelope: %+v", env.Errors)
+	}
+	profile, ok := env.Data["profile"].(map[string]any)
+	if !ok {
+		t.Fatalf("data.profile missing: %#v", env.Data["profile"])
+	}
+	if profile["agent"] != "claude" || profile["environment"] != "container" || profile["workspace"] != "." || profile["network"] != "deny" {
+		t.Fatalf("profile args not echoed under data.profile: %#v", profile)
+	}
+	if !stringSliceAnyContains(profile["bundles"].([]any), "pi") || !stringSliceAnyContains(profile["packages"].([]any), "pnpm") {
+		t.Fatalf("profile package selectors not echoed: %#v", profile)
+	}
+	risk, ok := env.Data["risk"].(map[string]any)
+	if !ok || risk["headline"] == "" || risk["level"] == "" || risk["lines"] == nil || risk["Headline"] != nil {
+		t.Fatalf("data.risk lower-camel contract missing: %#v", env.Data["risk"])
+	}
+	axes, ok := env.Data["risk_axes"].([]any)
+	if !ok || len(axes) == 0 {
+		t.Fatalf("data.risk_axes missing: %#v", env.Data["risk_axes"])
+	}
+	axis, ok := axes[0].(map[string]any)
+	if !ok || axis["name"] == "" || axis["value"] == "" || axis["restricted"] == nil || axis["severity"] == "" || axis["Name"] != nil {
+		t.Fatalf("data.risk_axes lower-camel contract missing: %#v", axes[0])
+	}
+}
+
 func TestProfileCreateWritesNewCue(t *testing.T) {
 	dir := t.TempDir()
 	out, err := runRootForTest(t, dir,

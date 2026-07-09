@@ -598,6 +598,335 @@ save is re-validated."
           (user-error "Could not find the `%s' block in %s — it may already be gone; review the file"
                       name (file-name-nondirectory path)))))))
 
+;;; ---- compose buffer ------------------------------------------------------
+
+(defconst safeslop-profiles-compose-buffer-name "*safeslop profile compose*"
+  "Buffer name for profile creation composition.")
+
+(defvar-local safeslop-profiles-compose--state nil
+  "Current profile compose state as an alist.")
+
+(defun safeslop-profiles--alist-index (rows)
+  "Return an alist mapping each row name in ROWS to its row alist."
+  (mapcar (lambda (row) (cons (alist-get 'name row) row)) (append rows nil)))
+
+(defun safeslop-profiles--catalog-indexes (bundle-data package-data)
+  "Merge bundle and package catalog envelope DATA into lookup indexes."
+  (list (cons 'bundles (safeslop-profiles--alist-index (alist-get 'bundles bundle-data)))
+        (cons 'packages (safeslop-profiles--alist-index (alist-get 'packages package-data)))
+        (cons 'defaults (alist-get 'defaults bundle-data))))
+
+(defun safeslop-profiles--lookup-default-bundle (agent catalog)
+  "Return AGENT's default bundle from CATALOG, falling back to a same-named bundle."
+  (let* ((defaults (alist-get 'defaults catalog))
+         (key (and agent (intern-soft agent)))
+         (from-defaults (or (and key (alist-get key defaults))
+                            (alist-get agent defaults nil nil #'string=))))
+    (or from-defaults
+        (when (assoc agent (alist-get 'bundles catalog)) agent))))
+
+(defun safeslop-profiles--catalog-row (kind name catalog)
+  "Return catalog row NAME from KIND (`bundles' or `packages') in CATALOG."
+  (cdr (assoc name (alist-get kind catalog))))
+
+(defun safeslop-profiles--row-vector (row field)
+  "Return ROW FIELD as a list, accepting JSON vectors."
+  (append (or (alist-get field row) []) nil))
+
+(defun safeslop-profiles--put-package-source (rows name source locked)
+  "Put package NAME in ROWS with SOURCE, preserving stronger existing locks."
+  (let ((existing (assoc name rows)))
+    (if existing
+        (let ((cell (cdr existing)))
+          (unless (alist-get 'locked cell)
+            (setcdr existing (list (cons 'source source) (cons 'locked locked) (cons 'checked t))))
+          rows)
+      (cons (cons name (list (cons 'source source) (cons 'locked locked) (cons 'checked t))) rows))))
+
+(defun safeslop-profiles--expand-requires (name rows catalog seen)
+  "Recursively add NAME package requirements to ROWS using CATALOG, tracking SEEN."
+  (if (member name seen)
+      rows
+    (let ((pkg (safeslop-profiles--catalog-row 'packages name catalog))
+          (seen (cons name seen)))
+      (dolist (req (safeslop-profiles--row-vector pkg 'requires) rows)
+        (setq rows (safeslop-profiles--put-package-source rows req (format "requires:%s" name) t))
+        (setq rows (safeslop-profiles--expand-requires req rows catalog seen))))))
+
+(defun safeslop-profiles--package-rows (agent bundles packages no-default-bundle catalog)
+  "Return catalog package rows for AGENT, BUNDLES, direct PACKAGES and CATALOG."
+  (let ((rows nil)
+        (selected-bundles (copy-sequence (or bundles nil))))
+    (unless no-default-bundle
+      (when-let* ((default (safeslop-profiles--lookup-default-bundle agent catalog)))
+        (push (cons default 'default) selected-bundles)))
+    (dolist (bundle selected-bundles)
+      (let* ((name (if (consp bundle) (car bundle) bundle))
+             (source-kind (if (and (consp bundle) (eq (cdr bundle) 'default)) "default" "bundle"))
+             (bundle-row (safeslop-profiles--catalog-row 'bundles name catalog)))
+        (dolist (pkg (safeslop-profiles--row-vector bundle-row 'packages))
+          (setq rows (safeslop-profiles--put-package-source rows pkg (format "%s:%s" source-kind name) t)))))
+    (dolist (pkg packages)
+      (setq rows (safeslop-profiles--put-package-source rows pkg "direct" nil)))
+    (dolist (pkg (mapcar #'car rows))
+      (setq rows (safeslop-profiles--expand-requires pkg rows catalog nil)))
+    (dolist (pkg (alist-get 'packages catalog))
+      (unless (assoc (car pkg) rows)
+        (push (cons (car pkg) (list (cons 'source nil) (cons 'locked nil) (cons 'checked nil))) rows)))
+    (sort rows (lambda (a b) (string< (car a) (car b))))))
+
+(defun safeslop-profiles--bundle-rows (agent bundles no-default-bundle catalog)
+  "Return catalog bundle rows with selected/default lock metadata."
+  (let ((default (unless no-default-bundle
+                   (safeslop-profiles--lookup-default-bundle agent catalog))))
+    (mapcar (lambda (bundle)
+              (let* ((name (car bundle))
+                     (is-default (and default (string= name default))))
+                (cons name (list (cons 'checked (or is-default (member name bundles)))
+                                 (cons 'locked is-default)
+                                 (cons 'source (when is-default (format "default:%s" name)))))))
+            (alist-get 'bundles catalog))))
+
+(defun safeslop-profiles--bundle-suggestions (&optional directory)
+  "Return suggested bundle names from local project markers in DIRECTORY."
+  (let ((dir (file-name-as-directory (or directory default-directory)))
+        (markers '(("go.mod" . "go")
+                   ("package.json" . "web")
+                   ("pyproject.toml" . "python")
+                   ("Cargo.toml" . "rust"))))
+    (delq nil (mapcar (lambda (m)
+                        (when (file-exists-p (expand-file-name (car m) dir))
+                          (cdr m)))
+                      markers))))
+
+(defun safeslop-profiles--compose-state
+    (name agent environment bundles packages network workspace no-default-bundle catalog)
+  "Build a pure profile compose state and derived package rows."
+  (let ((suggestions (safeslop-profiles--bundle-suggestions)))
+    (list (cons 'name name)
+          (cons 'agent agent)
+          (cons 'environment environment)
+          (cons 'bundles bundles)
+          (cons 'packages packages)
+          (cons 'network network)
+          (cons 'workspace workspace)
+          (cons 'no-default-bundle no-default-bundle)
+          (cons 'catalog catalog)
+          (cons 'suggestions suggestions)
+          (cons 'package-rows (safeslop-profiles--package-rows
+                               agent bundles packages no-default-bundle catalog)))))
+
+(defun safeslop-profiles--compose-args (state)
+  "Return profile create argv for compose STATE."
+  (safeslop-profiles--create-args
+   (alist-get 'name state) (alist-get 'agent state) (alist-get 'environment state)
+   (alist-get 'bundles state) (alist-get 'packages state)
+   (alist-get 'network state) (alist-get 'workspace state)
+   (alist-get 'no-default-bundle state)))
+
+(defun safeslop-profiles--dry-run-args (state)
+  "Return dry-run profile create argv for compose STATE."
+  (let ((args (safeslop-profiles--compose-args state)))
+    (append (butlast args 2) '("--dry-run") (last args 2))))
+
+(defvar safeslop-profiles-compose-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "SPC") #'safeslop-profiles-compose-toggle)
+    (define-key map (kbd "?") #'safeslop-profiles-compose-help)
+    (define-key map (kbd "g") #'safeslop-profiles-compose-refresh)
+    (define-key map (kbd "C-c C-c") #'safeslop-profiles-compose-preview-save)
+    (define-key map (kbd "q") #'safeslop-profiles-compose-cancel)
+    map)
+  "Keymap for `safeslop-profiles-compose-mode'.")
+
+(define-derived-mode safeslop-profiles-compose-mode special-mode "safeslop-profile-compose"
+  "Major mode for composing a safeslop profile before save.")
+
+(defun safeslop-profiles-compose--insert-row (type name checked locked source)
+  "Insert one compose row and attach row metadata."
+  (let ((start (point)))
+    (insert (if (eq type 'bundle)
+                (format "[%s] %s bundle %-18s %s\n"
+                        (if checked "x" " ") (if locked "L" " ") name (or source ""))
+              (format "[%s] %s %-18s package %s\n"
+                      (if checked "x" " ") (if locked "L" " ") name (or source ""))))
+    (put-text-property start (point) 'safeslop-row (list (cons 'type type) (cons 'name name)))))
+
+(defun safeslop-profiles-compose--render ()
+  "Render the current compose state."
+  (let ((inhibit-read-only t)
+        (state safeslop-profiles-compose--state))
+    (erase-buffer)
+    (insert "safeslop Profiles compose buffer\n")
+    (insert "Keys: SPC toggle unlocked, ? help, g refresh catalog, C-c C-c preview/save, q cancel\n\n")
+    (insert (format "Name: %s\nAgent: %s\nEnvironment: %s\nNetwork: %s\nWorkspace: %s\n\n"
+                    (alist-get 'name state) (alist-get 'agent state)
+                    (alist-get 'environment state) (alist-get 'network state)
+                    (or (alist-get 'workspace state) "")))
+    (insert "Bundles (suggested rows are visible but not preselected):\n")
+    (dolist (bundle (safeslop-profiles--bundle-rows
+                     (alist-get 'agent state) (alist-get 'bundles state)
+                     (alist-get 'no-default-bundle state) (alist-get 'catalog state)))
+      (let* ((name (car bundle))
+             (source (alist-get 'source (cdr bundle)))
+             (suggested (member name (alist-get 'suggestions state))))
+        (safeslop-profiles-compose--insert-row
+         'bundle name (alist-get 'checked (cdr bundle)) (alist-get 'locked (cdr bundle))
+         (string-join (delq nil (list source (when suggested "suggested"))) ", "))))
+    (insert "\nPackages:\n")
+    (dolist (pkg (alist-get 'package-rows state))
+      (safeslop-profiles-compose--insert-row
+       'package (car pkg) (alist-get 'checked (cdr pkg))
+       (alist-get 'locked (cdr pkg)) (alist-get 'source (cdr pkg))))
+    (goto-char (point-min))))
+
+(defun safeslop-profiles-compose--row-at-point ()
+  "Return compose row metadata at point."
+  (or (get-text-property (point) 'safeslop-row)
+      (get-text-property (max (point-min) (1- (point))) 'safeslop-row)))
+
+(defun safeslop-profiles-compose-toggle ()
+  "Toggle the bundle or unlocked direct package row at point."
+  (interactive)
+  (let* ((row (safeslop-profiles-compose--row-at-point))
+         (type (alist-get 'type row))
+         (name (alist-get 'name row))
+         (state safeslop-profiles-compose--state))
+    (cond
+     ((eq type 'bundle)
+      (let ((bundle (assoc name (safeslop-profiles--bundle-rows
+                                 (alist-get 'agent state) (alist-get 'bundles state)
+                                 (alist-get 'no-default-bundle state) (alist-get 'catalog state)))))
+        (unless (alist-get 'locked (cdr bundle))
+          (let ((bundles (alist-get 'bundles state)))
+            (setcdr (assoc 'bundles state)
+                    (if (member name bundles) (remove name bundles) (cons name bundles)))))))
+     ((eq type 'package)
+      (let ((pkg (assoc name (alist-get 'package-rows state))))
+        (unless (alist-get 'locked (cdr pkg))
+          (let ((packages (alist-get 'packages state)))
+            (setcdr (assoc 'packages state)
+                    (if (member name packages) (remove name packages) (cons name packages))))))))
+    (setcdr (assoc 'package-rows state)
+            (safeslop-profiles--package-rows
+             (alist-get 'agent state) (alist-get 'bundles state) (alist-get 'packages state)
+             (alist-get 'no-default-bundle state) (alist-get 'catalog state)))
+    (safeslop-profiles-compose--render)))
+
+(defun safeslop-profiles--package-help (pkg)
+  "Return help text for package catalog row PKG."
+  (string-join
+   (delq nil (list (format "%s (%s)" (alist-get 'name pkg) (or (alist-get 'kind pkg) "package"))
+                   (when (alist-get 'version pkg) (format "version: %s" (alist-get 'version pkg)))
+                   (when (alist-get 'requires pkg) (format "requires: %s" (safeslop-profiles--join (safeslop-profiles--row-vector pkg 'requires))))
+                   (when (alist-get 'conflicts pkg) (format "conflicts: %s" (safeslop-profiles--join (safeslop-profiles--row-vector pkg 'conflicts))))
+                   (when (alist-get 'runtimeEgress pkg) (format "runtime egress: %s" (safeslop-profiles--join (safeslop-profiles--row-vector pkg 'runtimeEgress))))
+                   (when (alist-get 'note pkg) (format "note: %s" (alist-get 'note pkg)))))
+   "; "))
+
+(defun safeslop-profiles-compose-help ()
+  "Show help for the bundle or package row at point."
+  (interactive)
+  (let* ((row (safeslop-profiles-compose--row-at-point))
+         (type (alist-get 'type row))
+         (name (alist-get 'name row))
+         (catalog (alist-get 'catalog safeslop-profiles-compose--state)))
+    (message "%s"
+             (pcase type
+               ('bundle (let ((bundle (safeslop-profiles--catalog-row 'bundles name catalog)))
+                          (format "%s: %s; packages: %s" name
+                                  (or (alist-get 'description bundle) "")
+                                  (safeslop-profiles--join (safeslop-profiles--row-vector bundle 'packages)))))
+               ('package (safeslop-profiles--package-help
+                          (safeslop-profiles--catalog-row 'packages name catalog)))
+               (_ "No row help here")))))
+
+(defun safeslop-profiles--fetch-compose-catalog ()
+  "Synchronously fetch catalog bundle/package data for compose."
+  (let ((bundles (safeslop--call-json '("catalog" "list" "--bundles" "--output" "json")))
+        (packages (safeslop--call-json '("catalog" "list" "--output" "json"))))
+    (safeslop-profiles--catalog-indexes
+     (and (safeslop-contract-ok-p bundles) (safeslop-contract-data bundles))
+     (and (safeslop-contract-ok-p packages) (safeslop-contract-data packages)))))
+
+(defun safeslop-profiles-compose-open ()
+  "Open the interactive profile compose buffer."
+  (interactive)
+  (let ((buf (get-buffer-create safeslop-profiles-compose-buffer-name)))
+    (with-current-buffer buf
+      (safeslop-profiles-compose-mode)
+      (setq safeslop-profiles-compose--state
+            (safeslop-profiles--compose-state
+             "review" "claude" "container" nil nil "deny" "." nil
+             (safeslop-profiles--fetch-compose-catalog)))
+      (safeslop-profiles-compose--render))
+    (pop-to-buffer-same-window buf)
+    buf))
+
+(defun safeslop-profiles-compose-refresh ()
+  "Refresh catalog data for the compose buffer."
+  (interactive)
+  (setcdr (assoc 'catalog safeslop-profiles-compose--state)
+          (safeslop-profiles--fetch-compose-catalog))
+  (setcdr (assoc 'package-rows safeslop-profiles-compose--state)
+          (safeslop-profiles--package-rows
+           (alist-get 'agent safeslop-profiles-compose--state)
+           (alist-get 'bundles safeslop-profiles-compose--state)
+           (alist-get 'packages safeslop-profiles-compose--state)
+           (alist-get 'no-default-bundle safeslop-profiles-compose--state)
+           (alist-get 'catalog safeslop-profiles-compose--state)))
+  (safeslop-profiles-compose--render))
+
+(defun safeslop-profiles-compose-cancel ()
+  "Cancel profile compose without writing."
+  (interactive)
+  (kill-buffer (current-buffer)))
+
+(defun safeslop-profiles--preview-text (data)
+  "Render engine-authored dry-run DATA for confirmation."
+  (let* ((risk (alist-get 'risk data))
+         (resolved (alist-get 'resolved data)))
+    (string-join
+     (delq nil
+           (append (list "Engine safety preview"
+                         (alist-get 'headline risk))
+                   (safeslop-profiles--row-vector risk 'lines)
+                   (list (format "resolved packages: %s"
+                                 (safeslop-profiles--join (safeslop-profiles--row-vector resolved 'identitySet)))
+                         (when (alist-get 'recipeID data) (format "recipe: %s" (alist-get 'recipeID data))))))
+     "\n")))
+
+(defun safeslop-profiles--show-preview (args env)
+  "Display dry-run preview ENV for ARGS and return its text."
+  (let ((text (safeslop-profiles--preview-text (safeslop-contract-data env))))
+    (with-current-buffer (get-buffer-create "*safeslop profile preview*")
+      (let ((inhibit-read-only t))
+        (special-mode)
+        (erase-buffer)
+        (insert (safeslop-surface--breadcrumb args))
+        (insert text)
+        (insert "\n"))
+      (display-buffer (current-buffer)))
+    text))
+
+(defun safeslop-profiles-compose-preview-save ()
+  "Preview exact compose state with the engine, then write after explicit yes."
+  (interactive)
+  (let* ((state safeslop-profiles-compose--state)
+         (args (safeslop-profiles--dry-run-args state)))
+    (safeslop--call-json-async
+     args
+     (lambda (env)
+       (if (not (safeslop-contract-ok-p env))
+           (safeslop--show-envelope-buffer "*safeslop profile preview*" args env)
+         (safeslop-profiles--show-preview args env)
+         (when (yes-or-no-p "Save this profile after the engine safety preview? ")
+           (safeslop-profiles-create
+            (alist-get 'name state) (alist-get 'agent state) (alist-get 'environment state)
+            (alist-get 'bundles state) (alist-get 'packages state)
+            (alist-get 'network state) (alist-get 'workspace state) nil
+            (alist-get 'no-default-bundle state))))))))
+
 ;;; ---- create / clone ------------------------------------------------------
 
 ;;;###autoload
@@ -610,24 +939,12 @@ write via the CLI and refresh any live profiles surface, landing point on the ne
 row.  CALLBACK, when given, receives the resulting JSON contract envelope.  The
 old preset scaffold is intentionally replaced by this structured flow (specs/0058
 N5), while CUE remains the stored source of truth."
-  (interactive
-   (let* ((existing (safeslop-profiles--names))
-          (name (safeslop-profiles--read-name existing))
-          (agent (completing-read "Agent: " safeslop-profiles--agents nil t nil nil "claude"))
-          (environment (completing-read "Environment: " safeslop-profiles--environments nil t nil nil "container"))
-          (bundle-choices (safeslop-profiles--catalog-choice-list 'bundles t))
-          (bundles (safeslop-profiles--read-multiple "Bundles (comma-separated, optional): " bundle-choices))
-          (package-choices (safeslop-profiles--catalog-choice-list 'packages nil))
-          (packages (safeslop-profiles--read-multiple "Packages (comma-separated, optional): " package-choices))
-          (network (completing-read "Network: " safeslop-profiles--networks nil t nil nil "deny"))
-          (workspace (safeslop-profiles--read-workspace))
-          (no-default-bundle (and (member agent '("claude" "pi"))
-                                  (y-or-n-p "Opt out of the agent's default package bundle? "))))
-     (unless (safeslop-profiles--confirm-create
-              existing name agent environment bundles packages network workspace no-default-bundle)
-       (user-error "Profile create cancelled"))
-     (list name agent environment bundles packages network workspace nil no-default-bundle)))
-  (let ((args (safeslop-profiles--create-args
+  (interactive)
+  (if (and (called-interactively-p 'interactive)
+           (not name) (not agent) (not environment) (not bundles) (not packages)
+           (not network) (not workspace) (not callback) (not no-default-bundle))
+      (safeslop-profiles-compose-open)
+    (let ((args (safeslop-profiles--create-args
                (or name "")
                (or agent "claude")
                (or environment "container")
@@ -650,7 +967,7 @@ N5), while CUE remains the stored source of truth."
          (message "safeslop: profile create failed: %s"
                   (or (alist-get 'message (car (safeslop-contract-errors env)))
                       "unknown error")))
-       (when callback (funcall callback env))))))
+       (when callback (funcall callback env)))))))
 
 (defalias 'safeslop-profiles-new #'safeslop-profiles-create
   "Compatibility alias for `safeslop-profiles-create'.")
