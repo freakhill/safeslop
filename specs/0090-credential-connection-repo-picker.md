@@ -132,7 +132,7 @@ Extend `C-c s K` / `safeslop-credentials`:
   VERIFY:   `rg -n 'profile credentials|creds status --output json|repo picker|GitHub App|Forgejo|account link|live repo discovery|0090' README.md emacs/README.md skills/agent-key-lifecycle/SKILL.md skills/agent-sandbox-ops/SKILL.md specs/0087-product-activation.md specs/0090-credential-connection-repo-picker.md`
   EXPECTED: output shows the new commands/UI and states that live repository discovery is deferred rather than implied.
 
-- [ ] T6 — Full verification
+- [x] T6 — Full verification
   FILE:     whole repo
   CHANGE:   Run repository gates after code/docs are in sync.
   VERIFY:   `make check && make build`
