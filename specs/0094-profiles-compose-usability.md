@@ -1,6 +1,6 @@
 # 0094 — Profiles compose usability
 
-Status: planned
+Status: complete
 Date: 2026-07-10
 
 SCOPE: fix the Profiles compose-buffer interaction regression where `RET` and catalog refresh re-render at the top of the buffer; explain locked inherited/default rows without moving the operator; and expose a deliberate, safe all-or-nothing opt-out for the agent default bundle using the existing `--no-default-bundle` contract.
@@ -35,7 +35,7 @@ Default agent bundles remain locked in the bundle list. Add a distinct, clearly 
   VERIFY:   `make test-emacs EMACS=$(command -v emacs)`
   EXPECTED: Operators can deliberately omit the default bundle through the UI; `--no-default-bundle` appears only in that intentional state; inherited rows remain protected otherwise.
 
-- [ ] T4 — Synchronize operator documentation and the implementation record
+- [x] T4 — Synchronize operator documentation and the implementation record
   FILE:     `README.md`, `emacs/README.md`, `skills/agent-sandbox-ops/SKILL.md`, `specs/0094-profiles-compose-usability.md`
   CHANGE:   Document retained-context toggle/refresh behavior, the meaning of locked rows, and the explicit default-bundle opt-out; state that it can leave an agent without its runtime. Mark the spec complete and tick tasks only after their stated verification passes.
   VERIFY:   `git diff --check && make check && make build`

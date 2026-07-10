@@ -150,7 +150,13 @@ longer dead ends: `r`, `e`, and `C` act from the detail view too; `g` (Evil:
 `gr`) re-fetches and re-renders the faced view, and `RET` returns to the list.
 The compose buffer uses `RET` to toggle unlocked bundle/package rows, `?` for
 row help, `g` (Evil: `gr`) to refresh, `C-c C-c` to preview/save, and `q` to
-cancel.
+cancel. `L` marks a row that is included by its displayed source and cannot be
+partly toggled. Toggle and refresh preserve the logical row and scroll position in
+every showing window. When an agent has a catalog default, the `Automatic agent
+bundle` row deliberately toggles the all-or-nothing automatic inclusion: disabling
+it sends `--no-default-bundle`, keeps explicit selections, and can leave the agent
+without its runtime so launch may fail. It does not change the isolation, network,
+or workspace-only file boundary.
 
 ## Credentials
 

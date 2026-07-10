@@ -74,7 +74,7 @@ safeslop catalog audit                           report staleness, yanked/unmain
 safeslop bundle add|remove <name> <pkg>...       mutate bundle membership (re-validates references)
 safeslop bundle list --output json               curated bundles for UIs
 safeslop profile list|presets --output json       profiles + preset library as the JSON contract
-safeslop profile create --name N --agent A --environment E [--bundle B] [--package P] [--dry-run] --output json
+safeslop profile create --name N --agent A --environment E [--bundle B] [--package P] [--no-default-bundle] [--dry-run] --output json
 safeslop profile show <name> --output json         profile + resolved packages + image recipe
 safeslop profile credentials set <profile> [safeslop.cue] --provider <github|forgejo> [--use-origin|--repo owner/name ...] [--write-repo owner/name ...] --output json
 safeslop profile credentials clear <profile> [safeslop.cue] --output json
@@ -388,17 +388,23 @@ deletion (pick the target, confirm, then remove the block by hand); `g` refreshe
 
 The compose buffer defaults to a container/deny profile and uses the catalog
 bundle defaults (`data.defaults`) to show inherited packages as selected and
-locked. `RET` toggles unlocked bundle/package rows, `?` shows bundle/package help,
-`g` refreshes catalog data, `C-c C-c` asks the engine for `profile create
---dry-run --output json` and shows the returned risk lines/resolved packages/image
-recipe before a final write, and `q` cancels without writing. Project marker
-suggestions (`go.mod`, `package.json`, `pyproject.toml`, `Cargo.toml`) are visible
-suggestions rather than automatic authority expansion. File reach is workspace-only
-in this slice; arbitrary custom host mounts are deferred until a mount capability
-model is specified. Creating still routes through `profile create`, while CUE stays
-the stored source of truth. This repo also dogfoods a checked-in `safeslop.cue`
-with `default`, `pi`, and `shell` profiles so the Profiles surface has useful
-local rows immediately.
+locked. `L` means a row is included by its displayed source and cannot be partly
+toggled. `RET` toggles unlocked bundle/package rows while retaining the logical row
+and each showing window's scroll position; `g` refreshes catalog data with the same
+context preservation. An `Automatic agent bundle` control is the deliberate
+all-or-nothing opt-out for an agent default: disabling it emits
+`--no-default-bundle`, retains explicit selections, and can leave the agent without
+its runtime so launch may fail. It does not relax the container, network, or
+workspace-only file boundary. `?` shows row help, `C-c C-c` asks the engine for
+`profile create --dry-run --output json` and shows the returned risk
+lines/resolved packages/image recipe before a final write, and `q` cancels without
+writing. Project marker suggestions (`go.mod`, `package.json`, `pyproject.toml`,
+`Cargo.toml`) are visible suggestions rather than automatic authority expansion.
+File reach is workspace-only in this slice; arbitrary custom host mounts are
+deferred until a mount capability model is specified. Creating still routes through
+`profile create`, while CUE stays the stored source of truth. This repo also
+dogfoods a checked-in `safeslop.cue` with `default`, `pi`, and `shell` profiles so
+the Profiles surface has useful local rows immediately.
 
 ### Trust model
 

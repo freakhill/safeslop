@@ -27,7 +27,7 @@ file transfer between host and sandboxed runtimes.
 - `safeslop catalog audit` — report staleness (versions-behind), yanked/unmaintained advisories, suggested lane (read-only).
 - `safeslop bundle add|remove <name> <pkg>...` — mutate bundle membership, re-validating references.
 - `safeslop bundle list --output json` — list curated bundles.
-- `safeslop profile create --name N --agent A --environment E [--bundle B] [--package P] [--dry-run] --output json` — create or update a `safeslop.cue` profile; `--dry-run` resolves packages/recipe and returns engine risk data without writing.
+- `safeslop profile create --name N --agent A --environment E [--bundle B] [--package P] [--no-default-bundle] [--dry-run] --output json` — create or update a `safeslop.cue` profile; `--no-default-bundle` deliberately omits automatic agent-runtime inclusion and can leave an agent unable to launch, while `--dry-run` resolves packages/recipe and returns engine risk data without writing.
 - `safeslop profile credentials set <profile> [safeslop.cue] --provider github|forgejo [--use-origin] [--repo owner/name] [--write-repo owner/name] --output json` — engine-owned CUE mutation for GitHub/Forgejo repo scopes; preserves other credential providers/secrets and clears only the opposite forge.
 - `safeslop profile credentials clear <profile> [safeslop.cue] --output json` — remove only `credentials.github`/`credentials.forgejo`, deleting the `credentials` object if it becomes empty.
 - `safeslop creds list|show [<profile>] --output json` — inspect the credential posture of `safeslop.cue` profiles (declared creds + value-free readiness status); read-only, never reveals secret values.
@@ -105,11 +105,17 @@ profile's resolved packages/egress/recipe, `r` to launch a session from the row
 after an isolation/network summary, `e` to edit the CUE at that profile's block,
 `c` to open `*safeslop profile compose*`, `C` to clone, `D` for guided manual
 deletion, and `g` to refresh. The compose buffer shows catalog defaults as
-selected/locked inherited rows, marks local project-language suggestions, and uses
-`RET` to toggle unlocked rows, `?` for bundle/package help, `g` to refresh,
-`C-c C-c` to request the engine `profile create --dry-run` safety preview before
-the final write, and `q` to cancel. File reach is workspace-only here; arbitrary
-custom host mounts are deferred until a mount capability model is specified.
+selected/locked inherited rows; `L` means a row is included by its displayed source
+and cannot be partly toggled. It marks local project-language suggestions and uses
+`RET` to toggle unlocked rows, `?` for bundle/package help, `g` to refresh, and
+preserves the logical row and scroll context in every showing window for either
+operation. The `Automatic agent bundle` control is the all-or-nothing opt-out for
+that automatic inclusion: it emits `--no-default-bundle`, retains explicit
+selections, and may leave the agent without its runtime, but it does not relax
+isolation, network, or workspace-only file reach. `C-c C-c` requests the engine
+`profile create --dry-run` safety preview before the final write, and `q` cancels.
+Arbitrary custom host mounts are deferred until a mount capability model is
+specified.
 `C-c s K` opens the Credentials surface: `a` links GitHub App / Forgejo accounts
 using refs/ids only, `u` unlinks, and `p` opens the repo picker that writes
 through `profile credentials set` (origin inference or manual `owner/repo` rows;
