@@ -17,7 +17,7 @@ Default agent bundles remain locked in the bundle list. Add a distinct, clearly 
 
 ## Tasks
 
-- [ ] T1 — Specify the failing compose interaction regressions first
+- [x] T1 — Specify the failing compose interaction regressions first
   FILE:     `emacs/test/safeslop-profiles-test.el`
   CHANGE:   Add ERT coverage that opens a real compose buffer/window, targets a lower unlocked catalog row, and proves `RET` preserves its logical row and scroll context; prove refresh preserves the same context and selections; prove a locked default/inherited row emits an explanatory message without rerendering or moving point; and prove the separate default-bundle control toggles `no-default-bundle`, changes effective default selection, and reaches compose argv.
   VERIFY:   `make test-emacs EMACS=$(command -v emacs)`

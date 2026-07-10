@@ -332,6 +332,149 @@
             (should (search-forward "[x]   ripgrep" nil t)))
         (kill-buffer (current-buffer))))))
 
+(defun safeslop-test-profiles--large-compose-catalog ()
+  "Return a catalog with enough rows to exercise compose scroll preservation."
+  (let* ((base (alist-get 'packages safeslop-test-profiles--package-envelope))
+         (extras (cl-loop for n from 1 to 50
+                          collect `((name . ,(format "pkg%02d" n))
+                                    (kind . "binary")
+                                    (version . "1"))))
+         (packages (vconcat (append base extras))))
+    (safeslop-profiles--catalog-indexes
+     safeslop-test-profiles--bundle-envelope
+     `((packages . ,packages)))))
+
+(defun safeslop-test-profiles--compose-row-at (position)
+  "Return compose row metadata at POSITION in the current compose buffer."
+  (save-excursion
+    (goto-char position)
+    (safeslop-profiles-compose--row-at-point)))
+
+(ert-deftest safeslop-test-profiles-compose-toggle-preserves-row-and-scroll ()
+  "RET keeps an operator on the lower row they just changed."
+  (let* ((catalog (safeslop-test-profiles--large-compose-catalog))
+         (state (safeslop-profiles--compose-state
+                 "review" "claude" "container" nil nil "deny" "." nil catalog))
+         (buffer (generate-new-buffer " *safeslop compose scroll*")))
+    (unwind-protect
+        (save-window-excursion
+          (switch-to-buffer buffer)
+          (safeslop-profiles-compose-mode)
+          (setq safeslop-profiles-compose--state state)
+          (safeslop-profiles-compose--render)
+          (goto-char (point-min))
+          (should (search-forward "pkg50" nil t))
+          (beginning-of-line)
+          (let* ((window (selected-window))
+                 (row (copy-tree (safeslop-profiles-compose--row-at-point)))
+                 (point-before (point)))
+            (set-window-start window point-before t)
+            (let ((start-row (copy-tree
+                              (safeslop-test-profiles--compose-row-at
+                               (window-start window)))))
+              (call-interactively #'safeslop-profiles-compose-toggle)
+              (should (member "pkg50" (alist-get 'packages state)))
+              (should (equal row (safeslop-profiles-compose--row-at-point)))
+              (should (equal start-row
+                             (safeslop-test-profiles--compose-row-at
+                              (window-start window)))))))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))))
+
+(ert-deftest safeslop-test-profiles-compose-refresh-preserves-row-and-scroll ()
+  "Refresh retains selected rows and the lower-row operator context."
+  (let* ((catalog (safeslop-test-profiles--large-compose-catalog))
+         (state (safeslop-profiles--compose-state
+                 "review" "claude" "container" nil '("pkg50") "deny" "." nil catalog))
+         (buffer (generate-new-buffer " *safeslop compose refresh*")))
+    (unwind-protect
+        (save-window-excursion
+          (switch-to-buffer buffer)
+          (safeslop-profiles-compose-mode)
+          (setq safeslop-profiles-compose--state state)
+          (safeslop-profiles-compose--render)
+          (goto-char (point-min))
+          (should (search-forward "pkg50" nil t))
+          (beginning-of-line)
+          (let* ((window (selected-window))
+                 (row (copy-tree (safeslop-profiles-compose--row-at-point)))
+                 (point-before (point)))
+            (set-window-start window point-before t)
+            (let ((start-row (copy-tree
+                              (safeslop-test-profiles--compose-row-at
+                               (window-start window)))))
+              (cl-letf (((symbol-function 'safeslop-profiles--fetch-compose-catalog)
+                         (lambda () catalog)))
+                (call-interactively #'safeslop-profiles-compose-refresh))
+              (should (equal '("pkg50") (alist-get 'packages state)))
+              (should (equal row (safeslop-profiles-compose--row-at-point)))
+              (should (equal start-row
+                             (safeslop-test-profiles--compose-row-at
+                              (window-start window)))))))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))))
+
+(ert-deftest safeslop-test-profiles-compose-locked-row-explains-without-moving ()
+  "Locked inherited rows retain context and explain why RET is unavailable."
+  (let* ((catalog (safeslop-test-profiles--large-compose-catalog))
+         (state (safeslop-profiles--compose-state
+                 "review" "claude" "container" nil nil "deny" "." nil catalog))
+         (buffer (generate-new-buffer " *safeslop compose locked*"))
+         feedback)
+    (unwind-protect
+        (save-window-excursion
+          (switch-to-buffer buffer)
+          (safeslop-profiles-compose-mode)
+          (setq safeslop-profiles-compose--state state)
+          (safeslop-profiles-compose--render)
+          (goto-char (point-min))
+          (should (search-forward "bundle claude" nil t))
+          (beginning-of-line)
+          (let* ((window (selected-window))
+                 (row (copy-tree (safeslop-profiles-compose--row-at-point)))
+                 (point-before (point)))
+            (set-window-start window point-before t)
+            (let ((start-row (copy-tree
+                              (safeslop-test-profiles--compose-row-at
+                               (window-start window)))))
+              (cl-letf (((symbol-function 'message)
+                         (lambda (format-string &rest args)
+                           (setq feedback (apply #'format format-string args)))))
+                (call-interactively #'safeslop-profiles-compose-toggle))
+              (should (equal row (safeslop-profiles-compose--row-at-point)))
+              (should (equal start-row
+                             (safeslop-test-profiles--compose-row-at
+                              (window-start window))))
+              (should (and feedback
+                           (string-match-p "locked.*default:claude" feedback))))))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))))
+
+(ert-deftest safeslop-test-profiles-compose-default-bundle-opt-out-is-explicit ()
+  "A distinct control maps the default-agent bundle choice to bare-agent argv."
+  (let* ((catalog (safeslop-profiles--catalog-indexes
+                   safeslop-test-profiles--bundle-envelope
+                   safeslop-test-profiles--package-envelope))
+         (state (safeslop-profiles--compose-state
+                 "review" "claude" "container" nil nil "deny" "." nil catalog)))
+    (with-temp-buffer
+      (safeslop-profiles-compose-mode)
+      (setq safeslop-profiles-compose--state state)
+      (safeslop-profiles-compose--render)
+      (goto-char (point-min))
+      (should (search-forward "Default agent bundle: [x] claude" nil t))
+      (let ((row (safeslop-profiles-compose--row-at-point)))
+        (should (eq (alist-get 'type row) 'default-bundle))
+        (should (equal "claude" (alist-get 'name row))))
+      (call-interactively #'safeslop-profiles-compose-toggle)
+      (should (alist-get 'no-default-bundle state))
+      (let ((claude (assoc "claude" (safeslop-profiles--bundle-rows
+                                     "claude" nil t catalog))))
+        (should-not (alist-get 'checked (cdr claude)))
+        (should-not (alist-get 'locked (cdr claude))))
+      (should (member "--no-default-bundle" (safeslop-profiles--compose-args state)))
+      (should (string-match-p "may not launch" (buffer-string))))))
+
 (ert-deftest safeslop-test-profiles-interactive-create-opens-compose-buffer ()
   "Interactive create opens the compose buffer instead of writing immediately."
   (let (called)
