@@ -785,33 +785,104 @@ save is re-validated."
   (or (get-text-property (point) 'safeslop-row)
       (get-text-property (max (point-min) (1- (point))) 'safeslop-row)))
 
+(defun safeslop-profiles-compose--row-at-position (position)
+  "Return compose row metadata at POSITION in the current buffer."
+  (save-excursion
+    (goto-char (max (point-min) (min position (point-max))))
+    (safeslop-profiles-compose--row-at-point)))
+
+(defun safeslop-profiles-compose--find-row (row)
+  "Return the current position of logical compose ROW, or nil when absent."
+  (when row
+    (save-excursion
+      (let ((position (point-min))
+            found)
+        (while (and (< position (point-max)) (not found))
+          (when (equal row (get-text-property position 'safeslop-row))
+            (setq found position))
+          (setq position (next-single-property-change
+                          position 'safeslop-row nil (point-max))))
+        found))))
+
+(defun safeslop-profiles-compose--capture-context ()
+  "Capture logical point and scroll rows for every window showing this buffer."
+  (list :point-row (safeslop-profiles-compose--row-at-point)
+        :point (point)
+        :views
+        (mapcar
+         (lambda (window)
+           (list :window window
+                 :point-row (safeslop-profiles-compose--row-at-position
+                             (window-point window))
+                 :point (window-point window)
+                 :start-row (safeslop-profiles-compose--row-at-position
+                             (window-start window))
+                 :start (window-start window)))
+         (get-buffer-window-list (current-buffer) nil t))))
+
+(defun safeslop-profiles-compose--restore-context (context)
+  "Restore logical point and scroll rows from compose CONTEXT after rendering."
+  (let ((point (or (safeslop-profiles-compose--find-row
+                    (plist-get context :point-row))
+                   (plist-get context :point))))
+    (goto-char (max (point-min) (min point (point-max)))))
+  (dolist (view (plist-get context :views))
+    (let ((window (plist-get view :window)))
+      (when (window-live-p window)
+        (let ((point (or (safeslop-profiles-compose--find-row
+                          (plist-get view :point-row))
+                         (plist-get view :point)))
+              (start (or (safeslop-profiles-compose--find-row
+                          (plist-get view :start-row))
+                         (plist-get view :start))))
+          (set-window-point window (max (point-min) (min point (point-max))))
+          (set-window-start window (max (point-min) (min start (point-max))) t))))))
+
+(defun safeslop-profiles-compose--render-preserving-context ()
+  "Render compose state without moving an operator away from its logical row."
+  (let ((context (safeslop-profiles-compose--capture-context)))
+    (safeslop-profiles-compose--render)
+    (safeslop-profiles-compose--restore-context context)))
+
+(defun safeslop-profiles-compose--locked-message (name row)
+  "Explain why compose ROW named NAME cannot be directly toggled."
+  (message "safeslop: %s is locked because it is included by %s; toggle that source instead"
+           name (or (alist-get 'source (cdr row)) "an inherited selection")))
+
 (defun safeslop-profiles-compose-toggle ()
   "Toggle the bundle or unlocked direct package row at point."
   (interactive)
   (let* ((row (safeslop-profiles-compose--row-at-point))
          (type (alist-get 'type row))
          (name (alist-get 'name row))
-         (state safeslop-profiles-compose--state))
-    (cond
-     ((eq type 'bundle)
-      (let ((bundle (assoc name (safeslop-profiles--bundle-rows
-                                 (alist-get 'agent state) (alist-get 'bundles state)
-                                 (alist-get 'no-default-bundle state) (alist-get 'catalog state)))))
-        (unless (alist-get 'locked (cdr bundle))
-          (let ((bundles (alist-get 'bundles state)))
-            (setcdr (assoc 'bundles state)
-                    (if (member name bundles) (remove name bundles) (cons name bundles)))))))
-     ((eq type 'package)
-      (let ((pkg (assoc name (alist-get 'package-rows state))))
-        (unless (alist-get 'locked (cdr pkg))
-          (let ((packages (alist-get 'packages state)))
-            (setcdr (assoc 'packages state)
-                    (if (member name packages) (remove name packages) (cons name packages))))))))
-    (setcdr (assoc 'package-rows state)
-            (safeslop-profiles--package-rows
-             (alist-get 'agent state) (alist-get 'bundles state) (alist-get 'packages state)
-             (alist-get 'no-default-bundle state) (alist-get 'catalog state)))
-    (safeslop-profiles-compose--render)))
+         (state safeslop-profiles-compose--state)
+         changed)
+    (pcase type
+      ('bundle
+       (let ((bundle (assoc name (safeslop-profiles--bundle-rows
+                                  (alist-get 'agent state) (alist-get 'bundles state)
+                                  (alist-get 'no-default-bundle state) (alist-get 'catalog state)))))
+         (if (alist-get 'locked (cdr bundle))
+             (safeslop-profiles-compose--locked-message name bundle)
+           (let ((bundles (alist-get 'bundles state)))
+             (setcdr (assoc 'bundles state)
+                     (if (member name bundles) (remove name bundles) (cons name bundles)))
+             (setq changed t)))))
+      ('package
+       (let ((pkg (assoc name (alist-get 'package-rows state))))
+         (if (alist-get 'locked (cdr pkg))
+             (safeslop-profiles-compose--locked-message name pkg)
+           (let ((packages (alist-get 'packages state)))
+             (setcdr (assoc 'packages state)
+                     (if (member name packages) (remove name packages) (cons name packages)))
+             (setq changed t)))))
+      (_ (message "safeslop: no selectable row at point")))
+    (when changed
+      (setcdr (assoc 'package-rows state)
+              (safeslop-profiles--package-rows
+               (alist-get 'agent state) (alist-get 'bundles state) (alist-get 'packages state)
+               (alist-get 'no-default-bundle state) (alist-get 'catalog state)))
+      (safeslop-profiles-compose--render-preserving-context))))
 
 (defun safeslop-profiles--package-help (pkg)
   "Return help text for package catalog row PKG."
@@ -875,7 +946,8 @@ save is re-validated."
            (alist-get 'packages safeslop-profiles-compose--state)
            (alist-get 'no-default-bundle safeslop-profiles-compose--state)
            (alist-get 'catalog safeslop-profiles-compose--state)))
-  (safeslop-profiles-compose--render))
+  (safeslop-profiles-compose--render-preserving-context)
+  (message "safeslop: catalog refreshed"))
 
 (defun safeslop-profiles-compose-cancel ()
   "Cancel profile compose without writing."

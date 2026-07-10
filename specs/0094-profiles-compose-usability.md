@@ -23,11 +23,11 @@ Default agent bundles remain locked in the bundle list. Add a distinct, clearly 
   VERIFY:   `make test-emacs EMACS=$(command -v emacs)`
   EXPECTED: New interaction assertions fail on the pre-fix renderer because it resets to the top, lacks a default-bundle control, and silently rerenders locked rows.
 
-- [ ] T2 — Preserve compose context and give locked rows feedback
-  FILE:     `emacs/safeslop-profiles.el`
-  CHANGE:   Add narrowly scoped helpers to capture/restore logical compose row positions for every showing window around compose rerenders. Use them after actual toggles and catalog refreshes. Detect locked/default/inherited rows before state mutation; leave the buffer/view unchanged and message the lock source. Keep raw and Evil `RET` behavior unchanged.
-  VERIFY:   `make test-emacs EMACS=$(command -v emacs) && make test-emacs-ui-matrix`
-  EXPECTED: Lower-row selections and refresh retain context; locked `RET` does not jump; raw, Doom-shim, Evil, and Doom+Evil key-resolution slots still pass.
+- [x] T2 — Preserve compose context and give locked rows feedback
+  FILE:     `emacs/safeslop-profiles.el`, `emacs/test/safeslop-profiles-test.el`
+  CHANGE:   First extend the regressions to cover two windows showing the compose buffer with distinct row/scroll positions and to prove a locked no-op does not change rendered content/state. Add narrowly scoped helpers to capture/restore logical compose row positions for every showing window around compose rerenders, falling back to a clamped old position only if a refreshed catalog no longer has that row. Use them after actual toggles and catalog refreshes. Detect locked/default/inherited rows before state mutation; leave the buffer/view unchanged and message the lock source. Keep raw and Evil `RET` behavior unchanged.
+  VERIFY:   `$(command -v emacs) --batch -L emacs -l ert -l emacs/test/safeslop-profiles-test.el --eval '(ert-run-tests-batch-and-exit "safeslop-test-profiles-compose-\\(toggle-preserves-row-and-scroll\\|toggle-preserves-every-showing-window\\|refresh-preserves-row-and-scroll\\|locked-row-explains-without-moving\\)")' && make test-emacs-ui-matrix`
+  EXPECTED: The four T2 interaction regressions pass; the T3 default-control regression remains intentionally red until its task; raw, Doom-shim, Evil, and Doom+Evil key-resolution slots still pass.
 
 - [ ] T3 — Expose the safe default-bundle opt-out
   FILE:     `emacs/safeslop-profiles.el`, `emacs/test/safeslop-profiles-test.el`

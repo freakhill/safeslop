@@ -381,6 +381,51 @@
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 
+(ert-deftest safeslop-test-profiles-compose-toggle-preserves-every-showing-window ()
+  "RET restores distinct row and scroll context in every compose window."
+  (let* ((catalog (safeslop-test-profiles--large-compose-catalog))
+         (state (safeslop-profiles--compose-state
+                 "review" "claude" "container" nil nil "deny" "." nil catalog))
+         (buffer (generate-new-buffer " *safeslop compose windows*")))
+    (unwind-protect
+        (save-window-excursion
+          (switch-to-buffer buffer)
+          (safeslop-profiles-compose-mode)
+          (setq safeslop-profiles-compose--state state)
+          (safeslop-profiles-compose--render)
+          (let ((first (selected-window))
+                (second (split-window-right)))
+            (set-window-buffer second buffer)
+            (cl-labels ((place-at
+                         (window name)
+                         (with-selected-window window
+                           (goto-char (point-min))
+                           (should (search-forward name nil t))
+                           (beginning-of-line)
+                           (set-window-start window (point) t)
+                           (list (copy-tree (safeslop-profiles-compose--row-at-point))
+                                 (copy-tree
+                                  (safeslop-test-profiles--compose-row-at
+                                   (window-start window)))))))
+              (let ((first-rows (place-at first "pkg50"))
+                    (second-rows (place-at second "pkg40")))
+                (with-selected-window first
+                  (goto-char (point-min))
+                  (should (search-forward "pkg50" nil t))
+                  (beginning-of-line)
+                  (call-interactively #'safeslop-profiles-compose-toggle))
+                (dolist (view `((,first ,first-rows) (,second ,second-rows)))
+                  (let ((window (nth 0 view))
+                        (expected (nth 1 view)))
+                    (with-selected-window window
+                      (should (equal (nth 0 expected)
+                                     (safeslop-profiles-compose--row-at-point)))
+                      (should (equal (nth 1 expected)
+                                     (safeslop-test-profiles--compose-row-at
+                                      (window-start window))))))))))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer))))))
+
 (ert-deftest safeslop-test-profiles-compose-refresh-preserves-row-and-scroll ()
   "Refresh retains selected rows and the lower-row operator context."
   (let* ((catalog (safeslop-test-profiles--large-compose-catalog))
@@ -432,7 +477,9 @@
           (beginning-of-line)
           (let* ((window (selected-window))
                  (row (copy-tree (safeslop-profiles-compose--row-at-point)))
-                 (point-before (point)))
+                 (point-before (point))
+                 (state-before (copy-tree state))
+                 (tick-before (buffer-chars-modified-tick)))
             (set-window-start window point-before t)
             (let ((start-row (copy-tree
                               (safeslop-test-profiles--compose-row-at
@@ -441,6 +488,8 @@
                          (lambda (format-string &rest args)
                            (setq feedback (apply #'format format-string args)))))
                 (call-interactively #'safeslop-profiles-compose-toggle))
+              (should (equal state-before state))
+              (should (= tick-before (buffer-chars-modified-tick)))
               (should (equal row (safeslop-profiles-compose--row-at-point)))
               (should (equal start-row
                              (safeslop-test-profiles--compose-row-at
