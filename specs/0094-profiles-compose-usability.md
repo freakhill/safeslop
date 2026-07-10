@@ -29,7 +29,7 @@ Default agent bundles remain locked in the bundle list. Add a distinct, clearly 
   VERIFY:   `$(command -v emacs) --batch -L emacs -l ert -l emacs/test/safeslop-profiles-test.el --eval '(ert-run-tests-batch-and-exit "safeslop-test-profiles-compose-\\(toggle-preserves-row-and-scroll\\|toggle-preserves-every-showing-window\\|refresh-preserves-row-and-scroll\\|locked-row-explains-without-moving\\)")' && make test-emacs-ui-matrix`
   EXPECTED: The four T2 interaction regressions pass; the T3 default-control regression remains intentionally red until its task; raw, Doom-shim, Evil, and Doom+Evil key-resolution slots still pass.
 
-- [ ] T3 — Expose the safe default-bundle opt-out
+- [x] T3 — Expose the safe default-bundle opt-out
   FILE:     `emacs/safeslop-profiles.el`, `emacs/test/safeslop-profiles-test.el`
   CHANGE:   Render a distinct `RET`-actionable default-agent-bundle control with visible on/off state and an advanced warning. Map it only to compose state's existing `no-default-bundle`; recompute bundle/package inheritance after a change. Keep the default `claude` bundle row locked while default inheritance is on, and allow ordinary explicit bundle selection only when the default is off.
   VERIFY:   `make test-emacs EMACS=$(command -v emacs)`

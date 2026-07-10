@@ -500,7 +500,7 @@
         (kill-buffer buffer)))))
 
 (ert-deftest safeslop-test-profiles-compose-default-bundle-opt-out-is-explicit ()
-  "A distinct control maps the default-agent bundle choice to bare-agent argv."
+  "A distinct control maps automatic default inclusion to bare-agent argv."
   (let* ((catalog (safeslop-profiles--catalog-indexes
                    safeslop-test-profiles--bundle-envelope
                    safeslop-test-profiles--package-envelope))
@@ -511,18 +511,46 @@
       (setq safeslop-profiles-compose--state state)
       (safeslop-profiles-compose--render)
       (goto-char (point-min))
-      (should (search-forward "Default agent bundle: [x] claude" nil t))
-      (let ((row (safeslop-profiles-compose--row-at-point)))
+      (should (search-forward "Automatic agent bundle: [x] claude (enabled)" nil t))
+      (should-not (member "--no-default-bundle" (safeslop-profiles--compose-args state)))
+      (let ((row (copy-tree (safeslop-profiles-compose--row-at-point))))
         (should (eq (alist-get 'type row) 'default-bundle))
-        (should (equal "claude" (alist-get 'name row))))
-      (call-interactively #'safeslop-profiles-compose-toggle)
+        (should (equal "claude" (alist-get 'name row)))
+        (call-interactively #'safeslop-profiles-compose-toggle)
+        (should (equal row (safeslop-profiles-compose--row-at-point))))
       (should (alist-get 'no-default-bundle state))
       (let ((claude (assoc "claude" (safeslop-profiles--bundle-rows
-                                     "claude" nil t catalog))))
+                                     "claude" nil t catalog)))
+            (node (assoc "node" (alist-get 'package-rows state))))
         (should-not (alist-get 'checked (cdr claude)))
-        (should-not (alist-get 'locked (cdr claude))))
+        (should-not (alist-get 'locked (cdr claude)))
+        (should-not (alist-get 'checked (cdr node)))
+        (should-not (alist-get 'locked (cdr node))))
       (should (member "--no-default-bundle" (safeslop-profiles--compose-args state)))
-      (should (string-match-p "may not launch" (buffer-string))))))
+      (should (string-match-p "may not launch" (buffer-string)))
+      (goto-char (point-min))
+      (should (search-forward "Automatic agent bundle: [ ] claude (disabled)" nil t))
+      (call-interactively #'safeslop-profiles-compose-toggle)
+      (should-not (alist-get 'no-default-bundle state))
+      (should-not (member "--no-default-bundle" (safeslop-profiles--compose-args state)))
+      (let ((claude (assoc "claude" (safeslop-profiles--bundle-rows
+                                     "claude" nil nil catalog))))
+        (should (alist-get 'checked (cdr claude)))
+        (should (alist-get 'locked (cdr claude)))))))
+
+(ert-deftest safeslop-test-profiles-compose-omits-default-control-without-default ()
+  "Agents without a catalog default do not get a bare-agent control."
+  (let* ((catalog (safeslop-profiles--catalog-indexes
+                   safeslop-test-profiles--bundle-envelope
+                   safeslop-test-profiles--package-envelope))
+         (state (safeslop-profiles--compose-state
+                 "review" "fish" "container" nil nil "deny" "." nil catalog)))
+    (with-temp-buffer
+      (safeslop-profiles-compose-mode)
+      (setq safeslop-profiles-compose--state state)
+      (safeslop-profiles-compose--render)
+      (should-not (string-match-p "Automatic agent bundle:" (buffer-string)))
+      (should-not (member "--no-default-bundle" (safeslop-profiles--compose-args state))))))
 
 (ert-deftest safeslop-test-profiles-interactive-create-opens-compose-buffer ()
   "Interactive create opens the compose buffer instead of writing immediately."

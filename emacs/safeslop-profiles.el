@@ -752,17 +752,32 @@ save is re-validated."
                       (if checked "x" " ") (if locked "L" " ") name (or source ""))))
     (put-text-property start (point) 'safeslop-row (list (cons 'type type) (cons 'name name)))))
 
+(defun safeslop-profiles-compose--insert-default-bundle-control (name disabled)
+  "Insert the automatic bundle control for NAME, disabled when DISABLED."
+  (let ((start (point)))
+    (insert (format "Automatic agent bundle: [%s] %s (%s)\n"
+                    (if disabled " " "x") name (if disabled "disabled" "enabled")))
+    (put-text-property start (point) 'safeslop-row
+                       (list (cons 'type 'default-bundle) (cons 'name name)))
+    (when disabled
+      (insert "  Warning: automatic agent runtime packages are omitted; the agent may not launch.\n"))))
+
 (defun safeslop-profiles-compose--render ()
   "Render the current compose state."
-  (let ((inhibit-read-only t)
-        (state safeslop-profiles-compose--state))
+  (let* ((inhibit-read-only t)
+         (state safeslop-profiles-compose--state)
+         (default (safeslop-profiles--lookup-default-bundle
+                   (alist-get 'agent state) (alist-get 'catalog state))))
     (erase-buffer)
     (insert "safeslop Profiles compose buffer\n")
-    (insert "Keys: RET toggle unlocked, ? help, g refresh catalog, C-c C-c preview/save, q cancel\n\n")
+    (insert "Keys: RET toggle, ? help, g refresh catalog, C-c C-c preview/save, q cancel; L = included by source\n\n")
     (insert (format "Name: %s\nAgent: %s\nEnvironment: %s\nNetwork: %s\nWorkspace: %s\n\n"
                     (alist-get 'name state) (alist-get 'agent state)
                     (alist-get 'environment state) (alist-get 'network state)
                     (or (alist-get 'workspace state) "")))
+    (when default
+      (safeslop-profiles-compose--insert-default-bundle-control
+       default (alist-get 'no-default-bundle state)))
     (insert "Bundles (suggested rows are visible but not preselected):\n")
     (dolist (bundle (safeslop-profiles--bundle-rows
                      (alist-get 'agent state) (alist-get 'bundles state)
@@ -846,8 +861,11 @@ save is re-validated."
 
 (defun safeslop-profiles-compose--locked-message (name row)
   "Explain why compose ROW named NAME cannot be directly toggled."
-  (message "safeslop: %s is locked because it is included by %s; toggle that source instead"
-           name (or (alist-get 'source (cdr row)) "an inherited selection")))
+  (let ((source (or (alist-get 'source (cdr row)) "an inherited selection")))
+    (message (if (and (stringp source) (string-prefix-p "default:" source))
+                 "safeslop: %s is locked because it is included by %s; use Automatic agent bundle to omit it"
+               "safeslop: %s is locked because it is included by %s; toggle that source instead")
+             name source)))
 
 (defun safeslop-profiles-compose-toggle ()
   "Toggle the bundle or unlocked direct package row at point."
@@ -858,6 +876,15 @@ save is re-validated."
          (state safeslop-profiles-compose--state)
          changed)
     (pcase type
+      ('default-bundle
+       (let ((default (safeslop-profiles--lookup-default-bundle
+                       (alist-get 'agent state) (alist-get 'catalog state))))
+         (if (equal name default)
+             (progn
+               (setcdr (assoc 'no-default-bundle state)
+                       (not (alist-get 'no-default-bundle state)))
+               (setq changed t))
+           (message "safeslop: no automatic agent bundle is available"))))
       ('bundle
        (let ((bundle (assoc name (safeslop-profiles--bundle-rows
                                   (alist-get 'agent state) (alist-get 'bundles state)
@@ -910,6 +937,10 @@ save is re-validated."
                                   (safeslop-profiles--join (safeslop-profiles--row-vector bundle 'packages)))))
                ('package (safeslop-profiles--package-help
                           (safeslop-profiles--catalog-row 'packages name catalog)))
+               ('default-bundle
+                (format "Automatic %s bundle is %s; RET toggles automatic inclusion. Explicit selections stay selected, but the agent may not launch without its runtime."
+                        name (if (alist-get 'no-default-bundle safeslop-profiles-compose--state)
+                                 "disabled" "enabled")))
                (_ "No row help here")))))
 
 (defun safeslop-profiles--fetch-compose-catalog ()
