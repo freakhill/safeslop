@@ -86,6 +86,7 @@ func (f cliFakeHostEnv) LookPath(name string) (string, bool) {
 	return all[0], true
 }
 func (f cliFakeHostEnv) LookAll(name string) []string { return append([]string(nil), f.all[name]...) }
+func (f cliFakeHostEnv) SameFile(a, b string) (bool, error) { return a == b, nil }
 
 func withStageHostExecResolver(t *testing.T, r *hostexec.Resolver) {
 	t.Helper()

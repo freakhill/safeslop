@@ -70,9 +70,10 @@ func (e *Env) LookPath(file string) (string, bool) {
 
 // LookAll resolves file against EVERY directory in the reconstructed PATH, returning all existing
 // executable matches in PATH order (like `which -a`). The first is the one LookPath returns (the winner);
-// any others are shadowed — a later-PATH install the user may have meant. Flagging this matters because
-// picking the wrong binary can silently differ from what the user expects. A slash-containing name is
-// checked directly (zero or one result).
+// any others are candidates — a later-PATH entry that may be the same file object (an alias, e.g. an
+// OrbStack/Docker-Desktop app-bundle symlink projected into multiple PATH dirs) or a genuinely distinct
+// binary (a real shadow). hostexec.Resolve collapses same-object aliases via SameFile and fails closed
+// only on distinct identity groups (specs/0095).
 func (e *Env) LookAll(file string) []string {
 	if strings.Contains(file, "/") {
 		if e.isExec(file) {
@@ -94,6 +95,23 @@ func (e *Env) LookAll(file string) []string {
 		seen[full] = true
 	}
 	return out
+}
+
+// SameFile reports whether two resolved helper paths name the same file object, by stat-ing both
+// (os.Stat follows symlinks, so app-bundle symlinks compare equal to their shared target) and comparing
+// device + inode via os.SameFile. This is the identity basis for collapsing same-binary PATH aliases
+// without weakening distinct-binary shadow refusal (specs/0095). A stat error is returned, never
+// collapsed to equal.
+func (e *Env) SameFile(pathA, pathB string) (bool, error) {
+	fa, err := os.Stat(pathA)
+	if err != nil {
+		return false, err
+	}
+	fb, err := os.Stat(pathB)
+	if err != nil {
+		return false, err
+	}
+	return os.SameFile(fa, fb), nil
 }
 
 // reconstructor holds the (injectable) host seams plus the in-memory session cache. All exported

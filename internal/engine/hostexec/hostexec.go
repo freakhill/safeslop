@@ -51,6 +51,11 @@ type LookupEnv interface {
 	Get(string) (string, bool)
 	LookPath(string) (string, bool)
 	LookAll(string) []string
+	// SameFile reports whether two resolved helper paths are the same file object
+	// (dev+inode, following symlinks). It is the identity basis for collapsing
+	// same-binary PATH aliases without weakening distinct-binary shadow refusal
+	// (specs/0095). A stat/compare error is returned and never collapses to equal.
+	SameFile(pathA, pathB string) (bool, error)
 }
 
 // Spec describes one helper resolution and execution policy.

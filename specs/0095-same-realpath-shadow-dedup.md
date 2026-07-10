@@ -22,7 +22,7 @@ WORKTREE: `.worktrees/0095-same-realpath-shadow-dedup/`
 
 ## Tasks
 
-- [ ] T1 — Add the identity seam and wire all LookupEnv implementers
+- [x] T1 — Add the identity seam and wire all LookupEnv implementers
   FILE: `internal/engine/hostexec/hostexec.go`, `internal/engine/hostenv/reconstruct.go`, test fakes in `internal/engine/hostexec/hostexec_test.go`, `internal/cli/cli_stage_test.go`, `internal/engine/toolchain/toolchain_test.go`, `internal/engine/creds/hostexec_test.go`, `internal/engine/secrets/secrets_test.go`
   CHANGE: Add `SameFile(pathA, pathB string) (bool, error)` to the `LookupEnv` interface. Production `Env.SameFile` = `os.Stat` (follows symlinks) on both + `os.SameFile` (dev+ino); a stat error is returned (never accidentally equal). Every test fake implements `SameFile` with the conservative default: `(a == b, nil)` (identical path string => same; distinct strings => distinct) so existing shadow goldens stay green untouched; new tests configure shared identity explicitly.
   VERIFY: `go build ./... && go vet ./...`

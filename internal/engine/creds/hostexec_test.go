@@ -45,6 +45,19 @@ func (e credsFakeHostEnv) LookAll(name string) []string {
 	return []string{p}
 }
 
+// SameFile uses real stat identity (credsFakeHostEnv is backed by real files in a tmp dir).
+func (e credsFakeHostEnv) SameFile(a, b string) (bool, error) {
+	fa, err := os.Stat(a)
+	if err != nil {
+		return false, err
+	}
+	fb, err := os.Stat(b)
+	if err != nil {
+		return false, err
+	}
+	return os.SameFile(fa, fb), nil
+}
+
 func isTestExec(p string) bool {
 	st, err := os.Stat(p)
 	return err == nil && !st.IsDir() && st.Mode().Perm()&0o111 != 0
@@ -93,3 +106,4 @@ func (e credsShadowEnv) LookPath(name string) (string, bool) {
 	return all[0], true
 }
 func (e credsShadowEnv) LookAll(name string) []string { return append([]string(nil), e.all[name]...) }
+func (e credsShadowEnv) SameFile(a, b string) (bool, error) { return a == b, nil }

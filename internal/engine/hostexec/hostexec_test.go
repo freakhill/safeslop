@@ -40,6 +40,10 @@ func (f fakeEnv) LookAll(name string) []string {
 	return cp
 }
 
+// SameFile default: identical path string => same object; distinct strings => distinct. New alias
+// tests override this with an explicit identity map (specs/0095).
+func (f fakeEnv) SameFile(a, b string) (bool, error) { return a == b, nil }
+
 func TestResolveMissingShadowedAbsoluteAndRelative(t *testing.T) {
 	r := New(fakeEnv{path: "/safe/bin", all: map[string][]string{
 		"op":         {"/safe/bin/op"},

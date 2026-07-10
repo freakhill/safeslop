@@ -132,6 +132,8 @@ func (f secretFakeEnv) LookAll(name string) []string {
 	return append([]string(nil), out...)
 }
 
+func (f secretFakeEnv) SameFile(a, b string) (bool, error) { return a == b, nil }
+
 func withHostExecResolver(t *testing.T, r *hostexec.Resolver) {
 	t.Helper()
 	old := hostExecResolver
