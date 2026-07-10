@@ -1,6 +1,6 @@
 # 0095 — Same-realpath shadow dedup
 
-Status: planned
+Status: complete
 Date: 2026-07-10
 
 Implements the ayo-flo decision at
@@ -46,7 +46,7 @@ WORKTREE: `.worktrees/0095-same-realpath-shadow-dedup/`
   VERIFY: `make test-emacs EMACS=$(command -v emacs)`
   EXPECTED: Alias-only Docker permits launch in the preflight; shadowed Docker still aborts.
 
-- [ ] T5 — Docs and spec completion
+- [x] T5 — Docs and spec completion
   FILE: `README.md`, `skills/agent-sandbox-ops/SKILL.md`, `specs/0095-same-realpath-shadow-dedup.md`
   CHANGE: Document that same-file PATH aliases (e.g. OrbStack's two docker symlinks) are treated as one helper and do not block launch, while genuinely distinct binaries still fail closed; note the inherited TOCTOU caveat briefly. Mark spec complete only after all verification passes.
   VERIFY: `git diff --check && make check && make build`

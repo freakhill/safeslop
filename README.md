@@ -136,11 +136,11 @@ session running, so nothing is left as a phantom. The Emacs client switches to a
 read-only `--output jsonl` status monitor on that code.
 
 Before Emacs starts a coupled or detached container session, it performs a
-best-effort runtime preflight with `safeslop doctor --json`. If the doctor JSON
-reports a shadowed `docker` helper (`shadowed_paths`), Emacs aborts before
-opening the launch subprocess and shows the selected and shadowed paths; if
-doctor fails or emits older JSON, launch continues and the CLI remains
-authoritative. Reattaching to an already-detached session uses the existing
+best-effort runtime preflight with `safeslop doctor --json`. Same-file Docker
+aliases are reported as `alias_paths` and do not block launch; genuinely distinct
+helpers appear in `shadowed_paths`, which makes Emacs abort before opening the
+launch subprocess and show the selected and shadowed paths. If doctor fails or
+emits older JSON, launch continues and the CLI remains authoritative. Reattaching to an already-detached session uses the existing
 supervisor socket and does not preflight Docker.
 
 `session run --detach` gives a session a life independent of the Emacs buffer that
@@ -213,8 +213,10 @@ runtime is used or the command fails closed, never a silent fallback to another)
 auto-detect in the fixed precedence **docker → podman → lima** (first whose CLI *and* working
 compose capability is present wins). Runtime CLIs are resolved once through safeslop's sanitized
 host PATH and carried as absolute paths into later commands, so detection and execution cannot
-drift; shadowed runtime CLIs fail closed. With none present/working, the command fails closed and
-names all three.
+drift. Same-file PATH aliases (for example, two OrbStack `docker` symlinks) count as one
+helper; genuinely distinct runtime binaries fail closed. This identity check is point-in-time,
+not a descriptor pin, so the existing validate-to-exec TOCTOU caveat remains. With none
+present/working, the command fails closed and names all three.
 
 **Deny-tier fail-closed:** a `network: deny` profile must place the agent on a network with no
 default route. HTTP(S) egress is a domain allowlist: numeric IP-literal destinations are denied

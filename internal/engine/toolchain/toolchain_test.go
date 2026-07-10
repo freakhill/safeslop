@@ -73,5 +73,5 @@ func (f toolchainFakeEnv) LookPath(name string) (string, bool) {
 	}
 	return all[0], true
 }
-func (f toolchainFakeEnv) LookAll(name string) []string { return append([]string(nil), f.all[name]...) }
+func (f toolchainFakeEnv) LookAll(name string) []string       { return append([]string(nil), f.all[name]...) }
 func (f toolchainFakeEnv) SameFile(a, b string) (bool, error) { return a == b, nil }

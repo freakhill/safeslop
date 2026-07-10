@@ -70,8 +70,10 @@ one and drives it, and never installs, upgrades, or manages one. Have one presen
 Selection: `SAFESLOP_CONTAINER_RUNTIME=docker|podman|lima` forces one (used or fail closed — no
 silent fallback); otherwise auto-detect **docker → podman → lima** (first with a working compose
 wins); none present fails closed naming all three. Runtime CLIs are resolved once through safeslop's
-sanitized host PATH and carried as absolute paths into later commands; shadowed runtime CLIs fail
-closed. A `network: deny` profile is **refused on podman/lima** (not yet egress-verified) unless
+sanitized host PATH and carried as absolute paths into later commands. Same-file PATH aliases (such
+as two OrbStack Docker symlinks) count as one helper; distinct binaries still fail closed. This
+point-in-time identity check does not pin an executable against the existing validate-to-exec TOCTOU
+window. A `network: deny` profile is **refused on podman/lima** (not yet egress-verified) unless
 `SAFESLOP_ALLOW_UNVERIFIED_RUNTIME=1` is set; teardown (`down`, the startup sweep, session reap) is
 never gated.
 

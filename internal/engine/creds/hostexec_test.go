@@ -105,5 +105,5 @@ func (e credsShadowEnv) LookPath(name string) (string, bool) {
 	}
 	return all[0], true
 }
-func (e credsShadowEnv) LookAll(name string) []string { return append([]string(nil), e.all[name]...) }
+func (e credsShadowEnv) LookAll(name string) []string       { return append([]string(nil), e.all[name]...) }
 func (e credsShadowEnv) SameFile(a, b string) (bool, error) { return a == b, nil }
