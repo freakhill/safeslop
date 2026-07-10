@@ -958,6 +958,18 @@ flight, so slow `session list' calls can't stack up."
     (should (string-match-p "/usr/local/bin/docker" message))
     (should-not (string-match-p "op://\\|token" message))))
 
+(ert-deftest safeslop-test-session-runtime-preflight-allows-alias-only-docker ()
+  "Alias-only Docker paths are visible diagnostics, not a launch blocker."
+  (let ((data '((session_id . "sess-alias") (environment . "container"))))
+    (cl-letf (((symbol-function 'safeslop--call-json)
+               (lambda (args)
+                 (should (equal args '("doctor" "--json")))
+                 (safeslop-contract-parse-string
+                  (concat "{\"schema_version\":1,\"ok\":true,\"data\":{\"tools\":{\"docker\":{"
+                          "\"present\":true,\"path\":\"/safe/bin/docker\","
+                          "\"alias_paths\":[\"/usr/local/bin/docker\"]}}},\"warnings\":[],\"errors\":[]}")))))
+      (should (eq (safeslop-session--run-runtime-preflight data) data)))))
+
 (ert-deftest safeslop-test-session-create-trust-required-retries ()
   "A TRUST_REQUIRED refusal offers to trust the policy and re-dispatches the create."
   (let ((trusted nil) (retried nil))

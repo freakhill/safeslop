@@ -40,7 +40,7 @@ WORKTREE: `.worktrees/0095-same-realpath-shadow-dedup/`
   VERIFY: `go test ./internal/cli/ -run 'Doctor' -v`
   EXPECTED: New doctor tests pass; distinct-shadow assertion unchanged in spirit.
 
-- [ ] T4 — Emacs runtime preflight permits alias-only Docker
+- [x] T4 — Emacs runtime preflight permits alias-only Docker
   FILE: `emacs/safeslop-session.el`, `emacs/test/safeslop-test.el`
   CHANGE: Confirm the preflight aborts ONLY on non-empty `shadowed_paths` (alias-only `present=true` Docker must NOT abort). Add an ERT case: doctor JSON with `present=true` + `alias_paths` + no `shadowed_paths` permits launch; mixed JSON with `shadowed_paths` still aborts. No change if it already keys only on `shadowed_paths`.
   VERIFY: `make test-emacs EMACS=$(command -v emacs)`
