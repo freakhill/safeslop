@@ -154,9 +154,18 @@ func doctorReport() map[string]any {
 	resolver := doctorHostExecResolver()
 	for _, t := range tools {
 		insp := resolver.Inspect(t)
-		row := map[string]any{"present": insp.Present && !insp.Shadowed, "path": insp.Path}
-		if insp.Shadowed {
-			row["shadowed_paths"] = append([]string(nil), insp.All[1:]...)
+		row := map[string]any{"present": insp.Present && !insp.Shadowed && insp.Err == nil, "path": insp.Path}
+		if len(insp.All) > 1 {
+			row["all_paths"] = append([]string(nil), insp.All...)
+		}
+		if len(insp.AliasPaths) > 0 {
+			row["alias_paths"] = append([]string(nil), insp.AliasPaths...)
+		}
+		if len(insp.ShadowedPaths) > 0 {
+			row["shadowed_paths"] = append([]string(nil), insp.ShadowedPaths...)
+		}
+		if errors.Is(insp.Err, hostexec.ErrIdentity) {
+			row["identity_unverified"] = true
 		}
 		report[t] = row
 	}

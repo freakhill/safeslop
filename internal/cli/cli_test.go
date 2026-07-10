@@ -66,6 +66,84 @@ func TestDoctorReportsGh(t *testing.T) {
 	}
 }
 
+func TestDoctorReportsPresentWithSameInodeAliases(t *testing.T) {
+	const (
+		first = "/Applications/OrbStack.app/Contents/MacOS/docker"
+		alias = "/usr/local/bin/docker"
+	)
+	old := doctorHostExecResolver
+	doctorHostExecResolver = func() *hostexec.Resolver {
+		return hostexec.New(cliFakeHostEnv{
+			all: map[string][]string{"docker": {first, alias}},
+			sameFile: func(a, b string) (bool, error) {
+				return (a == first || a == alias) && (b == first || b == alias), nil
+			},
+		})
+	}
+	t.Cleanup(func() { doctorHostExecResolver = old })
+
+	row := doctorReport()["docker"].(map[string]any)
+	if row["present"] != true || row["path"] != first {
+		t.Fatalf("alias-only docker should be present at the first path: %+v", row)
+	}
+	if got, ok := row["alias_paths"].([]string); !ok || len(got) != 1 || got[0] != alias {
+		t.Fatalf("alias_paths not surfaced: %+v", row)
+	}
+	if _, ok := row["shadowed_paths"]; ok {
+		t.Fatalf("alias-only docker must not report a shadow: %+v", row)
+	}
+}
+
+func TestDoctorReportsAliasesPlusDistinctShadow(t *testing.T) {
+	const (
+		first  = "/safe/bin/docker"
+		alias  = "/usr/local/bin/docker"
+		shadow = "/opt/homebrew/bin/docker"
+	)
+	old := doctorHostExecResolver
+	doctorHostExecResolver = func() *hostexec.Resolver {
+		return hostexec.New(cliFakeHostEnv{
+			all: map[string][]string{"docker": {first, alias, shadow}},
+			sameFile: func(a, b string) (bool, error) {
+				return (a == first || a == alias) && (b == first || b == alias), nil
+			},
+		})
+	}
+	t.Cleanup(func() { doctorHostExecResolver = old })
+
+	row := doctorReport()["docker"].(map[string]any)
+	if row["present"] != false {
+		t.Fatalf("mixed docker paths must not be present: %+v", row)
+	}
+	if got, ok := row["alias_paths"].([]string); !ok || len(got) != 1 || got[0] != alias {
+		t.Fatalf("alias_paths not surfaced: %+v", row)
+	}
+	if got, ok := row["shadowed_paths"].([]string); !ok || len(got) != 1 || got[0] != shadow {
+		t.Fatalf("shadowed_paths not surfaced: %+v", row)
+	}
+}
+
+func TestDoctorReportsUnverifiedIdentity(t *testing.T) {
+	old := doctorHostExecResolver
+	doctorHostExecResolver = func() *hostexec.Resolver {
+		return hostexec.New(cliFakeHostEnv{
+			all: map[string][]string{"docker": {"/safe/bin/docker", "/usr/local/bin/docker"}},
+			sameFile: func(string, string) (bool, error) {
+				return false, os.ErrPermission
+			},
+		})
+	}
+	t.Cleanup(func() { doctorHostExecResolver = old })
+
+	row := doctorReport()["docker"].(map[string]any)
+	if row["present"] != false || row["identity_unverified"] != true {
+		t.Fatalf("identity failure must be unavailable and explicitly unverified: %+v", row)
+	}
+	if _, ok := row["shadowed_paths"]; ok {
+		t.Fatalf("identity failure must not be mislabeled as a shadow: %+v", row)
+	}
+}
+
 func TestDoctorReportsShadowedHelperWithoutMarkingPresent(t *testing.T) {
 	old := doctorHostExecResolver
 	doctorHostExecResolver = func() *hostexec.Resolver {
@@ -81,6 +159,10 @@ func TestDoctorReportsShadowedHelperWithoutMarkingPresent(t *testing.T) {
 	}
 	if row["present"] != false || row["path"] != "/safe/bin/git" {
 		t.Fatalf("shadowed git should be marked unavailable with winner path: %+v", row)
+	}
+	all, ok := row["all_paths"].([]string)
+	if !ok || len(all) != 2 || all[0] != "/safe/bin/git" || all[1] != "/other/bin/git" {
+		t.Fatalf("all_paths not surfaced: %+v", row)
 	}
 	shadowed, ok := row["shadowed_paths"].([]string)
 	if !ok || len(shadowed) != 1 || shadowed[0] != "/other/bin/git" {

@@ -34,7 +34,7 @@ WORKTREE: `.worktrees/0095-same-realpath-shadow-dedup/`
   VERIFY: `go test ./internal/engine/hostexec/ -v`
   EXPECTED: New tests pass; `TestResolveMissingShadowedAbsoluteAndRelative` and `TestInspectReportsShadowWithoutFailing` stay green (fakes default distinct).
 
-- [ ] T3 — Surface aliases in the doctor contract
+- [x] T3 — Surface aliases in the doctor contract
   FILE: `internal/cli/cli.go`, `internal/cli/cli_test.go`
   CHANGE: `doctorReport` emits `all_paths` when >1 raw candidate, `alias_paths` when non-empty, `shadowed_paths` only when non-empty (distinct representatives); `present = Present && !Shadowed && Err==nil`; on `ErrIdentity` emit `present:false` + `identity_unverified:true` (never mislabel unknown as shadow). Add `TestDoctorReportsPresentWithSameInodeAliases` (present=true, alias_paths set, no shadowed_paths) and `TestDoctorReportsAliasesPlusDistinctShadow` (present=false, both alias_paths and shadowed_paths). Update `TestDoctorReportsShadowedHelperWithoutMarkingPresent` fixture to distinct paths and assert `all_paths`.
   VERIFY: `go test ./internal/cli/ -run 'Doctor' -v`

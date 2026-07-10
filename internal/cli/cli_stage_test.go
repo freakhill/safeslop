@@ -72,8 +72,9 @@ func helperNames(specs []hostexec.Spec) map[string]bool {
 }
 
 type cliFakeHostEnv struct {
-	path string
-	all  map[string][]string
+	path     string
+	all      map[string][]string
+	sameFile func(string, string) (bool, error)
 }
 
 func (f cliFakeHostEnv) PATH() string              { return f.path }
@@ -86,7 +87,12 @@ func (f cliFakeHostEnv) LookPath(name string) (string, bool) {
 	return all[0], true
 }
 func (f cliFakeHostEnv) LookAll(name string) []string { return append([]string(nil), f.all[name]...) }
-func (f cliFakeHostEnv) SameFile(a, b string) (bool, error) { return a == b, nil }
+func (f cliFakeHostEnv) SameFile(a, b string) (bool, error) {
+	if f.sameFile != nil {
+		return f.sameFile(a, b)
+	}
+	return a == b, nil
+}
 
 func withStageHostExecResolver(t *testing.T, r *hostexec.Resolver) {
 	t.Helper()
