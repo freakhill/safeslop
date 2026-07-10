@@ -42,6 +42,7 @@ const (
 var (
 	ErrNotFound     = errors.New("host helper not found")
 	ErrShadowed     = errors.New("host helper shadowed")
+	ErrIdentity     = errors.New("host helper identity unverified")
 	ErrRelativePath = errors.New("host helper relative path refused")
 )
 
@@ -77,12 +78,14 @@ type Resolved struct {
 
 // Inspection is a non-failing diagnostic view of a helper on sanitized PATH.
 type Inspection struct {
-	Name     string
-	Path     string
-	All      []string
-	Present  bool
-	Shadowed bool
-	Err      error
+	Name          string
+	Path          string
+	All           []string
+	AliasPaths    []string
+	ShadowedPaths []string
+	Present       bool
+	Shadowed      bool
+	Err           error
 }
 
 // Resolver resolves helpers against a sanitized lookup environment.
@@ -148,8 +151,12 @@ func (r *Resolver) Resolve(spec Spec) (Resolved, error) {
 	if !filepath.IsAbs(all[0]) {
 		return Resolved{}, fmt.Errorf("%w: host helper %q resolved to non-absolute path %q", ErrNotFound, name, all[0])
 	}
-	if len(all) > 1 {
-		return Resolved{}, resolveError{kind: ErrShadowed, spec: spec, paths: all}
+	classification, err := r.classify(all)
+	if err != nil {
+		return Resolved{}, resolveError{kind: ErrIdentity, spec: spec, err: err}
+	}
+	if len(classification.representatives) > 1 {
+		return Resolved{}, resolveError{kind: ErrShadowed, spec: spec, paths: classification.representatives}
 	}
 	return Resolved{Name: name, Path: all[0], All: append([]string(nil), all...), Explicit: filepath.IsAbs(name), Spec: spec}, nil
 }
@@ -166,13 +173,46 @@ func (r *Resolver) Inspect(name string) Inspection {
 	if len(all) == 0 {
 		return Inspection{Name: name, Err: ErrNotFound}
 	}
-	return Inspection{
-		Name:     name,
-		Path:     all[0],
-		All:      append([]string(nil), all...),
-		Present:  true,
-		Shadowed: len(all) > 1,
+	insp := Inspection{Name: name, Path: all[0], All: append([]string(nil), all...)}
+	classification, err := r.classify(all)
+	if err != nil {
+		insp.Err = fmt.Errorf("%w: %v", ErrIdentity, err)
+		return insp
 	}
+	insp.AliasPaths = classification.aliases
+	if len(classification.representatives) > 1 {
+		insp.ShadowedPaths = append([]string(nil), classification.representatives[1:]...)
+	}
+	insp.Present = true
+	insp.Shadowed = len(insp.ShadowedPaths) > 0
+	return insp
+}
+
+type identityClassification struct {
+	representatives []string
+	aliases         []string
+}
+
+func (r *Resolver) classify(all []string) (identityClassification, error) {
+	var result identityClassification
+	for _, path := range all {
+		alias := false
+		for _, representative := range result.representatives {
+			same, err := r.env.SameFile(path, representative)
+			if err != nil {
+				return identityClassification{}, fmt.Errorf("compare %q and %q: %w", path, representative, err)
+			}
+			if same {
+				result.aliases = append(result.aliases, path)
+				alias = true
+				break
+			}
+		}
+		if !alias {
+			result.representatives = append(result.representatives, path)
+		}
+	}
+	return result, nil
 }
 
 // Preflight resolves every spec before a staging operation writes credential artifacts.
@@ -291,6 +331,7 @@ type resolveError struct {
 	kind  error
 	spec  Spec
 	paths []string
+	err   error
 }
 
 func (e resolveError) Error() string {
@@ -303,6 +344,8 @@ func (e resolveError) Error() string {
 		return fmt.Sprintf("host helper %q not found on sanitized PATH; required for %s; install it or fix PATH", e.spec.Name, purpose)
 	case ErrShadowed:
 		return fmt.Sprintf("host helper %q is shadowed on sanitized PATH: %s; safeslop refuses to choose for credential-bearing helpers; remove the duplicate or fix PATH order", e.spec.Name, strings.Join(e.paths, ", "))
+	case ErrIdentity:
+		return fmt.Sprintf("host helper %q identity could not be verified; safeslop refuses to execute it: %v", e.spec.Name, e.err)
 	case ErrRelativePath:
 		return fmt.Sprintf("host helper %q must be an absolute path or bare name; relative paths are refused", e.spec.Name)
 	default:

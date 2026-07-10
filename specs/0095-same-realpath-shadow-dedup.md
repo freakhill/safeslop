@@ -28,7 +28,7 @@ WORKTREE: `.worktrees/0095-same-realpath-shadow-dedup/`
   VERIFY: `go build ./... && go vet ./...`
   EXPECTED: Compiles; all existing tests still pass (interface widened, fakes default to path-string equality).
 
-- [ ] T2 — Classify by identity in Resolve/Inspect (TDD red first)
+- [x] T2 — Classify by identity in Resolve/Inspect (TDD red first)
   FILE: `internal/engine/hostexec/hostexec.go`, `internal/engine/hostexec/hostexec_test.go`
   CHANGE: Add typed `ErrIdentity`. Add a `Resolver` classifier that groups `LookAll` candidates in PATH order by `SameFile` (first occurrence = representative); abort to `ErrIdentity` on a stat/compare error. Rewrite `Resolve`: 0 candidates -> `ErrNotFound`; 1 identity group -> success (`Path=all[0]`, `All`=raw); >=2 groups -> `ErrShadowed` (error lists one representative per group). Extend `Inspection` with `AliasPaths []string` and `ShadowedPaths []string`; `Shadowed = len(ShadowedPaths) > 0` (NOT `len(All) > 1`); `Present` true iff classification ok with >=1 candidate; on `ErrIdentity` keep `Path`/`All`, `Present=false`. `CommandResolved` unchanged (uses `Resolved.Path`, the symlink). Write the failing tests FIRST: same-inode aliases resolve to first entry; distinct inodes -> `ErrShadowed`; aliases + one distinct binary -> `ErrShadowed`; hardlink aliases pass; Inspect shows aliases-not-shadowed; CommandResolved executes first alias; identity failure fails closed.
   VERIFY: `go test ./internal/engine/hostexec/ -v`

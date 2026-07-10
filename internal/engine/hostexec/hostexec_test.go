@@ -3,14 +3,17 @@ package hostexec
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
 type fakeEnv struct {
-	path string
-	vars map[string]string
-	all  map[string][]string
+	path     string
+	vars     map[string]string
+	all      map[string][]string
+	sameFile func(string, string) (bool, error)
 }
 
 func (f fakeEnv) PATH() string { return f.path }
@@ -40,9 +43,23 @@ func (f fakeEnv) LookAll(name string) []string {
 	return cp
 }
 
-// SameFile default: identical path string => same object; distinct strings => distinct. New alias
-// tests override this with an explicit identity map (specs/0095).
-func (f fakeEnv) SameFile(a, b string) (bool, error) { return a == b, nil }
+// SameFile defaults to path-string identity so existing shadow tests stay distinct.
+func (f fakeEnv) SameFile(a, b string) (bool, error) {
+	if f.sameFile != nil {
+		return f.sameFile(a, b)
+	}
+	return a == b, nil
+}
+
+func samePaths(paths ...string) func(string, string) (bool, error) {
+	identities := map[string]string{}
+	for _, path := range paths {
+		identities[path] = "same"
+	}
+	return func(a, b string) (bool, error) {
+		return identities[a] != "" && identities[a] == identities[b], nil
+	}
+}
 
 func TestResolveMissingShadowedAbsoluteAndRelative(t *testing.T) {
 	r := New(fakeEnv{path: "/safe/bin", all: map[string][]string{
@@ -74,6 +91,159 @@ func TestResolveMissingShadowedAbsoluteAndRelative(t *testing.T) {
 	}
 	if res.Path != "/opt/bin/x" || !res.Explicit {
 		t.Fatalf("Resolve(abs)=%+v", res)
+	}
+}
+
+func TestResolveSameInodeAliasesSelectsFirstPATHEntry(t *testing.T) {
+	const first = "/Applications/OrbStack.app/Contents/MacOS/docker"
+	const alias = "/usr/local/bin/docker"
+	r := New(fakeEnv{
+		path:     "/Applications/OrbStack.app/Contents/MacOS:/usr/local/bin",
+		all:      map[string][]string{"docker": {first, alias}},
+		sameFile: samePaths(first, alias),
+	})
+
+	res, err := r.Resolve(RuntimeSpec("docker", "container runtime"))
+	if err != nil {
+		t.Fatalf("Resolve(docker): %v", err)
+	}
+	if res.Path != first {
+		t.Fatalf("Resolve(docker).Path=%q, want first PATH entry %q", res.Path, first)
+	}
+	if got, want := res.All, []string{first, alias}; !equalStrings(got, want) {
+		t.Fatalf("Resolve(docker).All=%q, want raw candidates %q", got, want)
+	}
+}
+
+func TestResolveHardlinkAliasesPass(t *testing.T) {
+	dir := t.TempDir()
+	first := filepath.Join(dir, "docker")
+	alias := filepath.Join(dir, "docker-alias")
+	if err := os.WriteFile(first, []byte("fixture"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(first, alias); err != nil {
+		t.Fatal(err)
+	}
+	r := New(fakeEnv{
+		all: map[string][]string{"docker": {first, alias}},
+		sameFile: func(a, b string) (bool, error) {
+			infoA, err := os.Stat(a)
+			if err != nil {
+				return false, err
+			}
+			infoB, err := os.Stat(b)
+			if err != nil {
+				return false, err
+			}
+			return os.SameFile(infoA, infoB), nil
+		},
+	})
+	res, err := r.Resolve(RuntimeSpec("docker", "container runtime"))
+	if err != nil {
+		t.Fatalf("Resolve(docker): %v", err)
+	}
+	if res.Path != first {
+		t.Fatalf("Resolve(docker).Path=%q, want %q", res.Path, first)
+	}
+}
+
+func TestResolveSameInodeAliasesPlusDistinctBinaryReturnsErrShadowed(t *testing.T) {
+	const (
+		first  = "/safe/bin/docker"
+		alias  = "/usr/local/bin/docker"
+		shadow = "/opt/homebrew/bin/docker"
+	)
+	r := New(fakeEnv{
+		all: map[string][]string{"docker": {first, alias, shadow}},
+		sameFile: func(a, b string) (bool, error) {
+			return (a == first || a == alias) && (b == first || b == alias), nil
+		},
+	})
+	_, err := r.Resolve(RuntimeSpec("docker", "container runtime"))
+	if !errors.Is(err, ErrShadowed) || !strings.Contains(err.Error(), first) || !strings.Contains(err.Error(), shadow) {
+		t.Fatalf("Resolve(docker) err=%v, want ErrShadowed listing identity representatives", err)
+	}
+	if strings.Contains(err.Error(), alias) {
+		t.Fatalf("Resolve(docker) err=%v, must not count alias as a shadow", err)
+	}
+}
+
+func TestInspectSameInodeAliasesAreVisibleNotShadowed(t *testing.T) {
+	const (
+		first  = "/safe/bin/docker"
+		alias  = "/usr/local/bin/docker"
+		shadow = "/opt/homebrew/bin/docker"
+	)
+	r := New(fakeEnv{
+		all: map[string][]string{"docker": {first, alias, shadow}},
+		sameFile: func(a, b string) (bool, error) {
+			return (a == first || a == alias) && (b == first || b == alias), nil
+		},
+	})
+	insp := r.Inspect("docker")
+	if !insp.Present || !insp.Shadowed || insp.Err != nil {
+		t.Fatalf("Inspect(docker)=%+v", insp)
+	}
+	if got, want := insp.AliasPaths, []string{alias}; !equalStrings(got, want) {
+		t.Fatalf("AliasPaths=%q, want %q", got, want)
+	}
+	if got, want := insp.ShadowedPaths, []string{shadow}; !equalStrings(got, want) {
+		t.Fatalf("ShadowedPaths=%q, want %q", got, want)
+	}
+}
+
+func TestCommandResolvedExecutesFirstAliasPath(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "docker")
+	first := filepath.Join(dir, "docker-alias")
+	if err := os.WriteFile(target, []byte("#!/bin/sh\nprintf '%s' \"$0\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, first); err != nil {
+		t.Fatal(err)
+	}
+	r := New(fakeEnv{
+		all: map[string][]string{"docker": {first, target}},
+		sameFile: func(a, b string) (bool, error) {
+			infoA, err := os.Stat(a)
+			if err != nil {
+				return false, err
+			}
+			infoB, err := os.Stat(b)
+			if err != nil {
+				return false, err
+			}
+			return os.SameFile(infoA, infoB), nil
+		},
+	})
+	res, err := r.Resolve(RuntimeSpec("docker", "container runtime"))
+	if err != nil {
+		t.Fatalf("Resolve(docker): %v", err)
+	}
+	out, err := r.CommandResolved(context.Background(), res, EnvRuntime).Output()
+	if err != nil {
+		t.Fatalf("CommandResolved: %v", err)
+	}
+	if got := strings.TrimSpace(string(out)); got != first {
+		t.Fatalf("CommandResolved executed %q, want first alias %q", got, first)
+	}
+}
+
+func TestResolveIdentityFailureFailsClosed(t *testing.T) {
+	const first = "/safe/bin/docker"
+	r := New(fakeEnv{
+		all: map[string][]string{"docker": {first, "/usr/local/bin/docker"}},
+		sameFile: func(string, string) (bool, error) {
+			return false, os.ErrPermission
+		},
+	})
+	if _, err := r.Resolve(RuntimeSpec("docker", "container runtime")); !errors.Is(err, ErrIdentity) {
+		t.Fatalf("Resolve(docker) err=%v, want ErrIdentity", err)
+	}
+	insp := r.Inspect("docker")
+	if insp.Present || !errors.Is(insp.Err, ErrIdentity) || insp.Path != first || len(insp.All) != 2 {
+		t.Fatalf("Inspect(docker)=%+v, want raw evidence but identity-unverified not-present", insp)
 	}
 }
 
@@ -152,6 +322,18 @@ func TestRuntimeEnvExcludesCredentialAuthority(t *testing.T) {
 			t.Fatalf("%s leaked into runtime env %v", denied, env)
 		}
 	}
+}
+
+func equalStrings(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func envMap(env []string) map[string]string {
