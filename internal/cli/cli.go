@@ -581,11 +581,15 @@ func engineForSession(_ engsession.Session) runtimepkg.Engine {
 	return runtimepkg.HostDockerEngine{}
 }
 
+// detectRuntimeForSweep is a test seam: runtime discovery deliberately uses the reconstructed host
+// environment, so mutating process PATH cannot hermetically model an unavailable runtime.
+var detectRuntimeForSweep = runtimepkg.Detect
+
 // sweepManagedOrphans reaps labelled boundaries whose session record is gone, before a new container run.
 // It detects the ambient runtime with PolicyAllow (teardown is never gated); with no runtime present
 // Detect fails and the sweep is a no-op — nothing safeslop could have started (specs/0066 D5).
 func sweepManagedOrphans(ctx context.Context) error {
-	eng, err := runtimepkg.Detect(runtimepkg.PolicyAllow)
+	eng, err := detectRuntimeForSweep(runtimepkg.PolicyAllow)
 	if err != nil {
 		return nil
 	}

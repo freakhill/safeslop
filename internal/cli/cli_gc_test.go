@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/freakhill/safeslop/internal/engine/container/runtime"
 	engsession "github.com/freakhill/safeslop/internal/engine/session"
 )
 
@@ -65,8 +67,12 @@ func TestRecordSessionBackendPersistsRecipeAnchorsForAdHocContainerSession(t *te
 }
 
 func TestSweepManagedOrphansNoopsWhenDockerUnavailable(t *testing.T) {
-	t.Setenv("PATH", "")
 	t.Setenv("SAFESLOP_STATE_DIR", filepath.Join(t.TempDir(), "state"))
+	orig := detectRuntimeForSweep
+	t.Cleanup(func() { detectRuntimeForSweep = orig })
+	detectRuntimeForSweep = func(runtime.NetworkPolicy) (runtime.Engine, error) {
+		return nil, errors.New("runtime unavailable")
+	}
 	if err := sweepManagedOrphans(t.Context()); err != nil {
 		t.Fatalf("sweep with no docker should no-op: %v", err)
 	}
