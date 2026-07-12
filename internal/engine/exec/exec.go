@@ -69,11 +69,11 @@ func RunInTerminal(ctx context.Context, spec LaunchSpec) (int, error) {
 	cmd.Stderr = writerOr(spec.Stderr, os.Stderr)
 	if spec.ControllingTTY {
 		// Setsid puts the child in a new session (so it can own a controlling tty);
-		// Setctty + Ctty:0 makes its PTY-slave stdin that controlling terminal. On
-		// ctx-cancel exec kills the session leader, and the kernel then hangs up the
-		// terminal — SIGHUP to the foreground group — so the agent's subtree is torn
-		// down too (the same teardown RunInPTY relies on).
+		// Setctty + Ctty:0 makes its PTY-slave stdin that controlling terminal. A
+		// terminal hangup reaches only the foreground group, so cancellation must also
+		// kill the new process group explicitly to reap background children.
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true, Ctty: 0}
+		cmd.Cancel = cancelProcessGroup(cmd)
 	}
 	err := cmd.Run()
 	return exitCode(err), err
@@ -90,6 +90,10 @@ func RunInPTY(ctx context.Context, spec LaunchSpec) (int, error) {
 	cmd := exec.CommandContext(ctx, spec.Argv[0], spec.Argv[1:]...)
 	cmd.Dir = spec.Dir
 	cmd.Env = envOrInherit(spec.Env)
+	// pty.Start makes the child a new session/process-group leader. CommandContext's
+	// default cancellation kills only that leader; override it so background children
+	// in the PTY group cannot outlive a stopped session.
+	cmd.Cancel = cancelProcessGroup(cmd)
 
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
@@ -135,6 +139,24 @@ func RunInPTY(ctx context.Context, spec LaunchSpec) (int, error) {
 	_ = ptmx.Close() // unblock the reader if it is still draining
 	wg.Wait()
 	return exitCode(waitErr), waitErr
+}
+
+// cancelProcessGroup kills the isolated session/process group created by pty.Start or
+// RunInTerminal's ControllingTTY path. It must never be used for the coupled host-terminal
+// path, where the child shares the caller's process group.
+func cancelProcessGroup(cmd *exec.Cmd) func() error {
+	return func() error {
+		if cmd.Process == nil {
+			return os.ErrProcessDone
+		}
+		if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
+			if errors.Is(err, syscall.ESRCH) {
+				return os.ErrProcessDone
+			}
+			return err
+		}
+		return nil
+	}
 }
 
 func envOrInherit(env []string) []string {

@@ -12,6 +12,10 @@ import (
 	"github.com/freakhill/safeslop/internal/engine/exec"
 )
 
+// detectRuntime is a test seam. Production uses runtime.Detect; unit tests must not invoke an
+// ambient Docker/OrbStack daemon merely to model runtime unavailability.
+var detectRuntime = runtime.Detect
+
 // policyFromNetwork maps a profile's `network:` field to the runtime.Detect egress posture. Anything
 // other than the explicit "allow" is the safe default (deny), which makes Detect fail-close on an
 // egress-unverified rootless runtime (specs/0066 D6).
@@ -138,7 +142,7 @@ func provision(ctx context.Context, sessionID string, agentArgv []string, worksp
 	// provisions one (specs/0066 D3). The deny-tier fail-closed egress gate lives inside Detect, so a
 	// network:deny profile cannot launch on an egress-unverified rootless runtime (podman/lima) without an
 	// explicit opt-in — Detect returns an actionable error instead.
-	eng, err = runtime.Detect(policyFromNetwork(network))
+	eng, err = detectRuntime(policyFromNetwork(network))
 	if err != nil {
 		return nil, "", nil, err
 	}

@@ -1,6 +1,11 @@
 package container
 
-import "testing"
+import (
+	"errors"
+	"testing"
+
+	"github.com/freakhill/safeslop/internal/engine/container/runtime"
+)
 
 func TestEmbeddedAssetsPresent(t *testing.T) {
 	for _, name := range []string{"allowlist.domains", "Dockerfile.agent", "Dockerfile.agent.tools", "agent-tools.env"} {
@@ -11,7 +16,11 @@ func TestEmbeddedAssetsPresent(t *testing.T) {
 }
 
 func TestAvailableFalseWithoutDocker(t *testing.T) {
-	t.Setenv("PATH", "")
+	orig := detectRuntime
+	t.Cleanup(func() { detectRuntime = orig })
+	detectRuntime = func(runtime.NetworkPolicy) (runtime.Engine, error) {
+		return nil, errors.New("runtime unavailable")
+	}
 	if Available() {
 		t.Fatal("Available must be false when docker is not on PATH")
 	}

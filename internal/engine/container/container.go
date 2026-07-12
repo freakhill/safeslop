@@ -33,7 +33,7 @@ func Reconcile(ctx context.Context, repo string, maxAge time.Duration) error {
 
 // Available reports whether this host can run the container boundary with a detected runtime.
 func Available() bool {
-	_, err := runtime.Detect(runtime.PolicyAllow)
+	_, err := detectRuntime(runtime.PolicyAllow)
 	return err == nil
 }
 

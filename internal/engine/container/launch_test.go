@@ -2,17 +2,23 @@ package container
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/freakhill/safeslop/internal/engine/container/runtime"
 	"github.com/freakhill/safeslop/internal/engine/exec"
 	"github.com/freakhill/safeslop/internal/engine/policy"
 )
 
 func TestLaunchRejectsWhenUnavailable(t *testing.T) {
-	t.Setenv("PATH", "")
+	orig := detectRuntime
+	t.Cleanup(func() { detectRuntime = orig })
+	detectRuntime = func(runtime.NetworkPolicy) (runtime.Engine, error) {
+		return nil, errors.New("runtime unavailable")
+	}
 	_, err := Launch(context.Background(), exec.LaunchSpec{Argv: []string{"fish"}}, t.TempDir(), "deny", nil, nil, t.TempDir(), nil)
 	if err == nil {
 		t.Fatal("expected error when docker unavailable")
