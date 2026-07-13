@@ -126,7 +126,7 @@ F     → G  Docs/skills/tests + make check/build
   VERIFY:   `test -s specs/0098-builtin-profile-resolution.md && rg -n "project.*builtin|profile_source|builtin:pi|session create --profile pi|profile defaults|fail closed|VERIFY" specs/0098-builtin-profile-resolution.md`
   EXPECTED: The spec exists, pins the JSON/provenance contract, and names exact CLI/session/policy files plus tests before implementation starts.
 
-- [ ] T4 — Implement policy/schema/session support for safe host projection
+- [x] T4 — Implement policy/schema/session support for safe host projection
   FILE:     `internal/engine/policy/schema/schema.cue`, `internal/engine/policy/policy.go`, `internal/engine/policy/policy_test.go`, `internal/engine/container/compose.go`, `internal/engine/container/assets/compose.yml.tmpl`, `internal/engine/container/assets/entrypoint.sh`, `internal/engine/container/compose_test.go`, `internal/engine/container/launch_test.go`, `internal/engine/policy/risk.go`
   CHANGE:   After T1 approves the model, add the exact profile fields and runtime projection plumbing chosen by T1. Render only allowlisted read-only host sources under opaque `/safeslop/projected/<id>` staging paths, preserve `/home/agent` tmpfs from `specs/0064`, copy approved config into the ephemeral home at entrypoint time, surface the added file authority in risk summaries, and hard-reject broad home/credential-dir projection attempts.
   VERIFY:   `go test ./internal/engine/policy ./internal/engine/container -run 'Projection|HostProjection|SafeHome|Risk' -v && make check-assets`
