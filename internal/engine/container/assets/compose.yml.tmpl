@@ -36,7 +36,10 @@ services:
 {{end}}    volumes:
       - {{.Workspace}}:/workspace:rw
       - {{.StageDir}}:/safeslop/runtime:ro
-    read_only: true
+{{range present .Projection}}      # specs/0096: read-only host config projection (opaque staging path; copied into
+      # /home/agent tmpfs by the entrypoint, never symlinked back to a live host bind).
+      - {{.Host}}:{{.Container}}:ro
+{{end}}    read_only: true
     tmpfs:
       - /tmp
       - /var/tmp

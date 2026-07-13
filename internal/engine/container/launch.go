@@ -2,6 +2,7 @@ package container
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -55,6 +56,29 @@ func materializeRun(p composeParams, open bool) (string, error) {
 	for name, content := range files {
 		if werr := os.WriteFile(filepath.Join(dir, name), content, 0o600); werr != nil {
 			return "", werr
+		}
+	}
+	// specs/0096: write the projection manifest (JSON, provenance of record) + a shell-friendly
+	// TSV the entrypoint reads to copy each staged file into the ephemeral home. Both are
+	// engine-generated (not user-editable) and only present entries get a copy line.
+	if p.Projection != nil && len(p.Projection.Items) > 0 {
+		pj, err := json.MarshalIndent(p.Projection, "", "  ")
+		if err != nil {
+			return "", err
+		}
+		if err := os.WriteFile(filepath.Join(dir, "projection.json"), append(pj, '\n'), 0o600); err != nil {
+			return "", err
+		}
+		var tsv strings.Builder
+		for _, mt := range p.Projection.PresentMounts() {
+			tsv.WriteString(mt.Container)
+			tsv.WriteByte('\t')
+			tsv.WriteString("/home/agent/")
+			tsv.WriteString(mt.Target)
+			tsv.WriteByte('\n')
+		}
+		if err := os.WriteFile(filepath.Join(dir, "projection.tsv"), []byte(tsv.String()), 0o600); err != nil {
+			return "", err
 		}
 	}
 	return filepath.Join(dir, "compose.yml"), nil

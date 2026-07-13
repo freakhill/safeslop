@@ -321,3 +321,98 @@ func TestComposeForcesTruecolorTerm(t *testing.T) {
 		t.Fatalf("compose must force a truecolor terminal unconditionally:\n%s", yml)
 	}
 }
+
+// TestComposeProjectionRendersReadOnlyMounts pins specs/0096 T4b: a resolved projection renders
+// one read-only bind mount per present file under opaque /safeslop/projected/<id> staging paths,
+// preserving the read-only rootfs + tmpfs home + no host-bridge invariants.
+func TestComposeProjectionRendersReadOnlyMounts(t *testing.T) {
+	yml, err := renderCompose(composeParams{RuntimeDir: "/r", Workspace: "/w", StageDir: "/r", Projection: &ProjectionManifest{
+		Items: []ProjectionMount{
+			{Host: "/home/u/.pi/agent/AGENTS.md", Container: "/safeslop/projected/0", Target: ".pi/agent/AGENTS.md", Status: projPresent},
+			{Host: "/home/u/.zshrc", Container: "/safeslop/projected/1", Target: ".zshrc", Status: projPresent},
+			{Host: "/home/u/.config/fish/config.fish", Target: ".config/fish/config.fish", Status: projSkippedAbsent}, // skipped: no mount
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// exactly two ro projection mounts (present entries only; skipped absent must NOT mount)
+	if n := strings.Count(yml, "/safeslop/projected/"); n != 2 {
+		t.Fatalf("want 2 projection mounts (present only), got %d:\n%s", n, yml)
+	}
+	for _, want := range []string{
+		"/home/u/.pi/agent/AGENTS.md:/safeslop/projected/0:ro",
+		"/home/u/.zshrc:/safeslop/projected/1:ro",
+	} {
+		if !strings.Contains(yml, want) {
+			t.Errorf("missing projection mount %q:\n%s", want, yml)
+		}
+	}
+	if strings.Contains(yml, "config.fish:/safeslop/projected") {
+		t.Errorf("skipped-absent entry must not get a mount:\n%s", yml)
+	}
+	// projection must not weaken container hardening (specs/0096 FLO law #10).
+	if !strings.Contains(yml, "read_only: true") || !strings.Contains(yml, "cap_drop: [ALL]") {
+		t.Errorf("projection must preserve read-only rootfs + cap_drop:\n%s", yml)
+	}
+	if strings.Contains(yml, "host.docker.internal") || strings.Contains(yml, "network_mode: host") {
+		t.Errorf("projection must not introduce a host bridge:\n%s", yml)
+	}
+}
+
+// TestComposeNoProjectionIsUnchanged pins that a profile without projection renders no projection
+// mounts and no projection section (regression guard, specs/0096).
+func TestComposeNoProjectionIsUnchanged(t *testing.T) {
+	yml, err := renderCompose(composeParams{RuntimeDir: "/r", Workspace: "/w", StageDir: "/r"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(yml, "/safeslop/projected/") {
+		t.Errorf("no-projection compose must not mention projection mounts:\n%s", yml)
+	}
+}
+
+// TestMaterializeRunWritesProjectionManifest pins that materializeRun writes projection.json (the
+// provenance manifest) and projection.tsv (the entrypoint's shell-friendly copy input) when a
+// projection is present, and writes neither when there is none.
+func TestMaterializeRunWritesProjectionManifest(t *testing.T) {
+	dir := t.TempDir()
+	_, err := materializeRun(composeParams{RuntimeDir: dir, Workspace: "/w", StageDir: dir, Projection: &ProjectionManifest{
+		Items: []ProjectionMount{
+			{Host: "/h/.zshrc", Container: "/safeslop/projected/0", Target: ".zshrc", Status: projPresent, Label: "zsh"},
+			{Host: "/h/.config/fish/config.fish", Target: ".config/fish/config.fish", Status: projSkippedAbsent},
+		},
+	}}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pj, err := os.ReadFile(dir + "/projection.json")
+	if err != nil {
+		t.Fatalf("projection.json not written: %v", err)
+	}
+	ps := string(pj)
+	for _, want := range []string{"\"host\"", "/h/.zshrc", projPresent, projSkippedAbsent, "\"label\": \"zsh\""} {
+		if !strings.Contains(ps, want) {
+			t.Errorf("projection.json missing %q:\n%s", want, ps)
+		}
+	}
+	tsv, err := os.ReadFile(dir + "/projection.tsv")
+	if err != nil {
+		t.Fatalf("projection.tsv not written: %v", err)
+	}
+	if string(tsv) != "/safeslop/projected/0\t/home/agent/.zshrc\n" {
+		t.Errorf("projection.tsv must list only the present mount:\n%q", string(tsv))
+	}
+
+	// No projection => neither file is written.
+	dir2 := t.TempDir()
+	if _, err := materializeRun(composeParams{RuntimeDir: dir2, Workspace: "/w", StageDir: dir2}, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(dir2 + "/projection.json"); !os.IsNotExist(err) {
+		t.Errorf("projection.json must not be written without a projection")
+	}
+	if _, err := os.Stat(dir2 + "/projection.tsv"); !os.IsNotExist(err) {
+		t.Errorf("projection.tsv must not be written without a projection")
+	}
+}

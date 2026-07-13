@@ -33,6 +33,11 @@ type composeParams struct {
 	// already unioned by the caller) appended to the base allowlist asset when the per-run
 	// allowlist.domains is materialized. Empty => base allowlist only (specs/0046).
 	Egress []string
+	// Projection is the resolved safe-host-projection manifest (specs/0096). When non-nil, present
+	// entries are rendered as read-only bind mounts under opaque /safeslop/projected/<id> paths and
+	// projection.json/projection.tsv are written into RuntimeDir for the entrypoint's copy step. Nil
+	// => no projection (the default for profiles without projection).
+	Projection *ProjectionManifest
 }
 
 func renderCompose(p composeParams) (string, error) {
@@ -40,7 +45,16 @@ func renderCompose(p composeParams) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	t, err := template.New("compose").Parse(string(raw))
+	t, err := template.New("compose").Funcs(template.FuncMap{
+		// present yields only the bind-mounted projection entries (skipped-absent/unreadable
+		// entries stay in projection.json for legibility but get no volume).
+		"present": func(m *ProjectionManifest) []ProjectionMount {
+			if m == nil {
+				return nil
+			}
+			return m.PresentMounts()
+		},
+	}).Parse(string(raw))
 	if err != nil {
 		return "", err
 	}
