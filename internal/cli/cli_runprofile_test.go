@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/freakhill/safeslop/internal/engine/container"
 	engexec "github.com/freakhill/safeslop/internal/engine/exec"
 	"github.com/freakhill/safeslop/internal/engine/policy"
 )
@@ -112,7 +113,7 @@ func TestRunProfileCtxContainerForwardsSupervisorPTY(t *testing.T) {
 
 	var gotSpec engexec.LaunchSpec
 	old := containerLaunch
-	containerLaunch = func(_ context.Context, spec engexec.LaunchSpec, _, _ string, _, _ []string, _ string, _ []string, _ *policy.Projection) (int, error) {
+	containerLaunch = func(_ context.Context, spec engexec.LaunchSpec, _, _ string, _, _ []string, _ string, _ []string, _ *policy.Projection, _ ...container.SessionGrant) (int, error) {
 		gotSpec = spec
 		return 0, nil
 	}

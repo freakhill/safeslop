@@ -12,15 +12,22 @@ import (
 )
 
 type fakeEngine struct {
-	t       *testing.T
-	outputs map[string]string
-	mu      sync.Mutex
-	runs    []string
+	t        *testing.T
+	outputs  map[string]string
+	failures map[string]int
+	mu       sync.Mutex
+	runs     []string
 }
 
 func newFakeEngine(t *testing.T, outputs map[string]string) *fakeEngine {
 	t.Helper()
-	return &fakeEngine{t: t, outputs: outputs}
+	return &fakeEngine{t: t, outputs: outputs, failures: map[string]int{}}
+}
+
+func (f *fakeEngine) fail(key string, code int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.failures[key] = code
 }
 
 func (f *fakeEngine) Name() string { return "fake" }
@@ -33,9 +40,10 @@ func (f *fakeEngine) Command(ctx context.Context, args ...string) *exec.Cmd {
 	key := strings.Join(args, " ")
 	f.mu.Lock()
 	f.runs = append(f.runs, key)
+	code := f.failures[key]
 	f.mu.Unlock()
 	out := f.outputs[key]
-	return fakeCommand(ctx, out)
+	return fakeCommand(ctx, out, code)
 }
 
 func (f *fakeEngine) assertRan(t *testing.T, want string) {
@@ -61,10 +69,10 @@ func (f *fakeEngine) assertNotRan(t *testing.T, unwanted string) {
 	}
 }
 
-func fakeCommand(ctx context.Context, stdout string) *exec.Cmd {
+func fakeCommand(ctx context.Context, stdout string, exitCode int) *exec.Cmd {
 	script := filepath.Join(os.TempDir(), "safeslop-fake-engine-helper.sh")
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=TestFakeEngineHelper", "--", script)
-	cmd.Env = append(os.Environ(), "SAFESLOP_FAKE_ENGINE_HELPER=1", "SAFESLOP_FAKE_ENGINE_STDOUT="+stdout)
+	cmd.Env = append(os.Environ(), "SAFESLOP_FAKE_ENGINE_HELPER=1", "SAFESLOP_FAKE_ENGINE_STDOUT="+stdout, fmt.Sprintf("SAFESLOP_FAKE_ENGINE_EXIT=%d", exitCode))
 	return cmd
 }
 
@@ -73,5 +81,10 @@ func TestFakeEngineHelper(t *testing.T) {
 		return
 	}
 	fmt.Print(os.Getenv("SAFESLOP_FAKE_ENGINE_STDOUT"))
+	if os.Getenv("SAFESLOP_FAKE_ENGINE_EXIT") != "" {
+		var code int
+		_, _ = fmt.Sscanf(os.Getenv("SAFESLOP_FAKE_ENGINE_EXIT"), "%d", &code)
+		os.Exit(code)
+	}
 	os.Exit(0)
 }

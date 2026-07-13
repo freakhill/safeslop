@@ -165,7 +165,7 @@ Add non-modal controls only:
   VERIFY:   `go test ./internal/engine/container -run 'SessionGrant|Squid|IPLiteral|Private|Metadata|Allowlist|Compose' -v && make check-assets`
   EXPECTED: Tests prove exact host+port grants allow only that pair, IP/private/metadata remain denied, static allowlist still works, network allow remains broad, and rendered assets stay synced.
 
-- [ ] T3 — Apply/revoke overlays fail-closed
+- [x] T3 — Apply/revoke overlays fail-closed
   FILE:     `internal/engine/container/launch.go`, `internal/engine/container/runtime/*.go`, `internal/cli/cli.go`, `internal/cli/cli_session_test.go`
   CHANGE:   Add an overlay apply path for running sessions: render desired grants, update runtime file, reconfigure proxy, restore previous file on failure, and save session only after success. Add seams/fakes for backend command failures; do not require live Docker in tests.
   VERIFY:   `go test ./internal/cli ./internal/engine/container -run 'SessionGrantApply|GrantRevoke|ProxyReload|FailClosed|NoProfileMutation' -v`

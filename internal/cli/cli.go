@@ -1477,6 +1477,74 @@ func sessionStore() engsession.Store {
 	return engsession.NewStore(filepath.Join(root, "sessions"))
 }
 
+func grantSessionEgress(ctx context.Context, store engsession.Store, id, host string, port int, now time.Time) (engsession.Session, engsession.EgressGrant, error) {
+	sess, err := store.Get(id)
+	if err != nil {
+		return engsession.Session{}, engsession.EgressGrant{}, err
+	}
+	if sess.Status == engsession.StatusStopped {
+		return engsession.Session{}, engsession.EgressGrant{}, fmt.Errorf("session stopped")
+	}
+	next, grant, err := engsession.AppendGrant(sess, host, port, now)
+	if err != nil {
+		return engsession.Session{}, engsession.EgressGrant{}, err
+	}
+	if sess.Status == engsession.StatusRunning {
+		if err := applySessionGrantOverlay(ctx, sess, sessionGrantViews(next.EgressGrants)); err != nil {
+			return engsession.Session{}, engsession.EgressGrant{}, err
+		}
+	}
+	if err := store.Save(next); err != nil {
+		return engsession.Session{}, engsession.EgressGrant{}, err
+	}
+	return next, grant, nil
+}
+
+func revokeSessionEgress(ctx context.Context, store engsession.Store, id, grantID string, now time.Time) (engsession.Session, error) {
+	sess, err := store.Get(id)
+	if err != nil {
+		return engsession.Session{}, err
+	}
+	if sess.Status == engsession.StatusStopped {
+		return engsession.Session{}, fmt.Errorf("session stopped")
+	}
+	next, err := engsession.RevokeGrant(sess, grantID, now)
+	if err != nil {
+		return engsession.Session{}, err
+	}
+	if sess.Status == engsession.StatusRunning {
+		if err := applySessionGrantOverlay(ctx, sess, sessionGrantViews(next.EgressGrants)); err != nil {
+			return engsession.Session{}, err
+		}
+	}
+	if err := store.Save(next); err != nil {
+		return engsession.Session{}, err
+	}
+	return next, nil
+}
+
+func sessionGrantViews(grants []engsession.EgressGrant) []container.SessionGrant {
+	if len(grants) == 0 {
+		return nil
+	}
+	out := make([]container.SessionGrant, 0, len(grants))
+	for _, g := range grants {
+		out = append(out, container.SessionGrant{Host: g.Host, Port: g.Port})
+	}
+	return out
+}
+
+func sessionGrantViewsFromRunName(name string) []container.SessionGrant {
+	if !strings.HasPrefix(name, "session-") {
+		return nil
+	}
+	sess, err := sessionStore().Get(strings.TrimPrefix(name, "session-"))
+	if err != nil {
+		return nil
+	}
+	return sessionGrantViews(sess.EgressGrants)
+}
+
 func sessionData(sess engsession.Session) map[string]any {
 	out := map[string]any{
 		"session_id":          sess.ID,
@@ -2529,6 +2597,14 @@ type runIO struct {
 // forwarded without standing up docker.
 var containerLaunch = container.Launch
 
+var applySessionGrantOverlay = func(ctx context.Context, sess engsession.Session, desired []container.SessionGrant) error {
+	stageDir, err := sessionStageDir(sess)
+	if err != nil {
+		return err
+	}
+	return container.ApplySessionGrants(ctx, engineForSession(sess), filepath.Join(stageDir, "compose.yml"), stageDir, desired)
+}
+
 func runProfileCtx(ctx context.Context, name string, prof policy.Profile, argv []string, ws string, stdio ...runIO) (int, error) {
 	var rio runIO
 	if len(stdio) > 0 {
@@ -2592,7 +2668,7 @@ func runProfileCtx(ctx context.Context, name string, prof policy.Profile, argv [
 		// A detached supervisor passes a PTY slave it owns (rio set); forward it so the
 		// container's tty bridges to the supervisor's PTY for attach. Coupled (rio zero)
 		// leaves stdio nil and container.Launch runs the user's terminal (specs/0051).
-		return containerLaunch(ctx, engexec.LaunchSpec{Argv: argv, Stdin: rio.Stdin, Stdout: rio.Stdout, Stderr: rio.Stderr}, ws, prof.Network, egress, secretEnv, stageDir, resolved.IdentitySet, prof.Projection)
+		return containerLaunch(ctx, engexec.LaunchSpec{Argv: argv, Stdin: rio.Stdin, Stdout: rio.Stdout, Stderr: rio.Stderr}, ws, prof.Network, egress, secretEnv, stageDir, resolved.IdentitySet, prof.Projection, sessionGrantViewsFromRunName(name)...)
 	default:
 		return 1, fmt.Errorf("unknown environment %q", prof.Environment)
 	}
