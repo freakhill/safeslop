@@ -153,7 +153,7 @@ Add non-modal controls only:
 
 ## Tasks
 
-- [ ] T1 — Model session grants and validation
+- [x] T1 — Model session grants and validation
   FILE:     `internal/engine/session/session.go`, `internal/engine/session/session_test.go`, `internal/cli/cli_session_test.go`
   CHANGE:   Add `EgressGrant` / `EgressGrants` / `GrantRevision`; add pure validation/normalization for exact FQDN:port targets; reject IP literals, private/metadata/local/broker/mint, wildcards, suffixes, URLs, invalid ports, host/network:allow sessions, and non-running/unknown sessions as appropriate.
   VERIFY:   `go test ./internal/engine/session ./internal/cli -run 'EgressGrant|SessionGrant|IPLiteral|Metadata|NetworkAllow|HostNonEnforceable' -v`

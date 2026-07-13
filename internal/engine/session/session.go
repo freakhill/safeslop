@@ -97,6 +97,12 @@ type Session struct {
 	// B1/B3). Both empty for ad-hoc (--agent) sessions, which carry no policy file. Non-secret.
 	PolicyPath string `json:"policy_path,omitempty"`
 	PolicyHash string `json:"policy_hash,omitempty"`
+	// EgressGrants are the operator-invoked, session-scoped, exact FQDN:port network grants for a
+	// container deny session (specs/0089/0097). Runtime overlay state only — never mutates profile.
+	// egress policy; revoked with the session. Empty (omitted) for host/allow sessions and sessions
+	// with no grants.
+	EgressGrants  []EgressGrant `json:"egress_grants,omitempty"`
+	GrantRevision int           `json:"egress_grant_revision,omitempty"`
 	// Detached marks a session whose recorded PID is a detached supervisor that
 	// leads its own process group, so `stop` signals the group, not a bare PID
 	// (specs/0051 D4). Internal routing state; not surfaced in the JSON envelope.
