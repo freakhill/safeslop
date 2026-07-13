@@ -177,7 +177,7 @@ Add non-modal controls only:
   VERIFY:   `go test ./internal/cli -run 'SessionEgress|SessionData|Help' -v`
   EXPECTED: CLI tests cover output shape, validation errors, host/network:allow non-enforceable messages, grant/revoke/list behavior, and help text.
 
-- [ ] T5 — Implement deny observation parsing
+- [x] T5 — Implement deny observation parsing
   FILE:     `internal/engine/container/egress_observation.go`, `internal/engine/container/egress_observation_test.go`, `internal/engine/container/assets/squid.conf.tmpl`, `internal/cli/cli.go`, `internal/cli/cli_session_test.go`
   CHANGE:   Configure/provide Squid access logging for denied requests and parse backend proxy logs into deduped value-free observations (`host`, `port`, `last_seen`, `count`, `grantable`, `reason`). Observation failure returns no grants and no traffic change.
   VERIFY:   `go test ./internal/engine/container ./internal/cli -run 'EgressObservation|Denied|Grantable|ObservationFailure' -v && make check-assets`

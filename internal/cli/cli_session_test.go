@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/freakhill/safeslop/internal/engine/container"
 	"github.com/freakhill/safeslop/internal/engine/policy"
 	engsession "github.com/freakhill/safeslop/internal/engine/session"
 	"github.com/freakhill/safeslop/internal/jsoncontract"
@@ -1583,6 +1585,68 @@ func TestSessionEgressGrantListAndRevokeCommands(t *testing.T) {
 	}
 	if got := env.Data["egress_grant_revision"]; got != float64(2) {
 		t.Fatalf("revoke revision = %#v, want 2", got)
+	}
+}
+
+func TestSessionEgressObservationsAreValueFreeAndFailureDoesNotMutateGrants(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+	store := sessionStore()
+	sess, err := store.Create("pi", "container", ws, nowForTest(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, _, err = engsession.AppendGrant(sess, "old.example.com", 443, nowForTest(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(sess); err != nil {
+		t.Fatal(err)
+	}
+
+	oldObserve := observeSessionEgress
+	observeSessionEgress = func(context.Context, engsession.Session) ([]container.EgressObservation, error) {
+		return []container.EgressObservation{{Host: "api.example.com", Port: 443, LastSeen: nowForTest(t), Count: 2, Grantable: true}}, nil
+	}
+	t.Cleanup(func() { observeSessionEgress = oldObserve })
+
+	out, err := runRootForTest(t, ws, "session", "egress", "observations", "--session-id", sess.ID, "--output", "json")
+	if err != nil {
+		t.Fatalf("session egress observations: %v\nout=%s", err, out)
+	}
+	env := parseEnvelopeForTest(t, out)
+	if !env.OK || len(env.Warnings) != 0 {
+		t.Fatalf("observations envelope = %+v", env)
+	}
+	observations, ok := env.Data["observations"].([]any)
+	if !ok || len(observations) != 1 {
+		t.Fatalf("observations = %#v, want one value-free observation", env.Data["observations"])
+	}
+	if row, _ := observations[0].(map[string]any); row["host"] != "api.example.com" || row["port"] != float64(443) || row["count"] != float64(2) {
+		t.Fatalf("observation row = %#v", observations[0])
+	}
+	if strings.Contains(out, "/path") || strings.Contains(out, "token=") {
+		t.Fatalf("observation output leaked request material: %s", out)
+	}
+
+	observeSessionEgress = func(context.Context, engsession.Session) ([]container.EgressObservation, error) {
+		return nil, errors.New("proxy logs unavailable")
+	}
+	out, err = runRootForTest(t, ws, "session", "egress", "observations", "--session-id", sess.ID, "--output", "json")
+	if err != nil {
+		t.Fatalf("observation failure must return an envelope, not command error: %v\nout=%s", err, out)
+	}
+	env = parseEnvelopeForTest(t, out)
+	failedObservations, ok := env.Data["observations"].([]any)
+	if !env.OK || !ok || len(failedObservations) != 0 || len(env.Warnings) != 1 || env.Warnings[0].Code != jsoncontract.CodeIOError {
+		t.Fatalf("observation failure envelope = %+v", env)
+	}
+	stored, err := store.Get(sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.EgressGrants) != 1 || stored.EgressGrants[0].Host != "old.example.com" || stored.GrantRevision != 1 {
+		t.Fatalf("observations must not mutate grants, stored session = %+v", stored)
 	}
 }
 

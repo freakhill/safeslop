@@ -628,14 +628,24 @@ func cmdSessionEgressObservations() *cobra.Command {
 			if output != "json" {
 				return fmt.Errorf("session egress observations requires --output json")
 			}
-			if _, err := egressSession(sessionStore(), id); err != nil {
+			sess, err := egressSession(sessionStore(), id)
+			if err != nil {
 				return err
 			}
-			// Denied-log parsing is intentionally a separate concern from grant mutation.
-			// Until that parser is available, report an explicit value-free warning rather
-			// than inventing observations or changing traffic (specs/0097 T5).
-			emitContract(jsoncontract.OK(map[string]any{"session_id": id, "observations": []any{}},
-				jsoncontract.NewMessage(jsoncontract.CodeIOError, "proxy denied-request observations are unavailable", true, nil)))
+			observations, err := observeSessionEgress(context.Background(), sess)
+			if observations == nil {
+				observations = []container.EgressObservation{}
+			}
+			data := map[string]any{"session_id": id, "observations": observations}
+			if err != nil {
+				// Observing is read-only: never turn a proxy/log failure into traffic
+				// authority, and do not return backend output that might include request
+				// material. The caller can retry after the runtime is healthy.
+				emitContract(jsoncontract.OK(data,
+					jsoncontract.NewMessage(jsoncontract.CodeIOError, "read proxy denied-request observations", true, nil)))
+				return nil
+			}
+			emitContract(jsoncontract.OK(data))
 			return nil
 		},
 	}
@@ -2772,6 +2782,15 @@ var applySessionGrantOverlay = func(ctx context.Context, sess engsession.Session
 		return err
 	}
 	return container.ApplySessionGrants(ctx, engineForSession(sess), filepath.Join(stageDir, "compose.yml"), stageDir, desired)
+}
+
+// observeSessionEgress is a seam so CLI tests never need a live container runtime.
+var observeSessionEgress = func(ctx context.Context, sess engsession.Session) ([]container.EgressObservation, error) {
+	stageDir, err := sessionStageDir(sess)
+	if err != nil {
+		return nil, err
+	}
+	return container.ReadDeniedEgressObservations(ctx, engineForSession(sess), filepath.Join(stageDir, "compose.yml"))
 }
 
 func runProfileCtx(ctx context.Context, name string, prof policy.Profile, argv []string, ws string, stdio ...runIO) (int, error) {
