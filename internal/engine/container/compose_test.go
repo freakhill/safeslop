@@ -408,6 +408,48 @@ func TestComposeNoProjectionIsUnchanged(t *testing.T) {
 	}
 }
 
+// TestMaterializeRunAlwaysWritesSessionGrants pins specs/0097 T2: session-grants.conf is written
+// unconditionally (comment-only when there are no grants) so the unconditional proxy bind mount +
+// squid include always resolve at compose-up; rendered grants are threaded from composeParams.
+func TestMaterializeRunAlwaysWritesSessionGrants(t *testing.T) {
+	empty := t.TempDir()
+	if _, err := materializeRun(composeParams{RuntimeDir: empty, StageDir: empty, Workspace: "/"}, false); err != nil {
+		t.Fatal(err)
+	}
+	b, err := readAssetFile(empty, "session-grants.conf")
+	if err != nil {
+		t.Fatalf("session-grants.conf must always be written (empty case): %v", err)
+	}
+	if !strings.HasPrefix(strings.TrimSpace(string(b)), "#") {
+		t.Errorf("empty grants must yield a comment-only file:\n%s", b)
+	}
+
+	with := t.TempDir()
+	if _, err := materializeRun(composeParams{RuntimeDir: with, StageDir: with, Workspace: "/", SessionGrants: []SessionGrant{{Host: "example.com", Port: 443}}}, false); err != nil {
+		t.Fatal(err)
+	}
+	b2, err := readAssetFile(with, "session-grants.conf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b2), "grant_0_host dstdom_regex -n ^example\\.com$") {
+		t.Errorf("session-grants.conf must render the threaded grant:\n%s", b2)
+	}
+
+	// compose.yml mounts session-grants.conf into the proxy.
+	yml, err := readAssetFile(with, "compose.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(yml), "session-grants.conf:/etc/squid/session-grants.conf:ro") {
+		t.Errorf("compose must bind-mount session-grants.conf into the proxy:\n%s", yml)
+	}
+}
+
+func readAssetFile(dir, name string) ([]byte, error) {
+	return os.ReadFile(dir + "/" + name)
+}
+
 // TestMaterializeRunWritesProjectionManifest pins that materializeRun writes projection.json (the
 // provenance manifest) and projection.tsv (the entrypoint's shell-friendly copy input) when a
 // projection is present, and writes neither when there is none.

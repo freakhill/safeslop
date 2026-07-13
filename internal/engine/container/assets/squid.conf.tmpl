@@ -14,6 +14,10 @@ acl ip_literal_dst dstdom_regex -n ^[0-9]+(\.[0-9]+){3}$ ^[0-9A-Fa-f:.]*:[0-9A-F
 http_access deny ip_literal_dst
 acl allowed_domains dstdomain -n "/etc/squid/allowlist.domains"
 http_access allow allowed_domains
+# specs/0097: operator-invoked session egress grants (exact FQDN:port). Included after the hard
+# denies (blocked_dst, ip_literal_dst) and the static allowlist, before the final deny-all, so a
+# grant can extend egress but never bypass a hard deny.
+include /etc/squid/session-grants.conf
 http_access deny all
 {{end}}via off
 forwarded_for delete

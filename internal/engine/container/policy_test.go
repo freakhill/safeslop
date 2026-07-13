@@ -73,3 +73,81 @@ func TestDecideBlocksMetadataHostnames(t *testing.T) {
 		}
 	}
 }
+
+// TestDecideWithGrantsAllowsExactPairOnly pins specs/0097 T2: a session grant allows ONLY its
+// exact FQDN:port pair in deny mode; a different port on the same host, or an ungranted host,
+// stays denied. Hard denies (IP literals, private/metadata) cannot be overridden by a grant.
+func TestDecideWithGrantsAllowsExactPairOnly(t *testing.T) {
+	grants := []SessionGrant{{Host: "example.com", Port: 443}}
+	cases := []struct {
+		host    string
+		port    int
+		network string
+		grants  []SessionGrant
+		want    bool
+	}{
+		{"example.com", 443, "deny", grants, true},      // exact granted pair
+		{"example.com", 80, "deny", grants, false},      // same host, wrong port
+		{"sub.example.com", 443, "deny", grants, false}, // subdomain is NOT the exact FQDN
+		{"other.com", 443, "deny", grants, false},       // not granted
+		{"example.com", 443, "deny", nil, false},        // no grants => denied
+		{"example.com", 443, "allow", grants, true},     // allow mode passes regardless
+		// hard denies are never grantable:
+		{"169.254.169.254", 443, "deny", []SessionGrant{{Host: "169.254.169.254", Port: 443}}, false},
+		{"10.0.0.5", 443, "deny", []SessionGrant{{Host: "10.0.0.5", Port: 443}}, false},
+		{"metadata.google.internal", 443, "deny", []SessionGrant{{Host: "metadata.google.internal", Port: 443}}, false},
+		// an allowlisted domain still passes without a grant:
+		{"api.anthropic.com", 443, "deny", nil, true},
+	}
+	for _, c := range cases {
+		if got := DecideWithGrants(c.host, c.port, c.network, c.grants); got != c.want {
+			t.Errorf("DecideWithGrants(%q,%d,%q,%v)=%v want %v", c.host, c.port, c.network, c.grants, got, c.want)
+		}
+	}
+}
+
+// TestRenderSessionGrantsEmitsExactACLs pins specs/0097 T2: each grant becomes one anchored
+// dstdom_regex (exact FQDN, dots escaped) + a port ACL + an allow for the pair; empty grants
+// yield a comment-only file so the unconditional include/mount always resolve.
+func TestRenderSessionGrantsEmitsExactACLs(t *testing.T) {
+	out := RenderSessionGrants([]SessionGrant{{Host: "example.com", Port: 443}, {Host: "api.anthropic.com", Port: 80}})
+	if !strings.Contains(out, "acl grant_0_host dstdom_regex -n ^example\\.com$") {
+		t.Errorf("grant 0 host ACL wrong (dots must be escaped, anchored):\n%s", out)
+	}
+	if !strings.Contains(out, "acl grant_0_port port 443") || !strings.Contains(out, "acl grant_1_port port 80") {
+		t.Errorf("port ACLs missing:\n%s", out)
+	}
+	if strings.Count(out, "http_access allow grant_") != 2 {
+		t.Errorf("each grant needs one allow line:\n%s", out)
+	}
+	if strings.Contains(out, "grant_0_host grant_1_port") {
+		t.Errorf("host and port ACLs must be paired per-grant, not crossable:\n%s", out)
+	}
+	empty := RenderSessionGrants(nil)
+	if !strings.HasPrefix(strings.TrimSpace(empty), "#") {
+		t.Errorf("empty grants must render a comment-only file:\n%s", empty)
+	}
+}
+
+// TestSquidConfIncludesSessionGrantsBeforeDenyAll pins the include ordering: session-grants.conf
+// is included after the hard denies + static allowlist and before the final deny-all, so a grant
+// extends egress but cannot bypass a hard deny (specs/0097).
+func TestSquidConfIncludesSessionGrantsBeforeDenyAll(t *testing.T) {
+	strict, err := RenderSquidConf(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strict, "include /etc/squid/session-grants.conf") {
+		t.Fatalf("squid.conf must include session-grants.conf:\n%s", strict)
+	}
+	inc := strings.Index(strict, "include /etc/squid/session-grants.conf")
+	deny := strings.Index(strict, "http_access deny all")
+	allow := strings.Index(strict, "http_access allow allowed_domains")
+	ipDeny := strings.Index(strict, "http_access deny ip_literal_dst")
+	if inc < 0 || deny < 0 || inc > deny {
+		t.Fatalf("session-grants include must precede deny-all:\n%s", strict)
+	}
+	if ipDeny < 0 || allow < 0 || ipDeny > inc || allow > inc {
+		t.Fatalf("hard denies + allowlist must precede the session-grants include:\n%s", strict)
+	}
+}

@@ -49,10 +49,11 @@ func materializeRun(p composeParams, open bool) (string, error) {
 		return "", err
 	}
 	files := map[string][]byte{
-		"squid.conf":        []byte(squid),
-		"allowlist.domains": composeAllowlist(allow, p.Egress),
-		"compose.yml":       []byte(yml),
-		".safeslop-stage":   nil,
+		"squid.conf":          []byte(squid),
+		"allowlist.domains":   composeAllowlist(allow, p.Egress),
+		"session-grants.conf": []byte(RenderSessionGrants(p.SessionGrants)),
+		"compose.yml":         []byte(yml),
+		".safeslop-stage":     nil,
 	}
 	for name, content := range files {
 		if werr := os.WriteFile(filepath.Join(dir, name), content, 0o600); werr != nil {

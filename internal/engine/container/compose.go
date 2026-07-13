@@ -38,6 +38,10 @@ type composeParams struct {
 	// projection.json/projection.tsv are written into RuntimeDir for the entrypoint's copy step. Nil
 	// => no projection (the default for profiles without projection).
 	Projection *ProjectionManifest
+	// SessionGrants are the operator-invoked session egress grants (specs/0097) rendered into the
+	// squid session-grants.conf overlay include. Empty => a comment-only file (the include + bind
+	// mount are unconditional, so the file must always exist at compose-up).
+	SessionGrants []SessionGrant
 }
 
 func renderCompose(p composeParams) (string, error) {

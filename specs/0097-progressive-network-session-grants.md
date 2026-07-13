@@ -159,7 +159,7 @@ Add non-modal controls only:
   VERIFY:   `go test ./internal/engine/session ./internal/cli -run 'EgressGrant|SessionGrant|IPLiteral|Metadata|NetworkAllow|HostNonEnforceable' -v`
   EXPECTED: Hermetic tests prove valid `example.com:443` normalizes, invalid targets fail before state mutation, and grants are available only on container deny sessions.
 
-- [ ] T2 — Render and test Squid session grant overlay
+- [x] T2 — Render and test Squid session grant overlay
   FILE:     `internal/engine/container/policy.go`, `internal/engine/container/policy_test.go`, `internal/engine/container/launch.go`, `internal/engine/container/assets/squid.conf.tmpl`, `internal/engine/container/compose.go`, `internal/engine/container/assets/compose.yml.tmpl`, `internal/engine/container/compose_test.go`
   CHANGE:   Add typed grant rendering to `session-grants.conf`; include it after hard denies and before final deny; update `Decide` or add `DecideWithGrants(host, port, network, grants)` as test oracle; change proxy runtime mount to support visible overlay updates; preserve existing static allowlist behavior and hard deny ordering.
   VERIFY:   `go test ./internal/engine/container -run 'SessionGrant|Squid|IPLiteral|Private|Metadata|Allowlist|Compose' -v && make check-assets`
