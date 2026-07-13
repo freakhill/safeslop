@@ -78,6 +78,42 @@ func TestEntrypointPreCreatesAgentStateDirs(t *testing.T) {
 	}
 }
 
+// TestEntrypointProjectionCopyIsSafe pins specs/0096 T4c: the entrypoint reads projection.tsv and
+// COPIES staged files into /home/agent, writes a status file, and must never source/. /eval/execute
+// projected content (shell/pi-skill config is readable instruction/code authority).
+func TestEntrypointProjectionCopyIsSafe(t *testing.T) {
+	b, err := readAsset("entrypoint.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	if !strings.Contains(s, "/safeslop/runtime/projection.tsv") {
+		t.Fatal("entrypoint must read projection.tsv when projection is staged")
+	}
+	if !strings.Contains(s, "projection-status") {
+		t.Fatal("entrypoint must write a projection-status file under the ephemeral home")
+	}
+	// copy-only: projected content must never be sourced/evaluated/executed — only `cp`'d. Assert
+	// none of the execution sinks reference a projected staging path or the TSV directly.
+	for _, bad := range []string{
+		". /safeslop/projected",
+		"source /safeslop/projected",
+		"sh /safeslop/projected",
+		"bash /safeslop/projected",
+		". /safeslop/runtime/projection.tsv",
+		"source /safeslop/runtime/projection.tsv",
+		"sh /safeslop/runtime/projection.tsv",
+	} {
+		if strings.Contains(s, bad) {
+			t.Errorf("entrypoint must never execute projected content (found %q):\n%s", bad, s)
+		}
+	}
+	// the copy primitive itself must be present.
+	if !strings.Contains(s, "cp --") {
+		t.Errorf("entrypoint must cp (copy) staged projection files:\n%s", s)
+	}
+}
+
 func TestWriteSecretsEnvEscapesAndIs0600(t *testing.T) {
 	dir := t.TempDir()
 	p, err := writeSecretsEnv(dir, []string{`ANTHROPIC_API_KEY=sk-a'b`})

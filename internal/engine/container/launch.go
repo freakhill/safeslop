@@ -11,6 +11,7 @@ import (
 
 	"github.com/freakhill/safeslop/internal/engine/container/runtime"
 	"github.com/freakhill/safeslop/internal/engine/exec"
+	"github.com/freakhill/safeslop/internal/engine/policy"
 )
 
 // detectRuntime is a test seam. Production uses runtime.Detect; unit tests must not invoke an
@@ -147,7 +148,7 @@ func composeAllowlist(base []byte, extra []string) []byte {
 // interactive argv that runs the agent (`docker compose run --rm agent <argv>`) plus the compose
 // file path (for teardown).
 // secretEnv is written to secrets.env and sourced by the entrypoint.
-func provision(ctx context.Context, sessionID string, agentArgv []string, workspace, network string, egress []string, secretEnv []string, stageDir string, enabled []string) (argv []string, composeFile string, eng runtime.Engine, err error) {
+func provision(ctx context.Context, sessionID string, agentArgv []string, workspace, network string, egress []string, secretEnv []string, stageDir string, enabled []string, proj *policy.Projection) (argv []string, composeFile string, eng runtime.Engine, err error) {
 	if len(agentArgv) == 0 {
 		return nil, "", nil, exec.ErrNoArgv
 	}
@@ -193,6 +194,17 @@ func provision(ctx context.Context, sessionID string, agentArgv []string, worksp
 	if err != nil {
 		return nil, "", nil, err
 	}
+	// specs/0096: resolve the engine-owned host projection against the launching user's $HOME.
+	// A resolver-law violation (credential dir, path escape, symlink, duplicate target, required
+	// source absent) fails closed here — the agent never launches under a half-resolved projection.
+	var projectionManifest *ProjectionManifest
+	if policy.ProjectionActive(policy.Profile{Environment: "container", Projection: proj}) {
+		manifest, resErr := ResolveProjection(os.Getenv("HOME"), *proj)
+		if resErr != nil {
+			return nil, "", nil, fmt.Errorf("resolve host projection: %w", resErr)
+		}
+		projectionManifest = &manifest
+	}
 	p := composeParams{
 		RuntimeDir:    stageDir,
 		Workspace:     workspace,
@@ -207,6 +219,7 @@ func provision(ctx context.Context, sessionID string, agentArgv []string, worksp
 		OpenEgress:    network == "allow",
 		InternalNet:   internalNet,
 		Egress:        egress,
+		Projection:    projectionManifest,
 	}
 	composeFile, err = materializeRun(p, network == "allow")
 	if err != nil {
@@ -225,8 +238,8 @@ func provision(ctx context.Context, sessionID string, agentArgv []string, worksp
 // staged); it is bind-mounted ro at /safeslop/runtime and wiped on exit by the caller. The agent runs interactively through a PTY (design §6.2).
 // enabled is the profile's resolved package identity set (specs/0058): it selects the agent
 // image (ENABLE_<pkg> build args) so a profile gets exactly the tools it declared.
-func Launch(ctx context.Context, spec exec.LaunchSpec, workspace, network string, egress []string, secretEnv []string, stageDir string, enabled []string) (int, error) {
-	argv, _, _, err := provision(ctx, SessionIDFromStageDir(stageDir), spec.Argv, workspace, network, egress, secretEnv, stageDir, enabled)
+func Launch(ctx context.Context, spec exec.LaunchSpec, workspace, network string, egress []string, secretEnv []string, stageDir string, enabled []string, proj *policy.Projection) (int, error) {
+	argv, _, _, err := provision(ctx, SessionIDFromStageDir(stageDir), spec.Argv, workspace, network, egress, secretEnv, stageDir, enabled, proj)
 	if err != nil {
 		return 1, err
 	}

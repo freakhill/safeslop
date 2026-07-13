@@ -19,7 +19,7 @@ func TestLaunchRejectsWhenUnavailable(t *testing.T) {
 	detectRuntime = func(runtime.NetworkPolicy) (runtime.Engine, error) {
 		return nil, errors.New("runtime unavailable")
 	}
-	_, err := Launch(context.Background(), exec.LaunchSpec{Argv: []string{"fish"}}, t.TempDir(), "deny", nil, nil, t.TempDir(), nil)
+	_, err := Launch(context.Background(), exec.LaunchSpec{Argv: []string{"fish"}}, t.TempDir(), "deny", nil, nil, t.TempDir(), nil, nil)
 	if err == nil {
 		t.Fatal("expected error when docker unavailable")
 	}
@@ -77,5 +77,65 @@ func TestMaterializeRunScopesEgressPerAgent(t *testing.T) {
 	}
 	if !strings.Contains(string(cl), ".anthropic.com") {
 		t.Errorf("claude run must still carry the shared base providers:\n%s", cl)
+	}
+}
+
+// TestProvisionThreadsProjectionIntoCompose pins specs/0096 T4c: provision resolves a profile's
+// projection against $HOME and materializes it into the per-run compose.yml (read-only mounts),
+// projection.json (manifest), and projection.tsv (entrypoint copy input) — fail-closed on a
+// resolver-law violation. No docker: the detectRuntime seam returns a fakeEngine whose commands
+// are no-op stubs.
+func TestProvisionThreadsProjectionIntoCompose(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.WriteFile(filepath.Join(home, ".zshrc"), []byte("# zsh"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	orig := detectRuntime
+	t.Cleanup(func() { detectRuntime = orig })
+	detectRuntime = func(runtime.NetworkPolicy) (runtime.Engine, error) {
+		return newFakeEngine(t, nil), nil
+	}
+	stageDir, ws := t.TempDir(), t.TempDir()
+	proj := &policy.Projection{Enabled: true, Items: []policy.ProjectionItem{{Source: "~/.zshrc", Label: "zsh"}}}
+	_, composeFile, _, err := provision(context.Background(), "sess-test", []string{"fish"}, ws, "deny", nil, nil, stageDir, nil, proj)
+	if err != nil {
+		t.Fatalf("provision with projection failed: %v", err)
+	}
+	yml, err := os.ReadFile(composeFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(yml), ":/safeslop/projected/0:ro") || !strings.Contains(string(yml), home+"/.zshrc:/safeslop/projected/0:ro") {
+		t.Errorf("provision must render the resolved projection mount ro:\n%s", yml)
+	}
+	if _, err := os.ReadFile(filepath.Join(stageDir, "projection.json")); err != nil {
+		t.Errorf("provision must write projection.json: %v", err)
+	}
+	tsv, err := os.ReadFile(filepath.Join(stageDir, "projection.tsv"))
+	if err != nil {
+		t.Errorf("provision must write projection.tsv: %v", err)
+	} else if !strings.Contains(string(tsv), "/safeslop/projected/0\t/home/agent/.zshrc") {
+		t.Errorf("projection.tsv must map the staging path to the home target:\n%s", tsv)
+	}
+}
+
+// TestProvisionFailsClosedOnProjectionLawViolation pins specs/0096: a resolver-law violation
+// (e.g. a credential-dir source) fails closed at provision time — the agent never launches with
+// a half-resolved/illegal projection.
+func TestProvisionFailsClosedOnProjectionLawViolation(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	_ = os.MkdirAll(filepath.Join(home, ".ssh"), 0o755)
+	_ = os.WriteFile(filepath.Join(home, ".ssh", "config"), []byte("x"), 0o644)
+	orig := detectRuntime
+	t.Cleanup(func() { detectRuntime = orig })
+	detectRuntime = func(runtime.NetworkPolicy) (runtime.Engine, error) {
+		return newFakeEngine(t, nil), nil
+	}
+	proj := &policy.Projection{Enabled: true, Items: []policy.ProjectionItem{{Source: "~/.ssh/config"}}}
+	_, _, _, err := provision(context.Background(), "sess-test", []string{"fish"}, t.TempDir(), "deny", nil, nil, t.TempDir(), nil, proj)
+	if err == nil || !strings.Contains(err.Error(), "resolve host projection") {
+		t.Fatalf("provision must fail closed on a credential-dir projection source, got: %v", err)
 	}
 }

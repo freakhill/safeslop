@@ -2592,7 +2592,7 @@ func runProfileCtx(ctx context.Context, name string, prof policy.Profile, argv [
 		// A detached supervisor passes a PTY slave it owns (rio set); forward it so the
 		// container's tty bridges to the supervisor's PTY for attach. Coupled (rio zero)
 		// leaves stdio nil and container.Launch runs the user's terminal (specs/0051).
-		return containerLaunch(ctx, engexec.LaunchSpec{Argv: argv, Stdin: rio.Stdin, Stdout: rio.Stdout, Stderr: rio.Stderr}, ws, prof.Network, egress, secretEnv, stageDir, resolved.IdentitySet)
+		return containerLaunch(ctx, engexec.LaunchSpec{Argv: argv, Stdin: rio.Stdin, Stdout: rio.Stdout, Stderr: rio.Stderr}, ws, prof.Network, egress, secretEnv, stageDir, resolved.IdentitySet, prof.Projection)
 	default:
 		return 1, fmt.Errorf("unknown environment %q", prof.Environment)
 	}
