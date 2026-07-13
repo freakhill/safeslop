@@ -120,3 +120,73 @@ func TestAgentLabelAndTechStackPi(t *testing.T) {
 		t.Errorf("tech stack must label the pi agent:\n%s", s)
 	}
 }
+
+func TestRiskSummaryProjectionSurfacesHostConfig(t *testing.T) {
+	// specs/0096: an active projection must surface as readable host config authority in the
+	// break-glass lines, and call out that it is live host state (not hash-pinned) plus that
+	// shell/pi-skill config is instruction/code the agent may execute.
+	r := RiskSummary(Profile{
+		Agent: "pi", Environment: "container", Network: "deny",
+		Projection: &Projection{Enabled: true, Items: []ProjectionItem{
+			{Source: "~/.pi/agent/AGENTS.md", Label: "pi-agent"},
+			{Source: "~/.config/fish/config.fish", Label: "fish"},
+		}},
+	})
+	joined := strings.Join(r.Lines, "\n")
+	for _, want := range []string{"projected", "pi-agent", "fish", "live host filesystem state", "instruction/code authority"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("risk summary missing %q:\n%s", want, joined)
+		}
+	}
+	if strings.Contains(joined, "ENTIRE account") {
+		t.Errorf("projected container must not claim whole-account file reach:\n%s", joined)
+	}
+}
+
+func TestRiskAxesProjectionKeepsFilesRestricted(t *testing.T) {
+	// Projection widens file reach but stays bounded (allowlisted, read-only): the files axis
+	// must remain restricted=contained, with a value that names the projected config.
+	by := axesByName(RiskAxes(Profile{
+		Environment: "container", Network: "deny",
+		Projection: &Projection{Enabled: true, Items: []ProjectionItem{{Source: "~/.zshrc"}}},
+	}))
+	f := by["files"]
+	if !f.Restricted || f.Severity != "contained" {
+		t.Errorf("projected container files axis = %+v, want restricted/contained", f)
+	}
+	if !strings.Contains(f.Value, "projected") {
+		t.Errorf("files axis value must mention projected config: %q", f.Value)
+	}
+}
+
+func TestProjectionActiveRequiresContainerAndItems(t *testing.T) {
+	// Host profiles never project (host already sees the whole account); a projection with no
+	// items or disabled is inert. Only container+enabled+items is active (specs/0096).
+	cases := []struct {
+		env  string
+		proj *Projection
+		want bool
+	}{
+		{"host", &Projection{Enabled: true, Items: []ProjectionItem{{Source: "x"}}}, false},
+		{"container", &Projection{Enabled: true}, false},
+		{"container", &Projection{Items: []ProjectionItem{{Source: "x"}}}, false},
+		{"container", &Projection{Enabled: true, Items: []ProjectionItem{{Source: "x"}}}, true},
+		{"container", nil, false},
+	}
+	for _, c := range cases {
+		got := ProjectionActive(Profile{Environment: c.env, Projection: c.proj})
+		if got != c.want {
+			t.Errorf("ProjectionActive(env=%q, proj=%+v) = %v, want %v", c.env, c.proj, got, c.want)
+		}
+	}
+}
+
+func TestRiskAxesContainerDenyWithoutProjectionUnchanged(t *testing.T) {
+	// Regression guard: a plain container+deny profile (no projection) keeps the original
+	// "workspace-only" files axis — projection is strictly additive (specs/0096).
+	by := axesByName(RiskAxes(Profile{Environment: "container", Network: "deny"}))
+	f := by["files"]
+	if f.Value != "workspace-only" || !f.Restricted {
+		t.Errorf("plain container files axis drifted: %+v", f)
+	}
+}

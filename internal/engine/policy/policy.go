@@ -142,6 +142,28 @@ type Toolchain struct {
 	Run  string `json:"run,omitempty"`
 }
 
+// ProjectionItem is one allowlisted host source copied read-only into the ephemeral home
+// (specs/0096 T1 FLO verdict). Source is a host path, optionally ~/$HOME or $XDG_CONFIG_HOME
+// relative. Kind is "file" (default), "dir", or "glob". Optional defaults to true (a nil pointer
+// is treated as true by the resolver); a required item fails closed when absent/unreadable.
+// Label carries provenance/legibility text (e.g. "pi-agent", "fish").
+type ProjectionItem struct {
+	Source   string `json:"source"`
+	Target   string `json:"target,omitempty"`
+	Kind     string `json:"kind,omitempty"`
+	Optional *bool  `json:"optional,omitempty"`
+	Label    string `json:"label,omitempty"`
+}
+
+// Projection is the engine-owned read-only host config projection model: a positive allowlist
+// of host config sources staged read-only under opaque paths and copied into /home/agent tmpfs
+// by the entrypoint (specs/0096). Engine-owned in MVP — user-authored projection in safeslop.cue
+// is rejected at load; only embedded builtin profiles populate this.
+type Projection struct {
+	Enabled bool             `json:"enabled,omitempty"`
+	Items   []ProjectionItem `json:"items,omitempty"`
+}
+
 // Profile is one launchable configuration from safeslop.cue.
 type Profile struct {
 	Agent       string `json:"agent"`
@@ -167,12 +189,24 @@ type Profile struct {
 	// BareAgent honors `profile create --no-default-bundle`: launch exactly the
 	// declared bundles/packages, even for agents that normally imply a bundle.
 	BareAgent bool `json:"bareAgent,omitempty"`
+	// Projection is the engine-owned read-only host config projection (specs/0096).
+	// MVP: populated only by embedded builtins; a user-authored projection in safeslop.cue
+	// is rejected at load with a spec-cited error.
+	Projection *Projection `json:"projection,omitempty"`
 }
 
 // Config is the decoded top-level `safeslop:` value from safeslop.cue.
 type Config struct {
 	Version  int                `json:"version"`
 	Profiles map[string]Profile `json:"profiles"`
+}
+
+// projectionAuthored reports whether a decoded Projection carries any engine-meaningful
+// content (enabled flag or items). A bare projection:{} decodes to a zero struct and is
+// treated as absent — only an enabled/item-bearing projection trips the MVP user-authored
+// reject in LoadBytes (specs/0096).
+func projectionAuthored(p Projection) bool {
+	return p.Enabled || len(p.Items) > 0
 }
 
 // NormalizeAgent returns the canonical engine agent name for accepted aliases.
@@ -250,6 +284,14 @@ func LoadBytes(data []byte) (*Config, error) {
 	for name, prof := range cfg.Profiles {
 		prof.Agent = NormalizeAgent(prof.Agent)
 		cfg.Profiles[name] = prof
+		// Projection is engine-owned in MVP (specs/0096 T1 FLO verdict): a safeslop.cue that
+		// sets a non-empty projection is rejected here with a spec-cited error. Embedded builtins
+		// populate Projection as a Go struct directly, so they never flow through LoadBytes and are
+		// unaffected. The field is decoded (and schema-typed) so the error is precise and future
+		// trust/UI work can flip this gate without a schema migration.
+		if prof.Projection != nil && projectionAuthored(*prof.Projection) {
+			return nil, fmt.Errorf("profile %q: projection is engine-owned and not yet settable in safeslop.cue (specs/0096); use a builtin profile (pi/claude/fish/zsh)", name)
+		}
 		// Forgejo API tokens are account-wide, not repo-scoped: enabling API staging must be an
 		// explicit, acknowledged decision (specs/0068 F5). Enforced here (post-decode) rather than in
 		// CUE because "required-only-when-enabled, no silent default" is awkward with CUE defaults.

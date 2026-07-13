@@ -21,10 +21,14 @@ type Risk struct {
 func RiskSummary(p Profile) Risk {
 	env := p.Environment
 	_, note := EnvTier(env)
+	proj := ProjectionActive(p)
 
 	lines := []string{
 		"Network: " + networkReach(env, p.Network),
-		"Files: " + fileReach(env),
+		"Files: " + fileReach(env, proj),
+	}
+	if pl := projectionLines(p); len(pl) > 0 {
+		lines = append(lines, pl...)
 	}
 	if len(p.Secrets) > 0 {
 		names := make([]string, 0, len(p.Secrets))
@@ -58,7 +62,38 @@ type RiskAxis struct {
 // that need loud surfacing on the compact Launch row.
 func RiskAxes(p Profile) []RiskAxis {
 	env := p.Environment
-	return []RiskAxis{networkAxis(env, p.Network), filesAxis(env)}
+	return []RiskAxis{networkAxis(env, p.Network), filesAxis(env, ProjectionActive(p))}
+}
+
+// ProjectionActive reports whether a profile carries an engine-owned read-only host config
+// projection that widens file reach beyond the workspace (specs/0096). Host profiles never
+// project (host already sees the whole account); only container profiles with an enabled,
+// item-bearing projection do.
+func ProjectionActive(p Profile) bool {
+	return p.Environment == "container" && p.Projection != nil && p.Projection.Enabled && len(p.Projection.Items) > 0
+}
+
+// projectionLines returns value-free risk lines describing an active projection: what is
+// projected (labels/sources), that it is live host filesystem state (not content-pinned by
+// the profile hash), and that shell/pi-skill config is readable instruction/code authority the
+// agent or shell may execute or use inside the container (specs/0096 ayo lesson #2).
+func projectionLines(p Profile) []string {
+	if !ProjectionActive(p) {
+		return nil
+	}
+	names := make([]string, 0, len(p.Projection.Items))
+	for _, it := range p.Projection.Items {
+		if it.Label != "" {
+			names = append(names, it.Label)
+		} else {
+			names = append(names, it.Source)
+		}
+	}
+	sort.Strings(names)
+	return []string{
+		"Host config projected (read-only, copied into ephemeral home): " + strings.Join(names, ", "),
+		"Projection is live host filesystem state, not pinned by the profile hash; shell/pi-skill config is readable instruction/code authority the agent may execute or use",
+	}
 }
 
 func networkAxis(env, network string) RiskAxis {
@@ -75,11 +110,16 @@ func networkAxis(env, network string) RiskAxis {
 	}
 }
 
-func filesAxis(env string) RiskAxis {
+func filesAxis(env string, proj bool) RiskAxis {
 	switch env {
 	case "host":
 		return RiskAxis{"files", "whole account", false, "high"}
 	case "container":
+		if proj {
+			// Still bounded/restricted: workspace (rw) + a read-only allowlist of host config copied
+			// into the ephemeral home. No broad $HOME, no credential dirs (specs/0096).
+			return RiskAxis{"files", "workspace + projected host config (read-only)", true, "contained"}
+		}
 		return RiskAxis{"files", "workspace-only", true, "contained"}
 	default: // unknown/invalid env — never imply a boundary (specs/0053)
 		return RiskAxis{"files", "whole account", false, "high"}
@@ -103,6 +143,11 @@ func TechStack(p Profile) []string {
 	}
 	if len(p.Secrets) > 0 {
 		s = append(s, "Secrets channel: "+secretProviders(p.Secrets))
+	}
+	if ProjectionActive(p) {
+		// Surface the projection set by label so an operator sees the readable host config
+		// authority the agent gains (specs/0096 ayo lesson #2/10).
+		s = append(s, "Projection: read-only host config copied into ephemeral home")
 	}
 	return s
 }
@@ -185,11 +230,14 @@ func networkReach(env, network string) string {
 	}
 }
 
-func fileReach(env string) string {
+func fileReach(env string, proj bool) string {
 	switch env {
 	case "host":
 		return "your ENTIRE account — home, ~/.ssh, ~/.aws, every file you can touch"
 	case "container":
+		if proj {
+			return "the mounted workspace (read-write) plus a read-only allowlist of host config copied into the ephemeral home — no broad $HOME, no credential dirs"
+		}
 		return "only the mounted workspace — no host files"
 	default: // unknown/invalid env (specs/0053)
 		return "unknown environment — assume your ENTIRE account is reachable"

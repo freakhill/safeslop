@@ -115,6 +115,35 @@ safeslop: profiles: dev: {agent: "claude", environment: "host", toolchain: {kind
 	}
 }
 
+func TestLoadRejectsUserAuthoredProjection(t *testing.T) {
+	// specs/0096 T1 FLO verdict: projection is engine-owned in MVP. A safeslop.cue that sets a
+	// non-empty projection is rejected at load with a spec-cited error; only embedded builtins
+	// (which populate the Go struct directly, bypassing LoadBytes) may carry projection.
+	_, err := loadStr(t, `package safeslop
+safeslop: profiles: dev: {
+	agent: "pi", environment: "container",
+	projection: {enabled: true, items: [{source: "~/.zshrc"}]}
+}`)
+	if err == nil {
+		t.Fatal("expected user-authored projection to be rejected in MVP")
+	}
+	if !strings.Contains(err.Error(), "projection") || !strings.Contains(err.Error(), "0096") {
+		t.Errorf("error must cite projection + specs/0096 (engine-owned), got:\n%s", err.Error())
+	}
+}
+
+func TestLoadRejectsMalformedProjectionKind(t *testing.T) {
+	// Even though projection is engine-owned, a structurally invalid projection must fail schema
+	// validation (the field is typed in the schema), not silently decode.
+	if _, err := loadStr(t, `package safeslop
+safeslop: profiles: dev: {
+	agent: "pi", environment: "container",
+	projection: {enabled: true, items: [{source: "x", kind: "weird"}]}
+}`); err == nil {
+		t.Fatal("expected schema rejection of an invalid projection kind")
+	}
+}
+
 func TestToolchainRejectsBadKind(t *testing.T) {
 	if _, err := loadStr(t, `package safeslop
 safeslop: profiles: dev: {agent: "claude", environment: "host", toolchain: {kind: "cargo"}}`); err == nil {

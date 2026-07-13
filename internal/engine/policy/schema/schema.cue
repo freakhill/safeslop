@@ -168,6 +168,35 @@ package safeslop
 	run?: string
 }
 
+// One allowlisted host source copied read-only into the ephemeral home (specs/0096 T1 FLO
+// verdict). Engine-owned in MVP: user-authored projection in safeslop.cue is rejected at
+// load (see policy.go); only embedded builtins populate this. Copy-based, never symlinked:
+// sources stage read-only under opaque /safeslop/projected/<id> paths and the entrypoint
+// copies them into /home/agent tmpfs.
+#ProjectionItem: {
+	source: string
+	// Destination under /home/agent; derived from source when omitted.
+	target?: string
+	// file = one regular file; dir = a directory expanded per-file; glob = a filepath.Match
+	// pattern expanded per-file. Defaults to file.
+	kind: "file" | "dir" | "glob" | *"file"
+	// true => absent/unreadable source skips legibly; false => required, fail closed. Defaults
+	// to true so convenience config (shell rc, optional skills) does not block launch.
+	optional?: bool | *true
+	// Provenance/legibility label (e.g. "pi-agent", "fish", "zsh", "starship").
+	label?: string
+}
+
+// Projection is the engine-owned read-only host config projection model: a positive
+// allowlist of host config sources copied into the ephemeral home. There is no broad
+// $HOME mount and no credential-directory projection; the resolver (container package)
+// hard-rejects excluded roots, symlink components, path escapes, duplicates, and
+// non-regular files (specs/0096, specs/research/2026-07-12-safe-home-projection-flo.md).
+#Projection: {
+	enabled?: bool | *false
+	items?:  [...#ProjectionItem]
+}
+
 #Profile: {
 	agent:       #Agent
 	environment: #Environment
@@ -194,6 +223,10 @@ package safeslop
 	bundles?:   [...string]
 	packages?:  [...string]
 	bareAgent?: bool | *false
+	// Read-only allowlist projection of host config into the ephemeral home (specs/0096).
+	// Engine-owned in MVP: a safeslop.cue that sets this is rejected at load with a
+	// spec-cited error; only embedded builtin profiles (pi/claude/fish/zsh) populate it.
+	projection?: #Projection
 }
 
 #Slop: {
