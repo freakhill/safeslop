@@ -183,7 +183,7 @@ Add non-modal controls only:
   VERIFY:   `go test ./internal/engine/container ./internal/cli -run 'EgressObservation|Denied|Grantable|ObservationFailure' -v && make check-assets`
   EXPECTED: Tests parse fixture logs for denied CONNECT/HTTP requests, reject IP/private/metadata observations as non-grantable, dedupe counts, and prove observation failures do not alter session grants or allow traffic.
 
-- [ ] T6 — Emacs non-modal grant/revoke UI hooks
+- [x] T6 — Emacs non-modal grant/revoke UI hooks
   FILE:     `emacs/safeslop-session.el`, `emacs/test/safeslop-test.el`, `skills/agent-sandbox-ops/SKILL.md`
   CHANGE:   Surface observations/grants in session status UI; add explicit grant/revoke actions that call the new CLI commands; do not trigger modal prompts from agent traffic and do not edit `safeslop.cue`.
   VERIFY:   `make test-emacs EMACS=$(command -v emacs)`

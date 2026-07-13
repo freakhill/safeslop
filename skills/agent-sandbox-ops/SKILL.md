@@ -188,6 +188,26 @@ external DNS forwarding is pinned to the container loopback (local service names
 such as `proxy` still resolve). Agent launches are hard-set to uid/gid 1000 in
 Compose, matching the image user and writable tmpfs home.
 
+### Progressive session egress
+
+For a running or created `container` + `network: deny` session, inspect denied,
+value-free proxy observations and explicitly grant only one exact FQDN:port:
+
+```bash
+safeslop session egress observations --session-id ID --output json
+safeslop session egress grants --session-id ID --output json
+safeslop session egress grant --session-id ID --host api.example.com --port 443 --output json
+safeslop session egress revoke --session-id ID --grant-id G --output json
+```
+
+Observations never grant traffic. Grants are session-scoped overlay state, never
+mutate `profile.egress` or `safeslop.cue`, and proxy update failure preserves the
+previous deny posture. Only `container` + `network: deny` is enforceable; host and
+`network: allow` sessions are rejected. IP literals, private/link-local/metadata,
+broker/mint, wildcard, suffix, URL, and non-80/443 targets are non-grantable.
+Emacs exposes the same explicit controls in session detail (`o` observations, `G`
+grants, `+` grant, `-` revoke); agent traffic never triggers a modal prompt.
+
 ### VM profile
 
 ```cue

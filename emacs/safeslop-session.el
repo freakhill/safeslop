@@ -745,6 +745,94 @@ handle, so this only ever carries --session-id, never a name-as-selector."
   (list "session" "rename" "--session-id" session-id "--name" name
         "--output" "json"))
 
+;; specs/0097: Egress observation is strictly read-only.  The three mutation
+;; functions below are explicit operator commands; no agent/proxy event calls
+;; them, and none edits safeslop.cue or profile egress policy.
+(defun safeslop-session--egress-observations-args (session-id)
+  "Return exact argv for SESSION-ID's value-free denied observations."
+  (list "session" "egress" "observations" "--session-id" session-id "--output" "json"))
+
+(defun safeslop-session--egress-grants-args (session-id)
+  "Return exact argv for SESSION-ID's active session-scoped grants."
+  (list "session" "egress" "grants" "--session-id" session-id "--output" "json"))
+
+(defun safeslop-session--egress-grant-args (session-id host port)
+  "Return exact argv to grant HOST:PORT for SESSION-ID."
+  (list "session" "egress" "grant" "--session-id" session-id "--host" host
+        "--port" (number-to-string port) "--output" "json"))
+
+(defun safeslop-session--egress-revoke-args (session-id grant-id)
+  "Return exact argv to revoke GRANT-ID from SESSION-ID."
+  (list "session" "egress" "revoke" "--session-id" session-id "--grant-id" grant-id
+        "--output" "json"))
+
+(defun safeslop-session--egress-dispatch (args buffer-name callback quiet)
+  "Dispatch egress ARGS asynchronously, rendering BUFFER-NAME unless QUIET.
+CALLBACK receives the JSON envelope.  This is deliberately a thin explicit CLI
+bridge: it never consults or writes a profile policy."
+  (safeslop--call-json-async
+   args
+   (lambda (envelope)
+     (unless quiet
+       (safeslop--show-envelope-buffer buffer-name args envelope))
+     (when callback (funcall callback envelope)))))
+
+;;;###autoload
+(defun safeslop-session-egress-observations (&optional session-id callback quiet)
+  "Show value-free, proxy-denied observations for SESSION-ID asynchronously.
+This is read-only: it does not prompt, grant traffic, or edit safeslop.cue."
+  (interactive (list (safeslop-session--read-id "Egress observations for session: ") nil nil))
+  (safeslop-session--egress-dispatch
+   (safeslop-session--egress-observations-args session-id)
+   "*safeslop session egress observations*" callback quiet))
+
+;;;###autoload
+(defun safeslop-session-egress-grants (&optional session-id callback quiet)
+  "Show active session-scoped grants for SESSION-ID asynchronously."
+  (interactive (list (safeslop-session--read-id "Egress grants for session: ") nil nil))
+  (safeslop-session--egress-dispatch
+   (safeslop-session--egress-grants-args session-id)
+   "*safeslop session egress grants*" callback quiet))
+
+;;;###autoload
+(defun safeslop-session-egress-grant (&optional session-id host port callback quiet)
+  "Explicitly grant exact HOST:PORT for SESSION-ID asynchronously.
+This operator action is never triggered by agent traffic and changes only the
+running session's overlay, not safeslop.cue or profile egress policy."
+  (interactive
+   (list (safeslop-session--read-id "Grant egress for session: ")
+         (read-string "Exact FQDN: ")
+         (read-number "Port (80 or 443): " 443) nil nil))
+  (safeslop-session--egress-dispatch
+   (safeslop-session--egress-grant-args session-id host port)
+   "*safeslop session egress grant*" callback quiet))
+
+;;;###autoload
+(defun safeslop-session-egress-revoke (&optional session-id grant-id callback quiet)
+  "Explicitly revoke GRANT-ID from SESSION-ID asynchronously."
+  (interactive
+   (list (safeslop-session--read-id "Revoke egress for session: ")
+         (read-string "Grant id: ") nil nil))
+  (safeslop-session--egress-dispatch
+   (safeslop-session--egress-revoke-args session-id grant-id)
+   "*safeslop session egress revoke*" callback quiet))
+
+(defun safeslop-session--egress-grants-summary (data)
+  "Return DATA's value-free session grants as a compact detail string."
+  (let ((grants (alist-get 'egress_grants data))
+        (revision (or (alist-get 'egress_grant_revision data) 0)))
+    (if (null grants)
+        (format "none (revision %s)" revision)
+      (format "%s (revision %s)"
+              (mapconcat
+               (lambda (grant)
+                 (format "%s:%s (%s)"
+                         (or (alist-get 'host grant) "?")
+                         (or (alist-get 'port grant) "?")
+                         (or (alist-get 'id grant) "?")))
+               grants ", ")
+              revision))))
+
 ;;;###autoload
 (defun safeslop-session-remove (&optional session-id callback quiet)
   "Remove SESSION-ID's record, asynchronously, and show the envelope.
@@ -847,6 +935,8 @@ the portal so row actions refresh in place instead of stealing the window."
                    ;; F11): the text label stays, colour + help-echo reinforce it.
                    (line "Environment:" (safeslop-surface--env-cell (field 'environment)))
                    (line "Network:" (safeslop-surface--net-cell network))
+                   (line "Egress grants:" (safeslop-session--egress-grants-summary data))
+                   (line "Egress:" "o observations · G grants · + grant · - revoke (explicit only)")
                    (line "Status:" status)
                    (line "Lifecycle:" (if detached "detached (survives buffer; reattach with A)"
                                          "coupled (tied to its terminal buffer)"))
@@ -884,6 +974,13 @@ the portal so row actions refresh in place instead of stealing the window."
             (erase-buffer)
             (insert (safeslop-surface--breadcrumb safeslop-output--args))
             (insert (safeslop-session--detail-format data))
+            ;; Detail-buffer keys are explicit operator controls. Proxy traffic
+            ;; never calls them, so observations remain non-modal and grants
+            ;; cannot be created by agent activity alone (specs/0097).
+            (local-set-key (kbd "o") (lambda () (interactive) (safeslop-session-egress-observations session-id)))
+            (local-set-key (kbd "G") (lambda () (interactive) (safeslop-session-egress-grants session-id)))
+            (local-set-key (kbd "+") (lambda () (interactive) (safeslop-session-egress-grant session-id)))
+            (local-set-key (kbd "-") (lambda () (interactive) (safeslop-session-egress-revoke session-id)))
             (goto-char (point-min))))
         (pop-to-buffer buf)
         buf)

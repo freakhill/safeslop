@@ -1371,3 +1371,49 @@ after its name became descriptive (specs/0086 T3)."
           (safeslop-portal-open)
           (should (eq popped buf)))
       (kill-buffer buf))))
+
+;;; specs/0097: progressive session egress -----------------------------------
+
+(ert-deftest safeslop-test-session-egress-args-are-explicit-and-value-free ()
+  "Egress actions use exact argv; only the chosen FQDN:port/grant id crosses it."
+  (should (equal (safeslop-session--egress-observations-args "sess-9")
+                 '("session" "egress" "observations" "--session-id" "sess-9" "--output" "json")))
+  (should (equal (safeslop-session--egress-grants-args "sess-9")
+                 '("session" "egress" "grants" "--session-id" "sess-9" "--output" "json")))
+  (should (equal (safeslop-session--egress-grant-args "sess-9" "api.example.com" 443)
+                 '("session" "egress" "grant" "--session-id" "sess-9" "--host" "api.example.com" "--port" "443" "--output" "json")))
+  (should (equal (safeslop-session--egress-revoke-args "sess-9" "g-a1b2c3")
+                 '("session" "egress" "revoke" "--session-id" "sess-9" "--grant-id" "g-a1b2c3" "--output" "json"))))
+
+(ert-deftest safeslop-test-session-egress-actions-do-not-prompt-or-edit-profile ()
+  "Explicit operator actions dispatch asynchronously without agent-triggered modal prompts."
+  (let (calls)
+    (cl-letf (((symbol-function 'safeslop--call-json-async)
+               (lambda (args _callback) (push args calls)))
+              ((symbol-function 'y-or-n-p)
+               (lambda (&rest _) (error "egress action must not prompt"))))
+      (safeslop-session-egress-observations "sess-9" nil t)
+      (safeslop-session-egress-grants "sess-9" nil t)
+      (safeslop-session-egress-grant "sess-9" "api.example.com" 443 nil t)
+      (safeslop-session-egress-revoke "sess-9" "g-a1b2c3" nil t))
+    (setq calls (nreverse calls))
+    (should (equal calls
+                   '(("session" "egress" "observations" "--session-id" "sess-9" "--output" "json")
+                     ("session" "egress" "grants" "--session-id" "sess-9" "--output" "json")
+                     ("session" "egress" "grant" "--session-id" "sess-9" "--host" "api.example.com" "--port" "443" "--output" "json")
+                     ("session" "egress" "revoke" "--session-id" "sess-9" "--grant-id" "g-a1b2c3" "--output" "json"))))))
+
+(ert-deftest safeslop-test-session-detail-surfaces-egress-grants-and-controls ()
+  "Session detail renders stored grants and names the explicit non-modal controls."
+  (let ((detail (safeslop-session--detail-format
+                 '((session_id . "sess-9") (agent . "pi") (status . "created")
+                   (workspace . "/w") (environment . "container") (network . "deny")
+                   (egress_grant_revision . 2)
+                   (egress_grants . (((id . "g-a1b2c3") (host . "api.example.com")
+                                      (port . 443) (source . "operator"))))))))
+    (should (string-match-p "Egress grants:" detail))
+    (should (string-match-p "api.example.com:443" detail))
+    (should (string-match-p "g-a1b2c3" detail))
+    (should (string-match-p "observations" detail))
+    (should (string-match-p "grant" detail))
+    (should (string-match-p "revoke" detail))))
