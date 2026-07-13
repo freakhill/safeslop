@@ -1491,3 +1491,136 @@ func TestSessionDataOmitsEmptyCredentialScopes(t *testing.T) {
 		t.Fatalf("empty credential scopes must be omitted from sessionData")
 	}
 }
+
+func TestSessionDataSurfacesEgressGrantsOnlyWhenNonEmpty(t *testing.T) {
+	sess := engsession.Session{
+		ID:            "sess-grants000",
+		Agent:         "pi",
+		Workspace:     "/workspace/project",
+		Environment:   "container",
+		Network:       "deny",
+		Status:        engsession.StatusCreated,
+		CreatedAt:     nowForTest(t),
+		UpdatedAt:     nowForTest(t),
+		GrantRevision: 1,
+		EgressGrants: []engsession.EgressGrant{{
+			ID: "g-abcdef", Host: "example.com", Port: 443, Source: "operator", CreatedAt: nowForTest(t),
+		}},
+	}
+	data := sessionData(sess)
+	grants, ok := data["egress_grants"].([]engsession.EgressGrant)
+	if !ok || len(grants) != 1 || grants[0].Host != "example.com" || grants[0].Port != 443 {
+		t.Fatalf("egress_grants = %#v, want value-free example.com:443 grant", data["egress_grants"])
+	}
+	if got := data["egress_grant_revision"]; got != 1 {
+		t.Fatalf("egress_grant_revision = %#v, want 1", got)
+	}
+
+	sess.EgressGrants = nil
+	sess.GrantRevision = 0
+	data = sessionData(sess)
+	if _, present := data["egress_grants"]; present {
+		t.Fatalf("empty egress grants must be omitted from sessionData")
+	}
+	if _, present := data["egress_grant_revision"]; present {
+		t.Fatalf("zero egress grant revision must be omitted from sessionData")
+	}
+}
+
+func TestSessionEgressGrantListAndRevokeCommands(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+	store := sessionStore()
+	sess, err := store.Create("pi", "container", ws, nowForTest(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runRootForTest(t, ws, "session", "egress", "grant", "--session-id", sess.ID, "--host", "Example.COM", "--port", "443", "--output", "json")
+	if err != nil {
+		t.Fatalf("session egress grant: %v\nout=%s", err, out)
+	}
+	env := parseEnvelopeForTest(t, out)
+	if !env.OK {
+		t.Fatalf("grant returned error envelope: %+v", env.Errors)
+	}
+	grants, ok := env.Data["egress_grants"].([]any)
+	if !ok || len(grants) != 1 {
+		t.Fatalf("grant response egress_grants = %#v, want one grant", env.Data["egress_grants"])
+	}
+	grant, ok := grants[0].(map[string]any)
+	if !ok || grant["host"] != "example.com" || grant["port"] != float64(443) || grant["source"] != "operator" {
+		t.Fatalf("grant response must be value-free normalized FQDN:port: %#v", grants[0])
+	}
+	grantID, _ := grant["id"].(string)
+	if grantID == "" {
+		t.Fatalf("grant id missing: %#v", grant)
+	}
+	if got := env.Data["egress_grant_revision"]; got != float64(1) {
+		t.Fatalf("grant revision = %#v, want 1", got)
+	}
+
+	out, err = runRootForTest(t, ws, "session", "egress", "grants", "--session-id", sess.ID, "--output", "json")
+	if err != nil {
+		t.Fatalf("session egress grants: %v\nout=%s", err, out)
+	}
+	env = parseEnvelopeForTest(t, out)
+	if !env.OK || len(env.Data["egress_grants"].([]any)) != 1 {
+		t.Fatalf("grants response = %+v", env)
+	}
+
+	out, err = runRootForTest(t, ws, "session", "egress", "revoke", "--session-id", sess.ID, "--grant-id", grantID, "--output", "json")
+	if err != nil {
+		t.Fatalf("session egress revoke: %v\nout=%s", err, out)
+	}
+	env = parseEnvelopeForTest(t, out)
+	if !env.OK {
+		t.Fatalf("revoke returned error envelope: %+v", env.Errors)
+	}
+	revoked, ok := env.Data["egress_grants"].([]any)
+	if !ok || len(revoked) != 0 {
+		t.Fatalf("revoked grants = %#v, want explicit empty list", env.Data["egress_grants"])
+	}
+	if got := env.Data["egress_grant_revision"]; got != float64(2) {
+		t.Fatalf("revoke revision = %#v, want 2", got)
+	}
+}
+
+func TestSessionEgressRejectsNonEnforceableAndInvalidTargets(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+	store := sessionStore()
+	host, err := store.Create("pi", "host", ws, nowForTest(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runRootForTest(t, ws, "session", "egress", "grant", "--session-id", host.ID, "--host", "example.com", "--port", "443", "--output", "json")
+	if !errors.Is(err, errOutputEmitted) {
+		t.Fatalf("host grant error = %v, want contract error\nout=%s", err, out)
+	}
+	env := parseEnvelopeForTest(t, out)
+	if env.OK || len(env.Errors) != 1 || env.Errors[0].Code != jsoncontract.CodeInvalidArgument || !strings.Contains(env.Errors[0].Message, "only enforceable for container deny") {
+		t.Fatalf("host grant envelope = %+v", env)
+	}
+
+	containerSess, err := store.Create("pi", "container", ws, nowForTest(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err = runRootForTest(t, ws, "session", "egress", "grant", "--session-id", containerSess.ID, "--host", "127.0.0.1", "--port", "443", "--output", "json")
+	if !errors.Is(err, errOutputEmitted) {
+		t.Fatalf("IP literal grant error = %v, want contract error\nout=%s", err, out)
+	}
+	env = parseEnvelopeForTest(t, out)
+	if env.OK || len(env.Errors) != 1 || env.Errors[0].Code != jsoncontract.CodeInvalidArgument || !strings.Contains(env.Errors[0].Message, "IP literals are non-grantable") {
+		t.Fatalf("IP literal grant envelope = %+v", env)
+	}
+	stored, err := store.Get(containerSess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.EgressGrants) != 0 || stored.GrantRevision != 0 {
+		t.Fatalf("invalid target mutated session: %+v", stored)
+	}
+}

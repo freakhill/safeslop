@@ -171,7 +171,7 @@ Add non-modal controls only:
   VERIFY:   `go test ./internal/cli ./internal/engine/container -run 'SessionGrantApply|GrantRevoke|ProxyReload|FailClosed|NoProfileMutation' -v`
   EXPECTED: Tests prove grant/revoke success updates session state and overlay; reload/write failure returns an error, preserves previous grants/effective deny, and never mutates `profile.egress`.
 
-- [ ] T4 — Add CLI `session egress` commands
+- [x] T4 — Add CLI `session egress` commands
   FILE:     `internal/cli/cli.go`, `internal/cli/cli_session_test.go`, `internal/cli/cli_help_iw3_test.go`
   CHANGE:   Add `session egress observations|grants|grant|revoke` JSON commands. Include `egress_grants`/`egress_grant_revision` in `sessionData` when non-empty. Keep output value-free: host, port, status/reason only.
   VERIFY:   `go test ./internal/cli -run 'SessionEgress|SessionData|Help' -v`

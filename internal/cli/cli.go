@@ -602,8 +602,171 @@ func sweepManagedOrphans(ctx context.Context) error {
 
 func cmdSession() *cobra.Command {
 	c := &cobra.Command{Use: "session", Short: "Manage Emacs-visible safeslop sessions"}
-	c.AddCommand(cmdSessionCreate(), cmdSessionRun(), cmdSessionStatus(), cmdSessionStop(), cmdSessionList(), cmdSessionRemove(), cmdSessionRename(), cmdSessionPrune(), cmdSessionSupervise(), cmdSessionAttach())
+	c.AddCommand(cmdSessionCreate(), cmdSessionRun(), cmdSessionStatus(), cmdSessionStop(), cmdSessionList(), cmdSessionRemove(), cmdSessionRename(), cmdSessionPrune(), cmdSessionSupervise(), cmdSessionAttach(), cmdSessionEgress())
 	return c
+}
+
+// cmdSessionEgress exposes the operator-only, session-scoped controls for the
+// container deny proxy overlay. It deliberately has no path from agent traffic to
+// a grant: observations are informational and only `grant` changes authority.
+func cmdSessionEgress() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "egress",
+		Short: "Inspect and manage session-scoped container egress grants",
+	}
+	c.AddCommand(cmdSessionEgressObservations(), cmdSessionEgressGrants(), cmdSessionEgressGrant(), cmdSessionEgressRevoke())
+	return c
+}
+
+func cmdSessionEgressObservations() *cobra.Command {
+	var id, output string
+	c := &cobra.Command{
+		Use:   "observations --session-id <id> --output json",
+		Short: "List proxy-denied egress observations for a session",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if output != "json" {
+				return fmt.Errorf("session egress observations requires --output json")
+			}
+			if _, err := egressSession(sessionStore(), id); err != nil {
+				return err
+			}
+			// Denied-log parsing is intentionally a separate concern from grant mutation.
+			// Until that parser is available, report an explicit value-free warning rather
+			// than inventing observations or changing traffic (specs/0097 T5).
+			emitContract(jsoncontract.OK(map[string]any{"session_id": id, "observations": []any{}},
+				jsoncontract.NewMessage(jsoncontract.CodeIOError, "proxy denied-request observations are unavailable", true, nil)))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&id, "session-id", "", "session id")
+	c.Flags().StringVar(&output, "output", "", "output format: json")
+	return c
+}
+
+func cmdSessionEgressGrants() *cobra.Command {
+	var id, output string
+	c := &cobra.Command{
+		Use:   "grants --session-id <id> --output json",
+		Short: "List active session egress grants",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if output != "json" {
+				return fmt.Errorf("session egress grants requires --output json")
+			}
+			sess, err := egressSession(sessionStore(), id)
+			if err != nil {
+				return err
+			}
+			emitContract(jsoncontract.OK(sessionEgressData(sess)))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&id, "session-id", "", "session id")
+	c.Flags().StringVar(&output, "output", "", "output format: json")
+	return c
+}
+
+func cmdSessionEgressGrant() *cobra.Command {
+	var id, host, output string
+	var port int
+	c := &cobra.Command{
+		Use:   "grant --session-id <id> --host <fqdn> --port <80|443> --output json",
+		Short: "Grant one exact FQDN:port to a container deny session",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if output != "json" {
+				return fmt.Errorf("session egress grant requires --output json")
+			}
+			sess, _, err := grantSessionEgress(context.Background(), sessionStore(), id, host, port, time.Now())
+			if err != nil {
+				return emitEgressError(err, id)
+			}
+			emitContract(jsoncontract.OK(sessionEgressData(sess)))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&id, "session-id", "", "session id")
+	c.Flags().StringVar(&host, "host", "", "exact FQDN to grant")
+	c.Flags().IntVar(&port, "port", 0, "destination port (80 or 443)")
+	c.Flags().StringVar(&output, "output", "", "output format: json")
+	return c
+}
+
+func cmdSessionEgressRevoke() *cobra.Command {
+	var id, grantID, output string
+	c := &cobra.Command{
+		Use:   "revoke --session-id <id> --grant-id <id> --output json",
+		Short: "Revoke one session egress grant",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if output != "json" {
+				return fmt.Errorf("session egress revoke requires --output json")
+			}
+			sess, err := revokeSessionEgress(context.Background(), sessionStore(), id, grantID, time.Now())
+			if err != nil {
+				return emitEgressError(err, id)
+			}
+			emitContract(jsoncontract.OK(sessionEgressData(sess)))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&id, "session-id", "", "session id")
+	c.Flags().StringVar(&grantID, "grant-id", "", "egress grant id")
+	c.Flags().StringVar(&output, "output", "", "output format: json")
+	return c
+}
+
+// sessionEgressData is the narrow, value-free response shape for the egress
+// subcommands. Unlike sessionData it always has a grants array and revision, so
+// clients can apply a revoke result without inferring an omitted field as stale.
+func sessionEgressData(sess engsession.Session) map[string]any {
+	grants := sess.EgressGrants
+	if grants == nil {
+		grants = []engsession.EgressGrant{}
+	}
+	return map[string]any{
+		"session_id":            sess.ID,
+		"egress_grants":         grants,
+		"egress_grant_revision": sess.GrantRevision,
+	}
+}
+
+// egressSession loads an enforceable session before a read-only egress command.
+// Host and network-allow sessions are rejected instead of looking grantable in a
+// UI that cannot actually constrain their traffic.
+func egressSession(store engsession.Store, id string) (engsession.Session, error) {
+	if id == "" {
+		return engsession.Session{}, emitContractError(jsoncontract.CodeInvalidArgument, "--session-id is required", nil)
+	}
+	sess, err := store.Get(id)
+	if err != nil {
+		if errors.Is(err, engsession.ErrNotFound) {
+			return engsession.Session{}, emitContractError(jsoncontract.CodeSessionNotFound, "session not found", map[string]any{"session_id": id})
+		}
+		return engsession.Session{}, emitContractError(jsoncontract.CodeIOError, "load session", map[string]any{"error": err.Error()})
+	}
+	if !engsession.CanGrant(sess) {
+		return engsession.Session{}, emitContractError(jsoncontract.CodeInvalidArgument, engsession.ErrSessionNotGrantable.Error(), map[string]any{"session_id": id, "environment": sess.Environment, "network": sess.Network})
+	}
+	return sess, nil
+}
+
+// emitEgressError maps all mutation failures to stable contract errors without
+// exposing proxy command output or runtime file paths in the JSON response.
+func emitEgressError(err error, id string) error {
+	switch {
+	case errors.Is(err, engsession.ErrNotFound):
+		return emitContractError(jsoncontract.CodeSessionNotFound, "session not found", map[string]any{"session_id": id})
+	case errors.Is(err, engsession.ErrSessionNotGrantable):
+		return emitContractError(jsoncontract.CodeInvalidArgument, err.Error(), map[string]any{"session_id": id})
+	case strings.HasPrefix(err.Error(), "egress grant:"):
+		return emitContractError(jsoncontract.CodeInvalidArgument, err.Error(), map[string]any{"session_id": id})
+	case err.Error() == "session stopped":
+		return emitContractError(jsoncontract.CodeSessionStopped, "session is stopped", map[string]any{"session_id": id})
+	default:
+		return emitContractError(jsoncontract.CodeIOError, "apply session egress grant", map[string]any{"session_id": id})
+	}
 }
 
 func cmdSessionCreate() *cobra.Command {
@@ -1574,6 +1737,12 @@ func sessionData(sess engsession.Session) map[string]any {
 	}
 	if len(sess.CredentialScopes) > 0 {
 		out["credential_scopes"] = sess.CredentialScopes
+	}
+	if len(sess.EgressGrants) > 0 {
+		out["egress_grants"] = sess.EgressGrants
+	}
+	if sess.GrantRevision > 0 {
+		out["egress_grant_revision"] = sess.GrantRevision
 	}
 	if !sess.StartedAt.IsZero() {
 		out["started_at"] = sess.StartedAt.Format(time.RFC3339Nano)
