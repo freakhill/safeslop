@@ -4,9 +4,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/freakhill/safeslop/internal/engine/policy"
 	"github.com/freakhill/safeslop/internal/jsoncontract"
 )
 
@@ -180,6 +182,112 @@ func TestProfileListEnvelope(t *testing.T) {
 	}
 	if review["agent"] != "claude" || review["environment"] != "container" || review["network"] != "deny" {
 		t.Fatalf("review profile fields wrong: %#v", review)
+	}
+}
+
+func TestProfileShowProjectExactByteEvaluation(t *testing.T) {
+	fixed := withProfileEvaluationLocalPass(t)
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	path := filepath.Join(dir, "safeslop.cue")
+	cue := []byte(`package safeslop
+
+safeslop: {
+	version: 1
+	profiles: review: {agent: "fish", environment: "host", network: "deny", workspace: "."}
+}
+`)
+	if err := os.WriteFile(path, cue, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	showTrust := func() map[string]any {
+		t.Helper()
+		out, err := runRootForTest(t, dir, "profile", "show", "review", "--output", "json")
+		if err != nil {
+			t.Fatalf("profile show: %v\nout=%s", err, out)
+		}
+		env := parseEnvelopeForTest(t, out)
+		evaluation, ok := env.Data["evaluation"].(map[string]any)
+		if !ok {
+			t.Fatalf("evaluation missing: %#v", env.Data)
+		}
+		return evaluation["trust"].(map[string]any)
+	}
+
+	untrusted := showTrust()
+	if untrusted["state"] != policy.TrustStateUntrusted || untrusted["basis"] != policy.TrustBasisProjectExactBytes || untrusted["checked_at"] != fixed.Format("2006-01-02T15:04:05Z07:00") {
+		t.Fatalf("untrusted project evaluation = %#v", untrusted)
+	}
+	if err := approvePolicyBytes(canonicalPolicyPath(path), cue); err != nil {
+		t.Fatalf("approve policy: %v", err)
+	}
+	if trusted := showTrust(); trusted["state"] != policy.TrustStateTrusted || trusted["basis"] != policy.TrustBasisProjectExactBytes {
+		t.Fatalf("trusted project evaluation = %#v", trusted)
+	}
+
+	changedBytes := append(append([]byte(nil), cue...), []byte("// exact bytes changed\n")...)
+	if err := os.WriteFile(path, changedBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	changed := showTrust()
+	if changed["state"] != policy.TrustStateChanged || changed["basis"] != policy.TrustBasisProjectExactBytes {
+		t.Fatalf("changed project evaluation = %#v", changed)
+	}
+}
+
+func TestProfileShowBuiltinEvaluation(t *testing.T) {
+	fixed := withProfileEvaluationLocalPass(t)
+	out, err := runRootForTest(t, t.TempDir(), "profile", "show", "pi", "--output", "json")
+	if err != nil {
+		t.Fatalf("profile show builtin: %v\nout=%s", err, out)
+	}
+	env := parseEnvelopeForTest(t, out)
+	evaluation := env.Data["evaluation"].(map[string]any)
+	trustSection := evaluation["trust"].(map[string]any)
+	if trustSection["state"] != policy.TrustStateTrusted || trustSection["basis"] != policy.TrustBasisEmbeddedBuiltin || trustSection["checked_at"] != fixed.Format("2006-01-02T15:04:05Z07:00") {
+		t.Fatalf("builtin trust evaluation = %#v", trustSection)
+	}
+	if evaluation["readiness"].(map[string]any)["state"] != policy.ReadinessStateReady {
+		t.Fatalf("builtin readiness = %#v", evaluation["readiness"])
+	}
+	if env.Data["risk"] == nil || env.Data["risk_axes"] == nil || env.Data["profile"] == nil || env.Data["resolved"] == nil {
+		t.Fatalf("evaluation replaced existing show keys: %#v", env.Data)
+	}
+}
+
+func TestProfileShowAndCreateDryRunEvaluationAuthorityEqual(t *testing.T) {
+	withProfileEvaluationLocalPass(t)
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	cue := `package safeslop
+
+safeslop: {
+	version: 1
+	profiles: review: {agent: "fish", environment: "host", network: "deny", workspace: "."}
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "safeslop.cue"), []byte(cue), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	showOut, err := runRootForTest(t, dir, "profile", "show", "review", "--output", "json")
+	if err != nil {
+		t.Fatalf("profile show: %v\nout=%s", err, showOut)
+	}
+	dryOut, err := runRootForTest(t, dir,
+		"profile", "create", "--dry-run", "--name", "review", "--agent", "fish",
+		"--environment", "host", "--network", "deny", "--workspace", ".", "--output", "json",
+	)
+	if err != nil {
+		t.Fatalf("profile create dry-run: %v\nout=%s", err, dryOut)
+	}
+	showEval := parseEnvelopeForTest(t, showOut).Data["evaluation"].(map[string]any)
+	dryEval := parseEnvelopeForTest(t, dryOut).Data["evaluation"].(map[string]any)
+	if !reflect.DeepEqual(showEval["authority"], dryEval["authority"]) {
+		t.Fatalf("static authority drifted across show/dry-run:\nshow=%#v\n dry=%#v", showEval["authority"], dryEval["authority"])
+	}
+	if showEval["trust"].(map[string]any)["state"] != policy.TrustStateUntrusted || dryEval["trust"].(map[string]any)["state"] != policy.TrustStateNotApplicable {
+		t.Fatalf("show/dry-run trust contexts were not separate: show=%#v dry=%#v", showEval["trust"], dryEval["trust"])
 	}
 }
 

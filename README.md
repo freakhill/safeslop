@@ -75,7 +75,7 @@ safeslop bundle add|remove <name> <pkg>...       mutate bundle membership (re-va
 safeslop bundle list --output json               curated bundles for UIs
 safeslop profile list|presets|defaults --output json profiles, scaffold presets, or builtin defaults
 safeslop profile create --name N --agent A --environment E [--bundle B] [--package P] [--no-default-bundle] [--dry-run] --output json
-safeslop profile show <name> --output json         profile + resolved packages + image recipe
+safeslop profile show <name> --output json         profile + recipe + three-section safety evaluation
 safeslop profile credentials set <profile> [safeslop.cue] --provider <github|forgejo> [--use-origin|--repo owner/name ...] [--write-repo owner/name ...] --output json
 safeslop profile credentials clear <profile> [safeslop.cue] --output json
 safeslop creds link|unlink|status                 manage value-free forge account links
@@ -435,8 +435,9 @@ Each preset is a complete, validated `safeslop.cue` with a one-line description:
 
 The Emacs Profiles surface (`C-c s F`) is a list of your `safeslop.cue` profiles
 with ergonomic CRUD and launch keys: `RET`/`i` inspect a profile's resolved
-packages, egress, and image recipe (read-only, no file edit); `r` launches a
-session from the selected profile after an isolation/network summary; `e` opens
+packages, egress, image recipe, and three-section evaluation (read-only, no file
+edit); `r` fetches and displays the engine evaluation before offering to launch a
+session from the selected profile; `e` opens
 the CUE file jumped to that profile's block; `c` opens `*safeslop profile
 compose*`; `C` clones the row at point (only a new name is required); `D` guides
 deletion (pick the target, confirm, then remove the block by hand); `g` refreshes.
@@ -451,8 +452,9 @@ all-or-nothing opt-out for an agent default: disabling it emits
 `--no-default-bundle`, retains explicit selections, and can leave the agent without
 its runtime so launch may fail. It does not relax the container, network, or
 workspace-only file boundary. `?` shows row help, `C-c C-c` asks the engine for
-`profile create --dry-run --output json` and shows the returned risk
-lines/resolved packages/image recipe before a final write, and `q` cancels without
+`profile create --dry-run --output json` and shows the returned
+Authority/Trust/Readiness findings, resolved packages, and image recipe before a
+final write, and `q` cancels without
 writing. Project marker suggestions (`go.mod`, `package.json`, `pyproject.toml`,
 `Cargo.toml`) are visible suggestions rather than automatic authority expansion.
 File reach is workspace-only in this slice; arbitrary custom host mounts are
@@ -460,6 +462,54 @@ deferred until a mount capability model is specified. Creating still routes thro
 `profile create`, while CUE stays the stored source of truth. This repo also
 dogfoods a checked-in `safeslop.cue` with `default`, `pi`, and `shell` profiles so
 the Profiles surface has useful local rows immediately.
+
+### Profile safety evaluation
+
+`profile show <name> --output json` and `profile create --dry-run --output json`
+return an additive v1 `evaluation` beside the compatibility `risk` and
+`risk_axes` fields. The evaluation keeps three questions structurally separate
+and always presents them in this order:
+
+1. **Authority — what it can reach.** Static consequences derived only from the
+   decoded profile: network, writable files, live host-config projection, direct
+   secrets, and credential authority.
+2. **Trust — is this exact policy approved?** Saved project profiles report
+   exact-byte approval, builtins report embedded-builtin provenance, and an
+   unsaved compose preview reports trust as not applicable.
+3. **Readiness — can this host launch it now?** Local workspace, sanitized helper,
+   container-runtime, toolchain, and required account-link metadata checks.
+
+There is no aggregate score, grade, combined safety color, or overall red/green
+verdict. A trust failure or blocked Readiness can stop launch, but it never
+suppresses or lowers Authority. For the same decoded profile, Authority is stable
+across show, compose preview, and launch review; Trust and Readiness are context
+snapshots.
+
+Credential rows expose only value-free targets such as `owner/repo`, a registry
+host, cloud role/profile label, API-scope label, or cluster label, together with
+access, lifetime, and basis. They never include values, secret/private-key/account
+refs, staged paths, or private host paths. Unknown scope is explicit and is not
+assumed read-only.
+
+Readiness is a point-in-time local snapshot, timestamped when collected. It does
+not contact forges, clouds, clusters, registries, or credential APIs, does not
+resolve secret values, and does not promise remote authentication or authorization.
+It is not an authorization token: launch-time CLI trust, host-consent, runtime,
+network, and credential gates remain authoritative.
+
+In Emacs Profiles, `RET`/`i` Inspect renders Authority → Trust → Readiness from a
+fresh `profile show`; compose `C-c C-c` renders the same sections from the exact
+unsaved dry-run before save; and `r` fetches and displays the named profile's
+engine evaluation before the final launch confirmation. Outcomes are printed as
+words, with color only as reinforcement, and remediation buttons dispatch only
+typed engine guidance—never automatic CUE edits or trust. If an older engine
+omits `evaluation`, Emacs shows **Legacy safety summary — trust and readiness
+unavailable** using `risk`/`risk_axes`. A present but malformed or unsupported
+evaluation instead renders loud `UNKNOWN — update required` and does not fall
+back to a reassuring legacy level.
+
+Custom host-mount authoring and forge credential P2 remain deferred, along with
+live remote permission inference and arbitrary remediation execution.
 
 ### Trust model
 

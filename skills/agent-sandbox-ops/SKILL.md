@@ -27,13 +27,13 @@ file transfer between host and sandboxed runtimes.
 - `safeslop catalog audit` — report staleness (versions-behind), yanked/unmaintained advisories, suggested lane (read-only).
 - `safeslop bundle add|remove <name> <pkg>...` — mutate bundle membership, re-validating references.
 - `safeslop bundle list --output json` — list curated bundles.
-- `safeslop profile create --name N --agent A --environment E [--bundle B] [--package P] [--no-default-bundle] [--dry-run] --output json` — create or update a `safeslop.cue` profile; `--no-default-bundle` deliberately omits automatic agent-runtime inclusion and can leave an agent unable to launch, while `--dry-run` resolves packages/recipe and returns engine risk data without writing.
+- `safeslop profile create --name N --agent A --environment E [--bundle B] [--package P] [--no-default-bundle] [--dry-run] --output json` — create or update a `safeslop.cue` profile; `--no-default-bundle` deliberately omits automatic agent-runtime inclusion and can leave an agent unable to launch, while `--dry-run` resolves packages/recipe and returns the engine's three-section safety evaluation without writing.
 - `safeslop profile credentials set <profile> [safeslop.cue] --provider github|forgejo [--use-origin] [--repo owner/name] [--write-repo owner/name] --output json` — engine-owned CUE mutation for GitHub/Forgejo repo scopes; preserves other credential providers/secrets and clears only the opposite forge.
 - `safeslop profile credentials clear <profile> [safeslop.cue] --output json` — remove only `credentials.github`/`credentials.forgejo`, deleting the `credentials` object if it becomes empty.
 - `safeslop creds list|show [<profile>] --output json` — inspect the credential posture of `safeslop.cue` profiles (declared creds + value-free readiness status); read-only, never reveals secret values.
 - `safeslop creds link|unlink|status` — manage host-only account links in `~/.config/safeslop/accounts.cue` (refs + non-secret ids only); `creds status --output json` is the Emacs account-link status envelope.
 - `safeslop profile defaults --output json` — list signed-binary builtin launchable defaults (`claude`, `fish`, `pi`, `zsh`), distinct from scaffold `profile presets`; each uses container/deny, the pinned buildable `personal` image inputs, and an allowlisted read-only host projection. Project profiles take precedence and an invalid local policy fails closed.
-- `safeslop profile show <name> --output json` — inspect a resolved project or builtin profile with package set, dry-run image recipe, and source/path/hash provenance.
+- `safeslop profile show <name> --output json` — inspect a resolved project or builtin profile with package set, dry-run image recipe, source/path/hash provenance, and structured Authority/Trust/Readiness evaluation.
 - `safeslop lock [profile] --output json` — write repo-root `safeslop.lock.json` for the selected profile's recipe identity.
 - `safeslop trust` — approve a policy's exact bytes for launch. Required by every launch lane: `safeslop run <profile>`, `session create --profile`, and the Emacs client all share this gate (specs/0072); an untrusted or changed `safeslop.cue` is refused with a `TRUST_REQUIRED` envelope.
 - `safeslop untrust [safeslop.cue]` — remove that host approval; future launches fail closed until the current bytes are reviewed and trusted again.
@@ -88,6 +88,39 @@ never gated.
 - Use `environment: "host"` only when you accept no isolation and can pass the per-launch consent gate.
 - Do not mount or expose host credential directories to agents.
 
+## Profile safety evaluation
+
+Resolved `profile show` and unsaved `profile create --dry-run` envelopes carry an
+additive v1 evaluation in fixed **Authority → Trust → Readiness** order. Authority
+states what a compromised run can reach and is derived only from the decoded
+profile. Trust reports exact saved-policy approval or embedded-builtin provenance
+(an unsaved preview is N/A). Readiness reports whether local workspace, sanitized
+helpers, runtime/toolchain, and required account-link metadata are available now.
+A failed Trust or blocked Readiness may prevent launch but never reduces Authority.
+There is no aggregate score, grade, combined color, or overall verdict.
+
+Readiness is a timestamped, point-in-time local snapshot. It performs no live
+forge, cloud, cluster, registry, credential, or secret-value probe and cannot
+promise remote authentication or authorization. Treat it as inspection, never as
+an authorization token; the launch CLI re-applies its trust, host-consent,
+helper/runtime, network, and credential gates.
+
+Credential scopes contain only value-free target metadata (for example
+`owner/repo`, registry host, role/profile, API scope, or cluster label) plus
+access, lifetime, and basis. They exclude secret values/refs, private-key or
+account-link refs, staged paths, and private host paths; unknown is never treated
+as read-only. Remediation is typed engine guidance only: do not derive rules from
+prose, auto-edit CUE, or auto-trust a policy.
+
+In Emacs Profiles, `RET`/`i` Inspect renders a fresh `profile show`; compose
+`C-c C-c` shows the exact unsaved dry-run before save; and `r` fetches the engine
+evaluation before final launch confirmation. If evaluation is absent, the client
+labels the `risk`/`risk_axes` compatibility view **Legacy safety summary — trust
+and readiness unavailable**. Present malformed/unsupported evaluation is loud
+`UNKNOWN — update required`, never a legacy green fallback. Custom host-mount
+authoring, forge credential P2, live remote permission inference, and arbitrary
+action execution remain deferred.
+
 ## Common workflows
 
 ### Inspect or create a builtin session from any directory
@@ -124,8 +157,9 @@ safeslop run review --dry-run
 ```
 
 In Emacs, `C-c s F` opens the Profiles surface. Use `RET`/`i` to inspect a
-profile's resolved packages/egress/recipe, `r` to launch a session from the row
-after an isolation/network summary, `e` to edit the CUE at that profile's block,
+profile's resolved packages/egress/recipe and Authority/Trust/Readiness findings,
+`r` to review a freshly fetched engine evaluation before offering to launch a
+session from the row, `e` to edit the CUE at that profile's block,
 `c` to open `*safeslop profile compose*`, `C` to clone, `D` for guided manual
 deletion, and `g` to refresh. The compose buffer shows catalog defaults as
 selected/locked inherited rows; `L` means a row is included by its displayed source
@@ -136,7 +170,9 @@ operation. The `Automatic agent bundle` control is the all-or-nothing opt-out fo
 that automatic inclusion: it emits `--no-default-bundle`, retains explicit
 selections, and may leave the agent without its runtime, but it does not relax
 isolation, network, or workspace-only file reach. `C-c C-c` requests the engine
-`profile create --dry-run` safety preview before the final write, and `q` cancels.
+`profile create --dry-run` Authority/Trust/Readiness preview before the final
+write, and `q` cancels. `r` fetches a fresh `profile show` evaluation and displays
+it before final launch confirmation; the CLI launch gates remain authoritative.
 Arbitrary custom host mounts are deferred until a mount capability model is
 specified.
 `C-c s K` opens the Credentials surface: `a` links GitHub App / Forgejo accounts

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/freakhill/safeslop/internal/engine/policy"
 	"github.com/freakhill/safeslop/internal/jsoncontract"
@@ -139,6 +140,39 @@ func TestProfileCreateDryRunIncludesRiskAndDoesNotWrite(t *testing.T) {
 	axis, ok := axes[0].(map[string]any)
 	if !ok || axis["name"] == "" || axis["value"] == "" || axis["restricted"] == nil || axis["severity"] == "" || axis["Name"] != nil {
 		t.Fatalf("data.risk_axes lower-camel contract missing: %#v", axes[0])
+	}
+}
+
+func TestProfileCreateDryRunAddsEvaluation(t *testing.T) {
+	fixed := withProfileEvaluationLocalPass(t)
+	dir := t.TempDir()
+	out, err := runRootForTest(t, dir,
+		"profile", "create", "--dry-run",
+		"--name", "preview",
+		"--agent", "fish",
+		"--environment", "host",
+		"--workspace", ".",
+		"--network", "deny",
+		"--output", "json",
+	)
+	if err != nil {
+		t.Fatalf("profile create dry-run: %v\nout=%s", err, out)
+	}
+	env := parseEnvelopeForTest(t, out)
+	evaluation, ok := env.Data["evaluation"].(map[string]any)
+	if !ok {
+		t.Fatalf("data.evaluation missing from additive dry-run contract: %#v", env.Data)
+	}
+	if evaluation["schema_version"] != float64(policy.EvaluationSchemaVersion) {
+		t.Fatalf("evaluation schema = %#v", evaluation["schema_version"])
+	}
+	trustSection := evaluation["trust"].(map[string]any)
+	if trustSection["state"] != policy.TrustStateNotApplicable || trustSection["basis"] != policy.TrustBasisUnsaved || trustSection["checked_at"] != nil {
+		t.Fatalf("dry-run trust = %#v", trustSection)
+	}
+	readiness := evaluation["readiness"].(map[string]any)
+	if readiness["state"] != policy.ReadinessStateReady || readiness["checked_at"] != fixed.Format(time.RFC3339) {
+		t.Fatalf("dry-run readiness = %#v, want one fixed local snapshot", readiness)
 	}
 }
 

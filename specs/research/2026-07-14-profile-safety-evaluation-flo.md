@@ -1,6 +1,7 @@
 # 2026-07-14 — Profile safety evaluation decision (FLO)
 
 Status: decision accepted for `specs/0101-profile-safety-evaluation.md`
+Implementation: complete in `specs/0101`; full compatibility/security/UI/check/build gates passed
 Score: **97.25 / 100** (no deterministic LAW override)
 Inputs: `specs/research/2026-07-14-profile-safety-evaluation-ayo.md`, `agent/tmp/flo-runs/0101-profile-safety-evaluation/inputs/{goal,rubric,packet}.md`
 
@@ -187,6 +188,17 @@ Deferred: custom mount authoring, forge credential P2, arbitrary action executio
 3. Trust/readiness adapters with fixed clock and fake helper/runtime/account/workspace seams; additive JSON wiring for show/dry-run/prelaunch.
 4. Emacs inspect/compose renderer, unsupported/legacy fallback, typed remediation dispatch, and ERT.
 5. Docs, goldens, security-regression gates, `make check`, and `make build`.
+
+## Implementation status
+
+The accepted split now drives resolved profile JSON and Emacs Profile
+inspect/compose/launch review: Authority stays static, exact-byte/builtin Trust is
+a separate gate, and Readiness is a point-in-time local snapshot with no remote
+validity claim. There is no aggregate score or combined verdict. Credential
+targets remain value-free, and absent evaluation uses the labeled legacy fallback
+while malformed/unsupported evaluation is loud unknown. Full repository gates
+passed; custom mounts, forge credential P2, live remote permission inference, and
+arbitrary action execution remain deferred.
 
 ## Scoring
 

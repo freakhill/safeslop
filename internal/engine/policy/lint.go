@@ -11,7 +11,7 @@ type Warning struct {
 }
 
 // Lint reports profiles whose configuration is legal but risky: a write-capable
-// ssh deploy key with open egress, and egress domains set where they are ignored.
+// forge credential with open egress, and egress domains set where they are ignored.
 func Lint(cfg *Config) []Warning {
 	if cfg == nil {
 		return nil
@@ -24,16 +24,26 @@ func Lint(cfg *Config) []Warning {
 
 	var out []Warning
 	for _, n := range names {
-		p := cfg.Profiles[n]
-		if p.Credentials != nil && p.Credentials.Github != nil && p.Credentials.Github.Write && p.Network == "allow" {
-			out = append(out, Warning{
-				Profile: n,
-				Code:    "github-write-open-egress",
-				Message: "a write-capable github credential with network:allow can be exfiltrated and used off-host — " +
-					"set network:deny with a forge-only egress allowlist, or use a read-only credential (specs/0011, specs/0069)",
-			})
+		facts := normalizeAuthorityFacts(cfg.Profiles[n])
+		if facts.compatibilityRuleApplies("github-write-open-egress") {
+			message := "a write-capable github credential with network:allow can be exfiltrated and used off-host — " +
+				"set network:deny with a forge-only egress allowlist, or use a read-only credential (specs/0011, specs/0069)"
+			if facts.Network == authorityNetworkHostUnrestricted {
+				message = "a write-capable github credential on the unrestricted host network can be exfiltrated and used off-host — " +
+					"use environment:container with network:deny and a forge-only egress allowlist, or use a read-only credential (specs/0011, specs/0069)"
+			}
+			out = append(out, Warning{Profile: n, Code: "github-write-open-egress", Message: message})
 		}
-		if len(p.Egress) > 0 && (p.Network == "allow" || p.Environment != "container") {
+		if facts.compatibilityRuleApplies("forgejo-write-open-egress") {
+			message := "a write-capable forgejo credential with network:allow can be exfiltrated and used off-host — " +
+				"set network:deny with a forge-only egress allowlist, or use a read-only credential (specs/0047, specs/0069)"
+			if facts.Network == authorityNetworkHostUnrestricted {
+				message = "a write-capable forgejo credential on the unrestricted host network can be exfiltrated and used off-host — " +
+					"use environment:container with network:deny and a forge-only egress allowlist, or use a read-only credential (specs/0047, specs/0069)"
+			}
+			out = append(out, Warning{Profile: n, Code: "forgejo-write-open-egress", Message: message})
+		}
+		if facts.compatibilityRuleApplies("egress-ignored") {
 			out = append(out, Warning{
 				Profile: n,
 				Code:    "egress-ignored",

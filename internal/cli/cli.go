@@ -2398,7 +2398,14 @@ func cmdProfileShow() *cobra.Command {
 				}
 				return emitContractError(code, "profile not found", map[string]any{"profile": args[0], "error": err.Error()})
 			}
-			data, err := profileResolvedData(resolved.policyPath, resolved.name, resolved.profile)
+			data, err := profileResolvedData(resolved.policyPath, resolved.name, resolved.profile, profileEvaluationInput{
+				Source:      profileEvaluationSource(resolved.source),
+				Name:        resolved.name,
+				PolicyPath:  resolved.policyPath,
+				PolicyHash:  resolved.policyHash,
+				PolicyBytes: resolved.policyBytes,
+				Profile:     resolved.profile,
+			})
 			if err != nil {
 				return emitContractError(jsoncontract.CodeInvalidArgument, "resolve profile image recipe", map[string]any{"profile": args[0], "error": err.Error()})
 			}
@@ -2537,11 +2544,12 @@ func renderConfigCUE(cfg *policy.Config) ([]byte, error) {
 }
 
 type resolvedProfile struct {
-	name       string
-	profile    policy.Profile
-	source     string
-	policyPath string
-	policyHash string
+	name        string
+	profile     policy.Profile
+	source      string
+	policyPath  string
+	policyHash  string
+	policyBytes []byte
 }
 
 type profileResolutionError struct {
@@ -2559,16 +2567,15 @@ func resolveProfile(name, explicit string) (resolvedProfile, error) {
 	path, findErr := findConfig(explicit)
 	if findErr == nil {
 		if _, err := os.Stat(path); err == nil {
-			cfg, err := policy.Load(path)
+			loaded, err := loadPolicyForLaunch(path)
 			if err != nil {
 				return resolvedProfile{}, &profileResolutionError{code: jsoncontract.CodeSchemaViolation, err: fmt.Errorf("load safeslop.cue: %w", err)}
 			}
-			if prof, ok := cfg.Profiles[name]; ok {
-				bytes, err := os.ReadFile(path)
-				if err != nil {
-					return resolvedProfile{}, fmt.Errorf("read safeslop.cue: %w", err)
-				}
-				return resolvedProfile{name: name, profile: prof, source: "project", policyPath: canonicalPolicyPath(path), policyHash: trust.Hash(bytes)}, nil
+			if prof, ok := loaded.cfg.Profiles[name]; ok {
+				return resolvedProfile{
+					name: name, profile: prof, source: "project", policyPath: loaded.trustPath,
+					policyHash: loaded.hash, policyBytes: append([]byte(nil), loaded.bytes...),
+				}, nil
 			}
 		} else if !os.IsNotExist(err) {
 			return resolvedProfile{}, fmt.Errorf("stat safeslop.cue: %w", err)
@@ -2583,7 +2590,7 @@ func resolveProfile(name, explicit string) (resolvedProfile, error) {
 	return resolvedProfile{}, fmt.Errorf("no profile %q", name)
 }
 
-func profileResolvedData(path, name string, prof policy.Profile) (map[string]any, error) {
+func profileResolvedData(path, name string, prof policy.Profile, contexts ...profileEvaluationInput) (map[string]any, error) {
 	resolved, err := policy.Resolve(prof)
 	if err != nil {
 		return nil, err
@@ -2592,18 +2599,26 @@ func profileResolvedData(path, name string, prof policy.Profile) (map[string]any
 	if err != nil {
 		return nil, err
 	}
+	evaluationInput := profileEvaluationInput{Source: profileEvaluationSourceUnsaved, Name: name, PolicyPath: path, Profile: prof}
+	if len(contexts) > 0 {
+		evaluationInput = contexts[0]
+		evaluationInput.Name = name
+		evaluationInput.PolicyPath = path
+		evaluationInput.Profile = prof
+	}
 	return map[string]any{
-		"path":      path,
-		"name":      name,
-		"profile":   prof,
-		"risk":      policy.RiskSummary(prof),
-		"risk_axes": policy.RiskAxes(prof),
-		"resolved":  resolved,
-		"recipeID":  recipe.RecipeID,
-		"image":     recipe.AgentImage,
-		"base":      recipe.SourceBaseImage,
-		"baseImage": recipe.BaseImage,
-		"recipe":    recipe,
+		"path":       path,
+		"name":       name,
+		"profile":    prof,
+		"evaluation": evaluateProfile(evaluationInput),
+		"risk":       policy.RiskSummary(prof),
+		"risk_axes":  policy.RiskAxes(prof),
+		"resolved":   resolved,
+		"recipeID":   recipe.RecipeID,
+		"image":      recipe.AgentImage,
+		"base":       recipe.SourceBaseImage,
+		"baseImage":  recipe.BaseImage,
+		"recipe":     recipe,
 	}, nil
 }
 
