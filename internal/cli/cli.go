@@ -1171,7 +1171,14 @@ func resolvedMetadata(resolved *policy.Resolved) *engsession.ResolvedMetadata {
 // have no policy file to be faithful to and keep the synthetic path.
 func sessionProfile(sess engsession.Session) (policy.Profile, error) {
 	prof := policy.Profile{Agent: sess.Agent, Environment: sess.Environment, Network: sess.Network, Workspace: sess.Workspace}
-	if sess.Profile != "" && sess.PolicyPath != "" {
+	if sess.Profile != "" && strings.HasPrefix(sess.PolicyPath, "builtin:") {
+		builtin, ok := policy.BuiltinProfileByName(sess.Profile)
+		if !ok || builtin.Hash != sess.PolicyHash {
+			return policy.Profile{}, fmt.Errorf("builtin profile %q changed or is unavailable; recreate the session", sess.Profile)
+		}
+		prof = builtin.Profile
+		prof.Workspace = sess.Workspace
+	} else if sess.Profile != "" && sess.PolicyPath != "" {
 		data, err := os.ReadFile(sess.PolicyPath)
 		if err != nil {
 			return policy.Profile{}, fmt.Errorf("re-read pinned policy for session %s: %w", sess.ID, err)
@@ -1987,6 +1994,13 @@ func trustStatusError(abs string, status trust.Status) error {
 // (PolicyPath empty) and are gated at create time instead.
 func verifySessionTrust(sess engsession.Session) error {
 	if sess.PolicyPath == "" {
+		return nil
+	}
+	if strings.HasPrefix(sess.PolicyPath, "builtin:") {
+		builtin, ok := policy.BuiltinProfileByName(sess.Profile)
+		if !ok || builtin.Hash != sess.PolicyHash {
+			return emitContractError(jsoncontract.CodeTrustRequired, "builtin profile changed or is unavailable; recreate the session", map[string]any{"profile": sess.Profile, "path": sess.PolicyPath})
+		}
 		return nil
 	}
 	abs, hash, status, err := checkTrust(sess.PolicyPath)

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/freakhill/safeslop/internal/engine/policy"
 	engsession "github.com/freakhill/safeslop/internal/engine/session"
 	"github.com/freakhill/safeslop/internal/engine/trust"
 )
@@ -98,6 +99,25 @@ func TestSessionProfileUnreadablePolicyFailsClosed(t *testing.T) {
 	sess := pinnedSession(filepath.Join(t.TempDir(), "absent.cue"), "irrelevant")
 	if _, err := sessionProfile(sess); err == nil {
 		t.Fatal("want fail-closed error for unreadable pinned policy")
+	}
+}
+
+func TestSessionProfileRebuildsBuiltinAndFailsClosedOnDrift(t *testing.T) {
+	builtin, ok := policy.BuiltinProfileByName("pi")
+	if !ok {
+		t.Fatal("pi builtin missing")
+	}
+	sess := engsession.Session{ID: "builtin", Profile: "pi", ProfileSource: "builtin", Agent: "pi", Environment: "container", Network: "deny", Workspace: "/ws", PolicyPath: "builtin:pi", PolicyHash: builtin.Hash}
+	prof, err := sessionProfile(sess)
+	if err != nil {
+		t.Fatalf("rebuild builtin session: %v", err)
+	}
+	if prof.Agent != "pi" || prof.Workspace != "/ws" {
+		t.Fatalf("builtin profile = %#v", prof)
+	}
+	sess.PolicyHash = "sha256:drift"
+	if _, err := sessionProfile(sess); err == nil || !strings.Contains(err.Error(), "changed or is unavailable") {
+		t.Fatalf("builtin hash drift must fail closed, got %v", err)
 	}
 }
 

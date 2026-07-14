@@ -136,7 +136,7 @@ When host projection lands, projection contents remain live host filesystem stat
   VERIFY:   `go test ./internal/cli -run 'SessionCreate.*(Builtin|Profile)|TrustSession|SessionCreateFromProfile' -v`
   EXPECTED: `session create --profile pi --output json` succeeds from a temp dir with no `safeslop.cue`; project `pi` still requires trust and overrides builtin; invalid project config blocks fallback; JSON includes profile provenance/path/hash; unresolved builtin package errors surface as invalid-argument, not panic.
 
-- [ ] T4 — Reconstruct builtin sessions at run/supervise time and fail closed on drift
+- [x] T4 — Reconstruct builtin sessions at run/supervise time and fail closed on drift
   FILE:     `internal/cli/cli.go`, `internal/cli/supervise.go`, `internal/cli/cli_session_profile_test.go`, `internal/engine/session/session.go`, `internal/engine/session/session_test.go`
   CHANGE:   Extend session record/source fields, `sessionData`, `verifySessionTrust`, and `sessionProfile` for `builtin:<name>`. Preserve existing project re-read/hash/trust behavior. Preserve legacy/ad-hoc sessions. Add a test seam to simulate builtin hash drift and prove run-time fail-closed behavior.
   VERIFY:   `go test ./internal/cli ./internal/engine/session -run 'Builtin|SessionProfile|VerifySessionTrust|SessionData|Legacy' -v`
