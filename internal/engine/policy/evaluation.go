@@ -186,6 +186,138 @@ type authorityRuleContext struct {
 	Unknown      bool
 }
 
+type authorityNetworkReach uint8
+
+type authorityFileReach uint8
+
+type authorityProjectionReach uint8
+
+const (
+	authorityNetworkUnknown authorityNetworkReach = iota
+	authorityNetworkHostUnrestricted
+	authorityNetworkContainerOpen
+	authorityNetworkContainerAllowlisted
+)
+
+const (
+	authorityFilesUnknown authorityFileReach = iota
+	authorityFilesHostAccount
+	authorityFilesWorkspace
+)
+
+const (
+	authorityProjectionUnknown authorityProjectionReach = iota
+	authorityProjectionLiveHostConfig
+	authorityProjectionAbsent
+	authorityProjectionNotApplicable
+)
+
+// normalizedAuthorityFacts is the single decoded-policy authority model used by
+// evaluation and the legacy risk/lint compatibility projections. Presentation
+// layers may retain old prose, but they must not re-decide these predicates.
+type normalizedAuthorityFacts struct {
+	Network                 authorityNetworkReach
+	OpenEgress              bool
+	Files                   authorityFileReach
+	Projection              authorityProjectionReach
+	ProjectionLabels        []string
+	SecretNames             []string
+	EgressDestinations      []string
+	EgressDestinationsValid bool
+	EgressCount             int
+	EgressIgnored           bool
+	CredentialScopes        []CredentialScope
+	CredentialProviders     []credentialProviderAuthority
+}
+
+func normalizeAuthorityFacts(p Profile) normalizedAuthorityFacts {
+	facts := normalizedAuthorityFacts{}
+
+	switch {
+	case p.Environment == "host":
+		facts.Network = authorityNetworkHostUnrestricted
+	case p.Environment == "container" && p.Network == "allow":
+		facts.Network = authorityNetworkContainerOpen
+	case p.Environment == "container" && p.Network == "deny":
+		facts.Network = authorityNetworkContainerAllowlisted
+	default:
+		facts.Network = authorityNetworkUnknown
+	}
+
+	facts.OpenEgress = p.Environment == "host" || p.Network == "allow"
+
+	switch p.Environment {
+	case "host":
+		facts.Files = authorityFilesHostAccount
+	case "container":
+		facts.Files = authorityFilesWorkspace
+	default:
+		facts.Files = authorityFilesUnknown
+	}
+
+	switch {
+	case p.Environment == "host":
+		facts.Projection = authorityProjectionNotApplicable
+	case p.Environment != "container":
+		facts.Projection = authorityProjectionUnknown
+	case p.Projection == nil || (!p.Projection.Enabled && len(p.Projection.Items) == 0):
+		facts.Projection = authorityProjectionAbsent
+	case p.Projection.Enabled && len(p.Projection.Items) > 0:
+		facts.Projection = authorityProjectionLiveHostConfig
+		facts.ProjectionLabels = make([]string, 0, len(p.Projection.Items))
+		for _, item := range p.Projection.Items {
+			label := item.Label
+			if label == "" {
+				label = item.Source
+			}
+			facts.ProjectionLabels = append(facts.ProjectionLabels, label)
+		}
+		sort.Strings(facts.ProjectionLabels)
+	default:
+		facts.Projection = authorityProjectionUnknown
+	}
+
+	facts.SecretNames = make([]string, 0, len(p.Secrets))
+	for name := range p.Secrets {
+		facts.SecretNames = append(facts.SecretNames, name)
+	}
+	sort.Strings(facts.SecretNames)
+
+	facts.EgressDestinations, facts.EgressDestinationsValid = valueFreeEgressDestinations(p.Egress)
+	facts.EgressCount = len(p.Egress)
+	facts.EgressIgnored = facts.EgressCount > 0 && facts.Network != authorityNetworkContainerAllowlisted
+	facts.CredentialScopes, facts.CredentialProviders = normalizeCredentialAuthority(p.Credentials)
+	return facts
+}
+
+func (f normalizedAuthorityFacts) hasOpenEgress() bool {
+	return f.OpenEgress
+}
+
+func (f normalizedAuthorityFacts) providerHasWrite(provider string) bool {
+	for _, credentialProvider := range f.CredentialProviders {
+		if credentialProvider.Provider == provider {
+			return len(credentialProvider.WriteScopeIDs) > 0
+		}
+	}
+	return false
+}
+
+// compatibilityRuleApplies owns the settled predicates shared by evaluation
+// findings and legacy lint codes. Rule IDs retain their existing meaning.
+func (f normalizedAuthorityFacts) compatibilityRuleApplies(ruleID string) bool {
+	switch ruleID {
+	case "github-write-open-egress":
+		return f.hasOpenEgress() && f.providerHasWrite(CredentialProviderGitHub)
+	case "forgejo-write-open-egress":
+		return f.hasOpenEgress() && f.providerHasWrite(CredentialProviderForgejo)
+	case "egress-ignored":
+		return f.EgressIgnored
+	default:
+		return false
+	}
+}
+
 // authorityRule is the engine-owned identity and presentation registry. A rule
 // owns its axis, legal dispositions, consequence builder, remediation policy,
 // docs anchor, and stable ordinal; profile data never participates in its ID.
@@ -425,15 +557,15 @@ func countNoun(count int, noun string) string {
 // EvaluateAuthority is intentionally pure. It reads only the decoded profile:
 // no clock, environment, filesystem, trust/account store, helper, or network.
 func EvaluateAuthority(p Profile) AuthorityEvaluation {
+	facts := normalizeAuthorityFacts(p)
 	findings := make([]Finding, 0, 10)
 
-	findings = append(findings, evaluateNetworkAuthority(p)...)
-	findings = append(findings, evaluateFileAuthority(p)...)
-	findings = append(findings, evaluateProjectionAuthority(p)...)
-	findings = append(findings, evaluateSecretAuthority(p)...)
+	findings = append(findings, evaluateNetworkAuthority(facts)...)
+	findings = append(findings, evaluateFileAuthority(facts)...)
+	findings = append(findings, evaluateProjectionAuthority(facts)...)
+	findings = append(findings, evaluateSecretAuthority(facts)...)
 
-	scopes, providers := evaluateCredentialAuthority(p.Credentials)
-	if len(providers) == 0 {
+	if len(facts.CredentialProviders) == 0 {
 		findings = append(findings, makeAuthorityFinding(
 			"authority.credentials.absent",
 			FindingOutcomeBounded,
@@ -442,25 +574,22 @@ func EvaluateAuthority(p Profile) AuthorityEvaluation {
 			nil,
 		))
 	} else {
-		openEgress := p.Environment == "host" || p.Network == "allow"
-		for _, provider := range providers {
-			if openEgress && len(provider.WriteScopeIDs) > 0 {
-				combinationID := ""
-				switch provider.Provider {
-				case CredentialProviderGitHub:
-					combinationID = "github-write-open-egress"
-				case CredentialProviderForgejo:
-					combinationID = "forgejo-write-open-egress"
-				}
-				if combinationID != "" {
-					findings = append(findings, makeAuthorityFinding(
-						combinationID,
-						FindingOutcomeConcern,
-						FindingSeverityCritical,
-						authorityRuleContext{},
-						provider.WriteScopeIDs,
-					))
-				}
+		for _, provider := range facts.CredentialProviders {
+			combinationID := ""
+			switch provider.Provider {
+			case CredentialProviderGitHub:
+				combinationID = "github-write-open-egress"
+			case CredentialProviderForgejo:
+				combinationID = "forgejo-write-open-egress"
+			}
+			if combinationID != "" && facts.compatibilityRuleApplies(combinationID) {
+				findings = append(findings, makeAuthorityFinding(
+					combinationID,
+					FindingOutcomeConcern,
+					FindingSeverityCritical,
+					authorityRuleContext{},
+					provider.WriteScopeIDs,
+				))
 			}
 
 			outcome := FindingOutcomeConcern
@@ -491,14 +620,14 @@ func EvaluateAuthority(p Profile) AuthorityEvaluation {
 	})
 	return AuthorityEvaluation{
 		Findings:         findings,
-		CredentialScopes: scopes,
+		CredentialScopes: facts.CredentialScopes,
 	}
 }
 
-func evaluateNetworkAuthority(p Profile) []Finding {
+func evaluateNetworkAuthority(facts normalizedAuthorityFacts) []Finding {
 	findings := make([]Finding, 0, 2)
-	switch p.Environment {
-	case "host":
+	switch facts.Network {
+	case authorityNetworkHostUnrestricted:
 		findings = append(findings, makeAuthorityFinding(
 			"authority.network.host-unrestricted",
 			FindingOutcomeConcern,
@@ -506,41 +635,29 @@ func evaluateNetworkAuthority(p Profile) []Finding {
 			authorityRuleContext{},
 			nil,
 		))
-	case "container":
-		switch p.Network {
-		case "allow":
-			findings = append(findings, makeAuthorityFinding(
-				"authority.network.container-open-egress",
-				FindingOutcomeConcern,
-				FindingSeverityHigh,
-				authorityRuleContext{},
-				nil,
-			))
-		case "deny":
-			destinations, ok := valueFreeEgressDestinations(p.Egress)
-			if !ok {
-				findings = append(findings, makeAuthorityFinding(
-					"authority.network.unknown",
-					FindingOutcomeUnknown,
-					FindingSeverityCritical,
-					authorityRuleContext{},
-					nil,
-				))
-			} else {
-				findings = append(findings, makeAuthorityFinding(
-					"authority.network.container-allowlist",
-					FindingOutcomeBounded,
-					FindingSeverityInfo,
-					authorityRuleContext{Destinations: destinations},
-					nil,
-				))
-			}
-		default:
+	case authorityNetworkContainerOpen:
+		findings = append(findings, makeAuthorityFinding(
+			"authority.network.container-open-egress",
+			FindingOutcomeConcern,
+			FindingSeverityHigh,
+			authorityRuleContext{},
+			nil,
+		))
+	case authorityNetworkContainerAllowlisted:
+		if !facts.EgressDestinationsValid {
 			findings = append(findings, makeAuthorityFinding(
 				"authority.network.unknown",
 				FindingOutcomeUnknown,
 				FindingSeverityCritical,
 				authorityRuleContext{},
+				nil,
+			))
+		} else {
+			findings = append(findings, makeAuthorityFinding(
+				"authority.network.container-allowlist",
+				FindingOutcomeBounded,
+				FindingSeverityInfo,
+				authorityRuleContext{Destinations: facts.EgressDestinations},
 				nil,
 			))
 		}
@@ -554,21 +671,21 @@ func evaluateNetworkAuthority(p Profile) []Finding {
 		))
 	}
 
-	if len(p.Egress) > 0 && !(p.Environment == "container" && p.Network == "deny") {
+	if facts.compatibilityRuleApplies("egress-ignored") {
 		findings = append(findings, makeAuthorityFinding(
 			"egress-ignored",
 			FindingOutcomeConcern,
 			FindingSeverityMedium,
-			authorityRuleContext{Count: len(p.Egress)},
+			authorityRuleContext{Count: facts.EgressCount},
 			nil,
 		))
 	}
 	return findings
 }
 
-func evaluateFileAuthority(p Profile) []Finding {
-	switch p.Environment {
-	case "host":
+func evaluateFileAuthority(facts normalizedAuthorityFacts) []Finding {
+	switch facts.Files {
+	case authorityFilesHostAccount:
 		return []Finding{makeAuthorityFinding(
 			"authority.files.host-account",
 			FindingOutcomeConcern,
@@ -576,7 +693,7 @@ func evaluateFileAuthority(p Profile) []Finding {
 			authorityRuleContext{},
 			nil,
 		)}
-	case "container":
+	case authorityFilesWorkspace:
 		return []Finding{makeAuthorityFinding(
 			"authority.files.workspace",
 			FindingOutcomeBounded,
@@ -595,8 +712,9 @@ func evaluateFileAuthority(p Profile) []Finding {
 	}
 }
 
-func evaluateProjectionAuthority(p Profile) []Finding {
-	if p.Environment == "host" {
+func evaluateProjectionAuthority(facts normalizedAuthorityFacts) []Finding {
+	switch facts.Projection {
+	case authorityProjectionNotApplicable:
 		return []Finding{makeAuthorityFinding(
 			"authority.projection.not-applicable",
 			FindingOutcomeNotApplicable,
@@ -604,8 +722,23 @@ func evaluateProjectionAuthority(p Profile) []Finding {
 			authorityRuleContext{},
 			nil,
 		)}
-	}
-	if p.Environment != "container" {
+	case authorityProjectionAbsent:
+		return []Finding{makeAuthorityFinding(
+			"authority.projection.absent",
+			FindingOutcomeBounded,
+			FindingSeverityInfo,
+			authorityRuleContext{},
+			nil,
+		)}
+	case authorityProjectionLiveHostConfig:
+		return []Finding{makeAuthorityFinding(
+			"authority.projection.live-host-config",
+			FindingOutcomeConcern,
+			FindingSeverityMedium,
+			authorityRuleContext{Count: len(facts.ProjectionLabels)},
+			nil,
+		)}
+	default:
 		return []Finding{makeAuthorityFinding(
 			"authority.projection.unknown",
 			FindingOutcomeUnknown,
@@ -614,35 +747,10 @@ func evaluateProjectionAuthority(p Profile) []Finding {
 			nil,
 		)}
 	}
-	if p.Projection == nil || (!p.Projection.Enabled && len(p.Projection.Items) == 0) {
-		return []Finding{makeAuthorityFinding(
-			"authority.projection.absent",
-			FindingOutcomeBounded,
-			FindingSeverityInfo,
-			authorityRuleContext{},
-			nil,
-		)}
-	}
-	if p.Projection.Enabled && len(p.Projection.Items) > 0 {
-		return []Finding{makeAuthorityFinding(
-			"authority.projection.live-host-config",
-			FindingOutcomeConcern,
-			FindingSeverityMedium,
-			authorityRuleContext{Count: len(p.Projection.Items)},
-			nil,
-		)}
-	}
-	return []Finding{makeAuthorityFinding(
-		"authority.projection.unknown",
-		FindingOutcomeUnknown,
-		FindingSeverityHigh,
-		authorityRuleContext{},
-		nil,
-	)}
 }
 
-func evaluateSecretAuthority(p Profile) []Finding {
-	if len(p.Secrets) == 0 {
+func evaluateSecretAuthority(facts normalizedAuthorityFacts) []Finding {
+	if len(facts.SecretNames) == 0 {
 		return []Finding{makeAuthorityFinding(
 			"authority.secrets.absent",
 			FindingOutcomeBounded,
@@ -655,7 +763,7 @@ func evaluateSecretAuthority(p Profile) []Finding {
 		"authority.secrets.injected",
 		FindingOutcomeConcern,
 		FindingSeverityHigh,
-		authorityRuleContext{Count: len(p.Secrets)},
+		authorityRuleContext{Count: len(facts.SecretNames)},
 		nil,
 	)}
 }
@@ -722,7 +830,7 @@ type credentialProviderAuthority struct {
 	Persistent    bool
 }
 
-func evaluateCredentialAuthority(c *Credentials) ([]CredentialScope, []credentialProviderAuthority) {
+func normalizeCredentialAuthority(c *Credentials) ([]CredentialScope, []credentialProviderAuthority) {
 	if c == nil {
 		return []CredentialScope{}, nil
 	}

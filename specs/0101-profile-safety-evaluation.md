@@ -29,7 +29,7 @@ WORKTREE: `.worktrees/0101-profile-safety-evaluation/`
   VERIFY:   `go test ./internal/engine/policy/ -run 'Test(Evaluation|EvaluateAuthority|CredentialScope|FindingRegistry)' -count=1 -v`
   EXPECTED: command exits 0; authority is pure/deterministic, every core axis is present, per-repo/Forgejo scope is correct, unknown is non-green, and JSON/findings contain no forbidden secret/ref/path material.
 
-- [ ] T2 — Make legacy risk/lint a compatibility projection of shared facts
+- [x] T2 — Make legacy risk/lint a compatibility projection of shared facts
   FILE:     `internal/engine/policy/risk.go`, `internal/engine/policy/risk_test.go`, `internal/engine/policy/lint.go`, `internal/engine/policy/lint_test.go`, `internal/engine/policy/evaluation.go`
   CHANGE:   Refactor `RiskSummary`, `RiskAxes`, and lint predicates to consume the evaluation's shared normalized authority facts rather than a second arbiter. Preserve field names/types, two-axis cardinality, valid-profile headline/level mappings, and existing prose order. In an isolated compatibility checkpoint, correct GitHub write detection to include `RepoCred.Write`, add value-free Forgejo credential lines, and add `forgejo-write-open-egress` without changing settled lint-code meaning.
   VERIFY:   `go test ./internal/engine/policy/ -run 'Test(Risk|Lint|LegacyEvaluationProjection)' -count=1 -v`

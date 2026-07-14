@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -55,6 +56,145 @@ func TestRiskSummaryListsSecretsAndCreds(t *testing.T) {
 	}
 	if !strings.Contains(joined, "read-WRITE") {
 		t.Errorf("write SSH key must be flagged:\n%s", joined)
+	}
+}
+
+func TestRiskSummaryUsesEffectiveForgeAccessAndValueFreeLines(t *testing.T) {
+	cases := []struct {
+		name        string
+		credentials *Credentials
+		want        string
+	}{
+		{
+			name: "github repository write",
+			credentials: &Credentials{Github: &GithubCreds{Repos: []RepoCred{
+				{Repo: "private-owner/read"},
+				{Repo: "private-owner/write", Write: true},
+			}}},
+			want: "GitHub token (read-WRITE)",
+		},
+		{
+			name:        "forgejo read only",
+			credentials: &Credentials{Forgejo: &ForgejoCreds{URL: "https://private-forge.example.com", Repos: []RepoCred{{Repo: "private-owner/read"}}}},
+			want:        "Forgejo deploy key (read-only)",
+		},
+		{
+			name:        "forgejo repository write",
+			credentials: &Credentials{Forgejo: &ForgejoCreds{URL: "https://private-forge.example.com", Repos: []RepoCred{{Repo: "private-owner/write", Write: true}}}},
+			want:        "Forgejo deploy key (read-WRITE)",
+		},
+		{
+			name:        "forgejo provider write",
+			credentials: &Credentials{Forgejo: &ForgejoCreds{Write: true, URL: "https://private-forge.example.com", Repos: []RepoCred{{Repo: "private-owner/read"}}}},
+			want:        "Forgejo deploy key (read-WRITE)",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			joined := strings.Join(RiskSummary(Profile{
+				Environment: "container",
+				Network:     "deny",
+				Credentials: tc.credentials,
+			}).Lines, "\n")
+			if !strings.Contains(joined, tc.want) {
+				t.Fatalf("risk summary missing effective credential access %q:\n%s", tc.want, joined)
+			}
+			for _, private := range []string{"private-owner", "private-forge.example.com"} {
+				if strings.Contains(joined, private) {
+					t.Errorf("legacy credential line leaked private target %q:\n%s", private, joined)
+				}
+			}
+		})
+	}
+}
+
+func TestRiskLegacyValidHeadlineLevelMappings(t *testing.T) {
+	cases := []struct {
+		name     string
+		profile  Profile
+		headline string
+		level    string
+	}{
+		{"host", Profile{Environment: "host", Network: "deny"}, "Runs as you — no isolation, full account + network", "high"},
+		{"container open", Profile{Environment: "container", Network: "allow"}, "File-isolated, but OPEN egress (can exfil)", "elevated"},
+		{"container deny", Profile{Environment: "container", Network: "deny"}, "Workspace-only files, egress limited to the allowlist", "contained"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := RiskSummary(tc.profile)
+			if got.Headline != tc.headline || got.Level != tc.level {
+				t.Errorf("risk headline/level = %q/%q, want %q/%q", got.Headline, got.Level, tc.headline, tc.level)
+			}
+		})
+	}
+}
+
+func TestRiskSummaryPreservesLegacyLineOrder(t *testing.T) {
+	lines := RiskSummary(Profile{
+		Environment: "container",
+		Network:     "deny",
+		Projection: &Projection{Enabled: true, Items: []ProjectionItem{
+			{Label: "pi-agent"},
+		}},
+		Secrets:     map[string]string{"TOKEN": "env:TOKEN"},
+		Credentials: &Credentials{Github: &GithubCreds{}},
+	}).Lines
+	wantPrefixes := []string{
+		"Network: ",
+		"Files: ",
+		"Host config projected ",
+		"Projection is live ",
+		"Secrets injected: ",
+		"Credentials: ",
+		"Tier: ",
+	}
+	if len(lines) != len(wantPrefixes) {
+		t.Fatalf("risk lines = %v, want %d legacy rows", lines, len(wantPrefixes))
+	}
+	for i, prefix := range wantPrefixes {
+		if !strings.HasPrefix(lines[i], prefix) {
+			t.Errorf("risk line %d = %q, want prefix %q", i, lines[i], prefix)
+		}
+	}
+}
+
+func TestRiskLegacyJSONShapeAndAxisCardinality(t *testing.T) {
+	profile := Profile{Environment: "container", Network: "deny"}
+	assertKeys := func(label string, value any, want map[string]bool) {
+		t.Helper()
+		data, err := json.Marshal(value)
+		if err != nil {
+			t.Fatalf("marshal %s: %v", label, err)
+		}
+		var got map[string]json.RawMessage
+		if err := json.Unmarshal(data, &got); err != nil {
+			t.Fatalf("unmarshal %s: %v", label, err)
+		}
+		if len(got) != len(want) {
+			t.Fatalf("%s keys = %v, want exactly %v", label, got, want)
+		}
+		for key := range want {
+			if _, ok := got[key]; !ok {
+				t.Errorf("%s omitted compatibility key %q: %s", label, key, data)
+			}
+		}
+	}
+
+	assertKeys("risk", RiskSummary(profile), map[string]bool{
+		"headline": true, "lines": true, "level": true,
+	})
+	axes := RiskAxes(profile)
+	if len(axes) != 2 || axes[0].Name != "network" || axes[1].Name != "files" {
+		t.Fatalf("risk axes = %+v, want exactly network then files", axes)
+	}
+	for i, axis := range axes {
+		assertKeys("risk axis", axis, map[string]bool{
+			"name": true, "value": true, "restricted": true, "severity": true,
+		})
+		if axis.Name == "" {
+			t.Errorf("risk axis %d has no name", i)
+		}
 	}
 }
 

@@ -1,6 +1,9 @@
 package policy
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestLintIsDeterministicAndStable(t *testing.T) {
 	mk := func() Profile {
@@ -13,7 +16,7 @@ func TestLintIsDeterministicAndStable(t *testing.T) {
 	}
 }
 
-func TestLintSshWriteOpenEgress(t *testing.T) {
+func TestLintGithubWriteOpenEgress(t *testing.T) {
 	cfg := &Config{Profiles: map[string]Profile{
 		"push_open": {Environment: "container", Network: "allow", Credentials: &Credentials{Github: &GithubCreds{Write: true}}},
 		"push_deny": {Environment: "container", Network: "deny", Credentials: &Credentials{Github: &GithubCreds{Write: true}}},
@@ -33,6 +36,107 @@ func TestLintSshWriteOpenEgress(t *testing.T) {
 	}
 	if _, bad := codes["ro_open"]; bad {
 		t.Fatal("read-only+allow must NOT be flagged")
+	}
+}
+
+func TestLegacyEvaluationProjectionKeepsLintPredicatesAligned(t *testing.T) {
+	cases := []struct {
+		name    string
+		profile Profile
+	}{
+		{
+			name: "github provider write with open container egress",
+			profile: Profile{Environment: "container", Network: "allow", Credentials: &Credentials{
+				Github: &GithubCreds{Write: true},
+			}},
+		},
+		{
+			name: "github repository write with open container egress",
+			profile: Profile{Environment: "container", Network: "allow", Credentials: &Credentials{
+				Github: &GithubCreds{Repos: []RepoCred{{Repo: "acme/write", Write: true}}},
+			}},
+		},
+		{
+			name: "github provider write on unrestricted host",
+			profile: Profile{Environment: "host", Network: "deny", Credentials: &Credentials{
+				Github: &GithubCreds{Write: true},
+			}},
+		},
+		{
+			name: "forgejo repository write with open container egress",
+			profile: Profile{Environment: "container", Network: "allow", Credentials: &Credentials{
+				Forgejo: &ForgejoCreds{URL: "https://forgejo.example.com", Repos: []RepoCred{{Repo: "acme/write", Write: true}}},
+			}},
+		},
+		{
+			name: "forgejo provider write on unrestricted host",
+			profile: Profile{Environment: "host", Network: "deny", Credentials: &Credentials{
+				Forgejo: &ForgejoCreds{Write: true},
+			}},
+		},
+		{
+			name: "read-only forgejo with open egress",
+			profile: Profile{Environment: "container", Network: "allow", Credentials: &Credentials{
+				Forgejo: &ForgejoCreds{URL: "https://forgejo.example.com", Repos: []RepoCred{{Repo: "acme/read"}}},
+			}},
+		},
+		{
+			name:    "ignored allowlist",
+			profile: Profile{Environment: "container", Network: "allow", Egress: []string{"forgejo.example.com"}},
+		},
+		{
+			name: "write credential with bounded egress",
+			profile: Profile{Environment: "container", Network: "deny", Credentials: &Credentials{
+				Forgejo: &ForgejoCreds{Write: true},
+			}},
+		},
+	}
+
+	compatibilityCodes := map[string]bool{
+		"github-write-open-egress":  true,
+		"forgejo-write-open-egress": true,
+		"egress-ignored":            true,
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			want := map[string]bool{}
+			for _, finding := range EvaluateAuthority(tc.profile).Findings {
+				if compatibilityCodes[finding.RuleID] {
+					want[finding.RuleID] = true
+				}
+			}
+
+			got := map[string]bool{}
+			for _, warning := range Lint(&Config{Profiles: map[string]Profile{"profile": tc.profile}}) {
+				if compatibilityCodes[warning.Code] {
+					got[warning.Code] = true
+				}
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("lint compatibility codes = %v, evaluation compatibility findings = %v", got, want)
+			}
+		})
+	}
+}
+
+func TestLintCompatibilityWarningOrder(t *testing.T) {
+	profiles := []Profile{
+		{Environment: "container", Network: "allow", Egress: []string{"forge.example.com"}, Credentials: &Credentials{Github: &GithubCreds{Write: true}}},
+		{Environment: "container", Network: "allow", Egress: []string{"forge.example.com"}, Credentials: &Credentials{Forgejo: &ForgejoCreds{Write: true}}},
+	}
+	want := [][]string{
+		{"github-write-open-egress", "egress-ignored"},
+		{"forgejo-write-open-egress", "egress-ignored"},
+	}
+	for i, profile := range profiles {
+		warnings := Lint(&Config{Profiles: map[string]Profile{"profile": profile}})
+		got := make([]string, 0, len(warnings))
+		for _, warning := range warnings {
+			got = append(got, warning.Code)
+		}
+		if !reflect.DeepEqual(got, want[i]) {
+			t.Errorf("warning order = %v, want %v", got, want[i])
+		}
 	}
 }
 

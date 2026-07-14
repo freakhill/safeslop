@@ -1,9 +1,6 @@
 package policy
 
-import (
-	"sort"
-	"strings"
-)
+import "strings"
 
 // Risk is the safety arbiter's view of a profile, derived from the compiled policy + EnvTier — the
 // "show safety as concrete consequence, never a score or tier name" principle (specs/0029, the second
@@ -19,31 +16,25 @@ type Risk struct {
 // CAN do if compromised (network reach, file reach, secrets, credentials) plus the honest tier
 // caveat — concrete consequences, so the user confronts the actual blast radius.
 func RiskSummary(p Profile) Risk {
-	env := p.Environment
-	_, note := EnvTier(env)
-	proj := ProjectionActive(p)
+	facts := normalizeAuthorityFacts(p)
+	_, note := EnvTier(p.Environment)
 
 	lines := []string{
-		"Network: " + networkReach(env, p.Network),
-		"Files: " + fileReach(env, proj),
+		"Network: " + networkReach(facts.Network),
+		"Files: " + fileReach(facts.Files, facts.Projection == authorityProjectionLiveHostConfig),
 	}
-	if pl := projectionLines(p); len(pl) > 0 {
+	if pl := projectionLinesFromFacts(facts); len(pl) > 0 {
 		lines = append(lines, pl...)
 	}
-	if len(p.Secrets) > 0 {
-		names := make([]string, 0, len(p.Secrets))
-		for k := range p.Secrets {
-			names = append(names, k)
-		}
-		sort.Strings(names)
-		lines = append(lines, "Secrets injected: "+strings.Join(names, ", "))
+	if len(facts.SecretNames) > 0 {
+		lines = append(lines, "Secrets injected: "+strings.Join(facts.SecretNames, ", "))
 	}
-	if creds := credLines(p.Credentials); len(creds) > 0 {
+	if creds := credentialLines(facts.CredentialProviders); len(creds) > 0 {
 		lines = append(lines, "Credentials: "+strings.Join(creds, ", ")+" (ephemeral, wiped on exit)")
 	}
 	lines = append(lines, "Tier: "+note)
 
-	return Risk{Headline: headline(env, p.Network), Lines: lines, Level: level(env, p.Network)}
+	return Risk{Headline: headline(facts.Network), Lines: lines, Level: level(facts.Network)}
 }
 
 // RiskAxis is one capability dimension with its restriction status, so frontends can show what is
@@ -61,8 +52,11 @@ type RiskAxis struct {
 // Secrets/credentials stay in RiskSummary.Lines (the break-glass enumeration); these two are the ones
 // that need loud surfacing on the compact Launch row.
 func RiskAxes(p Profile) []RiskAxis {
-	env := p.Environment
-	return []RiskAxis{networkAxis(env, p.Network), filesAxis(env, ProjectionActive(p))}
+	facts := normalizeAuthorityFacts(p)
+	return []RiskAxis{
+		networkAxis(facts.Network),
+		filesAxis(facts.Files, facts.Projection == authorityProjectionLiveHostConfig),
+	}
 }
 
 // ProjectionActive reports whether a profile carries an engine-owned read-only host config
@@ -70,7 +64,7 @@ func RiskAxes(p Profile) []RiskAxis {
 // project (host already sees the whole account); only container profiles with an enabled,
 // item-bearing projection do.
 func ProjectionActive(p Profile) bool {
-	return p.Environment == "container" && p.Projection != nil && p.Projection.Enabled && len(p.Projection.Items) > 0
+	return normalizeAuthorityFacts(p).Projection == authorityProjectionLiveHostConfig
 }
 
 // projectionLines returns value-free risk lines describing an active projection: what is
@@ -78,50 +72,44 @@ func ProjectionActive(p Profile) bool {
 // the profile hash), and that shell/pi-skill config is readable instruction/code authority the
 // agent or shell may execute or use inside the container (specs/0096 ayo lesson #2).
 func projectionLines(p Profile) []string {
-	if !ProjectionActive(p) {
+	return projectionLinesFromFacts(normalizeAuthorityFacts(p))
+}
+
+func projectionLinesFromFacts(facts normalizedAuthorityFacts) []string {
+	if facts.Projection != authorityProjectionLiveHostConfig {
 		return nil
 	}
-	names := make([]string, 0, len(p.Projection.Items))
-	for _, it := range p.Projection.Items {
-		if it.Label != "" {
-			names = append(names, it.Label)
-		} else {
-			names = append(names, it.Source)
-		}
-	}
-	sort.Strings(names)
 	return []string{
-		"Host config projected (read-only, copied into ephemeral home): " + strings.Join(names, ", "),
+		"Host config projected (read-only, copied into ephemeral home): " + strings.Join(facts.ProjectionLabels, ", "),
 		"Projection is live host filesystem state, not pinned by the profile hash; shell/pi-skill config is readable instruction/code authority the agent may execute or use",
 	}
 }
 
-func networkAxis(env, network string) RiskAxis {
-	switch env {
-	case "host":
+func networkAxis(reach authorityNetworkReach) RiskAxis {
+	switch reach {
+	case authorityNetworkHostUnrestricted:
 		return RiskAxis{"network", "unrestricted", false, "high"}
-	case "container":
-		if network == "allow" {
-			return RiskAxis{"network", "open egress", false, "elevated"}
-		}
+	case authorityNetworkContainerOpen:
+		return RiskAxis{"network", "open egress", false, "elevated"}
+	case authorityNetworkContainerAllowlisted:
 		return RiskAxis{"network", "egress-allowlisted", true, "contained"}
-	default: // unknown/invalid env — never imply a boundary (specs/0053)
+	default: // unknown/invalid authority — never imply a boundary (specs/0053)
 		return RiskAxis{"network", "unrestricted", false, "high"}
 	}
 }
 
-func filesAxis(env string, proj bool) RiskAxis {
-	switch env {
-	case "host":
+func filesAxis(reach authorityFileReach, proj bool) RiskAxis {
+	switch reach {
+	case authorityFilesHostAccount:
 		return RiskAxis{"files", "whole account", false, "high"}
-	case "container":
+	case authorityFilesWorkspace:
 		if proj {
 			// Still bounded/restricted: workspace (rw) + a read-only allowlist of host config copied
 			// into the ephemeral home. No broad $HOME, no credential dirs (specs/0096).
 			return RiskAxis{"files", "workspace + projected host config (read-only)", true, "contained"}
 		}
 		return RiskAxis{"files", "workspace-only", true, "contained"}
-	default: // unknown/invalid env — never imply a boundary (specs/0053)
+	default: // unknown/invalid authority — never imply a boundary (specs/0053)
 		return RiskAxis{"files", "whole account", false, "high"}
 	}
 }
@@ -130,6 +118,7 @@ func filesAxis(env string, proj bool) RiskAxis {
 // for the Launch tab's hover tooltip: which agent, which isolation mechanism (Docker+squid),
 // the network mechanism, plus any toolchain + credential providers.
 func TechStack(p Profile) []string {
+	facts := normalizeAuthorityFacts(p)
 	s := []string{
 		"Agent: " + agentLabel(p.Agent),
 		"Isolation: " + isolationTech(p.Environment),
@@ -138,13 +127,13 @@ func TechStack(p Profile) []string {
 	if p.Toolchain != nil && p.Toolchain.Kind != "" {
 		s = append(s, "Toolchain: "+p.Toolchain.Kind)
 	}
-	if cl := credLines(p.Credentials); len(cl) > 0 {
+	if cl := credentialLines(facts.CredentialProviders); len(cl) > 0 {
 		s = append(s, "Credentials: "+strings.Join(cl, ", "))
 	}
 	if len(p.Secrets) > 0 {
 		s = append(s, "Secrets channel: "+secretProviders(p.Secrets))
 	}
-	if ProjectionActive(p) {
+	if facts.Projection == authorityProjectionLiveHostConfig {
 		// Surface the projection set by label so an operator sees the readable host config
 		// authority the agent gains (specs/0096 ayo lesson #2/10).
 		s = append(s, "Projection: read-only host config copied into ephemeral home")
@@ -216,81 +205,88 @@ func secretProviders(secrets map[string]string) string {
 	}
 }
 
-func networkReach(env, network string) string {
-	switch env {
-	case "host":
+func networkReach(reach authorityNetworkReach) string {
+	switch reach {
+	case authorityNetworkHostUnrestricted:
 		return "unrestricted — uses your full host network"
-	case "container":
-		if network == "allow" {
-			return "OPEN egress — can reach the entire internet"
-		}
+	case authorityNetworkContainerOpen:
+		return "OPEN egress — can reach the entire internet"
+	case authorityNetworkContainerAllowlisted:
 		return "egress-allowlisted — only approved domains (github, npm, pypi, anthropic, …)"
-	default: // unknown/invalid env (specs/0053)
+	default: // unknown/invalid authority (specs/0053)
 		return "unrestricted — assume the agent can reach anywhere"
 	}
 }
 
-func fileReach(env string, proj bool) string {
-	switch env {
-	case "host":
+func fileReach(reach authorityFileReach, proj bool) string {
+	switch reach {
+	case authorityFilesHostAccount:
 		return "your ENTIRE account — home, ~/.ssh, ~/.aws, every file you can touch"
-	case "container":
+	case authorityFilesWorkspace:
 		if proj {
 			return "the mounted workspace (read-write) plus a read-only allowlist of host config copied into the ephemeral home — no broad $HOME, no credential dirs"
 		}
 		return "only the mounted workspace — no host files"
-	default: // unknown/invalid env (specs/0053)
+	default: // unknown/invalid authority (specs/0053)
 		return "unknown environment — assume your ENTIRE account is reachable"
 	}
 }
 
 func credLines(c *Credentials) []string {
-	if c == nil {
-		return nil
-	}
+	_, providers := normalizeCredentialAuthority(c)
+	return credentialLines(providers)
+}
+
+func credentialLines(providers []credentialProviderAuthority) []string {
 	var out []string
-	if len(c.Pnpm) > 0 {
-		out = append(out, "npm/pnpm registry token")
-	}
-	if c.Aws != nil {
-		out = append(out, "AWS (short-lived)")
-	}
-	if c.Gcp != nil {
-		out = append(out, "GCP access token")
-	}
-	if c.Kube != nil {
-		out = append(out, "kubeconfig")
-	}
-	if c.Github != nil {
-		w := "read-only"
-		if c.Github.Write {
-			w = "read-WRITE"
+	for _, provider := range providers {
+		switch provider.Provider {
+		case CredentialProviderPnpm:
+			out = append(out, "npm/pnpm registry token")
+		case CredentialProviderAWS:
+			out = append(out, "AWS (short-lived)")
+		case CredentialProviderGCP:
+			out = append(out, "GCP access token")
+		case CredentialProviderKube:
+			out = append(out, "kubeconfig")
+		case CredentialProviderGitHub:
+			out = append(out, "GitHub token ("+legacyForgeAccess(provider)+")")
+		case CredentialProviderForgejo:
+			out = append(out, "Forgejo deploy key ("+legacyForgeAccess(provider)+")")
 		}
-		out = append(out, "GitHub token ("+w+")")
 	}
 	return out
 }
 
-func headline(env, network string) string {
-	switch {
-	case env == "host":
+func legacyForgeAccess(provider credentialProviderAuthority) string {
+	if len(provider.WriteScopeIDs) > 0 {
+		return "read-WRITE"
+	}
+	return "read-only"
+}
+
+func headline(reach authorityNetworkReach) string {
+	switch reach {
+	case authorityNetworkHostUnrestricted:
 		return "Runs as you — no isolation, full account + network"
-	case network == "allow":
+	case authorityNetworkContainerOpen:
 		return "File-isolated, but OPEN egress (can exfil)"
-	case env == "container":
+	case authorityNetworkContainerAllowlisted:
 		return "Workspace-only files, egress limited to the allowlist"
-	default: // unknown/invalid env (specs/0053)
+	default: // unknown/invalid authority (specs/0053)
 		return "Unknown environment — assume no isolation"
 	}
 }
 
-func level(env, network string) string {
-	switch {
-	case env == "host":
+func level(reach authorityNetworkReach) string {
+	switch reach {
+	case authorityNetworkHostUnrestricted:
 		return "high"
-	case network == "allow":
+	case authorityNetworkContainerOpen:
 		return "elevated"
-	default:
+	case authorityNetworkContainerAllowlisted:
 		return "contained"
+	default:
+		return "high"
 	}
 }
