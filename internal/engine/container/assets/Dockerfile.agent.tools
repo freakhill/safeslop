@@ -1,108 +1,243 @@
 # syntax=docker/dockerfile:1
-# safeslop agent image (specs/0058 N1): the golden base + the profile's RESOLVED package
-# set, toggled by per-package ENABLE_<PKG> build args emitted from identity.go. Each
-# package is a guarded RUN with a BuildKit cache mount. Steps are ordered so a package's
-# requires install first (node before the npm CLIs that need npm) for EVERY enabled
-# subset, satisfying the resolver's topological order with a fixed Dockerfile.
-#
-# Versions + per-arch digests are passed as build args (sourced from the in-tree catalog
-# via identity.go), so the catalog is the single source of truth and a version/digest
-# bump rotates the recipeID (correct cache invalidation). The 2-file base+agent split is
-# kept for now; collapsing into one multi-stage Dockerfile is deferred (deviation from
-# specs/0058 N1, noted).
+# safeslop agent image: the golden base plus the profile's resolved package set.
+# identity.go emits every ENABLE/version/artifact URL/digest argument from the reviewed
+# catalog; changing any coordinate rotates the content-addressed recipe ID.
 ARG BASE=local/safeslop-base:latest
 FROM ${BASE}
 
 LABEL safeslop.managed="true"
-
-# Installs write to /usr/local (root); the base image's default user is the unprivileged
-# `agent`. Switch to root for the build, then drop back to agent at the end.
 USER root
 ENV DEBIAN_FRONTEND=noninteractive
 
-# --- node (kind: binary) — official multi-arch tarball, sha256-verified per arch.
-# Provides npm, which the npm CLIs below require; installed FIRST so any subset that
-# enables a CLI also has node. amd64 selects the x64 tarball.
+# Node is explicit because npm packages require it and its .tar.xz needs a guarded build
+# helper that is absent from the minimal base.
 ARG ENABLE_NODE=false
 ARG NODE_VERSION=
+ARG NODE_URL_AMD64=
+ARG NODE_URL_ARM64=
 ARG NODE_SHA256_AMD64=
 ARG NODE_SHA256_ARM64=
 RUN if [ "$ENABLE_NODE" = "true" ]; then set -eux; \
-      # Node publishes .tar.xz archives. Keep xz as a guarded package-local build
-      # helper (not in the universal base), so shell-only profiles stay lean.
-      apt-get update; \
-      apt-get install -y --no-install-recommends xz-utils; \
+      apt-get update; apt-get install -y --no-install-recommends xz-utils; \
       arch="$(dpkg --print-architecture)"; \
-      case "$arch" in \
-        amd64) ntarch=x64;   sha="$NODE_SHA256_AMD64";; \
-        arm64) ntarch=arm64; sha="$NODE_SHA256_ARM64";; \
-        *) echo "node: unsupported build arch $arch" >&2; exit 1;; \
-      esac; \
-      curl -fsSLo /tmp/node.tar.xz \
-        "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${ntarch}.tar.xz"; \
-      echo "${sha}  /tmp/node.tar.xz" | sha256sum -c -; \
+      case "$arch" in amd64) url="$NODE_URL_AMD64"; sha="$NODE_SHA256_AMD64";; arm64) url="$NODE_URL_ARM64"; sha="$NODE_SHA256_ARM64";; *) echo "node: unsupported build arch $arch" >&2; exit 1;; esac; \
+      curl -fsSLo /tmp/node.tar.xz "$url"; echo "$sha  /tmp/node.tar.xz" | sha256sum -c -; \
       tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 --no-same-owner; \
-      rm -f /tmp/node.tar.xz; \
-      apt-get purge -y --auto-remove xz-utils; \
-      rm -rf /var/lib/apt/lists/*; \
+      rm -f /tmp/node.tar.xz; apt-get purge -y --auto-remove xz-utils; rm -rf /var/lib/apt/lists/*; \
       node --version; npm --version; \
     fi
 
-# --- claude-code (kind: npm) — Claude Code CLI, exact version.
+# Exact npm coordinates are fetched through npm's package-integrity verification.
+# --- claude-code
 ARG ENABLE_CLAUDE_CODE=false
 ARG CLAUDE_CODE_NPM_PACKAGE=@anthropic-ai/claude-code
 ARG CLAUDE_CODE_VERSION=
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-    if [ "$ENABLE_CLAUDE_CODE" = "true" ]; then set -eux; \
-      npm install -g "${CLAUDE_CODE_NPM_PACKAGE}@${CLAUDE_CODE_VERSION}"; \
-    fi
+    if [ "$ENABLE_CLAUDE_CODE" = "true" ]; then set -eux; npm install -g "${CLAUDE_CODE_NPM_PACKAGE}@${CLAUDE_CODE_VERSION}"; fi
 
-# --- pi (kind: npm). --ignore-scripts: skip pi's npm lifecycle scripts (supply-chain
-# hygiene; matches pi.dev's published install command).
 ARG ENABLE_PI=false
 ARG PI_NPM_PACKAGE=@earendil-works/pi-coding-agent
 ARG PI_VERSION=
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-    if [ "$ENABLE_PI" = "true" ]; then set -eux; \
-      npm install -g --ignore-scripts "${PI_NPM_PACKAGE}@${PI_VERSION}"; \
-    fi
+    if [ "$ENABLE_PI" = "true" ]; then set -eux; npm install -g --ignore-scripts "${PI_NPM_PACKAGE}@${PI_VERSION}"; fi
 
-# --- pnpm (kind: npm) — JS/TS package manager, exact version.
 ARG ENABLE_PNPM=false
 ARG PNPM_NPM_PACKAGE=pnpm
 ARG PNPM_VERSION=
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-    if [ "$ENABLE_PNPM" = "true" ]; then set -eux; \
-      npm install -g "${PNPM_NPM_PACKAGE}@${PNPM_VERSION}"; \
+    if [ "$ENABLE_PNPM" = "true" ]; then set -eux; npm install -g "${PNPM_NPM_PACKAGE}@${PNPM_VERSION}"; fi
+
+# python3 is an exact leaf from the immutable, signed Debian snapshot inherited from
+# Dockerfile.agent; the snapshot also freezes all transitive selection.
+ARG ENABLE_PYTHON3=false
+ARG PYTHON3_VERSION=
+RUN if [ "$ENABLE_PYTHON3" = "true" ]; then set -eux; \
+      apt-get update; apt-get install -y --no-install-recommends "python3=${PYTHON3_VERSION}"; \
+      rm -rf /var/lib/apt/lists/*; python3 --version; \
     fi
 
-# --- ripgrep (kind: binary) — official release tarball, sha256-verified per arch.
+# Shared build-only primitive for the explicit binary handlers below. Every invocation
+# downloads exactly one catalog URL, verifies its architecture-specific SHA256 before
+# extraction, and installs only the named executable(s). It is removed before runtime.
+RUN <<'EOF'
+set -eu
+cat >/usr/local/sbin/install-catalog-artifact <<'SCRIPT'
+#!/bin/sh
+set -eu
+label=$1
+url=$2
+sha=$3
+format=$4
+shift 4
+archive="/tmp/${label}.artifact"
+work="$(mktemp -d "/tmp/${label}.XXXXXX")"
+trap 'rm -rf "$archive" "$work"' EXIT
+curl -fsSLo "$archive" "$url"
+echo "$sha  $archive" | sha256sum -c -
+case "$format" in
+  direct)
+    install -m 0755 "$archive" "/usr/local/bin/$1"
+    ;;
+  tgz)
+    tar -xzf "$archive" -C "$work" --no-same-owner
+    for binary in "$@"; do
+      source="$(find "$work" -type f -name "$binary" -print -quit)"
+      test -n "$source"
+      install -m 0755 "$source" "/usr/local/bin/$binary"
+    done
+    ;;
+  go)
+    rm -rf /usr/local/go
+    tar -xzf "$archive" -C /usr/local --no-same-owner
+    ;;
+  rust)
+    tar -xJf "$archive" -C "$work" --no-same-owner
+    installer="$(find "$work" -type f -name install.sh -print -quit)"
+    test -n "$installer"
+    sh "$installer" --prefix=/usr/local --disable-ldconfig
+    ;;
+  *)
+    echo "$label: unsupported artifact format $format" >&2
+    exit 1
+    ;;
+esac
+SCRIPT
+chmod 0755 /usr/local/sbin/install-catalog-artifact
+EOF
+
+# Each package has its own guarded handler so no resolved package can be silently
+# omitted. URL and digest selection fails closed on unsupported architectures.
+
+# --- ripgrep
 ARG ENABLE_RIPGREP=false
 ARG RIPGREP_VERSION=
+ARG RIPGREP_URL_AMD64=
+ARG RIPGREP_URL_ARM64=
 ARG RIPGREP_SHA256_AMD64=
 ARG RIPGREP_SHA256_ARM64=
-RUN if [ "$ENABLE_RIPGREP" = "true" ]; then set -eux; \
-      arch="$(dpkg --print-architecture)"; \
-      case "$arch" in \
-        amd64) rgtarget=x86_64-unknown-linux-musl; sha="$RIPGREP_SHA256_AMD64";; \
-        arm64) rgtarget=aarch64-unknown-linux-gnu; sha="$RIPGREP_SHA256_ARM64";; \
-        *) echo "ripgrep: unsupported build arch $arch" >&2; exit 1;; \
-      esac; \
-      curl -fsSLo /tmp/ripgrep.tar.gz \
-        "https://github.com/BurntSushi/ripgrep/releases/download/${RIPGREP_VERSION}/ripgrep-${RIPGREP_VERSION}-${rgtarget}.tar.gz"; \
-      echo "${sha}  /tmp/ripgrep.tar.gz" | sha256sum -c -; \
-      mkdir -p /tmp/ripgrep; \
-      tar -xzf /tmp/ripgrep.tar.gz -C /tmp/ripgrep --strip-components=1 --no-same-owner; \
-      install -m 0755 /tmp/ripgrep/rg /usr/local/bin/rg; \
-      rm -rf /tmp/ripgrep /tmp/ripgrep.tar.gz; \
-      rg --version; \
-    fi
+RUN if [ "$ENABLE_RIPGREP" = "true" ]; then set -eux; arch="$(dpkg --print-architecture)"; case "$arch" in amd64) url="$RIPGREP_URL_AMD64"; sha="$RIPGREP_SHA256_AMD64";; arm64) url="$RIPGREP_URL_ARM64"; sha="$RIPGREP_SHA256_ARM64";; *) exit 1;; esac; install-catalog-artifact ripgrep "$url" "$sha" tgz rg; rg --version; fi
 
-# NOTE: bun, uv, mise, fd are in the catalog but ship the IW2 digest SENTINEL;
-# the Go BuildReady gate (policy.BuildReadyFor) refuses to build a profile that resolves
-# any of them, so no ENABLE_<PKG> for them is ever emitted here. They get real digests +
-# their own guarded RUN blocks in a follow-up. python3 (kind: apt) likewise lands later.
+# --- fd
+ARG ENABLE_FD=false
+ARG FD_VERSION=
+ARG FD_URL_AMD64=
+ARG FD_URL_ARM64=
+ARG FD_SHA256_AMD64=
+ARG FD_SHA256_ARM64=
+RUN if [ "$ENABLE_FD" = "true" ]; then set -eux; arch="$(dpkg --print-architecture)"; case "$arch" in amd64) url="$FD_URL_AMD64"; sha="$FD_SHA256_AMD64";; arm64) url="$FD_URL_ARM64"; sha="$FD_SHA256_ARM64";; *) exit 1;; esac; install-catalog-artifact fd "$url" "$sha" tgz fd; fd --version; fi
 
+# --- bat
+ARG ENABLE_BAT=false
+ARG BAT_VERSION=
+ARG BAT_URL_AMD64=
+ARG BAT_URL_ARM64=
+ARG BAT_SHA256_AMD64=
+ARG BAT_SHA256_ARM64=
+RUN if [ "$ENABLE_BAT" = "true" ]; then set -eux; arch="$(dpkg --print-architecture)"; case "$arch" in amd64) url="$BAT_URL_AMD64"; sha="$BAT_SHA256_AMD64";; arm64) url="$BAT_URL_ARM64"; sha="$BAT_SHA256_ARM64";; *) exit 1;; esac; install-catalog-artifact bat "$url" "$sha" tgz bat; bat --version; fi
+
+# --- eza
+ARG ENABLE_EZA=false
+ARG EZA_VERSION=
+ARG EZA_URL_AMD64=
+ARG EZA_URL_ARM64=
+ARG EZA_SHA256_AMD64=
+ARG EZA_SHA256_ARM64=
+RUN if [ "$ENABLE_EZA" = "true" ]; then set -eux; arch="$(dpkg --print-architecture)"; case "$arch" in amd64) url="$EZA_URL_AMD64"; sha="$EZA_SHA256_AMD64";; arm64) url="$EZA_URL_ARM64"; sha="$EZA_SHA256_ARM64";; *) exit 1;; esac; install-catalog-artifact eza "$url" "$sha" tgz eza; eza --version; fi
+
+# --- fzf
+ARG ENABLE_FZF=false
+ARG FZF_VERSION=
+ARG FZF_URL_AMD64=
+ARG FZF_URL_ARM64=
+ARG FZF_SHA256_AMD64=
+ARG FZF_SHA256_ARM64=
+RUN if [ "$ENABLE_FZF" = "true" ]; then set -eux; arch="$(dpkg --print-architecture)"; case "$arch" in amd64) url="$FZF_URL_AMD64"; sha="$FZF_SHA256_AMD64";; arm64) url="$FZF_URL_ARM64"; sha="$FZF_SHA256_ARM64";; *) exit 1;; esac; install-catalog-artifact fzf "$url" "$sha" tgz fzf; fzf --version; fi
+
+# --- zoxide
+ARG ENABLE_ZOXIDE=false
+ARG ZOXIDE_VERSION=
+ARG ZOXIDE_URL_AMD64=
+ARG ZOXIDE_URL_ARM64=
+ARG ZOXIDE_SHA256_AMD64=
+ARG ZOXIDE_SHA256_ARM64=
+RUN if [ "$ENABLE_ZOXIDE" = "true" ]; then set -eux; arch="$(dpkg --print-architecture)"; case "$arch" in amd64) url="$ZOXIDE_URL_AMD64"; sha="$ZOXIDE_SHA256_AMD64";; arm64) url="$ZOXIDE_URL_ARM64"; sha="$ZOXIDE_SHA256_ARM64";; *) exit 1;; esac; install-catalog-artifact zoxide "$url" "$sha" tgz zoxide; zoxide --version; fi
+
+# --- yq (direct executable)
+ARG ENABLE_YQ=false
+ARG YQ_VERSION=
+ARG YQ_URL_AMD64=
+ARG YQ_URL_ARM64=
+ARG YQ_SHA256_AMD64=
+ARG YQ_SHA256_ARM64=
+RUN if [ "$ENABLE_YQ" = "true" ]; then set -eux; arch="$(dpkg --print-architecture)"; case "$arch" in amd64) url="$YQ_URL_AMD64"; sha="$YQ_SHA256_AMD64";; arm64) url="$YQ_URL_ARM64"; sha="$YQ_SHA256_ARM64";; *) exit 1;; esac; install-catalog-artifact yq "$url" "$sha" direct yq; yq --version; fi
+
+# --- uv (archive contains uv and uvx)
+ARG ENABLE_UV=false
+ARG UV_VERSION=
+ARG UV_URL_AMD64=
+ARG UV_URL_ARM64=
+ARG UV_SHA256_AMD64=
+ARG UV_SHA256_ARM64=
+RUN if [ "$ENABLE_UV" = "true" ]; then set -eux; arch="$(dpkg --print-architecture)"; case "$arch" in amd64) url="$UV_URL_AMD64"; sha="$UV_SHA256_AMD64";; arm64) url="$UV_URL_ARM64"; sha="$UV_SHA256_ARM64";; *) exit 1;; esac; install-catalog-artifact uv "$url" "$sha" tgz uv uvx; uv --version; fi
+
+# --- ruff
+ARG ENABLE_RUFF=false
+ARG RUFF_VERSION=
+ARG RUFF_URL_AMD64=
+ARG RUFF_URL_ARM64=
+ARG RUFF_SHA256_AMD64=
+ARG RUFF_SHA256_ARM64=
+RUN if [ "$ENABLE_RUFF" = "true" ]; then set -eux; arch="$(dpkg --print-architecture)"; case "$arch" in amd64) url="$RUFF_URL_AMD64"; sha="$RUFF_SHA256_AMD64";; arm64) url="$RUFF_URL_ARM64"; sha="$RUFF_SHA256_ARM64";; *) exit 1;; esac; install-catalog-artifact ruff "$url" "$sha" tgz ruff; ruff --version; fi
+
+# --- Go toolchain
+ARG ENABLE_GO=false
+ARG GO_VERSION=
+ARG GO_URL_AMD64=
+ARG GO_URL_ARM64=
+ARG GO_SHA256_AMD64=
+ARG GO_SHA256_ARM64=
+RUN if [ "$ENABLE_GO" = "true" ]; then set -eux; arch="$(dpkg --print-architecture)"; case "$arch" in amd64) url="$GO_URL_AMD64"; sha="$GO_SHA256_AMD64";; arm64) url="$GO_URL_ARM64"; sha="$GO_SHA256_ARM64";; *) exit 1;; esac; install-catalog-artifact go "$url" "$sha" go; /usr/local/go/bin/go version; fi
+ENV PATH="/usr/local/go/bin:${PATH}"
+
+# --- Rust rustc+cargo toolchain
+ARG ENABLE_RUST=false
+ARG RUST_VERSION=
+ARG RUST_URL_AMD64=
+ARG RUST_URL_ARM64=
+ARG RUST_SHA256_AMD64=
+ARG RUST_SHA256_ARM64=
+RUN if [ "$ENABLE_RUST" = "true" ]; then set -eux; apt-get update; apt-get install -y --no-install-recommends xz-utils; arch="$(dpkg --print-architecture)"; case "$arch" in amd64) url="$RUST_URL_AMD64"; sha="$RUST_SHA256_AMD64";; arm64) url="$RUST_URL_ARM64"; sha="$RUST_SHA256_ARM64";; *) exit 1;; esac; install-catalog-artifact rust "$url" "$sha" rust; apt-get purge -y --auto-remove xz-utils; rm -rf /var/lib/apt/lists/*; rustc --version; cargo --version; fi
+
+# --- hyperfine
+ARG ENABLE_HYPERFINE=false
+ARG HYPERFINE_VERSION=
+ARG HYPERFINE_URL_AMD64=
+ARG HYPERFINE_URL_ARM64=
+ARG HYPERFINE_SHA256_AMD64=
+ARG HYPERFINE_SHA256_ARM64=
+RUN if [ "$ENABLE_HYPERFINE" = "true" ]; then set -eux; arch="$(dpkg --print-architecture)"; case "$arch" in amd64) url="$HYPERFINE_URL_AMD64"; sha="$HYPERFINE_SHA256_AMD64";; arm64) url="$HYPERFINE_URL_ARM64"; sha="$HYPERFINE_SHA256_ARM64";; *) exit 1;; esac; install-catalog-artifact hyperfine "$url" "$sha" tgz hyperfine; hyperfine --version; fi
+
+# --- tokei
+ARG ENABLE_TOKEI=false
+ARG TOKEI_VERSION=
+ARG TOKEI_URL_AMD64=
+ARG TOKEI_URL_ARM64=
+ARG TOKEI_SHA256_AMD64=
+ARG TOKEI_SHA256_ARM64=
+RUN if [ "$ENABLE_TOKEI" = "true" ]; then set -eux; arch="$(dpkg --print-architecture)"; case "$arch" in amd64) url="$TOKEI_URL_AMD64"; sha="$TOKEI_SHA256_AMD64";; arm64) url="$TOKEI_URL_ARM64"; sha="$TOKEI_SHA256_ARM64";; *) exit 1;; esac; install-catalog-artifact tokei "$url" "$sha" tgz tokei; tokei --version; fi
+
+# --- sccache
+ARG ENABLE_SCCACHE=false
+ARG SCCACHE_VERSION=
+ARG SCCACHE_URL_AMD64=
+ARG SCCACHE_URL_ARM64=
+ARG SCCACHE_SHA256_AMD64=
+ARG SCCACHE_SHA256_ARM64=
+RUN if [ "$ENABLE_SCCACHE" = "true" ]; then set -eux; arch="$(dpkg --print-architecture)"; case "$arch" in amd64) url="$SCCACHE_URL_AMD64"; sha="$SCCACHE_SHA256_AMD64";; arm64) url="$SCCACHE_URL_ARM64"; sha="$SCCACHE_SHA256_ARM64";; *) exit 1;; esac; install-catalog-artifact sccache "$url" "$sha" tgz sccache; sccache --version; fi
+
+# Other catalog packages, including mise, remain fail-closed until separately pinned
+# and wired; identity.go's allowlist prevents their silent omission.
+RUN rm -f /usr/local/sbin/install-catalog-artifact
 USER agent
 WORKDIR /workspace
 CMD ["fish"]

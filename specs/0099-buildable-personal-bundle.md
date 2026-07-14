@@ -17,7 +17,7 @@ Design: retain the catalog as the reviewed source of package version, artifact U
   VERIFY: `make check-assets && go test ./internal/engine/policy -run 'Catalog|BuildReady' -v`
   EXPECTED: The personal closure has no unresolved binary digest and catalog source/rendered JSON stay identical.
 
-- [ ] T2 — Add explicit image-build handlers for the personal closure
+- [x] T2 — Add explicit image-build handlers for the personal closure
   FILE: `internal/engine/container/assets/Dockerfile.agent.tools`, `internal/engine/container/identity.go`, `internal/engine/container/identity_test.go`
   CHANGE: Add one guarded, checksum-verifying handler per non-apt package and explicit pinned-snapshot installation for apt packages; add only supported packages to the identity allowlist.
   VERIFY: `go test ./internal/engine/container -run 'Recipe|BuildArgs|Personal' -v`
