@@ -1,6 +1,6 @@
 # 0098 — Builtin profile resolution and provenance
 
-Status: planned
+Status: complete
 Date: 2026-07-12
 
 SCOPE: implement binary-embedded, cwd-independent launchable builtin profiles, distinct from scaffold presets, so `safeslop session create --profile pi|claude|fish|zsh --output json` and `safeslop profile show <name> --output json` work from any directory. Pin project-over-builtin precedence, invalid-project fail-closed behavior, JSON provenance, session record hash semantics, and run-time builtin reconstruction.
@@ -142,7 +142,7 @@ When host projection lands, projection contents remain live host filesystem stat
   VERIFY:   `go test ./internal/cli ./internal/engine/session -run 'Builtin|SessionProfile|VerifySessionTrust|SessionData|Legacy' -v`
   EXPECTED: Builtin sessions reconstruct from embedded registry; missing/mismatched builtin hash fails closed at run/supervise; project sessions still re-read trusted policy bytes; legacy records without `ProfileSource` still load.
 
-- [ ] T5 — Docs, help, and final verification
+- [x] T5 — Docs, help, and final verification
   FILE:     `README.md`, `skills/agent-sandbox-ops/SKILL.md`, `internal/cli/cli_help_iw3_test.go`, `specs/0098-builtin-profile-resolution.md`
   CHANGE:   Document builtin defaults vs scaffold presets, project-over-builtin precedence, cwd-independent launch examples, invalid-config fail-closed behavior, and provenance fields. Update CLI help tests for `profile defaults` and any wording change.
   VERIFY:   `git diff --check && make check && make build`

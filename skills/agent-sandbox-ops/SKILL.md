@@ -32,7 +32,8 @@ file transfer between host and sandboxed runtimes.
 - `safeslop profile credentials clear <profile> [safeslop.cue] --output json` — remove only `credentials.github`/`credentials.forgejo`, deleting the `credentials` object if it becomes empty.
 - `safeslop creds list|show [<profile>] --output json` — inspect the credential posture of `safeslop.cue` profiles (declared creds + value-free readiness status); read-only, never reveals secret values.
 - `safeslop creds link|unlink|status` — manage host-only account links in `~/.config/safeslop/accounts.cue` (refs + non-secret ids only); `creds status --output json` is the Emacs account-link status envelope.
-- `safeslop profile show <name> --output json` — inspect a profile with resolved package set and dry-run image recipe.
+- `safeslop profile defaults --output json` — list signed-binary builtin launchable defaults (`claude`, `fish`, `pi`, `zsh`), distinct from scaffold `profile presets`; project profiles take precedence and an invalid local policy fails closed.
+- `safeslop profile show <name> --output json` — inspect a resolved project or builtin profile with package set, dry-run image recipe, and source/path/hash provenance.
 - `safeslop lock [profile] --output json` — write repo-root `safeslop.lock.json` for the selected profile's recipe identity.
 - `safeslop trust` — approve a policy's exact bytes for launch. Required by every launch lane: `safeslop run <profile>`, `session create --profile`, and the Emacs client all share this gate (specs/0072); an untrusted or changed `safeslop.cue` is refused with a `TRUST_REQUIRED` envelope.
 - `safeslop untrust [safeslop.cue]` — remove that host approval; future launches fail closed until the current bytes are reviewed and trusted again.

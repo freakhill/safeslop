@@ -73,7 +73,7 @@ safeslop catalog add <pkg> --kind K --version V   add a pinned entry (channel ba
 safeslop catalog audit                           report staleness, yanked/unmaintained advisories, suggested lane (read-only)
 safeslop bundle add|remove <name> <pkg>...       mutate bundle membership (re-validates references)
 safeslop bundle list --output json               curated bundles for UIs
-safeslop profile list|presets --output json       profiles + preset library as the JSON contract
+safeslop profile list|presets|defaults --output json profiles, scaffold presets, or builtin defaults
 safeslop profile create --name N --agent A --environment E [--bundle B] [--package P] [--no-default-bundle] [--dry-run] --output json
 safeslop profile show <name> --output json         profile + resolved packages + image recipe
 safeslop profile credentials set <profile> [safeslop.cue] --provider <github|forgejo> [--use-origin|--repo owner/name ...] [--write-repo owner/name ...] --output json
@@ -107,6 +107,16 @@ Add `--json` to commands for machine-readable output where supported. Emacs-faci
 commands emit the shared versioned JSON contract envelope (`schema_version`,
 `ok`, `data`, `warnings`, `errors`). Session status also supports `--output
 jsonl` for a line-delimited monitor stream.
+
+`profile defaults --output json` lists the signed-binary builtin profiles
+(`claude`, `fish`, `pi`, and `zsh`), while `profile presets` remains the separate
+scaffold-template library. `profile show pi --output json` and `session create
+--profile pi --output json` work without a local `safeslop.cue`. A valid project
+profile of the same name takes precedence and retains its normal trust gate; an
+invalid local policy fails closed rather than falling back. Resolved project and
+builtin JSON includes `profile_source`, `profile_name`, `policy_path`, and
+`policy_hash`; builtin paths are `builtin:<name>` and their hashes pin the
+embedded profile used when the session runs.
 
 `session create --profile`, `session status`, and `session list` include
 value-free credential scope in the JSON contract as `credential_scopes` for
