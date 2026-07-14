@@ -1,6 +1,6 @@
 # 0099 — Buildable personal bundle
 
-Status: planned
+Status: complete
 Date: 2026-07-14
 
 SCOPE: make the existing `personal` catalog closure safely image-buildable so the 0096 contained-hybrid builtin profiles remain launchable with `bundles:["personal"]`.
@@ -29,7 +29,7 @@ Design: retain the catalog as the reviewed source of package version, artifact U
   VERIFY: `go test ./internal/engine/policy ./internal/cli -run 'Builtin|ProfileDefaults|SessionCreate.*Builtin' -v`
   EXPECTED: All four defaults are inspectable and session-creatable without a local policy.
 
-- [ ] T4 — Complete 0096 docs and final verification
+- [x] T4 — Complete 0096 docs and final verification
   FILE: `README.md`, `skills/agent-sandbox-ops/SKILL.md`, `specs/0096-contained-hybrid-default-profiles.md`, `specs/0099-buildable-personal-bundle.md`
   CHANGE: Document that builtin personal tools are pinned image-build inputs; mark 0096 only after the builtin contract is truly launchable.
   VERIFY: `git diff --check && make check && make build`

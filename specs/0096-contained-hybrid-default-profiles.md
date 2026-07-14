@@ -1,6 +1,6 @@
 # 0096 — Contained-hybrid builtin default profiles
 
-Status: in progress (T1-T3 planning complete)
+Status: complete
 Date: 2026-07-12
 
 SCOPE: deliver binary-embedded, cwd-independent default profiles named `pi`, `claude`, `fish`, and `zsh` that launch as contained-hybrid container sessions: curated devtools, deny-by-default/progressive network authority, and read-only allowlist-style host config/home projection. This spec is the umbrella DAG: it pins the product contract, sequences the required safety/capability gates, and makes builtin profile delivery the last mile after mount and network contracts exist.
@@ -29,7 +29,7 @@ Builtin default names are reserved fallback names, not hard overrides:
 | `fish` | `fish` | `container` | `deny` + session grants | `personal` bundle | shell config projection + safe home projection |
 | `zsh` | `zsh` | `container` | `deny` + session grants | `personal` bundle | shell config projection + safe home projection |
 
-`personal` is the existing daily-driver bundle (`ripgrep`, `fd`, `bat`, `eza`, `fzf`, `zoxide`, `yq`, Node/Python/Go/Rust toolchains, `hyperfine`, `tokei`, `sccache`). If a later catalog decision adds a `devtools` bundle, these defaults may migrate only through a separate catalog/spec update.
+`personal` is the existing daily-driver bundle (`ripgrep`, `fd`, `bat`, `eza`, `fzf`, `zoxide`, `yq`, Node/Python/Go/Rust toolchains, `hyperfine`, `tokei`, `sccache`). Its binary inputs are pinned by version, per-architecture artifact URL, and SHA256; its apt leaf is exact and inherits the immutable signed Debian snapshot. Explicit image handlers verify every selected artifact before installation. If a later catalog decision adds a `devtools` bundle, these defaults may migrate only through a separate catalog/spec update.
 
 ### Cwd-independent resolution
 
@@ -138,7 +138,7 @@ F     → G  Docs/skills/tests + make check/build
   VERIFY:   `go test ./internal/engine/container ./internal/engine/session ./internal/cli -run 'SessionGrant|Progressive|EgressGrant|IPLiteral|ProfileEgress' -v && make test-emacs EMACS=$(command -v emacs)`
   EXPECTED: Tests prove exact FQDN:port grants work only for container deny sessions, IP/private/metadata destinations remain denied and non-grantable, grants are session-scoped and revocable, profile CUE is not mutated, failure preserves deny, and Emacs surfaces non-modal controls.
 
-- [ ] T6 — Implement binary-embedded builtin defaults and cwd-independent profile fallback
+- [x] T6 — Implement binary-embedded builtin defaults and cwd-independent profile fallback
   FILE:     `internal/engine/policy/builtins.go`, `internal/engine/policy/builtins_test.go`, `internal/cli/cli.go`, `internal/cli/cli_profile_test.go`, `internal/cli/cli_session_test.go`, `internal/engine/session/session.go`, `internal/engine/session/session_test.go`
   CHANGE:   Execute `specs/0098-builtin-profile-resolution.md`: add embedded launchable builtin profiles for `pi`, `claude`, `fish`, and `zsh`; resolve project profiles before builtins; allow `session create --profile <builtin> --output json` from a directory with no `safeslop.cue`; include provenance/hash in JSON and session records; reconstruct builtin profiles at run/supervise time and fail closed if the builtin hash changed.
   VERIFY:   `go test ./internal/engine/policy ./internal/engine/session ./internal/cli -run 'Builtin|ProfileDefaults|SessionCreate.*Profile|ProfileShow' -v`
@@ -161,7 +161,7 @@ print('ok')
 PY`
   EXPECTED: Installed CLI lists all four builtin defaults with the expected agent/container/deny/personal contract and provenance.
 
-- [ ] T8 — Docs, skills, and final verification
+- [x] T8 — Docs, skills, and final verification
   FILE:     `README.md`, `skills/agent-sandbox-ops/SKILL.md`, `specs/0096-contained-hybrid-default-profiles.md`, related `specs/0097*`/`0098*` implementation specs
   CHANGE:   Update operator docs and skills to describe builtin defaults, project override precedence, safe projection boundaries, progressive grant controls, and exact commands from any directory. Mark specs complete only after their stated verification passes.
   VERIFY:   `git diff --check && make check && make build`
