@@ -175,6 +175,33 @@ func TestSessionCreateAcceptsClaudeCodeAlias(t *testing.T) {
 	}
 }
 
+func TestSessionCreateBuiltinProfileWithoutConfig(t *testing.T) {
+	workspace := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+
+	out, err := runRootForTest(t, workspace, "session", "create", "--profile", "pi", "--output", "json")
+	if err != nil {
+		t.Fatalf("session create builtin: %v; out=%s", err, out)
+	}
+	env := parseEnvelopeForTest(t, out)
+	if !env.OK {
+		t.Fatalf("builtin session creation returned error envelope: %+v", env.Errors)
+	}
+	if env.Data["profile"] != "pi" || env.Data["profile_source"] != "builtin" || env.Data["policy_path"] != "builtin:pi" {
+		t.Fatalf("builtin session provenance = %#v", env.Data)
+	}
+	if hash, _ := env.Data["policy_hash"].(string); hash == "" {
+		t.Fatalf("builtin policy hash missing: %#v", env.Data)
+	}
+	canonicalWorkspace, err := filepath.EvalSymlinks(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.Data["workspace"] != canonicalWorkspace {
+		t.Fatalf("builtin workspace = %#v, want %q", env.Data["workspace"], canonicalWorkspace)
+	}
+}
+
 func TestSessionCreateFromProfileResolvesRecipeMetadata(t *testing.T) {
 	ws := t.TempDir()
 	state := t.TempDir()

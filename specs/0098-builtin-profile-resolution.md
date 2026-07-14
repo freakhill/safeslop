@@ -130,7 +130,7 @@ When host projection lands, projection contents remain live host filesystem stat
   VERIFY:   `go test ./internal/cli -run 'Profile(Default|Show|Presets|List)' -v`
   EXPECTED: `profile defaults` lists builtins with `profile_source:"builtin"`; `profile show pi` works from a temp dir with no `safeslop.cue`; a project `pi` overrides builtin `pi`; an invalid local `safeslop.cue` blocks fallback; `profile presets` still returns the existing scaffold rows.
 
-- [ ] T3 — Add builtin-aware session create
+- [x] T3 — Add builtin-aware session create
   FILE:     `internal/cli/cli.go`, `internal/cli/cli_session_test.go`, `internal/cli/cli_trust_session_test.go`
   CHANGE:   Refactor `createSessionFromProfile` into project/builtin resolution. Project path keeps trust status check and records absolute `PolicyPath` + file hash. Builtin path skips `safeslop.cue` trust, records `ProfileSource:"builtin"`, `PolicyPath:"builtin:<name>"`, and builtin hash. Workspace defaults to current cwd for builtins with no workspace. Resolved packages/recipe metadata are recorded exactly as for project profiles.
   VERIFY:   `go test ./internal/cli -run 'SessionCreate.*(Builtin|Profile)|TrustSession|SessionCreateFromProfile' -v`

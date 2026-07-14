@@ -932,11 +932,18 @@ func cmdSessionRename() *cobra.Command {
 func createSessionFromProfile(store engsession.Store, profile string) (engsession.Session, error) {
 	path, err := findConfig("")
 	if err != nil {
-		return engsession.Session{}, emitContractError(jsoncontract.CodeNotFound, "safeslop.cue not found", map[string]any{"error": err.Error()})
+		return createBuiltinSession(store, profile)
 	}
 	loaded, err := loadPolicyForLaunch(path)
 	if err != nil {
 		return engsession.Session{}, emitContractError(jsoncontract.CodeSchemaViolation, "load safeslop.cue", map[string]any{"path": path, "error": err.Error()})
+	}
+	prof, ok := loaded.cfg.Profiles[profile]
+	if !ok {
+		if _, builtin := policy.BuiltinProfileByName(profile); builtin {
+			return createBuiltinSession(store, profile)
+		}
+		return engsession.Session{}, emitContractError(jsoncontract.CodeNotFound, fmt.Sprintf("no profile %q in safeslop.cue", profile), map[string]any{"profile": profile, "path": path})
 	}
 	// Gate the session lane on the same host-approval `safeslop run` requires (specs/0072 F1,
 	// closing 0070 B1): the Emacs client launches exclusively through session create, so without
@@ -949,10 +956,6 @@ func createSessionFromProfile(store engsession.Store, profile string) (engsessio
 	}
 	if status != trust.Trusted {
 		return engsession.Session{}, emitContractError(jsoncontract.CodeTrustRequired, "safeslop.cue is not host-approved", map[string]any{"path": loaded.trustPath, "status": status.String(), "hint": "safeslop trust " + loaded.trustPath})
-	}
-	prof, ok := loaded.cfg.Profiles[profile]
-	if !ok {
-		return engsession.Session{}, emitContractError(jsoncontract.CodeNotFound, fmt.Sprintf("no profile %q in safeslop.cue", profile), map[string]any{"profile": profile, "path": path})
 	}
 	resolved, err := policy.Resolve(prof)
 	if err != nil {
@@ -980,6 +983,7 @@ func createSessionFromProfile(store engsession.Store, profile string) (engsessio
 		return engsession.Session{}, emitContractError(jsoncontract.CodeIOError, "create session", map[string]any{"error": err.Error()})
 	}
 	sess.Profile = profile
+	sess.ProfileSource = "project"
 	sess.Network = prof.Network
 	sess.RecipeID = recipe.RecipeID
 	sess.Image = recipe.AgentImage
@@ -1007,6 +1011,40 @@ func createSessionFromProfile(store engsession.Store, profile string) (engsessio
 // cluster) and NEVER a token value, secret ref (op://, env:), staged file path,
 // session policy, or private-key ref (specs/0086 T1). Returns nil for an ad-hoc or
 // credential-less profile so the JSON field is omitted.
+// createBuiltinSession creates a profile-backed session without a repo policy:
+// the signed binary registry itself is the trusted policy authority.
+func createBuiltinSession(store engsession.Store, name string) (engsession.Session, error) {
+	builtin, ok := policy.BuiltinProfileByName(name)
+	if !ok {
+		return engsession.Session{}, emitContractError(jsoncontract.CodeNotFound, "profile not found", map[string]any{"profile": name})
+	}
+	prof := builtin.Profile
+	resolved, err := policy.Resolve(prof)
+	if err != nil {
+		return engsession.Session{}, emitContractError(jsoncontract.CodeInvalidArgument, "resolve profile packages", map[string]any{"profile": name, "error": err.Error()})
+	}
+	recipe, err := container.ResolveRecipe(resolved.IdentitySet)
+	if err != nil {
+		return engsession.Session{}, emitContractError(jsoncontract.CodeInvalidArgument, "resolve profile image recipe", map[string]any{"profile": name, "error": err.Error()})
+	}
+	workspace, err := os.Getwd()
+	if err != nil {
+		return engsession.Session{}, emitContractError(jsoncontract.CodeIOError, "get workspace", map[string]any{"error": err.Error()})
+	}
+	sess, err := store.Create(policy.NormalizeAgent(prof.Agent), prof.Environment, workspace, time.Now())
+	if err != nil {
+		return engsession.Session{}, emitContractError(jsoncontract.CodeIOError, "create session", map[string]any{"error": err.Error()})
+	}
+	sess.Profile, sess.ProfileSource, sess.Network = name, "builtin", prof.Network
+	sess.PolicyPath, sess.PolicyHash = "builtin:"+name, builtin.Hash
+	sess.RecipeID, sess.Image, sess.Resolved = recipe.RecipeID, recipe.AgentImage, resolvedMetadata(resolved)
+	sess.CredentialScopes = credentialScopesFromProfile(prof)
+	if err := store.Save(sess); err != nil {
+		return engsession.Session{}, emitContractError(jsoncontract.CodeIOError, "save session", map[string]any{"error": err.Error()})
+	}
+	return sess, nil
+}
+
 func credentialScopesFromProfile(prof policy.Profile) []engsession.CredentialScope {
 	c := prof.Credentials
 	if c == nil {
@@ -1732,6 +1770,9 @@ func sessionData(sess engsession.Session) map[string]any {
 	}
 	if sess.Profile != "" {
 		out["profile"] = sess.Profile
+		out["profile_source"] = sess.ProfileSource
+		out["policy_path"] = sess.PolicyPath
+		out["policy_hash"] = sess.PolicyHash
 	}
 	if sess.Name != "" {
 		out["name"] = sess.Name

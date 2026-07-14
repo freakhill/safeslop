@@ -58,17 +58,18 @@ type CredentialScope struct {
 // add staged credential values or resolved secret material here; the JSONL status
 // path serializes this object for clients.
 type Session struct {
-	ID          string            `json:"session_id"`
-	Profile     string            `json:"profile,omitempty"`
-	Name        string            `json:"name,omitempty"`
-	Agent       string            `json:"agent"`
-	Workspace   string            `json:"workspace"`
-	Environment string            `json:"environment"`
-	Network     string            `json:"network"`
-	Backend     string            `json:"backend"`
-	RecipeID    string            `json:"recipeID,omitempty"`
-	Image       string            `json:"image,omitempty"`
-	Resolved    *ResolvedMetadata `json:"resolved,omitempty"`
+	ID            string            `json:"session_id"`
+	Profile       string            `json:"profile,omitempty"`
+	ProfileSource string            `json:"profile_source,omitempty"`
+	Name          string            `json:"name,omitempty"`
+	Agent         string            `json:"agent"`
+	Workspace     string            `json:"workspace"`
+	Environment   string            `json:"environment"`
+	Network       string            `json:"network"`
+	Backend       string            `json:"backend"`
+	RecipeID      string            `json:"recipeID,omitempty"`
+	Image         string            `json:"image,omitempty"`
+	Resolved      *ResolvedMetadata `json:"resolved,omitempty"`
 	// CredentialScopes is the value-free credential legibility array for a
 	// profile-backed session, computed from the trusted policy.Profile at create
 	// time and surfaced by session create/list/status. Empty (omitted) for ad-hoc
