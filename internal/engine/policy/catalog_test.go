@@ -41,6 +41,21 @@ func TestDefaultCatalogBinaryDigestsPendingIW2(t *testing.T) {
 	}
 }
 
+func TestPersonalBundleBuildReady(t *testing.T) {
+	resolved, err := Resolve(Profile{Agent: "fish", Environment: "container", Bundles: []string{"personal"}})
+	if err != nil {
+		t.Fatalf("resolve personal bundle: %v", err)
+	}
+	catalog := DefaultCatalog()
+	if pending := catalog.BuildReadyFor(resolved.Packages); len(pending) > 0 {
+		t.Fatalf("personal bundle has unresolved binary digests: %v", pending)
+	}
+	python, ok := catalog.Lookup("python3")
+	if !ok || python.Kind != KindApt || python.Version != "3.11.2-1+b1" {
+		t.Fatalf("python3 must pin the Debian-snapshot apt leaf, got %+v", python)
+	}
+}
+
 // node's per-arch digests are the real, verified values (IW2): present, 64-hex, and
 // not the sentinel. Guards against a silent regression to placeholder digests.
 func TestNodeDigestsResolved(t *testing.T) {

@@ -32,7 +32,7 @@ file transfer between host and sandboxed runtimes.
 - `safeslop profile credentials clear <profile> [safeslop.cue] --output json` — remove only `credentials.github`/`credentials.forgejo`, deleting the `credentials` object if it becomes empty.
 - `safeslop creds list|show [<profile>] --output json` — inspect the credential posture of `safeslop.cue` profiles (declared creds + value-free readiness status); read-only, never reveals secret values.
 - `safeslop creds link|unlink|status` — manage host-only account links in `~/.config/safeslop/accounts.cue` (refs + non-secret ids only); `creds status --output json` is the Emacs account-link status envelope.
-- `safeslop profile defaults --output json` — list signed-binary builtin launchable defaults (`claude`, `fish`, `pi`, `zsh`), distinct from scaffold `profile presets`; project profiles take precedence and an invalid local policy fails closed.
+- `safeslop profile defaults --output json` — list signed-binary builtin launchable defaults (`claude`, `fish`, `pi`, `zsh`), distinct from scaffold `profile presets`; each uses container/deny, the pinned buildable `personal` image inputs, and an allowlisted read-only host projection. Project profiles take precedence and an invalid local policy fails closed.
 - `safeslop profile show <name> --output json` — inspect a resolved project or builtin profile with package set, dry-run image recipe, and source/path/hash provenance.
 - `safeslop lock [profile] --output json` — write repo-root `safeslop.lock.json` for the selected profile's recipe identity.
 - `safeslop trust` — approve a policy's exact bytes for launch. Required by every launch lane: `safeslop run <profile>`, `session create --profile`, and the Emacs client all share this gate (specs/0072); an untrusted or changed `safeslop.cue` is refused with a `TRUST_REQUIRED` envelope.
@@ -89,6 +89,24 @@ never gated.
 - Do not mount or expose host credential directories to agents.
 
 ## Common workflows
+
+### Inspect or create a builtin session from any directory
+
+```bash
+safeslop profile defaults --output json
+safeslop profile show pi --output json
+safeslop session create --profile pi --output json
+```
+
+The four builtins (`claude`, `fish`, `pi`, `zsh`) start at container + deny and
+resolve the `personal` bundle from pinned image inputs: binary URL/SHA256 per
+architecture and exact Debian-snapshot apt coordinates. Their read-only source
+allowlist is copied into the ephemeral container home; only the workspace is a
+read-write host mount. Never broaden projection to credential-bearing home paths.
+A project profile of the same name wins with normal trust/provenance checks, and
+an invalid project policy fails closed rather than falling back. Progressive
+egress remains an explicit operator action on the created session; it does not
+change the builtin policy.
 
 ### Create and inspect a profile
 

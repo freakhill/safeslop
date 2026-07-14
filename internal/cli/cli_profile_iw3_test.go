@@ -71,7 +71,7 @@ func TestProfileShowUnbuildablePackageReturnsEnvelope(t *testing.T) {
 safeslop: {
 	version: 1
 	profiles: {
-		test: {agent: "pi", environment: "container", network: "allow", bundles: ["pi"], packages: ["uv"]}
+		test: {agent: "pi", environment: "container", network: "allow", bundles: ["pi"], packages: ["bun"]}
 	}
 }
 `
@@ -190,7 +190,7 @@ func TestProfileCreateUnbuildablePackageReturnsEnvelopeAndDoesNotWrite(t *testin
 		"--agent", "pi",
 		"--environment", "container",
 		"--bundle", "pi",
-		"--package", "uv",
+		"--package", "bun",
 		"--network", "allow",
 		"--output", "json",
 	)

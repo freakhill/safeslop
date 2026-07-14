@@ -118,6 +118,21 @@ builtin JSON includes `profile_source`, `profile_name`, `policy_path`, and
 `policy_hash`; builtin paths are `builtin:<name>` and their hashes pin the
 embedded profile used when the session runs.
 
+All four builtins are contained-hybrid defaults: `environment: "container"`,
+`network: "deny"`, and the buildable `personal` bundle (plus the agent's own
+default bundle where applicable). Personal binary artifacts are pinned by version,
+per-architecture URL, and SHA256; `python3` is pinned to the immutable signed
+Debian snapshot. Image handlers verify the selected artifact before installation,
+so profile inspection fails closed if a package lacks a reviewed build path.
+
+Builtin host projection is read-only and allowlist-only. Approved pi/shell config
+is mounted under opaque staging paths and copied into the container's ephemeral
+home; the workspace remains the only read-write host mount. Credential-bearing
+home state such as `.ssh`, cloud/Kubernetes/Docker config, npm/cargo credentials,
+browser/keychain data, and safeslop state is never projected. Network authority
+still starts denied and can be expanded only through the explicit session-scoped
+grant commands below.
+
 `session create --profile`, `session status`, and `session list` include
 value-free credential scope in the JSON contract as `credential_scopes` for
 profile-backed sessions. Each row names only the credential kind, non-secret

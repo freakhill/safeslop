@@ -3,6 +3,8 @@ package container
 import (
 	"strings"
 	"testing"
+
+	"github.com/freakhill/safeslop/internal/engine/policy"
 )
 
 func TestRecipeIDDeterministicAndSensitive(t *testing.T) {
@@ -112,11 +114,94 @@ func TestAgentImageTagsAcceptsRipgrep(t *testing.T) {
 	}
 }
 
-func TestAgentImageTagsRejectsUnbuildablePackages(t *testing.T) {
-	if _, _, _, err := agentImageTags([]string{"uv"}); err == nil {
-		t.Fatal("expected error for a sentinel-digest binary (uv); got nil")
+func TestPersonalRecipeBuildArgs(t *testing.T) {
+	resolved, err := policy.Resolve(policy.Profile{Agent: "fish", Environment: "container", Bundles: []string{"personal"}})
+	if err != nil {
+		t.Fatalf("resolve personal bundle: %v", err)
 	}
-	if _, _, _, err := agentImageTags([]string{"python3"}); err == nil {
-		t.Fatal("expected error for an unwired catalog package (python3); got nil")
+	recipe, err := ResolveRecipe(resolved.IdentitySet)
+	if err != nil {
+		t.Fatalf("resolve personal recipe: %v", err)
+	}
+	catalog := policy.DefaultCatalog()
+	for _, name := range resolved.IdentitySet {
+		pkg, ok := catalog.Lookup(name)
+		if !ok {
+			t.Fatalf("resolved package %q missing from catalog", name)
+		}
+		prefix := argPrefix(name)
+		if got := recipe.BuildArgs[enableArg(name)]; got != "true" {
+			t.Errorf("%s = %q, want true", enableArg(name), got)
+		}
+		if got := recipe.BuildArgs[prefix+"_VERSION"]; got != pkg.Version {
+			t.Errorf("%s_VERSION = %q, want %q", prefix, got, pkg.Version)
+		}
+		if pkg.Kind == policy.KindBinary {
+			for arch, digest := range pkg.SHA256 {
+				suffix := strings.ToUpper(arch)
+				key := prefix + "_SHA256_" + suffix
+				if got := recipe.BuildArgs[key]; got != digest {
+					t.Errorf("%s = %q, want catalog digest %q", key, got, digest)
+				}
+				urlKey := prefix + "_URL_" + suffix
+				wantURL := strings.ReplaceAll(pkg.Upstream.Asset[arch], "{version}", pkg.Version)
+				if got := recipe.BuildArgs[urlKey]; got != wantURL {
+					t.Errorf("%s = %q, want catalog URL %q", urlKey, got, wantURL)
+				}
+			}
+		}
+	}
+}
+
+func TestPersonalDockerfileHandlersVerifyBinaryArtifacts(t *testing.T) {
+	resolved, err := policy.Resolve(policy.Profile{Agent: "fish", Environment: "container", Bundles: []string{"personal"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	asset, err := readAsset("Dockerfile.agent.tools")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dockerfile := string(asset)
+	catalog := policy.DefaultCatalog()
+	for _, name := range resolved.IdentitySet {
+		pkg, _ := catalog.Lookup(name)
+		prefix := argPrefix(name)
+		start := strings.Index(dockerfile, "ARG ENABLE_"+prefix+"=false")
+		if start < 0 {
+			t.Errorf("missing guarded Dockerfile handler for %q", name)
+			continue
+		}
+		end := strings.Index(dockerfile[start:], "\n# ---")
+		block := dockerfile[start:]
+		if end >= 0 {
+			block = dockerfile[start : start+end]
+		}
+		if pkg.Kind == policy.KindBinary {
+			for _, want := range []string{
+				prefix + "_URL_AMD64", prefix + "_URL_ARM64",
+				prefix + "_SHA256_AMD64", prefix + "_SHA256_ARM64",
+			} {
+				if !strings.Contains(block, want) {
+					t.Errorf("%s handler missing %q", name, want)
+				}
+			}
+			if !strings.Contains(block, "sha256sum -c -") && !strings.Contains(block, "install-catalog-artifact") {
+				t.Errorf("%s handler does not invoke checksum verification", name)
+			}
+		}
+	}
+	pythonAt := strings.Index(dockerfile, "ARG ENABLE_PYTHON3=false")
+	if pythonAt < 0 || !strings.Contains(dockerfile[pythonAt:], `apt-get install -y --no-install-recommends "python3=${PYTHON3_VERSION}"`) {
+		t.Error("python3 handler must install the exact catalog leaf from the inherited snapshot")
+	}
+}
+
+func TestRecipeRejectsUnbuildablePackages(t *testing.T) {
+	if _, _, _, err := agentImageTags([]string{"bun"}); err == nil {
+		t.Fatal("expected error for a sentinel-digest binary (bun); got nil")
+	}
+	if _, _, _, err := agentImageTags([]string{"typescript"}); err == nil {
+		t.Fatal("expected error for an unwired catalog package (typescript); got nil")
 	}
 }

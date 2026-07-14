@@ -125,8 +125,8 @@
       "kind": "binary",
       "name": "bat",
       "sha256": {
-        "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
-        "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
+        "amd64": "31bbbcc0d9f5abe16399425c98ffbf21aaa0ce190c7b75d4f32297696ff32b81",
+        "arm64": "d155df218dc2d662da191e2dacddc71c90197b62ebe7e2923a659e5dd055d5cb"
       },
       "upstream": {
         "asset": {
@@ -334,8 +334,8 @@
       "kind": "binary",
       "name": "eza",
       "sha256": {
-        "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
-        "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
+        "amd64": "3c2baacd598598da744a3996d8b6a37caa330e43c1a989026ccf9a9542731434",
+        "arm64": "88debe2b2f8454b45c6d4b12ba32b5192fd345de0fdc31c6e543ef12daea8870"
       },
       "upstream": {
         "asset": {
@@ -354,8 +354,8 @@
       "kind": "binary",
       "name": "fd",
       "sha256": {
-        "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
-        "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
+        "amd64": "5f9030bcb0e1d03818521ed2e3d74fdb046480a45a4418ccff4f070241b4ed25",
+        "arm64": "6de8be7a3d8ca27954a6d1e22bc327af4cf6fc7622791e68b820197f915c422b"
       },
       "upstream": {
         "asset": {
@@ -393,8 +393,8 @@
       "kind": "binary",
       "name": "fzf",
       "sha256": {
-        "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
-        "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
+        "amd64": "4957db97bb8d3af947745d8f0309572bd7867666de30367e9422d55761ad076a",
+        "arm64": "496fe77565d9008a684fff6ca9f23a48b41e674e8134e5f6cddee8e2cad129a9"
       },
       "upstream": {
         "asset": {
@@ -418,8 +418,8 @@
         "sum.golang.org"
       ],
       "sha256": {
-        "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
-        "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
+        "amd64": "aac1b08a0fb0c4e0a7c1555beb7b59180b05dfc5a3d62e40e9de90cd42f88235",
+        "arm64": "bd03b743eb6eb4193ea3c3fd3956546bf0e3ca5b7076c8226334afe6b75704cd"
       },
       "upstream": {
         "asset": {
@@ -439,8 +439,8 @@
       "kind": "binary",
       "name": "hyperfine",
       "sha256": {
-        "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
-        "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
+        "amd64": "d5550bbdc240d2aaa8f43ea2dc8b03a306afb30ea8464cd8b2faa9486ed1019e",
+        "arm64": "7f9c0522e1acf869e0558e085c43f2cea3e30e4f7a4b7bc3d5540cbdee7b4273"
       },
       "upstream": {
         "asset": {
@@ -546,12 +546,12 @@
       ],
       "kind": "apt",
       "name": "python3",
-      "note": "apt kind — transitives are frozen by the golden-base Debian-snapshot pin (specs/0058 N2.2); reserved for what only apt provides",
+      "note": "apt leaf 3.11.2-1+b1 and its transitives are frozen by the golden-base Debian snapshot 20260628T204121Z (specs/0058 N2.2)",
       "upstream": {
         "kind": "debian-snapshot",
-        "url": "https://snapshot.debian.org/mr/package/python3.11/"
+        "url": "https://snapshot.debian.org/mr/package/python3-defaults/"
       },
-      "version": "3.11"
+      "version": "3.11.2-1+b1"
     },
     {
       "buildFetch": [
@@ -581,8 +581,8 @@
       "kind": "binary",
       "name": "ruff",
       "sha256": {
-        "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
-        "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
+        "amd64": "ad61c55a3b361e4f451e90247d6ca6018c2563f41c5142c1f8388138bdac96b3",
+        "arm64": "e4e69fe47ad319aeef0983e26e927907d7521214a7d72c79cf2e2b15316ecfa5"
       },
       "upstream": {
         "asset": {
@@ -606,8 +606,8 @@
         "static.rust-lang.org"
       ],
       "sha256": {
-        "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
-        "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
+        "amd64": "c295047583a56238ea06b43f849f4b877fa12bfd4c7103f8d9a74c94c9c4e108",
+        "arm64": "371eadcca97062219cbd8593628eb5d2802bc370515d085fedce1b56b2baed57"
       },
       "upstream": {
         "asset": {
@@ -615,7 +615,7 @@
           "arm64": "https://static.rust-lang.org/dist/rust-{version}-aarch64-unknown-linux-gnu.tar.xz"
         },
         "kind": "url-regex",
-        "manifestURL": "https://static.rust-lang.org/dist/channel-rust-stable.toml",
+        "manifestURL": "https://static.rust-lang.org/dist/channel-rust-{version}.toml",
         "url": "https://static.rust-lang.org/dist/channel-rust-stable.toml"
       },
       "version": "1.96.0"
@@ -647,10 +647,14 @@
       "kind": "binary",
       "name": "sccache",
       "sha256": {
-        "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
-        "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
+        "amd64": "1fbb35e135660d04a2d5e42b59c7874d39b3deb17de56330b25b713ec59f849b",
+        "arm64": "d6a1ce4acd02b937cd61bc675a8be029a60f7bc167594c33d75732bbc0a07400"
       },
       "upstream": {
+        "asset": {
+          "amd64": "https://github.com/mozilla/sccache/releases/download/v{version}/sccache-v{version}-x86_64-unknown-linux-musl.tar.gz",
+          "arm64": "https://github.com/mozilla/sccache/releases/download/v{version}/sccache-v{version}-aarch64-unknown-linux-musl.tar.gz"
+        },
         "kind": "github-releases",
         "url": "https://api.github.com/repos/mozilla/sccache/releases"
       },
@@ -662,15 +666,20 @@
       ],
       "kind": "binary",
       "name": "tokei",
+      "note": "12.1.2 is the latest stable release with published Linux binary assets; 13.0.0 and 14.0.0 publish source only",
       "sha256": {
-        "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
-        "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
+        "amd64": "c8c5c4ab9e1ff47e745de70f4af3214078657399fa7a0da0b5f209d780e49978",
+        "arm64": "ef514fd12cfc3ee2d1725e5ecb866ee1123163004879ec285b22f3323389ebe2"
       },
       "upstream": {
+        "asset": {
+          "amd64": "https://github.com/XAMPPRocky/tokei/releases/download/v{version}/tokei-x86_64-unknown-linux-gnu.tar.gz",
+          "arm64": "https://github.com/XAMPPRocky/tokei/releases/download/v{version}/tokei-aarch64-unknown-linux-gnu.tar.gz"
+        },
         "kind": "github-releases",
         "url": "https://api.github.com/repos/XAMPPRocky/tokei/releases"
       },
-      "version": "13.0.0"
+      "version": "12.1.2"
     },
     {
       "buildFetch": [
@@ -695,8 +704,8 @@
       "kind": "binary",
       "name": "uv",
       "sha256": {
-        "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
-        "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
+        "amd64": "14411de26cdea5f5139fafaf2b675b1c633e744dd49c6d6a9fc8817ec065158b",
+        "arm64": "055c329c38a93c01d378349d51cb4d521d1998c8a79355ddc00f863ce451942f"
       },
       "upstream": {
         "asset": {
@@ -745,8 +754,8 @@
       "kind": "binary",
       "name": "yq",
       "sha256": {
-        "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
-        "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
+        "amd64": "b96de04645707e14a12f52c37e6266832e03c29e95b9b139cddcae7314466e69",
+        "arm64": "a02cc637409db44a9f9cb55ea92c40019582ba88083c4d930a727ec4b59ed439"
       },
       "upstream": {
         "asset": {
@@ -765,8 +774,8 @@
       "kind": "binary",
       "name": "zoxide",
       "sha256": {
-        "amd64": "0000000000000000000000000000000000000000000000000000000000000000",
-        "arm64": "0000000000000000000000000000000000000000000000000000000000000000"
+        "amd64": "4092ee38aa1efde42e4efb2f9c872df5388198aacae7f1a74e5eb5c3cc7f531c",
+        "arm64": "078cc9cc8cedb6c45edb84c0f5bad53518c610859c73bdb3009a52b89652c103"
       },
       "upstream": {
         "asset": {

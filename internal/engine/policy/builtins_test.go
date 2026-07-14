@@ -30,8 +30,13 @@ func TestBuiltinProfilesAreLaunchableAndDeterministic(t *testing.T) {
 		if !IsLaunchableAgent(NormalizeAgent(builtin.Profile.Agent)) {
 			t.Errorf("builtin %q is not session-launchable", builtin.Name)
 		}
-		if _, err := Resolve(builtin.Profile); err != nil {
+		resolved, err := Resolve(builtin.Profile)
+		if err != nil {
 			t.Errorf("builtin %q does not resolve: %v", builtin.Name, err)
+			continue
+		}
+		if pending := DefaultCatalog().BuildReadyFor(resolved.IdentitySet); len(pending) > 0 {
+			t.Errorf("builtin %q resolves unbuildable packages: %v", builtin.Name, pending)
 		}
 	}
 

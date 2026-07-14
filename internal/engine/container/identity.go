@@ -15,16 +15,29 @@ const (
 	toolsImageRepo = "local/safeslop-tools"
 )
 
-// iw2BuildablePackages are the catalog packages Dockerfile.agent.tools wires in IW2.
-// Others are modeled in the catalog but not yet built here: the remaining sentinel-digest
-// binaries (bun/uv/mise/fd) and apt python3. A profile that resolves one fails fast in
-// agentImageTags rather than silently dropping it (specs/0058 N1, deferred packages).
+// iw2BuildablePackages are the catalog packages Dockerfile.agent.tools explicitly wires.
+// A profile that resolves anything else fails fast in agentImageTags rather than silently
+// dropping a tool (specs/0058 N1).
 var iw2BuildablePackages = map[string]bool{
-	"node":        true,
+	"bat":         true,
 	"claude-code": true,
+	"eza":         true,
+	"fd":          true,
+	"fzf":         true,
+	"go":          true,
+	"hyperfine":   true,
+	"node":        true,
 	"pi":          true,
 	"pnpm":        true,
+	"python3":     true,
 	"ripgrep":     true,
+	"ruff":        true,
+	"rust":        true,
+	"sccache":     true,
+	"tokei":       true,
+	"uv":          true,
+	"yq":          true,
+	"zoxide":      true,
 }
 
 // RecipeID is the content-hash identity of a build: the first 12 hex chars of
@@ -76,14 +89,23 @@ func toolsBuildArgs(baseImg string, enabled []string) (map[string]string, error)
 			return nil, fmt.Errorf("cannot build: resolved package %q is not in the catalog", name)
 		}
 		if !iw2BuildablePackages[name] {
-			return nil, fmt.Errorf("cannot build: package %q is in the catalog but not yet wired into the agent image (IW2 supports node/claude-code/pi/pnpm)", name)
+			return nil, fmt.Errorf("cannot build: package %q is in the catalog but not wired into the agent image", name)
 		}
 		prefix := argPrefix(name)
 		args[enableArg(name)] = "true"
 		args[prefix+"_VERSION"] = p.Version
 		if p.Kind == policy.KindBinary {
+			if p.Upstream == nil {
+				return nil, fmt.Errorf("cannot build: binary package %q has no upstream artifact metadata", name)
+			}
 			for arch, digest := range p.SHA256 {
-				args[prefix+"_SHA256_"+strings.ToUpper(arch)] = digest
+				url := p.Upstream.Asset[arch]
+				if url == "" {
+					return nil, fmt.Errorf("cannot build: binary package %q has no %s artifact URL", name, arch)
+				}
+				suffix := strings.ToUpper(arch)
+				args[prefix+"_SHA256_"+suffix] = digest
+				args[prefix+"_URL_"+suffix] = strings.ReplaceAll(url, "{version}", p.Version)
 			}
 		}
 	}
