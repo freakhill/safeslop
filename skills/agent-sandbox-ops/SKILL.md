@@ -100,9 +100,11 @@ safeslop session create --profile pi --output json
 
 The four builtins (`claude`, `fish`, `pi`, `zsh`) start at container + deny and
 resolve the `personal` bundle from pinned image inputs: binary URL/SHA256 per
-architecture and exact Debian-snapshot apt coordinates. Their read-only source
-allowlist is copied into the ephemeral container home; only the workspace is a
-read-write host mount. Never broaden projection to credential-bearing home paths.
+architecture and exact Debian-snapshot apt coordinates. Pi/Claude project pi
+instructions and skills, Fish projects Fish config, and Zsh projects Zsh/Starship
+config; the read-only allowlist is copied into the ephemeral container home. Only
+the workspace is a read-write host mount. Never broaden projection to all home,
+raw Git config, or credential-bearing paths.
 A project profile of the same name wins with normal trust/provenance checks, and
 an invalid project policy fails closed rather than falling back. Progressive
 egress remains an explicit operator action on the created session; it does not

@@ -125,10 +125,12 @@ per-architecture URL, and SHA256; `python3` is pinned to the immutable signed
 Debian snapshot. Image handlers verify the selected artifact before installation,
 so profile inspection fails closed if a package lacks a reviewed build path.
 
-Builtin host projection is read-only and allowlist-only. Approved pi/shell config
-is mounted under opaque staging paths and copied into the container's ephemeral
-home; the workspace remains the only read-write host mount. Credential-bearing
-home state such as `.ssh`, cloud/Kubernetes/Docker config, npm/cargo credentials,
+Builtin host projection is read-only and allowlist-only. Pi/Claude receive pi
+instructions and skills; Fish receives Fish configuration; Zsh receives Zsh and
+Starship configuration. Approved sources are mounted under opaque staging paths
+and copied into the container's ephemeral home; the workspace remains the only
+read-write host mount. All of `$HOME`, raw Git configuration, credential-bearing
+state such as `.ssh`, cloud/Kubernetes/Docker config, npm/cargo credentials,
 browser/keychain data, and safeslop state is never projected. Network authority
 still starts denied and can be expanded only through the explicit session-scoped
 grant commands below.
