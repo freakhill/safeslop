@@ -320,6 +320,43 @@ mysterious bare table."
       (should (equal (aref (cadr running) 5) "4242"))
       (should (equal (aref (cadr created) 5) "—")))))
 
+(ert-deftest safeslop-test-portal-status-help-full-posture ()
+  "The Status tooltip prefixes lifecycle facts with the shared safety posture."
+  (let* ((sess '((environment . "container") (network . "deny")
+                 (socket . "") (credentials_revoked . nil)
+                 (last_error . "agent exited")
+                 (credential_scopes . (((kind . "github") (name . "acme/web") (scope . "app rw"))))))
+         (expected-posture (safeslop-session--posture-help sess))
+         (cell (safeslop-portal--status-cell "stopped" sess))
+         (help (get-text-property 0 'help-echo cell)))
+    (should (string-prefix-p expected-posture help))
+    (should (string-match-p "environment=container" help))
+    (should (string-match-p "network=deny" help))
+    (should (string-match-p "credentials: github acme/web app rw" help))
+    (should (string-suffix-p
+             "coupled · credentials live · last error: agent exited" help))))
+
+(ert-deftest safeslop-test-portal-status-help-old-record-posture ()
+  "Old credential-less rows get explicit env/net posture and no-scope text."
+  (let ((help (safeslop-portal--status-help
+               '((environment . "host") (network . "allow")
+                 (socket . "/tmp/session.sock") (credentials_revoked . t)))))
+    (should (string-match-p "environment=host" help))
+    (should (string-match-p "network=allow" help))
+    (should (string-match-p "credentials: —" help))
+    (should (string-suffix-p "detached · credentials revoked" help))))
+
+(ert-deftest safeslop-test-portal-status-help-defensive-posture ()
+  "A regressed row cannot leak refs, values, or paths through the Status tooltip."
+  (let ((help (safeslop-portal--status-help
+               '((environment . "container") (network . "deny")
+                 (credential_scopes . (((kind . "github") (name . "acme/web") (scope . "app rw"))
+                                       ((kind . "pnpm") (name . "op://vault/npm/token") (scope . "env:NPM_TOKEN"))
+                                       ((kind . "ssh") (name . "/tmp/stage/key") (scope . "BEGIN PRIVATE KEY"))))))))
+    (should (string-match-p "credentials: github acme/web app rw, pnpm, ssh" help))
+    (dolist (leak '("op://" "env:" "token" "BEGIN" "PRIVATE KEY" "/tmp/stage"))
+      (should-not (string-match-p (regexp-quote leak) help)))))
+
 (ert-deftest safeslop-test-portal-recipe-and-image-cells ()
   "Recipe lists resolved packages; Image shows the recipeID tag."
   (let ((sess '((recipeID . "abc123def456")

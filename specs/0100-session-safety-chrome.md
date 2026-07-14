@@ -26,7 +26,7 @@ WORKTREE: `.worktrees/0100-session-safety-chrome/`
   VERIFY:   `emacs --batch -L emacs -l ert -l emacs/test/safeslop-test.el -l emacs/test/safeslop-contract-test.el -l emacs/test/safeslop-profiles-test.el -l emacs/test/safeslop-credentials-test.el --eval '(ert-run-tests-batch-and-exit "safeslop-test-session-.*\\(safety-chrome\\|launch-term\\)")'`
   EXPECTED: command exits 0; live buffers with data carry one local, color-redundant mode-line segment with value-free help, existing mode-line content remains, and status-miss launches carry no segment.
 
-- [ ] T2 — Surface the same posture help from portal status
+- [x] T2 — Surface the same posture help from portal status
   FILE:     `emacs/safeslop-portal.el`, `emacs/test/safeslop-test.el`
   CHANGE:   Prefix `safeslop-portal--status-help` with the shared session posture help while retaining coupled/detached, credential-file lifecycle, and last-error details. Add tests for exact environment/network/scope text, old credential-less records, and defensive suppression of refs/values/paths.
   VERIFY:   `emacs --batch -L emacs -l ert -l emacs/test/safeslop-test.el -l emacs/test/safeslop-contract-test.el -l emacs/test/safeslop-profiles-test.el -l emacs/test/safeslop-credentials-test.el --eval '(ert-run-tests-batch-and-exit "safeslop-test-portal-status-help-.*posture")'`

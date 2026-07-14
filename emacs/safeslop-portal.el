@@ -116,7 +116,8 @@ terminal cells, so a wide-rune name (CJK/emoji, N1) can't overflow the row."
         (revoked (eq (alist-get 'credentials_revoked sess) t))
         (err (safeslop-portal--field sess 'last_error)))
     (string-join
-     (delq nil (list (if (and (stringp socket) (not (string-empty-p socket))) "detached" "coupled")
+     (delq nil (list (safeslop-session--posture-help sess)
+                     (if (and (stringp socket) (not (string-empty-p socket))) "detached" "coupled")
                      (if revoked "credentials revoked" "credentials live")
                      (unless (string-empty-p err) (concat "last error: " err))))
      " · ")))
