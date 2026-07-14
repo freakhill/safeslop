@@ -23,7 +23,7 @@ WORKTREE: `.worktrees/0101-profile-safety-evaluation/`
 
 ## Tasks
 
-- [ ] T1 — Implement the pure evaluation domain and authority registry
+- [x] T1 — Implement the pure evaluation domain and authority registry
   FILE:     `internal/engine/policy/evaluation.go`, `internal/engine/policy/evaluation_test.go`
   CHANGE:   TDD the v1 `Evaluation`, section, finding, remediation, and credential-scope JSON types/enums from the FLO note. Implement a validated stable rule registry and pure `EvaluateAuthority(Profile)` with deterministic axis/rule ordering for host/container network and file reach, builtin projection, secret count, all credential providers, value-free non-secret targets, provider/repo effective write, ignored egress, GitHub/Forgejo write+open-egress combinations, bounded/absent rows, and loud unknown handling. Add registry checks for duplicate/unregistered IDs, enum combinations, required remediation, and forbidden material.
   VERIFY:   `go test ./internal/engine/policy/ -run 'Test(Evaluation|EvaluateAuthority|CredentialScope|FindingRegistry)' -count=1 -v`
