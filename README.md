@@ -237,7 +237,11 @@ are rejected so it cannot break the JSONL line protocol or spoof a status) and,
 when set, is surfaced in the session's `status`/`list` envelope and the Emacs
 portal. Live Emacs buffers are also named and annotated with profile/project,
 tier/net, and value-free credential scope, so a running or attached terminal is
-legible without opening session details.
+legible without opening session details. Persistent safety chrome in each live
+buffer's mode-line repeats the literal environment/network posture and a
+value-free credential count, with color as reinforcement only; its tooltip
+expands the honest tier/network notes and safe scope names. The portal Status
+posture tooltip carries the same facts alongside lifecycle state.
 
 `safeslop down` removes safeslop-managed host-container stacks by label. Container
 startup also sweeps managed, record-less orphan boundaries on the detected

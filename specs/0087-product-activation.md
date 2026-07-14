@@ -57,5 +57,5 @@ After `specs/0086` and local install, safeslop is safer and more legible but sti
 - [x] Credential connection + repo picker implemented (`specs/0090-credential-connection-repo-picker.md`): account-link status/UI, `profile credentials set|clear`, and manual repo picker shipped; live repo discovery remains deferred.
 - [x] Profile authoring cockpit implemented (`specs/0091-profile-authoring-cockpit.md`): compose buffer, checkbox/help catalog selection, dry-run safety preview, catalog defaults inheritance, and custom mounts deferred.
 - [x] Network authority ayo-flo decision landed (`specs/0089-network-authority-ayo-flo.md`).
-- [ ] Session safety chrome spec written.
+- [x] Session safety chrome implemented (`specs/0100-session-safety-chrome.md`): live Emacs terminals carry persistent, color-redundant tier/network/credential posture in the mode-line, mirrored in portal Status help.
 - [ ] Profile safety evaluation spec written.

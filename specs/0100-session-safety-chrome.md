@@ -32,7 +32,7 @@ WORKTREE: `.worktrees/0100-session-safety-chrome/`
   VERIFY:   `emacs --batch -L emacs -l ert -l emacs/test/safeslop-test.el -l emacs/test/safeslop-contract-test.el -l emacs/test/safeslop-profiles-test.el -l emacs/test/safeslop-credentials-test.el --eval '(ert-run-tests-batch-and-exit "safeslop-test-portal-status-help-.*posture")'`
   EXPECTED: command exits 0; portal status help exposes the same value-free safety posture without changing visible columns or leaking forbidden material.
 
-- [ ] T3 — Synchronize operator documentation and roadmap status
+- [x] T3 — Synchronize operator documentation and roadmap status
   FILE:     `README.md`, `skills/agent-sandbox-ops/SKILL.md`, `specs/0087-product-activation.md`, `specs/0100-session-safety-chrome.md`
   CHANGE:   Document the persistent mode-line segment and portal posture tooltip; mark 0087 session safety chrome covered by 0100 while leaving profile safety evaluation open; set this spec complete only after T4 passes.
   VERIFY:   `rg -n 'safety chrome|mode-line|posture tooltip|0100|Profile safety evaluation' README.md skills/agent-sandbox-ops/SKILL.md specs/0087-product-activation.md specs/0100-session-safety-chrome.md`
