@@ -41,7 +41,7 @@ WORKTREE: `.worktrees/0101-profile-safety-evaluation/`
   VERIFY:   `go test ./internal/cli/ -run 'TestProfile(Evaluation|Show.*Evaluation|CreateDryRun.*Evaluation|EvaluationCompatibility)' -count=1 -v`
   EXPECTED: command exits 0; project/builtin/unsaved envelopes match the v1 contract, blocked/unknown readiness never changes authority, helper shadowing remains fail-closed, output is value-free, and old JSON fields remain decodable.
 
-- [ ] T4 — Render structured evaluation in Emacs Profile workflows
+- [x] T4 — Render structured evaluation in Emacs Profile workflows
   FILE:     `emacs/safeslop-profiles.el`, `emacs/test/safeslop-profiles-test.el`
   CHANGE:   TDD pure helpers that validate v1, render Authority → Trust → Readiness, print explicit outcome words with color redundancy, preserve engine order, show timestamp/remote-validity caveat, and dispatch remediation only by typed `kind/action_id/docs_ref`. Use the renderer in Profile Inspect and compose Preview; make profile launch fetch/show the engine evaluation before its final confirmation while leaving CLI launch gates authoritative. Unsupported/malformed v1 renders loud UNKNOWN; absent evaluation renders a labeled legacy fallback; supported v1 does not prominently use `risk.level`. Deduplicate remediation buttons by first `action_id` without hiding findings.
   VERIFY:   `emacs --batch -L emacs -l ert -l emacs/test/safeslop-test.el -l emacs/test/safeslop-contract-test.el -l emacs/test/safeslop-profiles-test.el -l emacs/test/safeslop-credentials-test.el --eval '(ert-run-tests-batch-and-exit "safeslop-test-profiles-.*evaluation")'`

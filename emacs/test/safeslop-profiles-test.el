@@ -665,4 +665,329 @@
     (setq safeslop-profiles--config-path nil)
     (should-error (safeslop-profiles-validate) :type 'user-error)))
 
+(defun safeslop-test-profiles--evaluation-remediation (kind action-id summary)
+  "Return representative typed remediation metadata for evaluation tests."
+  `((kind . ,kind)
+    (action_id . ,action-id)
+    (summary . ,summary)
+    (docs_ref . "specs/0101-profile-safety-evaluation.md#test")))
+
+(defun safeslop-test-profiles--evaluation-finding
+    (rule-id axis outcome severity title consequence &optional remediation scope-ids)
+  "Return a representative structured profile evaluation finding."
+  `((rule_id . ,rule-id)
+    (axis . ,axis)
+    (outcome . ,outcome)
+    (severity . ,severity)
+    (title . ,title)
+    (consequence . ,consequence)
+    (scope_ids . ,(or scope-ids nil))
+    (remediation . ,(or remediation :json-null))))
+
+(defun safeslop-test-profiles--evaluation-data ()
+  "Return complete v1 profile DATA with legacy fields that must not win."
+  (let* ((duplicate (safeslop-test-profiles--evaluation-remediation
+                     "policy_change" "bound-shared-authority" "Engine guidance A"))
+         (authority-findings
+          (list
+           (safeslop-test-profiles--evaluation-finding
+            "authority.network.test" "network" "concern" "high"
+            "Network title from engine" "Network consequence from engine" duplicate)
+           (safeslop-test-profiles--evaluation-finding
+            "authority.files.test" "files" "bounded" "info"
+            "Files title from engine" "Files consequence from engine")
+           (safeslop-test-profiles--evaluation-finding
+            "authority.projection.test" "projection" "not_applicable" "info"
+            "Projection title from engine" "Projection consequence from engine")
+           (safeslop-test-profiles--evaluation-finding
+            "authority.secrets.test" "secrets" "bounded" "info"
+            "Secrets title from engine" "Secrets consequence from engine")
+           (safeslop-test-profiles--evaluation-finding
+            "authority.credentials.test" "credentials" "unknown" "high"
+            "Credentials title from engine" "Credentials consequence from engine"
+            duplicate '("credential.github.001"))))
+         (trust-findings
+          (list
+           (safeslop-test-profiles--evaluation-finding
+            "trust.project.changed" "trust" "fail" "high"
+            "Trust title from engine" "Trust consequence from engine"
+            (safeslop-test-profiles--evaluation-remediation
+             "review_and_trust" "review-and-trust-policy" "Review exact bytes"))))
+         (readiness-findings
+          (list
+           (safeslop-test-profiles--evaluation-finding
+            "readiness.workspace" "readiness" "pass" "info"
+            "Workspace title from engine" "Workspace consequence from engine")
+           (safeslop-test-profiles--evaluation-finding
+            "readiness.container-runtime" "readiness" "fail" "high"
+            "Runtime title from engine" "Runtime consequence from engine"
+            (safeslop-test-profiles--evaluation-remediation
+             "install_helper" "install-container-runtime" "Install a reviewed runtime"))
+           (safeslop-test-profiles--evaluation-finding
+            "readiness.retry" "readiness" "unknown" "high"
+            "Retry title from engine" "Retry consequence from engine"
+            (safeslop-test-profiles--evaluation-remediation
+             "retry_check" "retry-readiness-check" "Retry the local check"))))
+         (scope '((scope_id . "credential.github.001")
+                  (provider . "github")
+                  (target . "acme/widgets")
+                  (access . "read_write")
+                  (lifetime . "short_lived")
+                  (basis . "declared"))))
+    (list
+     '(name . "review")
+     '(profile . ((agent . "claude") (environment . "container") (network . "deny")))
+     (cons 'evaluation
+           (list
+            (cons 'schema_version 1)
+            (cons 'authority
+                  (list (cons 'findings authority-findings)
+                        (cons 'credential_scopes (list scope))))
+            (cons 'trust
+                  (list '(state . "changed")
+                        '(basis . "project_exact_bytes")
+                        '(checked_at . "2026-07-14T12:34:56Z")
+                        (cons 'findings trust-findings)))
+            (cons 'readiness
+                  (list '(state . "blocked")
+                        '(checked_at . "2026-07-14T12:34:56Z")
+                        (cons 'findings readiness-findings)))))
+     '(risk . ((headline . "LEGACY HEADLINE MUST NOT WIN")
+               (lines . ("legacy risk line"))
+               (level . "high")))
+     '(risk_axes . (((name . "network") (value . "legacy network")
+                     (restricted . :json-false) (severity . "high"))))
+     '(resolved . ((identitySet . ("node"))))
+     '(recipeID . "abc"))))
+
+(ert-deftest safeslop-test-profiles-preview-renders-evaluation-before-legacy-risk ()
+  "Compose preview prefers the structured three-question evaluation."
+  (let ((text (safeslop-profiles--preview-text
+               (safeslop-test-profiles--evaluation-data))))
+    (should (string-match-p "Authority — what it can reach" text))
+    (should-not (string-match-p "LEGACY HEADLINE MUST NOT WIN" text))))
+
+(defun safeslop-test-profiles--evaluation-button-at-action (action-id)
+  "Return the current buffer's text button for ACTION-ID, or nil."
+  (let ((position (point-min))
+        found)
+    (while (and (< position (point-max)) (not found))
+      (if-let* ((button (button-at position)))
+          (progn
+            (when (equal (plist-get (button-get button 'button-data) :action-id)
+                         action-id)
+              (setq found button))
+            (setq position (button-end button)))
+        (setq position (1+ position))))
+    found))
+
+(defun safeslop-test-profiles--evaluation-buttons (text)
+  "Return each button's typed metadata from propertized TEXT, in display order."
+  (with-temp-buffer
+    (insert text)
+    (let ((position (point-min))
+          metadata)
+      (while (< position (point-max))
+        (if-let* ((button (button-at position)))
+            (progn
+              (push (button-get button 'button-data) metadata)
+              (setq position (button-end button)))
+          (setq position (1+ position))))
+      (nreverse metadata))))
+
+(defun safeslop-test-profiles--evaluation-face-at (text label)
+  "Return TEXT's face property at the start of LABEL."
+  (with-temp-buffer
+    (insert text)
+    (goto-char (point-min))
+    (should (search-forward label nil t))
+    (get-text-property (- (point) (length label)) 'face)))
+
+(ert-deftest safeslop-test-profiles-evaluation-v1-validates-and-renders-three-questions ()
+  "V1 rendering keeps engine order and prints outcomes, timestamp, scope, and caveat."
+  (let* ((data (safeslop-test-profiles--evaluation-data))
+         (evaluation (alist-get 'evaluation data))
+         (text (safeslop-profiles--evaluation-text data)))
+    (should-not (safeslop-profiles--evaluation-validation-error evaluation))
+    (let ((authority (string-match "Authority — what it can reach" text))
+          (trust (string-match "Trust — is this exact policy approved?" text))
+          (readiness (string-match "Readiness — can this host launch it now?" text)))
+      (should (< authority trust))
+      (should (< trust readiness)))
+    (dolist (word '("[CONCERN]" "[BOUNDED]" "[N/A]" "[PASS]" "[FAIL]" "[UNKNOWN]"))
+      (should (string-match-p (regexp-quote word) text)))
+    (should (eq (safeslop-test-profiles--evaluation-face-at text "[PASS]")
+                'safeslop-profile-evaluation-pass))
+    (should (eq (safeslop-test-profiles--evaluation-face-at text "[UNKNOWN]")
+                'safeslop-profile-evaluation-unknown))
+    (should (eq (safeslop-test-profiles--evaluation-face-at text "[N/A]")
+                'safeslop-profile-evaluation-not-applicable))
+    (should (string-match-p "State: CHANGED" text))
+    (should (string-match-p "State: BLOCKED" text))
+    (should (string-match-p "Checked at: 2026-07-14T12:34:56Z" text))
+    (should (string-match-p "point-in-time local snapshot" text))
+    (should (string-match-p "remote authentication and authorization were not checked" text))
+    (should (string-match-p "github · acme/widgets · READ WRITE · SHORT LIVED · DECLARED" text))
+    ;; Array order is engine-owned: the client neither sorts titles nor parses
+    ;; their prose to derive a different order.
+    (should (< (string-match "Network title from engine" text)
+               (string-match "Files title from engine" text)))
+    (should (< (string-match "Runtime title from engine" text)
+               (string-match "Retry title from engine" text)))
+    (should-not (string-match-p "LEGACY HEADLINE MUST NOT WIN" text))))
+
+(ert-deftest safeslop-test-profiles-evaluation-remediation-is-typed-and-deduped ()
+  "Only the first action_id is a button; prose never becomes dispatch metadata."
+  (let* ((data (safeslop-test-profiles--evaluation-data))
+         (text (safeslop-profiles--evaluation-text data))
+         (buttons (safeslop-test-profiles--evaluation-buttons text))
+         (shared (cl-remove-if-not
+                  (lambda (metadata)
+                    (equal (plist-get metadata :action-id) "bound-shared-authority"))
+                  buttons)))
+    (should (= (length shared) 1))
+    ;; Both findings remain even though their action button is collapsed.
+    (should (string-match-p "Network consequence from engine" text))
+    (should (string-match-p "Credentials consequence from engine" text))
+    (let ((metadata (car shared)))
+      (should (equal metadata
+                     '(:kind "policy_change"
+                       :action-id "bound-shared-authority"
+                       :docs-ref "specs/0101-profile-safety-evaluation.md#test")))
+      (should-not (plist-member metadata :summary))
+      (let (dispatched)
+        (with-temp-buffer
+          (insert text)
+          (let ((button (safeslop-test-profiles--evaluation-button-at-action
+                         "bound-shared-authority")))
+            (cl-letf (((symbol-function 'safeslop-profiles--dispatch-remediation)
+                       (lambda (kind action-id docs-ref)
+                         (setq dispatched (list kind action-id docs-ref)))))
+              (button-activate button))))
+        (should (equal dispatched
+                       '("policy_change" "bound-shared-authority"
+                         "specs/0101-profile-safety-evaluation.md#test")))))))
+
+(ert-deftest safeslop-test-profiles-evaluation-prose-does-not-change-action-semantics ()
+  "Changing engine prose leaves typed remediation dispatch unchanged."
+  (let* ((data (safeslop-test-profiles--evaluation-data))
+         (evaluation (alist-get 'evaluation data))
+         (finding (car (alist-get 'findings (alist-get 'authority evaluation))))
+         (remediation (alist-get 'remediation finding)))
+    (setcdr (assq 'title finding) "Completely rewritten title")
+    (setcdr (assq 'consequence finding) "rm -rf is displayed only as inert prose")
+    (setcdr (assq 'summary remediation) "$(touch /tmp/never-executed)")
+    (let ((text (safeslop-profiles--evaluation-text data))
+          dispatched)
+      (with-temp-buffer
+        (insert text)
+        (let ((button (safeslop-test-profiles--evaluation-button-at-action
+                       "bound-shared-authority")))
+          (cl-letf (((symbol-function 'safeslop-profiles--dispatch-remediation)
+                     (lambda (&rest metadata) (setq dispatched metadata))))
+            (button-activate button))))
+      (should (equal dispatched
+                     '("policy_change" "bound-shared-authority"
+                       "specs/0101-profile-safety-evaluation.md#test")))
+      (should-not (file-exists-p "/tmp/never-executed")))))
+
+(ert-deftest safeslop-test-profiles-evaluation-unsupported-and-malformed-are-loud-unknown ()
+  "Present but unsupported/malformed evaluation never falls back to legacy green."
+  (dolist (mutator
+           (list
+            (lambda (evaluation)
+              (setcdr (assq 'schema_version evaluation) 2))
+            (lambda (evaluation)
+              (let* ((authority (alist-get 'authority evaluation))
+                     (finding (car (alist-get 'findings authority))))
+                (setcdr (assq 'outcome finding) "future_green")))))
+    (let* ((data (safeslop-test-profiles--evaluation-data))
+           (evaluation (alist-get 'evaluation data)))
+      (funcall mutator evaluation)
+      (let ((text (safeslop-profiles--evaluation-text data)))
+        (should (string-match-p "UNKNOWN — update required" text))
+        (should (eq (safeslop-test-profiles--evaluation-face-at text "UNKNOWN")
+                    'safeslop-profile-evaluation-unknown))
+        (should (string-match-p "No legacy risk fallback was used" text))
+        (should-not (string-match-p "LEGACY HEADLINE MUST NOT WIN" text))))))
+
+(ert-deftest safeslop-test-profiles-evaluation-absent-uses-labeled-legacy-fallback ()
+  "An absent evaluation explicitly says trust/readiness are unavailable."
+  (let* ((data (assq-delete-all 'evaluation
+                                (safeslop-test-profiles--evaluation-data)))
+         (text (safeslop-profiles--evaluation-text data)))
+    (should (string-match-p
+             "Legacy safety summary — trust and readiness unavailable" text))
+    (should (string-match-p "LEGACY HEADLINE MUST NOT WIN" text))
+    (should (string-match-p "legacy risk line" text))
+    (should (string-match-p "network: legacy network" text))
+    (should-not (string-match-p "Authority — what it can reach" text))))
+
+(ert-deftest safeslop-test-profiles-inspect-includes-evaluation-without-legacy-level ()
+  "Profile inspect appends structured evaluation and does not promote risk.level."
+  (let ((text (safeslop-profiles--inspect-format
+               (safeslop-test-profiles--evaluation-data))))
+    (should (string-match-p "Authority — what it can reach" text))
+    (should (string-match-p "Readiness — can this host launch it now?" text))
+    (should-not (string-match-p "LEGACY HEADLINE MUST NOT WIN" text))
+    (should-not (string-match-p "Legacy level" text))))
+
+(ert-deftest safeslop-test-profiles-launch-reviews-exact-evaluation-before-confirm ()
+  "Launch fetches profile show, displays its evaluation, then confirms and uses session gates."
+  (let* ((data (safeslop-test-profiles--evaluation-data))
+         (envelope `((schema_version . 1) (ok . t) (data . ,data)
+                     (warnings . nil) (errors . nil)))
+         events fetched-args reviewed-evaluation launched launch-directory)
+    (cl-letf (((symbol-function 'tabulated-list-get-id) (lambda () "review"))
+              ((symbol-function 'safeslop--call-json-async)
+               (lambda (args callback)
+                 (setq fetched-args args)
+                 (push 'fetch events)
+                 (let ((default-directory "/other/"))
+                   (funcall callback envelope))))
+              ((symbol-function 'safeslop-profiles--show-launch-review)
+               (lambda (_name _args shown-data)
+                 (setq reviewed-evaluation (alist-get 'evaluation shown-data))
+                 (push 'review events)))
+              ((symbol-function 'yes-or-no-p)
+               (lambda (prompt)
+                 (should (string-match-p "after reviewing the engine evaluation" prompt))
+                 (push 'confirm events)
+                 t))
+              ((symbol-function 'safeslop-session-new-from-profile)
+               (lambda (name)
+                 (setq launched name
+                       launch-directory default-directory)
+                 (push 'launch events))))
+      (with-temp-buffer
+        (safeslop-profiles-mode)
+        (setq default-directory "/repo/"
+              safeslop-profiles--config-path "/repo/safeslop.cue")
+        (safeslop-profiles-launch))
+      (should (equal fetched-args
+                     '("profile" "show" "review" "/repo/safeslop.cue" "--output" "json")))
+      (should (eq reviewed-evaluation (alist-get 'evaluation data)))
+      (should (equal (nreverse events) '(fetch review confirm launch)))
+      (should (equal launched "review"))
+      (should (equal launch-directory "/repo/")))))
+
+(ert-deftest safeslop-test-profiles-launch-declined-evaluation-review-does-not-create-session ()
+  "Declining the post-evaluation confirmation leaves CLI session creation untouched."
+  (let* ((data (safeslop-test-profiles--evaluation-data))
+         (envelope `((schema_version . 1) (ok . t) (data . ,data)
+                     (warnings . nil) (errors . nil)))
+         launched)
+    (cl-letf (((symbol-function 'tabulated-list-get-id) (lambda () "review"))
+              ((symbol-function 'safeslop--call-json-async)
+               (lambda (_args callback) (funcall callback envelope)))
+              ((symbol-function 'safeslop-profiles--show-launch-review)
+               (lambda (&rest _) nil))
+              ((symbol-function 'yes-or-no-p) (lambda (_prompt) nil))
+              ((symbol-function 'safeslop-session-new-from-profile)
+               (lambda (&rest _) (setq launched t))))
+      (with-temp-buffer
+        (safeslop-profiles-mode)
+        (safeslop-profiles-launch))
+      (should-not launched))))
+
 ;;; safeslop-profiles-test.el ends here
