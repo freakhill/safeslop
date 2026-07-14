@@ -118,7 +118,7 @@ When host projection lands, projection contents remain live host filesystem stat
 
 ## Tasks
 
-- [ ] T1 — Add builtin registry API and tests
+- [x] T1 — Add builtin registry API and tests
   FILE:     `internal/engine/policy/builtins.go`, `internal/engine/policy/builtins_test.go`, optional `internal/engine/policy/builtins/*.cue`
   CHANGE:   Add `BuiltinProfile`, `BuiltinProfiles`, and `BuiltinProfileByName`. Validate embedded builtin bytes via `LoadBytes` when CUE-backed. Sort output by name. Compute stable builtin hashes from canonical embedded bytes. Add placeholder/minimal builtins only if needed for this resolution slice; the final contained-hybrid profile bodies land in specs/0096 T7 after projection and session grants exist.
   VERIFY:   `go test ./internal/engine/policy -run 'Builtin|Presets' -v`
