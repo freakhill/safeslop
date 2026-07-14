@@ -1293,6 +1293,52 @@ ref/value/staged path is still refused (mirrors the portal T2 guarantee)."
     (dolist (leak '("op://" "env:" "TOKEN"))
       (should-not (string-match-p (regexp-quote leak) header)))))
 
+(ert-deftest safeslop-test-session-safety-chrome-is-color-redundant-and-value-free ()
+  "Safety chrome keeps literal posture words, reinforces them with existing faces,
+and exposes only the defensive value-free credential summary in help text."
+  (let* ((data '((environment . "container") (network . "deny")
+                 (credential_scopes . (((kind . "github") (name . "acme/web") (scope . "app rw"))
+                                       ((kind . "pnpm") (name . "op://vault/npm/token") (scope . "env:NPM_TOKEN"))
+                                       ((kind . "ssh") (name . "/tmp/stage/key") (scope . "BEGIN PRIVATE KEY"))))))
+         (chrome (safeslop-session--safety-chrome data))
+         (plain (substring-no-properties chrome))
+         (help (get-text-property 0 'help-echo chrome)))
+    (should (equal plain "safeslop[container/deny creds:3]"))
+    (should (eq (get-text-property (string-match "container" plain) 'face chrome)
+                'safeslop-tier-container))
+    (should (eq (get-text-property (string-match "deny" plain) 'face chrome)
+                'safeslop-net-deny))
+    (should (string-match-p "environment=container" help))
+    (should (string-match-p "network=deny" help))
+    (should (string-match-p "credentials: github acme/web app rw, pnpm, ssh" help))
+    (dolist (leak '("op://" "env:" "token" "BEGIN" "PRIVATE KEY" "/tmp/stage"))
+      (should-not (string-match-p (regexp-quote leak) help)))))
+
+(ert-deftest safeslop-test-session-safety-chrome-none-and-danger-faces ()
+  "Credential-less host/allow posture stays explicit and uses the danger faces."
+  (let* ((chrome (safeslop-session--safety-chrome
+                  '((environment . "host") (network . "allow"))))
+         (plain (substring-no-properties chrome)))
+    (should (equal plain "safeslop[host/allow creds:none]"))
+    (should (eq (get-text-property (string-match "host" plain) 'face chrome)
+                'safeslop-tier-host))
+    (should (eq (get-text-property (string-match "allow" plain) 'face chrome)
+                'safeslop-net-allow))))
+
+(ert-deftest safeslop-test-session-safety-chrome-install-is-local-idempotent-and-preserving ()
+  "Installing chrome prepends one local segment without replacing terminal modes' entries."
+  (with-temp-buffer
+    (setq mode-line-format '("existing" mode-line-buffer-identification))
+    (let ((original (copy-sequence mode-line-format))
+          (data '((environment . "container") (network . "deny"))))
+      (safeslop-session--install-safety-chrome data)
+      (safeslop-session--install-safety-chrome data)
+      (should (local-variable-p 'safeslop-session-safety-chrome))
+      (should (equal (substring-no-properties safeslop-session-safety-chrome)
+                     "safeslop[container/deny creds:none]"))
+      (should (= (cl-count 'safeslop-session-safety-chrome mode-line-format) 1))
+      (should (equal (cdr mode-line-format) original)))))
+
 (ert-deftest safeslop-test-session-launch-term-sets-buffer-local-id-and-header ()
   "launch-term fetches data best-effort, names the buffer descriptively, sets the
 buffer-local id after terminal creation, and installs a value-free creds header."
@@ -1318,7 +1364,10 @@ buffer-local id after terminal creation, and installs a value-free creds header.
             (should (equal safeslop-session-id "sess-xyz"))
             (should (stringp header-line-format))
             (should (string-match-p "creds: github acme/web app rw" header-line-format))
-            (should-not (string-match-p "op://\\|env:\\|/home/me" header-line-format))))
+            (should-not (string-match-p "op://\\|env:\\|/home/me" header-line-format))
+            (should (equal (substring-no-properties safeslop-session-safety-chrome)
+                           "safeslop[container/deny creds:1]"))
+            (should (= (cl-count 'safeslop-session-safety-chrome mode-line-format) 1))))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
 (ert-deftest safeslop-test-session-launch-term-fallback-legacy-buffer-name ()
@@ -1336,7 +1385,9 @@ legacy `safeslop-<id>' name and installs no header."
           (should (equal made-name "safeslop-sess-none"))
           (with-current-buffer buf
             (should (equal safeslop-session-id "sess-none"))
-            (should (null header-line-format))))
+            (should (null header-line-format))
+            (should-not (bound-and-true-p safeslop-session-safety-chrome))
+            (should-not (memq 'safeslop-session-safety-chrome mode-line-format))))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
 (ert-deftest safeslop-test-session-live-buffer-found-by-id ()

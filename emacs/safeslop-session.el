@@ -400,6 +400,71 @@ Set after terminal creation so the portal can find a live buffer by id even
 after its displayed name becomes descriptive (specs/0086 T3).  The id is the
 sole addressing handle; the buffer name is a pure, renamable label.")
 
+(defvar-local safeslop-session-safety-chrome nil
+  "Buffer-local mode-line safety posture for a live safeslop session.
+The symbol itself is installed in `mode-line-format', so refreshing this value
+updates the segment without replacing terminal-mode or user entries.")
+
+(defun safeslop-session--cell-help (cell)
+  "Return CELL's help text, or nil when it has none."
+  (and (stringp cell) (get-text-property 0 'help-echo cell)))
+
+(defun safeslop-session--posture-help (data)
+  "Return value-free expanded safety posture help for session DATA.
+Environment and network descriptions come from the same shared cells used by
+the dashboards.  Credential text uses the defensive 0086 scope formatter."
+  (let* ((env (or (safeslop-session--safe-display-field
+                   (safeslop-session--field data 'environment))
+                  "unknown"))
+         (net (or (safeslop-session--safe-display-field
+                   (safeslop-session--field data 'network))
+                  "unknown"))
+         (env-help (safeslop-session--cell-help
+                    (safeslop-surface--env-cell env)))
+         (net-help (safeslop-session--cell-help
+                    (safeslop-surface--net-cell net))))
+    (string-join
+     (list (if env-help
+               (format "environment=%s (%s)" env env-help)
+             (format "environment=%s" env))
+           (or net-help (format "network=%s" net))
+           (format "credentials: %s" (safeslop-session--creds-summary data)))
+     " · ")))
+
+(defun safeslop-session--safety-chrome (data)
+  "Return a persistent, color-redundant mode-line segment for session DATA.
+Literal environment/network words remain readable without color; the existing
+shared faces reinforce them.  Help text expands the same value-free posture."
+  (let* ((env (or (safeslop-session--safe-display-field
+                   (safeslop-session--field data 'environment))
+                  "unknown"))
+         (net (or (safeslop-session--safe-display-field
+                   (safeslop-session--field data 'network))
+                  "unknown"))
+         (count (safeslop-session--credential-count data))
+         (chrome (concat "safeslop["
+                         (safeslop-surface--env-cell env) "/"
+                         (safeslop-surface--net-cell net)
+                         " creds:" (if (> count 0) (number-to-string count) "none")
+                         "]")))
+    (add-text-properties 0 (length chrome)
+                         (list 'help-echo (safeslop-session--posture-help data))
+                         chrome)
+    chrome))
+
+(defun safeslop-session--install-safety-chrome (data)
+  "Install DATA's safety segment locally without replacing the current mode line.
+Installation is idempotent: the buffer-local segment symbol appears once and a
+copy of the terminal mode's existing format remains after it."
+  (setq-local safeslop-session-safety-chrome
+              (safeslop-session--safety-chrome data))
+  (let ((format (cond ((listp mode-line-format) (copy-sequence mode-line-format))
+                      ((null mode-line-format) nil)
+                      (t (list mode-line-format)))))
+    (unless (memq 'safeslop-session-safety-chrome format)
+      (setq-local mode-line-format
+                  (cons 'safeslop-session-safety-chrome format)))))
+
 (defconst safeslop-session--creds-unsafe-patterns
   '("op://" "\\benv:" "private[-_ ]?key" "begin .*key" "\\btoken\\b" "\\`[~/]")
   "Case-insensitive patterns never rendered from credential scope fields.
@@ -439,17 +504,25 @@ fields are dropped so nothing but value-free text reaches the header."
                  '(kind name scope)))
    " "))
 
+(defun safeslop-session--credential-scope-strings (data)
+  "Return DATA's non-empty, defensively value-free credential scope strings."
+  (let ((scopes (let ((v (alist-get 'credential_scopes data)))
+                  (if (vectorp v) (append v nil) v))))
+    (delq nil
+          (mapcar (lambda (scope)
+                    (let ((str (safeslop-session--creds-scope-string scope)))
+                      (unless (string-empty-p str) str)))
+                  scopes))))
+
+(defun safeslop-session--credential-count (data)
+  "Return the count of display-safe credential scopes in session DATA."
+  (length (safeslop-session--credential-scope-strings data)))
+
 (defun safeslop-session--creds-summary (data)
   "Return DATA's value-free credential-scope summary, or an em dash when none.
 Comma-joins every scope as \"kind name scope\"; old records without
 `credential_scopes' (and empty/blank arrays) yield an em dash (specs/0086 T3)."
-  (let* ((scopes (let ((v (alist-get 'credential_scopes data)))
-                   (if (vectorp v) (append v nil) v)))
-         (rendered (delq nil
-                         (mapcar (lambda (s)
-                                   (let ((str (safeslop-session--creds-scope-string s)))
-                                     (unless (string-empty-p str) str)))
-                                 scopes))))
+  (let ((rendered (safeslop-session--credential-scope-strings data)))
     (if rendered (string-join rendered ", ") "\u2014")))
 
 (defun safeslop-session--project (data)
@@ -636,7 +709,8 @@ fallback (`safeslop-session-status-fallback')."
     (with-current-buffer buf
       (setq-local safeslop-session-id session-id)
       (when data
-        (setq header-line-format (safeslop-session--header-line data))))
+        (setq header-line-format (safeslop-session--header-line data))
+        (safeslop-session--install-safety-chrome data)))
     (let ((proc (get-buffer-process buf)))
       (when proc
         ;; Capture raw stdout ahead of term's renderer, then key on it when the

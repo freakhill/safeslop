@@ -20,7 +20,7 @@ WORKTREE: `.worktrees/0100-session-safety-chrome/`
 
 ## Tasks
 
-- [ ] T1 — Add and install the buffer-local safety mode-line segment
+- [x] T1 — Add and install the buffer-local safety mode-line segment
   FILE:     `emacs/safeslop-session.el`, `emacs/test/safeslop-test.el`
   CHANGE:   TDD pure helpers for a safe credential count, shared posture help, and a propertized `safeslop[env/net creds:N|none]` segment. Add a buffer-local segment variable and an idempotent installer that prepends its symbol to a copied local `mode-line-format` without replacing existing entries. Call it from `safeslop-session--launch-term` only when status data exists, beside the existing header installation. Assert literal environment/network words, existing faces, full value-free help, unsafe-field suppression, preservation/idempotence, and fallback-without-data behavior.
   VERIFY:   `emacs --batch -L emacs -l ert -l emacs/test/safeslop-test.el -l emacs/test/safeslop-contract-test.el -l emacs/test/safeslop-profiles-test.el -l emacs/test/safeslop-credentials-test.el --eval '(ert-run-tests-batch-and-exit "safeslop-test-session-.*\\(safety-chrome\\|launch-term\\)")'`
