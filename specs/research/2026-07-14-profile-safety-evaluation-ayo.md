@@ -1,6 +1,6 @@
 # 2026-07-14 — Profile safety evaluation prior art (AYO)
 
-Status: compiled for `specs/0101`
+Status: applied through T5 of `specs/0101`; final repository verification pending
 Target: evolve safeslop's coarse `risk`/`risk_axes` preview into an actionable profile evaluation without a misleading aggregate score.
 
 ## Corpus
@@ -52,6 +52,17 @@ Target: evolve safeslop's coarse `risk`/`risk_axes` preview into an actionable p
 2. **Wire shape:** one flat finding stream with dimensions, or separate `authority`, `readiness`, and `trust` sections sharing a common finding schema.
 3. **Remediation contract:** prose + docs only, or typed action metadata in the first version.
 4. **Readiness timing:** enrich `profile show` directly, or add an explicit evaluation/preflight command so normal inspection stays deterministic and cheap.
+
+## Implementation status
+
+The selected lessons are now represented by the engine-owned v1 Authority → Trust
+→ Readiness contract and the Emacs inspect/compose/launch review. There is no
+aggregate score; local Readiness is a timestamped point-in-time snapshot and
+cannot reduce static Authority. Credential targets and remediation actions remain
+value-free and typed. Legacy `risk`/`risk_axes` fallback is labeled as lacking
+Trust and Readiness. Final T6 repository gates and roadmap closure remain pending;
+custom mounts, forge credential P2, and live remote permission inference remain
+deferred.
 
 ## Method
 

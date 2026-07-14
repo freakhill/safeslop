@@ -1,6 +1,6 @@
 # 0101 — Actionable profile safety evaluation
 
-Status: planned
+Status: implementation landed; final repository verification pending
 Date: 2026-07-14
 Decision: `specs/research/2026-07-14-profile-safety-evaluation-flo.md`
 Prior art: `specs/research/2026-07-14-profile-safety-evaluation-ayo.md`
@@ -20,6 +20,100 @@ WORKTREE: `.worktrees/0101-profile-safety-evaluation/`
 - Findings carry engine-owned `rule_id`, `axis`, `outcome`, `severity`, consequence, scope IDs, and typed remediation. Unknown/not-applicable are explicit and never green.
 - Credential scopes expose only non-secret targets/access/lifetime/basis and correctly honor provider-level or per-repository write.
 - Emacs renders Authority → Trust → Readiness from structured fields and never parses prose to infer severity, grouping, or action.
+
+There is no aggregate score, grade, combined color, or overall verdict. Static
+Authority describes authorized consequence, not likelihood; blocked Readiness or
+failed Trust never makes that Authority smaller.
+
+## Implemented behavior and operator guidance
+
+`profile show <name> --output json` returns the saved project or embedded builtin
+snapshot. `profile create --dry-run --output json` returns the exact unsaved
+compose input without writing and reports Trust as `not_applicable / unsaved`.
+Both keep legacy `risk` and two-row `risk_axes` fields for additive compatibility.
+
+### Authority: network
+
+Host network reach is unrestricted. A container with `network: "allow"` retains
+open egress even though its file boundary is narrower. A container with
+`network: "deny"` reports bounded allowlisted egress and names declared domains
+as possible exfiltration channels; an `egress` declaration on a mode that does
+not enforce it is reported as ignored. Unknown modes conservatively report
+unknown/wider reach rather than green.
+
+### Authority: files
+
+A host run can read and modify the whole account. A container run can read and
+modify the workspace; that is concrete write authority, not a claim that the
+workspace is safe. No project-authored custom host mounts exist in this slice.
+
+### Authority: projection
+
+Builtin projection copies an allowlisted set of live host instructions/config
+read-only into the ephemeral home. That content is readable authority and is not
+content-pinned by the policy hash. Absence, host not-applicable state, and unknown
+projection shape remain visible findings.
+
+### Authority: secrets
+
+Direct secret injection reports the count and consequence while withholding
+secret names, refs, and values. No injection remains a visible bounded finding;
+credential providers are classified separately.
+
+### Authority: credentials
+
+Credential rows use value-free targets only: approved non-secret metadata such as
+`owner/repo`, `origin`, registry host, cloud profile/role label, API-scope label,
+or cluster label. Rows expose provider, access, lifetime, and basis, but never a
+secret value/ref, private-key/account-link ref, staged path, private host/workspace
+path, or policy body. GitHub and Forgejo effective write is provider write OR
+per-repository write; mixed access is split into separate rows. Provider-default
+or unclassifiable scope is unknown, never assumed read-only. Write-capable forge
+credentials combined with open egress receive their own critical findings.
+
+### Trust
+
+Saved project profiles compare the exact inspected policy bytes with the local
+approval record: trusted, untrusted, changed, or unknown. A known builtin uses
+`embedded_builtin` provenance; this does not claim runtime signature verification.
+Unsaved dry-runs are N/A rather than untrusted. Trust remediation opens the
+explicit review/trust workflow and never approves automatically. Trust can block
+launch but cannot alter Authority.
+
+### Readiness
+
+Readiness checks only point-in-time local prerequisites: workspace availability,
+sanitized helper identity/shadow state, container runtime, host agent/toolchain
+helpers, and required value-free account-link presence. The section is
+timestamped once when collected. It does not stage credentials, resolve secret
+values, or contact a forge, cloud, cluster, registry, credential provider, or
+other remote authorization service; therefore it cannot promise that remote
+authentication/authorization will succeed. The displayed snapshot is not an
+authorization token, and existing launch-time trust, host-consent, helper/runtime,
+network, session-grant, and credential gates remain authoritative.
+
+### Compatibility and Emacs UX
+
+Profile Inspect (`RET`/`i`) renders the latest `profile show` evaluation. Compose
+Preview (`C-c C-c`) renders the exact unsaved dry-run before save. Profile launch
+(`r`) fetches and displays a fresh `profile show` evaluation before its final
+Emacs confirmation, then hands off to the authoritative CLI session gates. Every
+finding prints `CONCERN`, `BOUNDED`, `PASS`, `FAIL`, `UNKNOWN`, or `N/A`; color is
+only redundant reinforcement. Remediation dispatch uses typed
+`kind`/`action_id`/`docs_ref`, never finding prose, shell text, automatic CUE
+patching, or automatic trust.
+
+When `evaluation` is absent, Emacs labels the compatibility view **Legacy safety
+summary — trust and readiness unavailable** and renders `risk`/`risk_axes`. A
+present but unsupported or malformed evaluation renders **UNKNOWN — update
+required** and does not fall back to legacy `risk.level`.
+
+### Deferred
+
+Custom mount authoring, forge credential P2 and live repository discovery, live
+IAM/RBAC/remote credential inference, arbitrary remediation execution, a daemon,
+and changes to settled trust/network/host-consent/session-grant/file-sharing laws
+remain deferred.
 
 ## Tasks
 
@@ -47,7 +141,7 @@ WORKTREE: `.worktrees/0101-profile-safety-evaluation/`
   VERIFY:   `emacs --batch -L emacs -l ert -l emacs/test/safeslop-test.el -l emacs/test/safeslop-contract-test.el -l emacs/test/safeslop-profiles-test.el -l emacs/test/safeslop-credentials-test.el --eval '(ert-run-tests-batch-and-exit "safeslop-test-profiles-.*evaluation")'`
   EXPECTED: command exits 0; all three questions are independently legible, unknown/N/A are non-green, prose changes do not alter UI behavior, typed remediation is value-free, launch reviews the exact engine evaluation, and legacy clients/snapshots degrade loudly.
 
-- [ ] T5 — Synchronize docs, roadmap, and decision status
+- [x] T5 — Synchronize docs, roadmap, and decision status
   FILE:     `README.md`, `skills/agent-sandbox-ops/SKILL.md`, `specs/0087-product-activation.md`, `specs/0101-profile-safety-evaluation.md`, `specs/research/2026-07-14-profile-safety-evaluation-{ayo,flo}.md`
   CHANGE:   Document the three-section non-score evaluation, local readiness snapshot caveat, trust/authority separation, value-free credential targets, legacy fallback, and Profile inspect/compose/launch UX. Mark 0087 profile safety evaluation complete only after T6 passes; keep custom mounts and forge P2 deferred.
   VERIFY:   `rg -n 'Authority|Trust|Readiness|no.*score|value-free|0101|profile safety evaluation' README.md skills/agent-sandbox-ops/SKILL.md specs/0087-product-activation.md specs/0101-profile-safety-evaluation.md specs/research/2026-07-14-profile-safety-evaluation-{ayo,flo}.md`

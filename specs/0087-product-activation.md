@@ -19,7 +19,7 @@ After `specs/0086` and local install, safeslop is safer and more legible but sti
 - The UI can connect/check GitHub and Forgejo readiness and choose repositories/scopes without exposing secret values.
 - Bundle/package selection is checkbox-driven, documented inline, and makes inherited packages obvious.
 - Network authority supports more than allow/deny only after an ayo-flo decision on the capability model.
-- Profile authoring supports mounts and shows a safety evaluation before save/run.
+- Profile authoring states the current workspace-only file boundary and shows a non-score safety evaluation before save/run; custom mount authoring remains deferred pending its capability model.
 - The UI blocks or explains runtime helper failures before a session is created/launched.
 - Host ad-hoc creation in Emacs offers the explicit `--trust-host` acknowledgement instead of dead-ending on `TRUST_REQUIRED`.
 - Open sessions have persistent chrome that certifies environment, network, and credential posture.
@@ -33,7 +33,7 @@ After `specs/0086` and local install, safeslop is safer and more legible but sti
    UI flows for GitHub and Forgejo account links, readiness, repository selection with checkboxes, and read/write scope toggles. Values/refs stay outside rows unless explicitly in the existing Credentials readiness surface; session/profile records remain value-free.
 
 3. **Profile authoring cockpit.**
-   Default profiles, checkbox bundle/package picker with `?` help, inherited bundle packages shown selected/locked, dynamic LSP bundle generation, mounts UI, and safety summary before save.
+   Default profiles, checkbox bundle/package picker with `?` help, inherited bundle packages shown selected/locked, dynamic LSP bundle generation, current workspace-only boundary legibility, and a safety evaluation before save. Custom mount UI remains deferred pending a file-sharing capability model.
 
 4. **Network authority model (ayo-flo required).**
    Decide the policy/UX model for deny, allowlist domains/IPs, progressive ask-per-destination, temporary grants, and mixed allowlist+prompt. This is a security/capability boundary and must not be improvised in code.
@@ -42,7 +42,7 @@ After `specs/0086` and local install, safeslop is safer and more legible but sti
    Persistent, redundant visual chrome across terminal buffers/portal/modeline/tab that certifies tier/net/credential scope at a glance. Builds on `specs/0086` labels and headers.
 
 6. **Profile safety evaluation.**
-   Rubric and UI that scores/explains profile risk: host vs container, network posture, mounts, credential write scopes, helper readiness, and trust state. Must be actionable, not a magic number.
+   Engine-owned, non-score Authority → Trust → Readiness findings for host/container reach, network posture, current file/projection boundaries, value-free credential targets and write scopes, exact-byte/builtin trust, and point-in-time local helper readiness. It must be actionable without combining unlike facts into a magic number or overall verdict.
 
 ## Recommended order
 
@@ -58,4 +58,8 @@ After `specs/0086` and local install, safeslop is safer and more legible but sti
 - [x] Profile authoring cockpit implemented (`specs/0091-profile-authoring-cockpit.md`): compose buffer, checkbox/help catalog selection, dry-run safety preview, catalog defaults inheritance, and custom mounts deferred.
 - [x] Network authority ayo-flo decision landed (`specs/0089-network-authority-ayo-flo.md`).
 - [x] Session safety chrome implemented (`specs/0100-session-safety-chrome.md`): live Emacs terminals carry persistent, color-redundant tier/network/credential posture in the mode-line, mirrored in portal Status help.
-- [ ] Profile safety evaluation spec written.
+- [ ] Profile safety evaluation implemented in `specs/0101-profile-safety-evaluation.md`; final compatibility, security, UI-matrix, check, and build gates in T6 must pass before this track is marked complete.
+
+Deferred activation follow-ons remain explicit: custom mount authoring still needs
+a file-sharing capability decision, and forge credential P2/live repository
+discovery remains outside the session-owned, value-free P1 lifecycle.
