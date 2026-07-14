@@ -46,6 +46,7 @@ func BuiltinProfiles() []BuiltinProfile {
 		if !ok || len(cfg.Profiles) != 1 {
 			panic(fmt.Sprintf("embedded builtin profile %q must contain exactly profile %q", name, name))
 		}
+		profile.Projection = builtinProjection(name)
 		sum := sha256.Sum256(cue)
 		out = append(out, BuiltinProfile{
 			Name:        name,
@@ -57,6 +58,20 @@ func BuiltinProfiles() []BuiltinProfile {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+func builtinProjection(name string) *Projection {
+	optional := func(v bool) *bool { return &v }
+	p := &Projection{Enabled: true}
+	switch name {
+	case "pi", "claude":
+		p.Items = []ProjectionItem{{Source: "~/.pi/agent/AGENTS.md", Label: "pi-agent", Optional: optional(false)}, {Source: "~/.pi/agent/skills", Kind: "dir", Label: "pi-skills", Optional: optional(true)}}
+	case "fish":
+		p.Items = []ProjectionItem{{Source: "~/.config/fish/config.fish", Label: "fish", Optional: optional(true)}, {Source: "~/.config/fish/conf.d/*.fish", Kind: "glob", Label: "fish-conf", Optional: optional(true)}, {Source: "~/.config/fish/functions/*.fish", Kind: "glob", Label: "fish-functions", Optional: optional(true)}, {Source: "~/.config/fish/completions/*.fish", Kind: "glob", Label: "fish-completions", Optional: optional(true)}}
+	case "zsh":
+		p.Items = []ProjectionItem{{Source: "~/.zshrc", Label: "zshrc", Optional: optional(true)}, {Source: "~/.zprofile", Label: "zprofile", Optional: optional(true)}, {Source: "~/.zshenv", Label: "zshenv", Optional: optional(true)}, {Source: "~/.config/starship.toml", Label: "starship", Optional: optional(true)}}
+	}
+	return p
 }
 
 // BuiltinProfileByName looks up one binary-embedded launchable profile.

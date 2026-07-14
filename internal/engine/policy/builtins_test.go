@@ -18,8 +18,11 @@ func TestBuiltinProfilesAreLaunchableAndDeterministic(t *testing.T) {
 		if builtin.Description == "" || builtin.Hash == "" {
 			t.Errorf("builtin %q is missing description or hash", builtin.Name)
 		}
-		if builtin.Profile.Environment != "container" || builtin.Profile.Network != "deny" {
-			t.Errorf("builtin %q is not contained deny-by-default: %#v", builtin.Name, builtin.Profile)
+		if builtin.Profile.Environment != "container" || builtin.Profile.Network != "deny" || len(builtin.Profile.Bundles) != 1 || builtin.Profile.Bundles[0] != "personal" {
+			t.Errorf("builtin %q is not contained deny-by-default with personal tools: %#v", builtin.Name, builtin.Profile)
+		}
+		if builtin.Profile.BareAgent || builtin.Profile.Projection == nil || !builtin.Profile.Projection.Enabled || len(builtin.Profile.Projection.Items) == 0 {
+			t.Errorf("builtin %q lacks its safe host projection: %#v", builtin.Name, builtin.Profile)
 		}
 		if NormalizeAgent(builtin.Profile.Agent) != builtin.Name {
 			t.Errorf("builtin %q has agent %q", builtin.Name, builtin.Profile.Agent)

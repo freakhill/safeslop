@@ -4,6 +4,6 @@ package safeslop
 safeslop: {
 	version: 1
 	profiles: {
-		zsh: {agent: "zsh", environment: "container", network: "deny"}
+		zsh: {agent: "zsh", environment: "container", network: "deny", bundles: ["personal"]}
 	}
 }

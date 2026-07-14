@@ -144,7 +144,7 @@ F     → G  Docs/skills/tests + make check/build
   VERIFY:   `go test ./internal/engine/policy ./internal/engine/session ./internal/cli -run 'Builtin|ProfileDefaults|SessionCreate.*Profile|ProfileShow' -v`
   EXPECTED: Tests prove cwd-independent builtin launch, project-over-builtin precedence, JSON provenance, session hash recording, run-time reconstruction, changed-hash fail-closed behavior, and no regression to existing `profile presets` scaffold contract.
 
-- [ ] T7 — Add the four contained-hybrid defaults
+- [x] T7 — Add the four contained-hybrid defaults
   FILE:     `internal/engine/policy/builtins.go` or `internal/engine/policy/builtins/*.cue`, `internal/engine/policy/builtins_test.go`, `README.md`, `skills/agent-sandbox-ops/SKILL.md`
   CHANGE:   Define builtins `pi`, `claude`, `fish`, `zsh` with `environment:"container"`, `network:"deny"`, `bundles:["personal"]`, default agent bundle enabled, progressive-session-grant capability enabled by the T5 contract, and safe projection selections approved by T1. Document that these are launchable defaults, distinct from scaffold presets, and that project `safeslop.cue` profiles with the same names override them.
   VERIFY:   `~/.local/bin/safeslop profile defaults --output json >/tmp/safeslop-defaults.json && python3 - <<'PY'

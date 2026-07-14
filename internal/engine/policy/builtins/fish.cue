@@ -4,6 +4,6 @@ package safeslop
 safeslop: {
 	version: 1
 	profiles: {
-		fish: {agent: "fish", environment: "container", network: "deny"}
+		fish: {agent: "fish", environment: "container", network: "deny", bundles: ["personal"]}
 	}
 }

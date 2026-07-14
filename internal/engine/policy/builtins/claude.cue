@@ -4,6 +4,6 @@ package safeslop
 safeslop: {
 	version: 1
 	profiles: {
-		claude: {agent: "claude", environment: "container", network: "deny"}
+		claude: {agent: "claude", environment: "container", network: "deny", bundles: ["personal"]}
 	}
 }

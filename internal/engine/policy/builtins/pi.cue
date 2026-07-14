@@ -4,6 +4,6 @@ package safeslop
 safeslop: {
 	version: 1
 	profiles: {
-		pi: {agent: "pi", environment: "container", network: "deny"}
+		pi: {agent: "pi", environment: "container", network: "deny", bundles: ["personal"]}
 	}
 }
