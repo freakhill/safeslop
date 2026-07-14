@@ -35,7 +35,7 @@ WORKTREE: `.worktrees/0101-profile-safety-evaluation/`
   VERIFY:   `go test ./internal/engine/policy/ -run 'Test(Risk|Lint|LegacyEvaluationProjection)' -count=1 -v`
   EXPECTED: command exits 0; existing risk/axis behavior stays compatible, old surfaces no longer under-report per-repo GitHub or Forgejo authority, and lint/evaluation predicates cannot drift.
 
-- [ ] T3 — Add trust/readiness context and wire additive profile JSON
+- [x] T3 — Add trust/readiness context and wire additive profile JSON
   FILE:     `internal/cli/profile_evaluation.go`, `internal/cli/profile_evaluation_test.go`, `internal/cli/cli.go`, `internal/cli/cli_profile_iw3_test.go`, `internal/cli/cli_profile_test.go`
   CHANGE:   Add narrow injectable adapters/clock for exact policy-byte trust, embedded-builtin provenance, workspace availability, sanitized helper inspection, container runtime identity/readiness, toolchain helpers, and value-free GitHub/Forgejo account-link presence. Do not call remote APIs or resolve secret values. Produce trust/readiness states/findings per the FLO note, suppress all helper/workspace/account paths, and add `evaluation` to `profileResolvedData`: project show checks current hash/trust; builtin show uses `embedded_builtin`; unsaved dry-run uses trust not-applicable; every context snapshot is timestamped once. Preserve all current envelope keys and prove static authority equality across show/dry-run inputs.
   VERIFY:   `go test ./internal/cli/ -run 'TestProfile(Evaluation|Show.*Evaluation|CreateDryRun.*Evaluation|EvaluationCompatibility)' -count=1 -v`
