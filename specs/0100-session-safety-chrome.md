@@ -1,6 +1,6 @@
 # 0100 — Persistent session safety chrome
 
-Status: planned
+Status: complete
 Date: 2026-07-14
 Follows: `specs/0086-session-legibility.md`, `specs/0087-product-activation.md` track 5.
 
@@ -38,7 +38,7 @@ WORKTREE: `.worktrees/0100-session-safety-chrome/`
   VERIFY:   `rg -n 'safety chrome|mode-line|posture tooltip|0100|Profile safety evaluation' README.md skills/agent-sandbox-ops/SKILL.md specs/0087-product-activation.md specs/0100-session-safety-chrome.md`
   EXPECTED: output shows the live-buffer chrome contract, portal posture help, 0087 completion cross-reference, and the still-open profile safety evaluation track.
 
-- [ ] T4 — Run the full compatibility and repository gates
+- [x] T4 — Run the full compatibility and repository gates
   FILE:     whole repo
   CHANGE:   Run the Emacs UI matrix followed by required repository checks and build; inspect the final diff for scope drift.
   VERIFY:   `make test-emacs-ui-matrix && make check && make build`
