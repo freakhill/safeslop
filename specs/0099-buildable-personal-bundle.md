@@ -11,7 +11,7 @@ WORKTREE: `.worktrees/0099-buildable-personal-bundle/`
 
 Design: retain the catalog as the reviewed source of package version, artifact URL, architecture, and digest. Add explicit package-specific Dockerfile handlers and identity allowlist coverage only after each binary has verified amd64+arm64 digests; use the pinned Debian snapshot only for catalog entries deliberately modeled as `apt`. Add a closure contract test so `profile show` discovers drift before an operator creates a builtin session.
 
-- [ ] T1 — Pin and validate the personal package artifacts
+- [x] T1 — Pin and validate the personal package artifacts
   FILE: `internal/engine/policy/catalog.cue`, `internal/engine/policy/catalog.json`, `internal/engine/policy/catalog_test.go`
   CHANGE: Replace every personal binary sentinel with reviewed per-architecture SHA256 values and preserve structured upstream provenance; classify any Debian package intentionally installed from the pinned snapshot as `apt` with its version policy.
   VERIFY: `make check-assets && go test ./internal/engine/policy -run 'Catalog|BuildReady' -v`
