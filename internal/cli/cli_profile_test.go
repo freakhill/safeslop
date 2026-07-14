@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/freakhill/safeslop/internal/jsoncontract"
@@ -65,20 +66,54 @@ func TestProfilePresetsEnvelope(t *testing.T) {
 	}
 }
 
+var personalPackagesForBuiltinTest = []string{
+	"bat", "eza", "fd", "fzf", "go", "hyperfine", "node", "pnpm", "python3",
+	"ripgrep", "ruff", "rust", "sccache", "tokei", "uv", "yq", "zoxide",
+}
+
 func TestProfileShowFallsBackToBuiltinWithProvenance(t *testing.T) {
-	out, err := runRootForTest(t, t.TempDir(), "profile", "show", "pi", "--output", "json")
-	if err != nil {
-		t.Fatalf("profile show builtin pi: %v", err)
-	}
-	env := parseEnvelopeForTest(t, out)
-	if !env.OK {
-		t.Fatalf("profile show builtin returned error envelope: %+v", env.Errors)
-	}
-	if env.Data["profile_source"] != "builtin" || env.Data["profile_name"] != "pi" || env.Data["policy_path"] != "builtin:pi" {
-		t.Fatalf("builtin provenance = %#v", env.Data)
-	}
-	if hash, _ := env.Data["policy_hash"].(string); hash == "" {
-		t.Fatalf("builtin policy hash missing: %#v", env.Data)
+	for _, name := range []string{"claude", "fish", "pi", "zsh"} {
+		t.Run(name, func(t *testing.T) {
+			out, err := runRootForTest(t, t.TempDir(), "profile", "show", name, "--output", "json")
+			if err != nil {
+				t.Fatalf("profile show builtin %s: %v", name, err)
+			}
+			env := parseEnvelopeForTest(t, out)
+			if !env.OK {
+				t.Fatalf("profile show builtin returned error envelope: %+v", env.Errors)
+			}
+			if env.Data["profile_source"] != "builtin" || env.Data["profile_name"] != name || env.Data["policy_path"] != "builtin:"+name {
+				t.Fatalf("builtin provenance = %#v", env.Data)
+			}
+			if hash, _ := env.Data["policy_hash"].(string); hash == "" {
+				t.Fatalf("builtin policy hash missing: %#v", env.Data)
+			}
+			profile, ok := env.Data["profile"].(map[string]any)
+			if !ok || profile["environment"] != "container" || profile["network"] != "deny" {
+				t.Fatalf("builtin is not contained deny-by-default: %#v", env.Data["profile"])
+			}
+			bundles, _ := profile["bundles"].([]any)
+			projection, _ := profile["projection"].(map[string]any)
+			if !stringSliceAnyContains(bundles, "personal") || projection["enabled"] != true {
+				t.Fatalf("builtin lacks personal tools or host projection: %#v", profile)
+			}
+			resolved, ok := env.Data["resolved"].(map[string]any)
+			if !ok {
+				t.Fatalf("builtin resolved closure missing: %#v", env.Data)
+			}
+			identity, _ := resolved["identitySet"].([]any)
+			for _, pkg := range personalPackagesForBuiltinTest {
+				if !stringSliceAnyContains(identity, pkg) {
+					t.Errorf("builtin %s identity missing personal package %q: %#v", name, pkg, identity)
+				}
+			}
+			if recipeID, _ := env.Data["recipeID"].(string); len(recipeID) != 12 {
+				t.Errorf("builtin recipeID = %q, want 12 chars", recipeID)
+			}
+			if image, _ := env.Data["image"].(string); !strings.HasPrefix(image, "local/safeslop-tools:") {
+				t.Errorf("builtin image = %q", image)
+			}
+		})
 	}
 }
 
@@ -107,9 +142,17 @@ func TestProfileDefaultsEnvelope(t *testing.T) {
 	if !env.OK || !ok || len(profiles) != 4 {
 		t.Fatalf("defaults envelope = %#v", env)
 	}
-	first := profiles[0].(map[string]any)
-	if first["profile_source"] != "builtin" || first["policy_path"] == "" || first["policy_hash"] == "" {
-		t.Fatalf("default provenance = %#v", first)
+	for _, value := range profiles {
+		profile := value.(map[string]any)
+		if profile["profile_source"] != "builtin" || profile["policy_path"] == "" || profile["policy_hash"] == "" {
+			t.Fatalf("default provenance = %#v", profile)
+		}
+		body, _ := profile["profile"].(map[string]any)
+		bundles, _ := body["bundles"].([]any)
+		projection, _ := body["projection"].(map[string]any)
+		if body["environment"] != "container" || body["network"] != "deny" || !stringSliceAnyContains(bundles, "personal") || projection["enabled"] != true {
+			t.Fatalf("builtin default is not contained-hybrid with personal tools: %#v", profile)
+		}
 	}
 }
 

@@ -23,7 +23,7 @@ Design: retain the catalog as the reviewed source of package version, artifact U
   VERIFY: `go test ./internal/engine/container -run 'Recipe|BuildArgs|Personal' -v`
   EXPECTED: Recipe resolution emits deterministic build args for the complete personal closure and unsupported packages still fail closed.
 
-- [ ] T3 — Prove builtin profiles are launchable with personal
+- [x] T3 — Prove builtin profiles are launchable with personal
   FILE: `internal/engine/policy/builtins_test.go`, `internal/cli/cli_profile_test.go`, `internal/cli/cli_session_test.go`
   CHANGE: Assert each builtin resolves a buildable recipe and profile show/session create expose the contained-hybrid provenance and personal closure.
   VERIFY: `go test ./internal/engine/policy ./internal/cli -run 'Builtin|ProfileDefaults|SessionCreate.*Builtin' -v`

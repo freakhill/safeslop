@@ -178,27 +178,47 @@ func TestSessionCreateAcceptsClaudeCodeAlias(t *testing.T) {
 func TestSessionCreateBuiltinProfileWithoutConfig(t *testing.T) {
 	workspace := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
-
-	out, err := runRootForTest(t, workspace, "session", "create", "--profile", "pi", "--output", "json")
-	if err != nil {
-		t.Fatalf("session create builtin: %v; out=%s", err, out)
-	}
-	env := parseEnvelopeForTest(t, out)
-	if !env.OK {
-		t.Fatalf("builtin session creation returned error envelope: %+v", env.Errors)
-	}
-	if env.Data["profile"] != "pi" || env.Data["profile_source"] != "builtin" || env.Data["policy_path"] != "builtin:pi" {
-		t.Fatalf("builtin session provenance = %#v", env.Data)
-	}
-	if hash, _ := env.Data["policy_hash"].(string); hash == "" {
-		t.Fatalf("builtin policy hash missing: %#v", env.Data)
-	}
 	canonicalWorkspace, err := filepath.EvalSymlinks(workspace)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if env.Data["workspace"] != canonicalWorkspace {
-		t.Fatalf("builtin workspace = %#v, want %q", env.Data["workspace"], canonicalWorkspace)
+
+	for _, name := range []string{"claude", "fish", "pi", "zsh"} {
+		t.Run(name, func(t *testing.T) {
+			out, err := runRootForTest(t, workspace, "session", "create", "--profile", name, "--output", "json")
+			if err != nil {
+				t.Fatalf("session create builtin: %v; out=%s", err, out)
+			}
+			env := parseEnvelopeForTest(t, out)
+			if !env.OK {
+				t.Fatalf("builtin session creation returned error envelope: %+v", env.Errors)
+			}
+			if env.Data["profile"] != name || env.Data["profile_source"] != "builtin" || env.Data["policy_path"] != "builtin:"+name {
+				t.Fatalf("builtin session provenance = %#v", env.Data)
+			}
+			if hash, _ := env.Data["policy_hash"].(string); hash == "" {
+				t.Fatalf("builtin policy hash missing: %#v", env.Data)
+			}
+			if env.Data["environment"] != "container" || env.Data["network"] != "deny" || env.Data["workspace"] != canonicalWorkspace {
+				t.Fatalf("builtin session boundary = %#v", env.Data)
+			}
+			resolved, ok := env.Data["resolved"].(map[string]any)
+			if !ok {
+				t.Fatalf("builtin session resolved closure missing: %#v", env.Data)
+			}
+			identity, _ := resolved["identitySet"].([]any)
+			for _, pkg := range personalPackagesForBuiltinTest {
+				if !stringSliceAnyContains(identity, pkg) {
+					t.Errorf("builtin %s session missing personal package %q: %#v", name, pkg, identity)
+				}
+			}
+			if recipeID, _ := env.Data["recipeID"].(string); len(recipeID) != 12 {
+				t.Errorf("builtin session recipeID = %q", recipeID)
+			}
+			if image, _ := env.Data["image"].(string); !strings.HasPrefix(image, "local/safeslop-tools:") {
+				t.Errorf("builtin session image = %q", image)
+			}
+		})
 	}
 }
 
