@@ -33,6 +33,9 @@ safeslop: {
 	if !env.OK {
 		t.Fatalf("profile show returned error envelope: %+v", env.Errors)
 	}
+	if env.Data["profile_source"] != "project" || env.Data["profile_name"] != "review" || env.Data["policy_hash"] == "" {
+		t.Fatalf("project profile should override builtin with provenance: %#v", env.Data)
+	}
 	profile, ok := env.Data["profile"].(map[string]any)
 	if !ok || profile["agent"] != "claude" || profile["environment"] != "container" {
 		t.Fatalf("profile data wrong: %#v", env.Data["profile"])

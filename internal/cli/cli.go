@@ -2251,7 +2251,7 @@ func credRowsOrEmpty(rows []creds.CredRow) []creds.CredRow {
 
 func cmdProfile() *cobra.Command {
 	c := &cobra.Command{Use: "profile", Short: "Inspect and author safeslop.cue profiles"}
-	c.AddCommand(cmdProfileList(), cmdProfilePresets(), cmdProfileShow(), cmdProfileCreate(), cmdProfileCredentials())
+	c.AddCommand(cmdProfileList(), cmdProfilePresets(), cmdProfileDefaults(), cmdProfileShow(), cmdProfileCreate(), cmdProfileCredentials())
 	return c
 }
 
@@ -2299,32 +2299,58 @@ func cmdProfilePresets() *cobra.Command {
 	return c
 }
 
+func cmdProfileDefaults() *cobra.Command {
+	var output string
+	c := &cobra.Command{
+		Use:   "defaults --output json",
+		Short: "List binary-embedded launchable profile defaults",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if output != "json" {
+				return fmt.Errorf("profile defaults requires --output json")
+			}
+			profiles := make([]map[string]any, 0)
+			for _, builtin := range policy.BuiltinProfiles() {
+				profiles = append(profiles, map[string]any{
+					"name": builtin.Name, "description": builtin.Description, "profile_source": "builtin",
+					"policy_path": "builtin:" + builtin.Name, "policy_hash": builtin.Hash, "profile": builtin.Profile,
+				})
+			}
+			emitContract(jsoncontract.OK(map[string]any{"profiles": profiles}))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&output, "output", "", "output format: json")
+	return c
+}
+
 func cmdProfileShow() *cobra.Command {
 	var output string
 	c := &cobra.Command{
 		Use:   "show <name> [safeslop.cue] --output json",
-		Short: "Show a profile with its resolved catalog packages and image recipe",
+		Short: "Show a resolved project or builtin profile with its image recipe",
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(_ *cobra.Command, args []string) error {
 			if output != "json" {
 				return fmt.Errorf("profile show requires --output json")
 			}
-			path, err := findConfig(argAt(args, 1))
+			resolved, err := resolveProfile(args[0], argAt(args, 1))
 			if err != nil {
-				return emitContractError(jsoncontract.CodeNotFound, "safeslop.cue not found", map[string]any{"error": err.Error()})
+				code := jsoncontract.CodeNotFound
+				var resolutionErr *profileResolutionError
+				if errors.As(err, &resolutionErr) {
+					code = resolutionErr.code
+				}
+				return emitContractError(code, "profile not found", map[string]any{"profile": args[0], "error": err.Error()})
 			}
-			cfg, err := policy.Load(path)
-			if err != nil {
-				return emitContractError(jsoncontract.CodeSchemaViolation, "load safeslop.cue", map[string]any{"path": path, "error": err.Error()})
-			}
-			prof, ok := cfg.Profiles[args[0]]
-			if !ok {
-				return emitContractError(jsoncontract.CodeNotFound, fmt.Sprintf("no profile %q in safeslop.cue", args[0]), map[string]any{"profile": args[0], "path": path})
-			}
-			data, err := profileResolvedData(path, args[0], prof)
+			data, err := profileResolvedData(resolved.policyPath, resolved.name, resolved.profile)
 			if err != nil {
 				return emitContractError(jsoncontract.CodeInvalidArgument, "resolve profile image recipe", map[string]any{"profile": args[0], "error": err.Error()})
 			}
+			data["profile_source"] = resolved.source
+			data["profile_name"] = resolved.name
+			data["policy_path"] = resolved.policyPath
+			data["policy_hash"] = resolved.policyHash
 			emitContract(jsoncontract.OK(data))
 			return nil
 		},
@@ -2453,6 +2479,53 @@ func renderConfigCUE(cfg *policy.Config) ([]byte, error) {
 		return nil, err
 	}
 	return append([]byte("package safeslop\n\nsafeslop: "), append(b, '\n')...), nil
+}
+
+type resolvedProfile struct {
+	name       string
+	profile    policy.Profile
+	source     string
+	policyPath string
+	policyHash string
+}
+
+type profileResolutionError struct {
+	code jsoncontract.ErrorCode
+	err  error
+}
+
+func (e *profileResolutionError) Error() string { return e.err.Error() }
+func (e *profileResolutionError) Unwrap() error { return e.err }
+
+// resolveProfile gives a valid project config precedence over the signed binary's
+// builtin registry. A present-but-invalid project config is never ignored: that
+// would turn a typo or a damaged policy into an unintended authority change.
+func resolveProfile(name, explicit string) (resolvedProfile, error) {
+	path, findErr := findConfig(explicit)
+	if findErr == nil {
+		if _, err := os.Stat(path); err == nil {
+			cfg, err := policy.Load(path)
+			if err != nil {
+				return resolvedProfile{}, &profileResolutionError{code: jsoncontract.CodeSchemaViolation, err: fmt.Errorf("load safeslop.cue: %w", err)}
+			}
+			if prof, ok := cfg.Profiles[name]; ok {
+				bytes, err := os.ReadFile(path)
+				if err != nil {
+					return resolvedProfile{}, fmt.Errorf("read safeslop.cue: %w", err)
+				}
+				return resolvedProfile{name: name, profile: prof, source: "project", policyPath: canonicalPolicyPath(path), policyHash: trust.Hash(bytes)}, nil
+			}
+		} else if !os.IsNotExist(err) {
+			return resolvedProfile{}, fmt.Errorf("stat safeslop.cue: %w", err)
+		}
+	}
+	if builtin, ok := policy.BuiltinProfileByName(name); ok {
+		return resolvedProfile{name: name, profile: builtin.Profile, source: "builtin", policyPath: "builtin:" + name, policyHash: builtin.Hash}, nil
+	}
+	if findErr != nil {
+		return resolvedProfile{}, findErr
+	}
+	return resolvedProfile{}, fmt.Errorf("no profile %q", name)
 }
 
 func profileResolvedData(path, name string, prof policy.Profile) (map[string]any, error) {

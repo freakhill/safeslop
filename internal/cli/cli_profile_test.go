@@ -1,9 +1,12 @@
 package cli
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/freakhill/safeslop/internal/jsoncontract"
 )
 
 func TestProfilePresetsEnvelope(t *testing.T) {
@@ -59,6 +62,54 @@ func TestProfilePresetsEnvelope(t *testing.T) {
 		if names[i] != want {
 			t.Fatalf("preset names/order = %v, want %v", names, wantNames)
 		}
+	}
+}
+
+func TestProfileShowFallsBackToBuiltinWithProvenance(t *testing.T) {
+	out, err := runRootForTest(t, t.TempDir(), "profile", "show", "pi", "--output", "json")
+	if err != nil {
+		t.Fatalf("profile show builtin pi: %v", err)
+	}
+	env := parseEnvelopeForTest(t, out)
+	if !env.OK {
+		t.Fatalf("profile show builtin returned error envelope: %+v", env.Errors)
+	}
+	if env.Data["profile_source"] != "builtin" || env.Data["profile_name"] != "pi" || env.Data["policy_path"] != "builtin:pi" {
+		t.Fatalf("builtin provenance = %#v", env.Data)
+	}
+	if hash, _ := env.Data["policy_hash"].(string); hash == "" {
+		t.Fatalf("builtin policy hash missing: %#v", env.Data)
+	}
+}
+
+func TestProfileShowInvalidProjectConfigBlocksBuiltinFallback(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "safeslop.cue"), []byte("this is not CUE"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runRootForTest(t, dir, "profile", "show", "pi", "--output", "json")
+	if !errors.Is(err, errOutputEmitted) {
+		t.Fatalf("profile show invalid project: err=%v, out=%s", err, out)
+	}
+	env := parseEnvelopeForTest(t, out)
+	if env.OK || len(env.Errors) != 1 || env.Errors[0].Code != jsoncontract.CodeSchemaViolation {
+		t.Fatalf("invalid project should block fallback with schema error: %#v", env)
+	}
+}
+
+func TestProfileDefaultsEnvelope(t *testing.T) {
+	out, err := runRootForTest(t, t.TempDir(), "profile", "defaults", "--output", "json")
+	if err != nil {
+		t.Fatalf("profile defaults: %v", err)
+	}
+	env := parseEnvelopeForTest(t, out)
+	profiles, ok := env.Data["profiles"].([]any)
+	if !env.OK || !ok || len(profiles) != 4 {
+		t.Fatalf("defaults envelope = %#v", env)
+	}
+	first := profiles[0].(map[string]any)
+	if first["profile_source"] != "builtin" || first["policy_path"] == "" || first["policy_hash"] == "" {
+		t.Fatalf("default provenance = %#v", first)
 	}
 }
 

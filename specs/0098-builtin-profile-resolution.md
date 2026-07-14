@@ -124,7 +124,7 @@ When host projection lands, projection contents remain live host filesystem stat
   VERIFY:   `go test ./internal/engine/policy -run 'Builtin|Presets' -v`
   EXPECTED: Builtins validate, resolve, sort deterministically, carry non-empty descriptions/hashes, and existing preset tests still pass unchanged.
 
-- [ ] T2 — Add profile defaults and profile show fallback
+- [x] T2 — Add profile defaults and profile show fallback
   FILE:     `internal/cli/cli.go`, `internal/cli/cli_profile_test.go`
   CHANGE:   Add `profile defaults --output json`. Refactor `cmdProfileShow` through a shared resolver that returns project-or-builtin profile data plus provenance. Keep invalid project config fail-closed. Keep project-over-builtin precedence. Keep `profile presets` unchanged.
   VERIFY:   `go test ./internal/cli -run 'Profile(Default|Show|Presets|List)' -v`
