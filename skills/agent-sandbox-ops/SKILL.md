@@ -153,8 +153,11 @@ state-aware open, `r` run, `R` run detached, `A` reattach, `i` details, `s`
 stop/revoke, `x` remove one stopped session, `X` prune all stopped sessions, `c`
 new, `g` refresh, `a` pause/resume auto-refresh. Live buffers opened from the
 portal are named and annotated with profile/project, tier/net, and value-free
-credential scope. Each
-in-place refresh keeps point on the same session and preserves window scroll, so
+credential scope. Their persistent safety chrome mode-line repeats literal
+environment/network posture plus a value-free credential count; hover help
+expands the honest posture and safe scope names, and the portal Status posture
+tooltip shows the same facts. Each in-place refresh keeps point on the same
+session and preserves window scroll, so
 it never jumps the cursor out from under a row action key; session-mutating row
 actions refresh the portal in place instead of popping a JSON result buffer over
 the dashboard.
