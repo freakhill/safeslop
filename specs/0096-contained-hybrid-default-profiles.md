@@ -132,7 +132,7 @@ F     → G  Docs/skills/tests + make check/build
   VERIFY:   `go test ./internal/engine/policy ./internal/engine/container -run 'Projection|HostProjection|SafeHome|Risk' -v && make check-assets`
   EXPECTED: Unit tests prove schema decode/rejects, credential-dir exclusions, read-only mount rendering, absent-source behavior, tmpfs-home preservation, and risk-axis text; mirrored container assets stay in sync.
 
-- [ ] T5 — Implement progressive session grants
+- [x] T5 — Implement progressive session grants
   FILE:     `internal/engine/container/policy.go`, `internal/engine/container/compose.go`, `internal/engine/container/assets/squid.conf.tmpl`, `internal/engine/session/session.go`, `internal/cli/cli.go`, `internal/cli/cli_session_test.go`, `emacs/safeslop-session.el`, `emacs/test/safeslop-test.el`
   CHANGE:   Execute `specs/0097-progressive-network-session-grants.md`: store value-free session grant records, materialize grants into the proxy allow overlay, expose list/grant/revoke/status JSON, preserve fail-closed behavior on overlay write/reload failure, and add UI hooks without agent-triggered modal prompts.
   VERIFY:   `go test ./internal/engine/container ./internal/engine/session ./internal/cli -run 'SessionGrant|Progressive|EgressGrant|IPLiteral|ProfileEgress' -v && make test-emacs EMACS=$(command -v emacs)`

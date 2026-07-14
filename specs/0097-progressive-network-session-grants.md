@@ -1,6 +1,6 @@
 # 0097 — Progressive network session grants
 
-Status: planned
+Status: complete
 Date: 2026-07-12
 
 SCOPE: implement the first `specs/0089-network-authority-ayo-flo.md` progressive network slice: operator-invoked, session-scoped, exact FQDN:port grants for `environment:"container"` + `network:"deny"` sessions. Grants are runtime overlay state, not profile policy, and update the existing Squid-enforced deny topology without moving the agent onto the egress network.
@@ -189,7 +189,7 @@ Add non-modal controls only:
   VERIFY:   `make test-emacs EMACS=$(command -v emacs)`
   EXPECTED: ERT proves commands/argv, non-modal behavior, grant/revoke display, and no profile mutation path.
 
-- [ ] T7 — Docs and final verification
+- [x] T7 — Docs and final verification
   FILE:     `README.md`, `skills/agent-sandbox-ops/SKILL.md`, `specs/0097-progressive-network-session-grants.md`, `specs/0096-contained-hybrid-default-profiles.md`
   CHANGE:   Document progressive network as container deny + session grants; exact FQDN:port shape; no `network:"progressive"`; non-grantable IP/private/metadata/broker/mint; commands and examples; host/network:allow non-enforcement labels. Mark specs complete only after all verification passes.
   VERIFY:   `git diff --check && make check && make build`

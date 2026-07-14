@@ -89,6 +89,10 @@ safeslop session create --agent <claude|pi|fish|zsh> --environment <host|contain
 safeslop session run --session-id <id> [--detach]
 safeslop session attach --session-id <id>
 safeslop session status --session-id <id> --output <json|jsonl>
+safeslop session egress observations --session-id <id> --output json
+safeslop session egress grants --session-id <id> --output json
+safeslop session egress grant --session-id <id> --host example.com --port 443 --output json
+safeslop session egress revoke --session-id <id> --grant-id G --output json
 safeslop session stop --session-id <id> --revoke-credentials --output json
 safeslop session rm --session-id <id> --output json        remove one stopped session record
 safeslop session prune --output json                       remove all stopped session records
@@ -110,6 +114,24 @@ profile-backed sessions. Each row names only the credential kind, non-secret
 target, and access/scope; it does not include token values, source references,
 or staged file paths. Ad-hoc sessions and profiles without credentials omit it
 or return an empty array.
+
+### Progressive session egress
+
+There is no `network: "progressive"` policy value. Progressive egress is an
+operator-invoked, session-scoped overlay available only to
+`environment: "container"` + `network: "deny"` sessions. Use `observations` to
+inspect denied, value-free FQDN:port destinations, then explicitly `grant` or
+`revoke` one exact destination. A grant never mutates `profile.egress` or
+`safeslop.cue`; it is removed with the session. Proxy overlay/reload failure
+keeps the prior, more-restrictive deny state.
+
+Only exact FQDNs on port 80 or 443 are eligible. IP literals, private or
+link-local addresses, localhost/metadata, credential broker or mint endpoints,
+wildcards, suffixes, raw URLs, and other ports are non-grantable. Host-tier and
+`network: "allow"` sessions are not enforceably isolated and reject these
+commands. Observations are non-modal: agent traffic never opens a prompt or
+changes network authority. In Emacs session detail, `o` shows observations, `G`
+lists grants, `+` grants an operator-entered FQDN:port, and `-` revokes a grant.
 
 `session status` and `session list` reconcile liveness: a session still marked
 `running` whose recorded process is gone — or whose PID now names a different
