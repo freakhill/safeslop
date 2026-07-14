@@ -1,6 +1,6 @@
 # 2026-07-14 — Profile safety evaluation prior art (AYO)
 
-Status: applied through T5 of `specs/0101`; final repository verification pending
+Status: applied; `specs/0101` complete
 Target: evolve safeslop's coarse `risk`/`risk_axes` preview into an actionable profile evaluation without a misleading aggregate score.
 
 ## Corpus
@@ -60,9 +60,8 @@ The selected lessons are now represented by the engine-owned v1 Authority → Tr
 aggregate score; local Readiness is a timestamped point-in-time snapshot and
 cannot reduce static Authority. Credential targets and remediation actions remain
 value-free and typed. Legacy `risk`/`risk_axes` fallback is labeled as lacking
-Trust and Readiness. Final T6 repository gates and roadmap closure remain pending;
-custom mounts, forge credential P2, and live remote permission inference remain
-deferred.
+Trust and Readiness. Full repository gates and the 0087 roadmap closure passed; custom mounts,
+forge credential P2, and live remote permission inference remain deferred.
 
 ## Method
 

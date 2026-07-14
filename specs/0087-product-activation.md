@@ -58,7 +58,7 @@ After `specs/0086` and local install, safeslop is safer and more legible but sti
 - [x] Profile authoring cockpit implemented (`specs/0091-profile-authoring-cockpit.md`): compose buffer, checkbox/help catalog selection, dry-run safety preview, catalog defaults inheritance, and custom mounts deferred.
 - [x] Network authority ayo-flo decision landed (`specs/0089-network-authority-ayo-flo.md`).
 - [x] Session safety chrome implemented (`specs/0100-session-safety-chrome.md`): live Emacs terminals carry persistent, color-redundant tier/network/credential posture in the mode-line, mirrored in portal Status help.
-- [ ] Profile safety evaluation implemented in `specs/0101-profile-safety-evaluation.md`; final compatibility, security, UI-matrix, check, and build gates in T6 must pass before this track is marked complete.
+- [x] Profile safety evaluation implemented (`specs/0101-profile-safety-evaluation.md`): engine-owned non-score Authority/Trust/Readiness findings, value-free credential scope, local readiness, and Emacs inspect/compose/launch review shipped with full gates.
 
 Deferred activation follow-ons remain explicit: custom mount authoring still needs
 a file-sharing capability decision, and forge credential P2/live repository

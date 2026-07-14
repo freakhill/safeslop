@@ -1,7 +1,7 @@
 # 2026-07-14 — Profile safety evaluation decision (FLO)
 
 Status: decision accepted for `specs/0101-profile-safety-evaluation.md`
-Implementation: contract, compatibility projection, context, UI, and docs landed through T5; final T6 repository verification and roadmap closure pending
+Implementation: complete in `specs/0101`; full compatibility/security/UI/check/build gates passed
 Score: **97.25 / 100** (no deterministic LAW override)
 Inputs: `specs/research/2026-07-14-profile-safety-evaluation-ayo.md`, `agent/tmp/flo-runs/0101-profile-safety-evaluation/inputs/{goal,rubric,packet}.md`
 
@@ -196,9 +196,9 @@ inspect/compose/launch review: Authority stays static, exact-byte/builtin Trust 
 a separate gate, and Readiness is a point-in-time local snapshot with no remote
 validity claim. There is no aggregate score or combined verdict. Credential
 targets remain value-free, and absent evaluation uses the labeled legacy fallback
-while malformed/unsupported evaluation is loud unknown. T6 still owns final
-repository gates and completion; custom mounts, forge credential P2, live remote
-permission inference, and arbitrary action execution remain deferred.
+while malformed/unsupported evaluation is loud unknown. Full repository gates
+passed; custom mounts, forge credential P2, live remote permission inference, and
+arbitrary action execution remain deferred.
 
 ## Scoring
 

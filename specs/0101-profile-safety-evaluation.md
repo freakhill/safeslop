@@ -1,6 +1,6 @@
 # 0101 — Actionable profile safety evaluation
 
-Status: implementation landed; final repository verification pending
+Status: complete
 Date: 2026-07-14
 Decision: `specs/research/2026-07-14-profile-safety-evaluation-flo.md`
 Prior art: `specs/research/2026-07-14-profile-safety-evaluation-ayo.md`
@@ -147,7 +147,7 @@ remain deferred.
   VERIFY:   `rg -n 'Authority|Trust|Readiness|no.*score|value-free|0101|profile safety evaluation' README.md skills/agent-sandbox-ops/SKILL.md specs/0087-product-activation.md specs/0101-profile-safety-evaluation.md specs/research/2026-07-14-profile-safety-evaluation-{ayo,flo}.md`
   EXPECTED: output shows the engine/UI contract, non-score law, roadmap closure, and explicit deferrals.
 
-- [ ] T6 — Run compatibility, security, and repository gates
+- [x] T6 — Run compatibility, security, and repository gates
   FILE:     whole repo
   CHANGE:   Run the UI matrix, required repository checks/build, and inspect the final diff. Set this spec complete only after every gate succeeds.
   VERIFY:   `make test-emacs-ui-matrix && make check && make build`
