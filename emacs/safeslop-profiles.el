@@ -71,6 +71,14 @@ choice; the UI presents the canonical `claude' engine name.")
 (defconst safeslop-profiles--networks '("deny" "allow")
   "Profile-create network choices; deny remains the safe default.")
 
+(defun safeslop-profiles--network-label (environment network)
+  "Return the compose label for ENVIRONMENT and NETWORK without granting authority.
+Container deny remains ordinary deny-by-default policy; the progressive review
+label only describes the later, operator-opened session review workflow."
+  (if (and (equal environment "container") (equal network "deny"))
+      "Deny (progressive review)"
+    (or network "deny")))
+
 (defconst safeslop-profiles--name-regexp "\\`[A-Za-z_][A-Za-z0-9_-]*\\'"
   "Regexp a profile name must match to be offered to the CLI.
 A leading letter/underscore then letters, digits, underscores, or hyphens.  The
@@ -1369,8 +1377,13 @@ save is re-validated."
     (insert "Keys: RET toggle, ? help, g refresh catalog, C-c C-c preview/save, q cancel; L = included by source\n\n")
     (insert (format "Name: %s\nAgent: %s\nEnvironment: %s\nNetwork: %s\nWorkspace: %s\n\n"
                     (alist-get 'name state) (alist-get 'agent state)
-                    (alist-get 'environment state) (alist-get 'network state)
+                    (alist-get 'environment state)
+                    (safeslop-profiles--network-label
+                     (alist-get 'environment state) (alist-get 'network state))
                     (or (alist-get 'workspace state) "")))
+    (when (and (equal (alist-get 'environment state) "container")
+               (equal (alist-get 'network state) "deny"))
+      (insert "  Passive denied-destination review is operator-opened; it grants nothing automatically.\n"))
     (when default
       (safeslop-profiles-compose--insert-default-bundle-control
        default (alist-get 'no-default-bundle state)))

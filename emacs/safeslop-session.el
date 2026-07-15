@@ -840,6 +840,21 @@ handle, so this only ever carries --session-id, never a name-as-selector."
   (list "session" "egress" "revoke" "--session-id" session-id "--grant-id" grant-id
         "--output" "json"))
 
+(defun safeslop-session--egress-dismiss-args (session-id host port)
+  "Return exact argv to keep HOST:PORT denied for SESSION-ID."
+  (list "session" "egress" "dismiss" "--session-id" session-id "--host" host
+        "--port" (number-to-string port) "--output" "json"))
+
+(defun safeslop-session--profile-egress-args (operation profile policy-path host port policy-hash)
+  "Return exact argv for explicit durable OPERATION on PROFILE's typed rule.
+POLICY-HASH is always supplied from the session snapshot so a changed policy
+fails closed instead of silently editing newer reviewed bytes."
+  (append (list "profile" "egress" operation profile)
+          (when (and (stringp policy-path) (not (string-prefix-p "builtin:" policy-path)))
+            (list policy-path))
+          (list "--host" host "--port" (number-to-string port)
+                "--expected-policy-hash" policy-hash "--output" "json")))
+
 (defun safeslop-session--egress-dispatch (args buffer-name callback quiet)
   "Dispatch egress ARGS asynchronously, rendering BUFFER-NAME unless QUIET.
 CALLBACK receives the JSON envelope.  This is deliberately a thin explicit CLI
@@ -890,6 +905,85 @@ running session's overlay, not safeslop.cue or profile egress policy."
   (safeslop-session--egress-dispatch
    (safeslop-session--egress-revoke-args session-id grant-id)
    "*safeslop session egress revoke*" callback quiet))
+
+;;;###autoload
+(defun safeslop-session-egress-dismiss (&optional session-id host port callback quiet)
+  "Explicitly acknowledge HOST:PORT as Keep denied for SESSION-ID.
+This is review-only session state: it never writes/reloads the proxy and never
+edits a profile policy."
+  (interactive
+   (list (safeslop-session--read-id "Keep denied for session: ")
+         (read-string "Exact FQDN: ")
+         (read-number "Port (80 or 443): " 443) nil nil))
+  (safeslop-session--egress-dispatch
+   (safeslop-session--egress-dismiss-args session-id host port)
+   "*safeslop session egress dismiss*" callback quiet))
+
+(defun safeslop-session--review-observation-at-point ()
+  "Return the value-free review observation at point, or signal clearly."
+  (or (get-text-property (point) 'safeslop-egress-observation)
+      (user-error "Move point to a denied destination")))
+
+(defun safeslop-session--review-render (session-id session-data envelope)
+  "Render an operator-opened, non-modal review buffer from ENVELOPE only."
+  (let ((buf (get-buffer-create "*safeslop egress review*"))
+        (observations (alist-get 'observations (safeslop-contract-data envelope))))
+    (with-current-buffer buf
+      (safeslop-output-mode)
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert (format "Progressive egress review — session %s\n" session-id))
+        (insert "Passive observations are denied traffic, not prompts or authority.\n")
+        (insert "Keys: a Allow now, k Keep denied, A Always allow, g refresh, q quit\n\n")
+        (if (not (safeslop-contract-ok-p envelope))
+            (insert "Could not read observations; retry with g.\n")
+          (if (null observations)
+              (insert "No pending denied destinations.\n")
+            (dolist (obs observations)
+              (let ((start (point))
+                    (host (safeslop-session--safe-display-field (alist-get 'host obs)))
+                    (port (alist-get 'port obs)))
+                ;; Deliberately render no request URI, header, or payload.
+                (insert (format "%s:%s  count=%s  last=%s  %s\n"
+                                (or host "[redacted]") (or port "?")
+                                (or (alist-get 'count obs) 0)
+                                (or (alist-get 'last_seen obs) "?")
+                                (if (eq (alist-get 'grantable obs) t) "grantable" "keep denied")))
+                (put-text-property start (point) 'safeslop-egress-observation obs)))))
+        (local-set-key (kbd "a")
+                       (lambda () (interactive)
+                         (let ((o (safeslop-session--review-observation-at-point)))
+                           (safeslop-session-egress-grant session-id (alist-get 'host o) (alist-get 'port o) nil t))))
+        (local-set-key (kbd "k")
+                       (lambda () (interactive)
+                         (let ((o (safeslop-session--review-observation-at-point)))
+                           (safeslop-session-egress-dismiss session-id (alist-get 'host o) (alist-get 'port o) nil t))))
+        (local-set-key (kbd "A")
+                       (lambda () (interactive)
+                         (let* ((o (safeslop-session--review-observation-at-point))
+                                (profile (alist-get 'profile session-data))
+                                (hash (alist-get 'policy_hash session-data))
+                                (path (alist-get 'policy_path session-data)))
+                           (unless (and (stringp profile) (stringp hash) (not (string-prefix-p "builtin:" (or path ""))))
+                             (user-error "Always allow requires a project profile snapshot"))
+                           ;; Preview is review-only.  It never follows itself with add.
+                           (safeslop-session--egress-dispatch
+                            (safeslop-session--profile-egress-args "preview" profile path
+                                                                  (alist-get 'host o) (alist-get 'port o) hash)
+                            "*safeslop profile egress preview*" nil nil))))
+        (local-set-key (kbd "g") (lambda () (interactive) (safeslop-session-egress-review session-id session-data)))
+        (goto-char (point-min))))
+    (pop-to-buffer buf)))
+
+;;;###autoload
+(defun safeslop-session-egress-review (&optional session-id session-data)
+  "Open a passive review buffer only on explicit operator invocation.
+The observation query is asynchronous and never steals focus when it completes."
+  (interactive (list (safeslop-session--read-id "Review denied egress for session: ") nil))
+  (safeslop-session-egress-observations
+   session-id
+   (lambda (envelope) (safeslop-session--review-render session-id session-data envelope))
+   t))
 
 (defun safeslop-session--egress-grants-summary (data)
   "Return DATA's value-free session grants as a compact detail string."
@@ -1010,7 +1104,7 @@ the portal so row actions refresh in place instead of stealing the window."
                    (line "Environment:" (safeslop-surface--env-cell (field 'environment)))
                    (line "Network:" (safeslop-surface--net-cell network))
                    (line "Egress grants:" (safeslop-session--egress-grants-summary data))
-                   (line "Egress:" "o observations · G grants · + grant · - revoke (explicit only)")
+                   (line "Egress:" "v review · o observations · G grants · + grant · - revoke (explicit only)")
                    (line "Status:" status)
                    (line "Lifecycle:" (if detached "detached (survives buffer; reattach with A)"
                                          "coupled (tied to its terminal buffer)"))
@@ -1051,6 +1145,7 @@ the portal so row actions refresh in place instead of stealing the window."
             ;; Detail-buffer keys are explicit operator controls. Proxy traffic
             ;; never calls them, so observations remain non-modal and grants
             ;; cannot be created by agent activity alone (specs/0097).
+            (local-set-key (kbd "v") (lambda () (interactive) (safeslop-session-egress-review session-id data)))
             (local-set-key (kbd "o") (lambda () (interactive) (safeslop-session-egress-observations session-id)))
             (local-set-key (kbd "G") (lambda () (interactive) (safeslop-session-egress-grants session-id)))
             (local-set-key (kbd "+") (lambda () (interactive) (safeslop-session-egress-grant session-id)))
