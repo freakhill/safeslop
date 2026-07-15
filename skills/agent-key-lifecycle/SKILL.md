@@ -83,10 +83,22 @@ use `safeslop profile credentials set <profile> --provider github --repo owner/w
 any declared `repos` entries — must match `[A-Za-z0-9._-]+` before safeslop stages
 git config. In the default `app` mode safeslop mints an ephemeral, repo-scoped App
 installation token per owner (partitioned by `write`) and stages it over HTTPS —
-no deploy keys, no `gh` CLI. An owner with no account link is a hard error. The
-P1 token lifetime is ~1h with no renewal (renewal is P2). Live GitHub repository
-discovery is deferred because listing installation repositories would require a
-minted installation token outside the session-owned lifecycle.
+no deploy keys, no `gh` CLI. An owner with no account link is a hard error. A
+**host-owned** lease renews complete App-token batches atomically; the container
+has file access only and cannot mint, renew, or revoke. `ttl` defaults to `"1h"`;
+a positive Go duration is a run-relative horizon for future staging/renewal, while
+explicit `""` lasts to normal teardown without retroactively invalidating an
+issued token. Live GitHub repository discovery remains deferred because listing
+installation repositories would require a minted installation token outside the
+session-owned lifecycle.
+
+Opt into GitHub API staging only for App mode with unique `permission:read` or
+`permission:write` declarations. One partition receives
+`SAFESLOP_GITHUB_TOKEN_FILE`; multiple partitions receive
+`SAFESLOP_GITHUB_TOKEN_DIR` and `SAFESLOP_GITHUB_TOKEN_MANIFEST`. Do not use a
+copied `GITHUB_TOKEN`: safeslop deliberately does not inject it because it would
+be stale after host renewal. `api.github.com` is added to deny-tier egress only
+for this opt-in.
 
 PAT fallback (an existing fine-grained token, staged in a wipe-on-exit file, not
 embedded in git config or the environment):
@@ -126,8 +138,29 @@ mints one deploy key per repo and stages per-repo SSH aliases plus git URL
 rewrites. Origin-inferred and declared owner/repo components must match
 `[A-Za-z0-9._-]+`; malformed remotes fail closed before `.gitconfig` or
 `.ssh/config` is rendered. Each declared owner needs a forgejo account link;
-Forgejo tokens are account-wide, so prefer a dedicated bot account. Live Forgejo
+Forgejo tokens are account-wide, so prefer a dedicated bot account. `ttl` has the
+same default/horizon semantics as GitHub; at a bounded horizon safeslop removes an
+opted-in API token file and attempts best-effort deploy-key cleanup. To enable the
+file-only API token (`SAFESLOP_FORGEJO_TOKEN_FILE`), declare
+`api.enabled: true` and `api.ackAccountWide: true` with an HTTPS/default-443 URL.
+The scope remains operator-provisioned, unverified, and may be account-wide; that
+exact API hostname is added to deny-tier egress only for this opt-in. Live Forgejo
 repository discovery is deferred because it would use the account-wide token.
+
+### Narrow deploy-key GC
+
+`creds gc` is not a discovery or broad cleanup interface. Supply every target and
+use `--yes` only after reviewing its default dry-run output:
+
+```bash
+safeslop creds gc --host forgejo.example.com --repo owner/web --dry-run --output json
+safeslop creds gc --host forgejo.example.com --repo owner/web --yes --output json
+```
+
+It resolves only host/owner-matching links in host memory; discovers all requested
+repos before deletion; selects only exact `safeslop-<owner>-<repo>` titles; and
+rechecks each candidate. HTTP 404 is already absent. It never deletes an
+unrequested repo or a merely similar title.
 
 ## Safety checklist
 
@@ -143,6 +176,6 @@ Run focused tests after credential changes:
 
 ```bash
 go test ./internal/engine/creds/ -v
-go test ./internal/cli/ -run 'Creds(Status|Link|Unlink)|ProfileCredentials|StageProfile' -v
+go test ./internal/cli/ -run 'Creds(Status|Link|Unlink|GC)|ProfileCredentials|StageProfile' -v
 make check
 ```

@@ -44,7 +44,7 @@ Contract: `credentials.github.ttl` and `credentials.forgejo.ttl` default to `"1h
   VERIFY:   `go test ./internal/cli/ -run 'CredsGC|Creds.*GC|GC' -v`
   EXPECTED: httptest fakes prove no deletion without `--yes`, exact-match-only selection, discovery-before-delete, recheck behavior, 404 idempotence, and value-free output.
 
-- [ ] Update operator documentation and execute final gates
+- [x] Update operator documentation and execute final gates
   FILE:     `README.md`, `skills/agent-key-lifecycle/SKILL.md`, `skills/agent-sandbox-ops/SKILL.md`, `specs/0102-forge-credential-p2.md`
   CHANGE:   Document P2 horizon semantics, host-only renewal custody, GitHub canonical API files and stale compatibility values, Forgejo’s unverified potentially account-wide API scope and horizon cleanup side effect, opt-in egress, and exact/confirmed GC. Mark every completed plan task only after its verification command succeeds.
   VERIFY:   `make check && make build`
