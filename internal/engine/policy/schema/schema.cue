@@ -198,6 +198,13 @@ package safeslop
 	items?:  [...#ProjectionItem]
 }
 
+// A durable egress rule is intentionally typed and exact. It does not share
+// legacy `egress` string semantics, where a leading dot is a suffix match.
+#PersistentEgressRule: {
+	fqdn: string
+	port: 80 | 443
+}
+
 #Profile: {
 	agent:       #Agent
 	environment: #Environment
@@ -210,6 +217,9 @@ package safeslop
 	// (".example.com") is a subdomain suffix match; a bare host is exact. Ignored on
 	// network:allow and on host.
 	egress?: [...string]
+	// Exact durable rules for future container-deny sessions. Go validation
+	// canonicalizes and rejects non-FQDN/hard-denied values (specs/0103).
+	persistentEgress?: [...#PersistentEgressRule]
 	// Env var name -> secret ref; injected into the agent's environment at launch.
 	secrets?: {[string]: #SecretRef}
 	// Credentials staged before launch and wiped on exit.

@@ -5,9 +5,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"net"
-	"strings"
 	"time"
+
+	"github.com/freakhill/safeslop/internal/engine/policy"
 )
 
 // EgressGrant is one operator-invoked, session-scoped, exact FQDN:port network grant for a
@@ -29,15 +29,6 @@ type EgressGrant struct {
 // egress (specs/0089/0097).
 var ErrSessionNotGrantable = errors.New("network grants are only enforceable for container deny sessions")
 
-// nonGrantableHosts are denied regardless of grant: cloud metadata hostnames and localhost. They
-// mirror the proxy's hard-deny host set so a grant can never bypass metadata protections.
-var nonGrantableHosts = map[string]bool{
-	"localhost":                  true,
-	"metadata.google.internal":   true,
-	"metadata":                   true,
-	"instance-data.ec2.internal": true,
-}
-
 // CanGrant reports whether a session can enforce an egress grant. Only container deny sessions
 // route traffic through the squid proxy whose overlay a grant extends (specs/0089/0097).
 func CanGrant(sess Session) bool {
@@ -52,37 +43,13 @@ func CanGrant(sess Session) bool {
 // metadata/localhost hosts, a leading dot or wildcard (suffix match), URL scheme/path/query/
 // fragment/slash/space, and ports other than 80/443 (the squid Safe_ports MVP set).
 func ValidateEgressGrant(host string, port int) (string, int, error) {
-	host = strings.ToLower(strings.TrimSpace(host))
-	if host == "" {
-		return "", 0, errors.New("egress grant: host is empty")
+	normalized, normalizedPort, err := policy.ValidateExactEgress(host, port)
+	if err != nil {
+		// Preserve the stable session-grant error prefix consumed by the CLI's
+		// value-minimal contract mapper while sharing policy validation.
+		return "", 0, fmt.Errorf("egress grant: %w", err)
 	}
-	// A grant is one exact FQDN: reject anything that smuggles scheme/path/wildcard/encoding.
-	for _, bad := range []string{"http://", "https://", "ftp://", "ws://", "wss://", "/", "?", "#", " ", "\t", "\n", "*", "%", "@"} {
-		if strings.Contains(host, bad) {
-			return "", 0, fmt.Errorf("egress grant: host %q must be an exact FQDN (no scheme/path/query/wildcard/encoding)", host)
-		}
-	}
-	if strings.HasPrefix(host, ".") || strings.HasSuffix(host, ".") {
-		return "", 0, fmt.Errorf("egress grant: host %q: leading/trailing dot (suffix/wildcard match) is not grantable; use the exact FQDN", host)
-	}
-	if isIPLiteral(host) {
-		return "", 0, fmt.Errorf("egress grant: host %q: IP literals are non-grantable (use the FQDN)", host)
-	}
-	if nonGrantableHosts[host] {
-		return "", 0, fmt.Errorf("egress grant: host %q: localhost/metadata destinations are non-grantable", host)
-	}
-	if port != 80 && port != 443 {
-		return "", 0, fmt.Errorf("egress grant: port %d: only 80/443 are grantable in MVP (squid Safe_ports)", port)
-	}
-	return host, port, nil
-}
-
-// isIPLiteral reports whether host is an IPv4 or IPv6 literal (bare or bracketed). Mirrors the
-// proxy's ip_literal_dst deny so a grant can never target a raw address (which bypasses the FQDN
-// allowlist model and could name a private/metadata IP).
-func isIPLiteral(host string) bool {
-	h := strings.Trim(host, "[]")
-	return net.ParseIP(h) != nil
+	return normalized, normalizedPort, nil
 }
 
 // AppendGrant validates the target and the session posture, assigns a stable non-secret ID, and

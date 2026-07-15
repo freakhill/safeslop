@@ -9,6 +9,7 @@ package policy
 import (
 	_ "embed"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -221,6 +222,70 @@ type Projection struct {
 	Items   []ProjectionItem `json:"items,omitempty"`
 }
 
+// PersistentEgressRule is one durable, exact FQDN:port rule. It is separate
+// from legacy Profile.Egress strings so durable authority can never silently
+// broaden through suffix semantics (specs/0103).
+type PersistentEgressRule struct {
+	FQDN string `json:"fqdn"`
+	Port int    `json:"port"`
+}
+
+var exactEgressFQDNRE = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$`)
+
+var nonGrantableEgressHosts = map[string]bool{
+	"localhost":                  true,
+	"metadata.google.internal":   true,
+	"metadata":                   true,
+	"instance-data.ec2.internal": true,
+}
+
+// ValidateExactEgress normalizes one durable or session-scoped exact FQDN:port
+// designation. Keeping this in policy makes the typed durable contract and the
+// session overlay share one authority boundary (specs/0103).
+func ValidateExactEgress(host string, port int) (string, int, error) {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "" {
+		return "", 0, fmt.Errorf("exact egress: host is empty")
+	}
+	if net.ParseIP(strings.Trim(host, "[]")) != nil {
+		return "", 0, fmt.Errorf("exact egress: host %q: IP literals are non-grantable", host)
+	}
+	if nonGrantableEgressHosts[host] {
+		return "", 0, fmt.Errorf("exact egress: host %q: localhost/metadata destinations are non-grantable", host)
+	}
+	if !exactEgressFQDNRE.MatchString(host) {
+		return "", 0, fmt.Errorf("exact egress: host %q must be an exact FQDN (ASCII only)", host)
+	}
+	if port != 80 && port != 443 {
+		return "", 0, fmt.Errorf("exact egress: port %d: only 80/443 are grantable", port)
+	}
+	return host, port, nil
+}
+
+func validatePersistentEgress(prof *Profile) error {
+	if len(prof.PersistentEgress) == 0 {
+		return nil
+	}
+	if prof.Environment != "container" || prof.Network != "deny" {
+		return fmt.Errorf("persistentEgress is only enforceable for container deny profiles")
+	}
+	seen := make(map[string]struct{}, len(prof.PersistentEgress))
+	for i := range prof.PersistentEgress {
+		rule := &prof.PersistentEgress[i]
+		host, port, err := ValidateExactEgress(rule.FQDN, rule.Port)
+		if err != nil {
+			return fmt.Errorf("persistentEgress[%d]: %w", i, err)
+		}
+		key := fmt.Sprintf("%s:%d", host, port)
+		if _, duplicate := seen[key]; duplicate {
+			return fmt.Errorf("persistentEgress[%d]: duplicate exact rule %s", i, key)
+		}
+		seen[key] = struct{}{}
+		rule.FQDN, rule.Port = host, port
+	}
+	return nil
+}
+
 // Profile is one launchable configuration from safeslop.cue.
 type Profile struct {
 	Agent       string `json:"agent"`
@@ -230,6 +295,9 @@ type Profile struct {
 	// Egress lists extra allowlist domains for environment:container with network:deny,
 	// unioned with the base allowlist + the agent's built-in providers (specs/0046).
 	Egress []string `json:"egress,omitempty"`
+	// PersistentEgress contains durable exact FQDN:port rules for future container
+	// deny sessions. It is deliberately distinct from legacy suffix-capable Egress.
+	PersistentEgress []PersistentEgressRule `json:"persistentEgress,omitempty"`
 	// Secrets maps an env var name to a secret ref (op://... or env:NAME),
 	// resolved at launch and injected into the agent's environment.
 	Secrets map[string]string `json:"secrets,omitempty"`
@@ -340,7 +408,6 @@ func LoadBytes(data []byte) (*Config, error) {
 	}
 	for name, prof := range cfg.Profiles {
 		prof.Agent = NormalizeAgent(prof.Agent)
-		cfg.Profiles[name] = prof
 		// Projection is engine-owned in MVP (specs/0096 T1 FLO verdict): a safeslop.cue that
 		// sets a non-empty projection is rejected here with a spec-cited error. Embedded builtins
 		// populate Projection as a Go struct directly, so they never flow through LoadBytes and are
@@ -348,6 +415,9 @@ func LoadBytes(data []byte) (*Config, error) {
 		// trust/UI work can flip this gate without a schema migration.
 		if prof.Projection != nil && projectionAuthored(*prof.Projection) {
 			return nil, fmt.Errorf("profile %q: projection is engine-owned and not yet settable in safeslop.cue (specs/0096); use a builtin profile (pi/claude/fish/zsh)", name)
+		}
+		if err := validatePersistentEgress(&prof); err != nil {
+			return nil, fmt.Errorf("profile %q: %w", name, err)
 		}
 		if c := prof.Credentials; c != nil {
 			if c.Github != nil {
@@ -367,6 +437,7 @@ func LoadBytes(data []byte) (*Config, error) {
 				}
 			}
 		}
+		cfg.Profiles[name] = prof
 	}
 	return &cfg, nil
 }

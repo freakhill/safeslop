@@ -405,6 +405,43 @@ func TestEnvTier(t *testing.T) {
 	}
 }
 
+func TestPersistentEgressDecodesOnlyExactContainerDenyRules(t *testing.T) {
+	cfg, err := loadStr(t, `package safeslop
+safeslop: profiles: review: {
+	agent: "pi", environment: "container", network: "deny",
+	persistentEgress: [{fqdn: "API.Example.com", port: 443}]
+}`)
+	if err != nil {
+		t.Fatalf("Load persistent egress: %v", err)
+	}
+	got := cfg.Profiles["review"].PersistentEgress
+	if len(got) != 1 || got[0].FQDN != "api.example.com" || got[0].Port != 443 {
+		t.Fatalf("persistentEgress = %#v, want normalized api.example.com:443", got)
+	}
+
+	for name, src := range map[string]string{
+		"suffix": `persistentEgress: [{fqdn: ".example.com", port: 443}]`,
+		"ip":     `persistentEgress: [{fqdn: "127.0.0.1", port: 443}]`,
+		"url":    `persistentEgress: [{fqdn: "https://example.com", port: 443}]`,
+		"port":   `persistentEgress: [{fqdn: "api.example.com", port: 22}]`,
+		"host":   `environment: "host", network: "deny", persistentEgress: [{fqdn: "api.example.com", port: 443}]`,
+		"allow":  `environment: "container", network: "allow", persistentEgress: [{fqdn: "api.example.com", port: 443}]`,
+		"dupe":   `persistentEgress: [{fqdn: "API.example.com", port: 443}, {fqdn: "api.example.com", port: 443}]`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			fields := src
+			if !strings.Contains(fields, "environment:") {
+				fields = `environment: "container", network: "deny", ` + fields
+			}
+			_, err := loadStr(t, `package safeslop
+safeslop: profiles: review: {agent: "pi", `+fields+`}`)
+			if err == nil {
+				t.Fatalf("Load accepted invalid persistent egress: %s", src)
+			}
+		})
+	}
+}
+
 func TestIsLaunchableAgent(t *testing.T) {
 	for _, a := range []string{"claude", "pi", "fish", "zsh"} {
 		if !IsLaunchableAgent(a) {
