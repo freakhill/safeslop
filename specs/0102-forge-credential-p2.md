@@ -20,7 +20,7 @@ Contract: `credentials.github.ttl` and `credentials.forgejo.ttl` default to `"1h
   VERIFY:   `go test ./internal/engine/creds/ -run 'Lease|Renew' -v`
   EXPECTED: Fake-time tests prove renew/retry/horizon/current-expiry transitions and cleanup without sleeps or leaked timers.
 
-- [ ] Renew GitHub App batches atomically and stage API credentials
+- [x] Renew GitHub App batches atomically and stage API credentials
   FILE:     `internal/engine/creds/github.go`, `internal/engine/creds/github_expiry.go`, `internal/engine/creds/github_test.go`, `internal/engine/creds/github_expiry_test.go`, `internal/engine/creds/githubapp/mint.go`, `internal/engine/creds/githubapp/mint_test.go`
   CHANGE:   Refactor App partition construction and minting so a complete replacement batch is minted before canonical files change. Use 0600 temp siblings plus rename for token files/manifests; retain prior tokens privately until natural expiry for teardown-only best-effort revocation; never revoke them on renewal. Stage GitHub API tokens separately from git partition files: one partition gets canonical `SAFESLOP_GITHUB_TOKEN_FILE`; multiple partitions get a canonical directory and value-free manifest; optional `GITHUB_TOKEN` is documented stale after renewal. Reject short native lifetimes and preserve token-free metadata.
   VERIFY:   `go test ./internal/engine/creds/ ./internal/engine/creds/githubapp/ -run 'Github|GitHub|Mint|Revoke|Renew|API' -v`

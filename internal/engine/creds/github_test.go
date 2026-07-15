@@ -9,9 +9,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/freakhill/safeslop/internal/engine/creds/githubapp"
 	"github.com/freakhill/safeslop/internal/engine/policy"
@@ -21,10 +23,12 @@ import (
 // fakeForge implements githubapp.ForgeHTTP: it returns a distinct token per mint so tests can
 // assert per-owner/per-partition separation, and records mint bodies + revoked bearer tokens.
 type fakeForge struct {
-	mu      sync.Mutex
-	mints   []string // POST .../access_tokens request bodies, in order
-	revoked []string // bearer tokens seen by DELETE /installation/token
-	n       int
+	mu       sync.Mutex
+	mints    []string // POST .../access_tokens request bodies, in order
+	revoked  []string // bearer tokens seen by DELETE /installation/token
+	n        int
+	failAt   int
+	lifetime time.Duration
 }
 
 func (f *fakeForge) Do(_ context.Context, method, url string, headers map[string]string, body []byte) ([]byte, int, error) {
@@ -34,7 +38,15 @@ func (f *fakeForge) Do(_ context.Context, method, url string, headers map[string
 	case strings.HasSuffix(url, "/access_tokens"):
 		f.n++
 		f.mints = append(f.mints, string(body))
-		return []byte(fmt.Sprintf(`{"token":"ghs_tok_%d","expires_at":"2026-07-03T13:00:00Z"}`, f.n)), 201, nil
+		if f.failAt == f.n {
+			return []byte(`{"message":"mint failed"}`), 500, nil
+		}
+		lifetime := f.lifetime
+		if lifetime == 0 {
+			lifetime = time.Hour
+		}
+		expiresAt := time.Now().Add(lifetime).UTC().Format(time.RFC3339)
+		return []byte(fmt.Sprintf(`{"token":"ghs_tok_%d","expires_at":"%s"}`, f.n, expiresAt)), 201, nil
 	case method == "DELETE" && strings.HasSuffix(url, "/installation/token"):
 		f.revoked = append(f.revoked, strings.TrimPrefix(headers["Authorization"], "Bearer "))
 		return nil, 204, nil
@@ -212,18 +224,140 @@ func TestStageGithubContainerVariant(t *testing.T) {
 	}
 }
 
-func TestStageGithubApiEnabledIsP2(t *testing.T) {
-	_, err := StageGithub(context.Background(),
-		&policy.Credentials{Github: &policy.GithubCreds{Api: &policy.GithubApi{Enabled: true}}}, t.TempDir(), nil)
-	if err == nil || !strings.Contains(err.Error(), "P2") {
-		t.Fatalf("api.enabled staging must be a P2 error, got %v", err)
-	}
-}
-
 func TestStageGithubNilIsNoop(t *testing.T) {
 	env, err := StageGithub(context.Background(), &policy.Credentials{}, t.TempDir(), nil)
 	if err != nil || env != nil {
 		t.Fatalf("nil github creds must be a no-op: env=%v err=%v", env, err)
+	}
+}
+
+func TestStageGithubRenewalIsAtomicAndRetainsPriorTokens(t *testing.T) {
+	ref := testAppKeyEnv(t)
+	stage := t.TempDir()
+	acc := ghAccounts(ref, "acme")
+	f := &fakeForge{}
+	client := githubapp.New(f, "http://x")
+	repos := []policy.RepoCred{{Repo: "acme/web"}, {Repo: "acme/api", Write: true}}
+	if _, err := stageGithubApp(context.Background(), repos, stage, acc, client); err != nil {
+		t.Fatal(err)
+	}
+	beforeRO, err := os.ReadFile(filepath.Join(stage, githubDir, "token-acme"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeRW, err := os.ReadFile(filepath.Join(stage, githubDir, "token-acme-rw"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The second replacement mint fails. Neither canonical token may change.
+	f.failAt = f.n + 2
+	if _, err := stageGithubApp(context.Background(), repos, stage, acc, client); err == nil {
+		t.Fatal("partial replacement batch must fail")
+	}
+	for path, want := range map[string][]byte{
+		"token-acme":    beforeRO,
+		"token-acme-rw": beforeRW,
+	} {
+		got, err := os.ReadFile(filepath.Join(stage, githubDir, path))
+		if err != nil || string(got) != string(want) {
+			t.Fatalf("failed batch changed canonical %s: got %q err %v", path, got, err)
+		}
+	}
+
+	f.failAt = 0
+	if _, err := stageGithubApp(context.Background(), repos, stage, acc, client); err != nil {
+		t.Fatalf("successful replacement: %v", err)
+	}
+	for _, path := range []string{"token-acme", "token-acme-rw"} {
+		fi, err := os.Stat(filepath.Join(stage, githubDir, path))
+		if err != nil || fi.Mode().Perm() != 0o600 {
+			t.Fatalf("replacement %s must be canonical 0600: %v", path, err)
+		}
+	}
+	if len(f.revoked) != 0 {
+		t.Fatalf("ordinary renewal must not revoke active prior tokens: %v", f.revoked)
+	}
+
+	revokeGithubWith(context.Background(), stage, client)
+	if len(f.revoked) != 4 { // two current plus two retained prior tokens
+		t.Fatalf("teardown must revoke current and retained tokens, got %v", f.revoked)
+	}
+}
+
+func TestStageGithubRejectsShortNativeLifetime(t *testing.T) {
+	ref := testAppKeyEnv(t)
+	stage := t.TempDir()
+	f := &fakeForge{lifetime: 9 * time.Minute}
+	_, err := stageGithubApp(context.Background(), []policy.RepoCred{{Repo: "acme/web"}}, stage, ghAccounts(ref, "acme"), githubapp.New(f, "http://x"))
+	if err == nil || !strings.Contains(err.Error(), "lifetime") {
+		t.Fatalf("short native lifetime must be rejected, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(stage, githubDir, "token-acme")); !os.IsNotExist(err) {
+		t.Fatalf("short lifetime must not change canonical stage, stat err=%v", err)
+	}
+}
+
+func TestStageGithubAPIFileDeliveryAndDownscoping(t *testing.T) {
+	ref := testAppKeyEnv(t)
+	stage := t.TempDir()
+	acc := ghAccounts(ref, "acme")
+	f := &fakeForge{}
+	api := &policy.GithubApi{Enabled: true, Permissions: []string{"issues:write", "metadata:read"}}
+	env, err := stageGithubAppWithAPI(context.Background(), []policy.RepoCred{{Repo: "acme/web"}}, stage, acc, githubapp.New(f, "http://x"), api)
+	if err != nil {
+		t.Fatal(err)
+	}
+	apiFile := filepath.Join(stage, githubAPIDir, githubAPITokenFile)
+	fi, err := os.Stat(apiFile)
+	if err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("canonical API token must be 0600: %v", err)
+	}
+	if !slices.Contains(env, "SAFESLOP_GITHUB_TOKEN_FILE="+apiFile) {
+		t.Fatalf("single API partition needs canonical file env, got %v", env)
+	}
+	if slices.ContainsFunc(env, func(v string) bool { return strings.HasPrefix(v, "GITHUB_TOKEN=") }) {
+		t.Fatalf("API token must not be exported as a conventional value: %v", env)
+	}
+	if len(f.mints) != 2 {
+		t.Fatalf("git and API tokens must mint separately, got %d", len(f.mints))
+	}
+	apiMint := f.mints[1]
+	if !strings.Contains(apiMint, `"issues":"write"`) || !strings.Contains(apiMint, `"metadata":"read"`) || !strings.Contains(apiMint, `"web"`) {
+		t.Fatalf("API mint must be repository/permission downscoped: %s", apiMint)
+	}
+	manifestPath := filepath.Join(stage, githubAPIDir, githubAPIMetaFile)
+	manifest, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Stat(manifestPath); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("API manifest must be 0600: %v", err)
+	}
+	if _, err := os.Stat(apiFile + ".new"); !os.IsNotExist(err) {
+		t.Fatalf("successful atomic replacement must not leave token temp: %v", err)
+	}
+	if strings.Contains(string(manifest), "ghs_tok_") {
+		t.Fatalf("API manifest must not contain token bytes: %s", manifest)
+	}
+}
+
+func TestStageGithubAPIMultiplePartitionsUsesDirectoryManifest(t *testing.T) {
+	ref := testAppKeyEnv(t)
+	stage := t.TempDir()
+	acc := ghAccounts(ref, "acme")
+	api := &policy.GithubApi{Enabled: true, Permissions: []string{"issues:read"}}
+	env, err := stageGithubAppWithAPI(context.Background(), []policy.RepoCred{{Repo: "acme/web"}, {Repo: "acme/api", Write: true}}, stage, acc, githubapp.New(&fakeForge{}, "http://x"), api)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(env, "SAFESLOP_GITHUB_TOKEN_DIR="+filepath.Join(stage, githubAPIDir)) || !slices.Contains(env, "SAFESLOP_GITHUB_TOKEN_MANIFEST="+filepath.Join(stage, githubAPIDir, githubAPIMetaFile)) {
+		t.Fatalf("multiple API partitions need directory + manifest, got %v", env)
+	}
+	for _, forbidden := range []string{"SAFESLOP_GITHUB_TOKEN_FILE=", "GITHUB_TOKEN="} {
+		if slices.ContainsFunc(env, func(v string) bool { return strings.HasPrefix(v, forbidden) }) {
+			t.Fatalf("multiple partitions must not choose an ambiguous default: %v", env)
+		}
 	}
 }
 
