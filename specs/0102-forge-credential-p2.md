@@ -14,7 +14,7 @@ Contract: `credentials.github.ttl` and `credentials.forgejo.ttl` default to `"1h
   VERIFY:   `go test ./internal/engine/policy/ -run 'TTL|Api|API|Egress|Authority' -v`
   EXPECTED: Valid P2 profiles decode; invalid horizons/API declarations fail before staging; evaluation and egress are value-free and least-authority accurate.
 
-- [ ] Build a fake-clock lease state machine
+- [x] Build a fake-clock lease state machine
   FILE:     `internal/engine/creds/lease.go`, `internal/engine/creds/lease_test.go`
   CHANGE:   Define a host-only lease manager with injectable clock, timer, jitter, mint callback, and value-free snapshot. Model healthy/renewing/degraded/expired states, a run-relative horizon, 2/3 observed-lifetime GitHub renewal, 10-minute minimum usable lifetime, 5s-to-5m exponential retry with 0–20% jitter, success reset, cancellation, and no timer/goroutine leaks. Do not serialize secret material or expose a listener.
   VERIFY:   `go test ./internal/engine/creds/ -run 'Lease|Renew' -v`
