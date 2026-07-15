@@ -30,6 +30,25 @@ func TestProfileIW3SubcommandsRegistered(t *testing.T) {
 	}
 }
 
+func TestProfileEgressSubcommandsRegistered(t *testing.T) {
+	root := newRoot()
+	egress, _, err := root.Find([]string{"profile", "egress"})
+	if err != nil {
+		t.Fatalf("profile egress command missing: %v", err)
+	}
+	for _, want := range []string{"preview", "add", "remove"} {
+		var found bool
+		for _, c := range egress.Commands() {
+			if c.Name() == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("profile egress subcommand %q not registered", want)
+		}
+	}
+}
+
 func TestSessionEgressSubcommandsRegistered(t *testing.T) {
 	root := newRoot()
 	egress, _, err := root.Find([]string{"session", "egress"})

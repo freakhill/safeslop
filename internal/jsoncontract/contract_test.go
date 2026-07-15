@@ -77,8 +77,8 @@ func TestGoldenFixturesParseValidateAndRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(paths) != 9 {
-		t.Fatalf("golden fixture count = %d, want 9: %v", len(paths), paths)
+	if len(paths) != 10 {
+		t.Fatalf("golden fixture count = %d, want 10: %v", len(paths), paths)
 	}
 	for _, path := range paths {
 		t.Run(filepath.Base(path), func(t *testing.T) {

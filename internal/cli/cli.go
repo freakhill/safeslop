@@ -2361,7 +2361,7 @@ func credRowsOrEmpty(rows []creds.CredRow) []creds.CredRow {
 
 func cmdProfile() *cobra.Command {
 	c := &cobra.Command{Use: "profile", Short: "Inspect and author safeslop.cue profiles"}
-	c.AddCommand(cmdProfileList(), cmdProfilePresets(), cmdProfileDefaults(), cmdProfileShow(), cmdProfileCreate(), cmdProfileCredentials())
+	c.AddCommand(cmdProfileList(), cmdProfilePresets(), cmdProfileDefaults(), cmdProfileShow(), cmdProfileCreate(), cmdProfileCredentials(), cmdProfileEgress())
 	return c
 }
 

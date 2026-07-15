@@ -35,7 +35,7 @@ At container launch, persistent exact rules and session grants are rendered thro
   VERIFY:   `go test ./internal/engine/container ./internal/engine/session ./internal/cli -run 'PersistentEgress|SessionGrant|ProxyReload|FailClosed|FutureSession|NoProfileMutation' -v && make check-assets`
   EXPECTED: Persistent exact entries permit only their host+port, survive session-grant add/revoke, respect hard denies, and are present only in a new profile-backed session; overlay failure preserves the prior restrictive effective set.
 
-- [ ] T3 — Add hash-checked profile persistent-egress transactions
+- [x] T3 — Add hash-checked profile persistent-egress transactions
   FILE:     `internal/cli/profile_egress.go`, `internal/cli/profile_egress_test.go`, `internal/cli/cli.go`, `internal/cli/cli_help_iw3_test.go`, `internal/jsoncontract/testdata/*.golden.json`
   CHANGE:   Add `profile egress preview|add|remove <profile> [safeslop.cue] --host H --port P --expected-policy-hash HASH --output json`. Reuse the structured profile-mutation renderer, but compare the loaded source policy hash before mutation, validate/canonicalize the rule, and emit only profile/path, rule, source/lifetime, current/candidate hash, and a logical `+/- persistentEgress: {fqdn,port}` diff. Preview does not write; add/remove atomically write only validated rendered policy and never touch legacy `egress`; output/help remains value-free.
   VERIFY:   `go test ./internal/cli -run 'ProfileEgress|PersistentEgress|PolicyHash|Help|ValueFree' -v`

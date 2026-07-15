@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "ok": true,
+  "data": {
+    "candidate_policy_hash": "sha256:candidate",
+    "current_policy_hash": "sha256:current",
+    "delta": {
+      "op": "+",
+      "persistentEgress": {
+        "fqdn": "api.example.com",
+        "port": 443
+      }
+    },
+    "lifetime": "future-sessions",
+    "path": "/workspace/safeslop.cue",
+    "profile": "reviewed",
+    "rule": {
+      "fqdn": "api.example.com",
+      "port": 443
+    },
+    "source": "profile-persistent"
+  },
+  "warnings": [],
+  "errors": []
+}
