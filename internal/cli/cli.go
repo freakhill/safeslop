@@ -2443,7 +2443,7 @@ func credRowsOrEmpty(rows []creds.CredRow) []creds.CredRow {
 
 func cmdProfile() *cobra.Command {
 	c := &cobra.Command{Use: "profile", Short: "Inspect and author safeslop.cue profiles"}
-	c.AddCommand(cmdProfileList(), cmdProfilePresets(), cmdProfileDefaults(), cmdProfileShow(), cmdProfileCreate(), cmdProfileCredentials(), cmdProfileEgress())
+	c.AddCommand(cmdProfileList(), cmdProfilePresets(), cmdProfileDefaults(), cmdProfileShow(), cmdProfileCreate(), cmdProfileDelete(), cmdProfileCredentials(), cmdProfileEgress())
 	return c
 }
 
@@ -2633,6 +2633,47 @@ func cmdProfileCreate() *cobra.Command {
 	c.Flags().StringVar(&network, "network", "deny", "network policy: deny or allow")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "resolve and print the profile without writing safeslop.cue")
 	c.Flags().BoolVar(&noDefaultBundle, "no-default-bundle", false, "do not include the agent's default package bundle")
+	c.Flags().StringVar(&output, "output", "", "output format: json")
+	return c
+}
+
+func cmdProfileDelete() *cobra.Command {
+	var output string
+	c := &cobra.Command{
+		Use:   "delete <name> [safeslop.cue] --output json",
+		Short: "Delete one profile from safeslop.cue",
+		Args:  cobra.RangeArgs(1, 2),
+		RunE: func(_ *cobra.Command, args []string) error {
+			if output != "json" {
+				return fmt.Errorf("profile delete requires --output json")
+			}
+			path, err := findConfig(argAt(args, 1))
+			if err != nil {
+				return emitContractError(jsoncontract.CodeNotFound, "load safeslop.cue", map[string]any{"error": err.Error()})
+			}
+			cfg, err := policy.Load(path)
+			if err != nil {
+				return emitContractError(jsoncontract.CodeSchemaViolation, "load safeslop.cue", map[string]any{"path": path, "error": err.Error()})
+			}
+			name := args[0]
+			if _, ok := cfg.Profiles[name]; !ok {
+				return emitContractError(jsoncontract.CodeNotFound, fmt.Sprintf("no profile %q in safeslop.cue", name), map[string]any{"profile": name, "path": path})
+			}
+			delete(cfg.Profiles, name)
+			rendered, err := renderConfigCUE(cfg)
+			if err != nil {
+				return emitContractError(jsoncontract.CodeInternal, "render safeslop.cue", map[string]any{"error": err.Error()})
+			}
+			if _, err := policy.LoadBytes(rendered); err != nil {
+				return emitContractError(jsoncontract.CodeSchemaViolation, "rendered safeslop.cue did not validate; not writing", map[string]any{"error": err.Error()})
+			}
+			if err := os.WriteFile(path, rendered, 0o644); err != nil {
+				return emitContractError(jsoncontract.CodeIOError, "write safeslop.cue", map[string]any{"path": path, "error": err.Error()})
+			}
+			emitContract(jsoncontract.OK(map[string]any{"removed": true, "profile": name, "path": path}))
+			return nil
+		},
+	}
 	c.Flags().StringVar(&output, "output", "", "output format: json")
 	return c
 }

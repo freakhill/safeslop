@@ -185,6 +185,74 @@ func TestProfileListEnvelope(t *testing.T) {
 	}
 }
 
+func TestProfileDeleteRemovesOnlyTargetProfile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "safeslop.cue")
+	cue := `package safeslop
+
+safeslop: {
+	version: 1
+	profiles: {
+		review: {agent: "claude", environment: "container", network: "deny"}
+		keep:   {agent: "pi", environment: "container", network: "deny"}
+	}
+}
+`
+	if err := os.WriteFile(path, []byte(cue), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runRootForTest(t, dir, "profile", "delete", "review", "--output", "json")
+	if err != nil {
+		t.Fatalf("profile delete: %v\nout=%s", err, out)
+	}
+	env := parseEnvelopeForTest(t, out)
+	if !env.OK || env.Data["removed"] != true || env.Data["profile"] != "review" || env.Data["path"] != canonicalPolicyPath(path) {
+		t.Fatalf("profile delete envelope = %#v", env)
+	}
+	cfg, err := policy.Load(path)
+	if err != nil {
+		t.Fatalf("load remaining config: %v", err)
+	}
+	if _, found := cfg.Profiles["review"]; found {
+		t.Fatalf("deleted profile remained: %#v", cfg.Profiles)
+	}
+	if _, found := cfg.Profiles["keep"]; !found {
+		t.Fatalf("unrelated profile was removed: %#v", cfg.Profiles)
+	}
+}
+
+func TestProfileDeleteMissingDoesNotWrite(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "safeslop.cue")
+	cue := []byte(`package safeslop
+
+safeslop: {version: 1, profiles: {keep: {agent: "pi", environment: "container", network: "deny"}}}
+`)
+	if err := os.WriteFile(path, cue, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runRootForTest(t, dir, "profile", "delete", "missing", "--output", "json")
+	if !errors.Is(err, errOutputEmitted) {
+		t.Fatalf("profile delete missing: err=%v, want envelope error; out=%s", err, out)
+	}
+	env := parseEnvelopeForTest(t, out)
+	if env.OK || len(env.Errors) != 1 || env.Errors[0].Code != jsoncontract.CodeNotFound {
+		t.Fatalf("profile delete missing envelope = %#v", env)
+	}
+	after, readErr := os.ReadFile(path)
+	if readErr != nil || string(after) != string(cue) {
+		t.Fatalf("missing delete changed policy: readErr=%v\nafter=%s", readErr, after)
+	}
+}
+
+func TestProfileDeleteRequiresOutputJSON(t *testing.T) {
+	if _, err := runRootForTest(t, t.TempDir(), "profile", "delete", "review"); err == nil {
+		t.Fatal("profile delete without --output json should error")
+	}
+}
+
 func TestProfileShowProjectExactByteEvaluation(t *testing.T) {
 	fixed := withProfileEvaluationLocalPass(t)
 	t.Setenv("HOME", t.TempDir())
