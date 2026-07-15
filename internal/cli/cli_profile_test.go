@@ -253,6 +253,42 @@ func TestProfileDeleteRequiresOutputJSON(t *testing.T) {
 	}
 }
 
+func TestProfileListIncludesBuiltinsWithoutConfig(t *testing.T) {
+	out, err := runRootForTest(t, t.TempDir(), "profile", "list", "--output", "json")
+	if err != nil {
+		t.Fatalf("profile list without config: %v\nout=%s", err, out)
+	}
+	env := parseEnvelopeForTest(t, out)
+	if !env.OK || env.Data["path"] != "" {
+		t.Fatalf("no-config list envelope = %#v", env)
+	}
+	profiles, ok := env.Data["profiles"].(map[string]any)
+	if !ok || len(profiles) != 0 {
+		t.Fatalf("no-config project profiles = %#v", env.Data["profiles"])
+	}
+	builtins, ok := env.Data["builtins"].([]any)
+	if !ok || len(builtins) != 4 {
+		t.Fatalf("no-config builtins = %#v", env.Data["builtins"])
+	}
+	for _, row := range builtins {
+		builtin := row.(map[string]any)
+		if builtin["profile_source"] != "builtin" || builtin["policy_path"] == "" || builtin["policy_hash"] == "" {
+			t.Fatalf("builtin provenance = %#v", builtin)
+		}
+	}
+}
+
+func TestProfileListInvalidConfigDoesNotFallBackToBuiltins(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "safeslop.cue"), []byte("not valid cue"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runRootForTest(t, dir, "profile", "list", "--output", "json")
+	if err == nil {
+		t.Fatalf("invalid profile list unexpectedly succeeded: %s", out)
+	}
+}
+
 func TestProfileShowProjectExactByteEvaluation(t *testing.T) {
 	fixed := withProfileEvaluationLocalPass(t)
 	t.Setenv("HOME", t.TempDir())

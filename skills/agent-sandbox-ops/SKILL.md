@@ -158,7 +158,9 @@ safeslop list
 safeslop run review --dry-run
 ```
 
-In Emacs, `C-c s F` opens the Profiles surface. Use `RET`/`i` to inspect a
+In Emacs, `C-c s F` opens the Profiles surface, including signed-binary `claude`,
+`fish`, `pi`, and `zsh` defaults labelled `builtin` in Source. A same-named project
+profile wins; builtin rows are launchable/inspectable but immutable. Use `RET`/`i` to inspect a
 profile's resolved packages/egress/recipe and Authority/Trust/Readiness findings,
 `r` to review a freshly fetched engine evaluation before offering to launch a
 session from the row, `e` to edit the CUE at that profile's block,

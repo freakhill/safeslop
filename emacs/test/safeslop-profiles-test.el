@@ -37,6 +37,18 @@
       (should (eq (get-text-property 0 'face (aref (cadr yolo) 2)) 'safeslop-tier-host))
       (should (eq (get-text-property 0 'face (aref (cadr yolo) 3)) 'safeslop-net-allow)))))
 
+(ert-deftest safeslop-test-profiles-rows-merge-nonshadowed-builtins ()
+  "Builtin rows are visible, source-labelled, and lose to project names."
+  (let* ((data '((profiles . ((pi . ((agent . "pi") (environment . "container") (network . "allow")))))
+                 (builtins . [((name . "fish") (profile_source . "builtin")
+                               (profile . ((agent . "fish") (environment . "container") (network . "deny"))))
+                              ((name . "pi") (profile_source . "builtin")
+                               (profile . ((agent . "pi") (environment . "container") (network . "deny"))))])))
+         (rows (safeslop-profiles--rows data)))
+    (should (= (length rows) 2))
+    (should (equal (aref (cadr (assoc "pi" rows)) 4) "project"))
+    (should (equal (aref (cadr (assoc "fish" rows)) 4) "builtin"))))
+
 (ert-deftest safeslop-test-profiles-keymap ()
   ;; RET is the safe primary action (inspect); editing the CUE file is `e'.
   (should (eq (lookup-key safeslop-profiles-mode-map (kbd "RET")) #'safeslop-profiles-inspect))

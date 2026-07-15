@@ -463,7 +463,7 @@ Each preset is a complete, validated `safeslop.cue` with a one-line description:
 | `shell-container` | A plain `fish` shell in a container — a sandboxed shell, no coding agent. |
 
 The Emacs Profiles surface (`C-c s F`) is a list of your `safeslop.cue` profiles
-with ergonomic CRUD and launch keys: `RET`/`i` inspect a profile's resolved
+with built-in `claude`, `fish`, `pi`, and `zsh` defaults alongside project rows. The Source column labels the signed-binary defaults; a same-named project profile wins. Builtins are launchable/inspectable without `safeslop trust`, but immutable; create a project profile to customize one. The surface has ergonomic CRUD and launch keys: `RET`/`i` inspect a profile's resolved
 packages, egress, image recipe, and three-section evaluation (read-only, no file
 edit); `r` fetches and displays the engine evaluation before offering to launch a
 session from the selected profile; `e` opens

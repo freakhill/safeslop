@@ -144,7 +144,9 @@ Debug lines from polling are labelled `event=poll`.
 
 `M-x safeslop-profiles` (`C-c s F`) opens the **Profiles** surface for the active
 `safeslop.cue`.  Rows show profile, agent, environment, and network with the same
-safety legends as the portal.
+safety legends as the portal. It also lists signed-binary `claude`, `fish`, `pi`,
+and `zsh` defaults, marked `builtin` in Source; same-named project profiles win.
+Builtin rows can be inspected/launched but cannot be edited, deleted, or cloned.
 
 | key | action |
 |---|---|

@@ -2459,13 +2459,21 @@ func cmdProfileList() *cobra.Command {
 			}
 			path, err := findConfig(arg0(args))
 			if err != nil {
-				return err
+				if len(args) > 0 {
+					return err
+				}
+				emitContract(jsoncontract.OK(map[string]any{
+					"path":     "",
+					"profiles": map[string]policy.Profile{},
+					"builtins": profileBuiltinRows(),
+				}))
+				return nil
 			}
 			cfg, err := policy.Load(path)
 			if err != nil {
 				return err
 			}
-			emitContract(jsoncontract.OK(map[string]any{"path": path, "profiles": cfg.Profiles}))
+			emitContract(jsoncontract.OK(map[string]any{"path": path, "profiles": cfg.Profiles, "builtins": profileBuiltinRows()}))
 			return nil
 		},
 	}
@@ -2491,6 +2499,17 @@ func cmdProfilePresets() *cobra.Command {
 	return c
 }
 
+func profileBuiltinRows() []map[string]any {
+	profiles := make([]map[string]any, 0)
+	for _, builtin := range policy.BuiltinProfiles() {
+		profiles = append(profiles, map[string]any{
+			"name": builtin.Name, "description": builtin.Description, "profile_source": "builtin",
+			"policy_path": "builtin:" + builtin.Name, "policy_hash": builtin.Hash, "profile": builtin.Profile,
+		})
+	}
+	return profiles
+}
+
 func cmdProfileDefaults() *cobra.Command {
 	var output string
 	c := &cobra.Command{
@@ -2501,14 +2520,7 @@ func cmdProfileDefaults() *cobra.Command {
 			if output != "json" {
 				return fmt.Errorf("profile defaults requires --output json")
 			}
-			profiles := make([]map[string]any, 0)
-			for _, builtin := range policy.BuiltinProfiles() {
-				profiles = append(profiles, map[string]any{
-					"name": builtin.Name, "description": builtin.Description, "profile_source": "builtin",
-					"policy_path": "builtin:" + builtin.Name, "policy_hash": builtin.Hash, "profile": builtin.Profile,
-				})
-			}
-			emitContract(jsoncontract.OK(map[string]any{"profiles": profiles}))
+			emitContract(jsoncontract.OK(map[string]any{"profiles": profileBuiltinRows()}))
 			return nil
 		},
 	}

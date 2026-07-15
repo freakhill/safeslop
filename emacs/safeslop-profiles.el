@@ -139,18 +139,23 @@ create write remains asynchronous."
           (list "--output" "json")))
 
 (defun safeslop-profiles--rows (data)
-  "Build tabulated rows from `profile list' DATA, name-ordered and safety-faced."
-  (mapcar
-   (lambda (entry)
-     (let ((name (symbol-name (car entry)))
-           (p (cdr entry)))
-       (list name
-             (vector name
-                     (or (alist-get 'agent p) "")
-                     (safeslop-surface--env-cell (or (alist-get 'environment p) ""))
-                     (safeslop-surface--net-cell (or (alist-get 'network p) ""))))))
-   (sort (copy-sequence (alist-get 'profiles data))
-         (lambda (a b) (string< (symbol-name (car a)) (symbol-name (car b)))))))
+  "Build source-labelled rows from `profile list' DATA with project precedence."
+  (let ((projects (alist-get 'profiles data))
+        rows)
+    (dolist (entry projects)
+      (let ((name (symbol-name (car entry))) (p (cdr entry)))
+        (push (list name (vector name (or (alist-get 'agent p) "")
+                                 (safeslop-surface--env-cell (or (alist-get 'environment p) ""))
+                                 (safeslop-surface--net-cell (or (alist-get 'network p) ""))
+                                 "project")) rows)))
+    (dolist (builtin (append (alist-get 'builtins data) nil))
+      (let ((name (alist-get 'name builtin)) (p (alist-get 'profile builtin)))
+        (unless (assoc (intern name) projects)
+          (push (list name (vector name (or (alist-get 'agent p) "")
+                                   (safeslop-surface--env-cell (or (alist-get 'environment p) ""))
+                                   (safeslop-surface--net-cell (or (alist-get 'network p) ""))
+                                   "builtin")) rows))))
+    (sort rows (lambda (a b) (string< (car a) (car b))))))
 
 ;;; ---- pure CRUD helpers (unit-tested) -------------------------------------
 
@@ -177,6 +182,11 @@ create write remains asynchronous."
         (list (substring-no-properties (aref v 1))
               (substring-no-properties (aref v 2))
               (substring-no-properties (aref v 3)))))))
+
+(defun safeslop-profiles--builtin-name-p (name)
+  "Return non-nil when NAME identifies an immutable builtin row."
+  (let ((entry (assoc name tabulated-list-entries)))
+    (equal (and entry (aref (cadr entry) 4)) "builtin")))
 
 (defun safeslop-profiles--row-summary (name)
   "Return a one-line \"agent, env, net\" summary for listed profile NAME, or nil."
@@ -1163,6 +1173,8 @@ quietly re-validated."
   (interactive)
   (let ((path safeslop-profiles--config-path)
         (name (tabulated-list-get-id)))
+    (when (and name (safeslop-profiles--builtin-name-p name))
+      (user-error "Builtin profile `%s' is embedded and immutable; launch it or create a project profile" name))
     (unless path (user-error "No safeslop.cue known; scaffold one with `c'"))
     (safeslop-profiles--open-config path)
     (if (and name (safeslop-profiles--goto-profile-block name))
@@ -1181,7 +1193,7 @@ complete remaining CUE before writing; on success this Profiles buffer refreshes
 in place, so deletion never requires hand-editing a profile block."
   (interactive)
   (let ((path safeslop-profiles--config-path)
-        (names (safeslop-profiles--names))
+        (names (seq-remove #'safeslop-profiles--builtin-name-p (safeslop-profiles--names)))
         (at-point (tabulated-list-get-id)))
     (unless path (user-error "No safeslop.cue known; refresh, or scaffold one with `c'"))
     (unless names (user-error "No profiles to delete"))
@@ -1754,6 +1766,8 @@ through `profile create'."
   (interactive)
   (let ((name (tabulated-list-get-id))
         (existing (safeslop-profiles--names)))
+    (when (and name (safeslop-profiles--builtin-name-p name))
+      (user-error "Builtin profile `%s' is embedded and cannot be cloned through the partial compose UI" name))
     (unless name (user-error "No profile on this line"))
     (safeslop--call-json-async
      (safeslop-profiles--show-args name)
@@ -1800,7 +1814,8 @@ through `profile create'."
         [("Profile" 20 nil)
          ("Agent" 12 nil)
          ("Env" 11 nil)
-         ("Net" 6 nil)])
+         ("Net" 6 nil)
+         ("Source" 9 nil)])
   (setq tabulated-list-padding 1)
   (tabulated-list-init-header))
 
