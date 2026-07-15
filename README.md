@@ -146,20 +146,47 @@ or return an empty array.
 ### Progressive session egress
 
 There is no `network: "progressive"` policy value. Progressive egress is an
-operator-invoked, session-scoped overlay available only to
-`environment: "container"` + `network: "deny"` sessions. Use `observations` to
-inspect denied, value-free FQDN:port destinations, then explicitly `grant` or
-`revoke` one exact destination. A grant never mutates `profile.egress` or
-`safeslop.cue`; it is removed with the session. Proxy overlay/reload failure
-keeps the prior, more-restrictive deny state.
+operator-invoked review surface available only to `environment: "container"` +
+`network: "deny"` sessions. `observations` returns value-free denied FQDN:port
+rows; it never grants traffic. `grant`/`revoke` control a session-scoped overlay
+only, so a grant is removed with the session and never mutates `profile.egress`
+or `safeslop.cue`. `dismiss` records a value-free **Keep denied** acknowledgement
+for the observed destination: it grants nothing, suppresses only observations at
+or before that acknowledgement, and a later denial is visible again. Proxy
+overlay/reload failure keeps the prior, more-restrictive deny state.
 
-Only exact FQDNs on port 80 or 443 are eligible. IP literals, private or
-link-local addresses, localhost/metadata, credential broker or mint endpoints,
-wildcards, suffixes, raw URLs, and other ports are non-grantable. Host-tier and
-`network: "allow"` sessions are not enforceably isolated and reject these
-commands. Observations are non-modal: agent traffic never opens a prompt or
-changes network authority. In Emacs session detail, `o` shows observations, `G`
-lists grants, `+` grants an operator-entered FQDN:port, and `-` revokes a grant.
+For a deliberately reviewed future-session rule, use the separate typed policy
+field — never legacy `egress`:
+
+```cue
+persistentEgress: [{fqdn: "api.example.com", port: 443}]
+```
+
+It is accepted only on container-deny profiles and each entry is one normalized,
+exact FQDN on port 80 or 443. Review the value-free logical delta and source hash
+first, then make the explicit hash-checked write:
+
+```bash
+safeslop profile egress preview review safeslop.cue --host api.example.com --port 443 --expected-policy-hash HASH --output json
+safeslop profile egress add     review safeslop.cue --host api.example.com --port 443 --expected-policy-hash HASH --output json
+safeslop profile egress remove  review safeslop.cue --host api.example.com --port 443 --expected-policy-hash HASH --output json
+```
+
+Preview never writes. Add/remove fail closed on a stale hash, validate and
+atomically render the complete policy, and change policy bytes; review and run
+`safeslop trust` before a **new** session can use the rule. They cannot alter a
+running session. Persistent rules identify `profile-persistent / future sessions`;
+dynamic grants identify `session-grant / this session`.
+
+IP literals, private or link-local addresses, localhost/metadata, credential
+broker or mint endpoints, wildcards, suffixes, raw URLs, and other ports are
+non-grantable. Host-tier and `network: "allow"` sessions are not enforceably
+isolated and reject these commands. Observations are non-modal: agent traffic
+never opens a prompt, focuses a review buffer, edits CUE, or changes network
+authority. In Emacs, compose labels container deny as **Deny (progressive
+review)** (not an authorization); session detail shows a passive pending count
+and `v` opens review. There, `a` is Allow now, `k` is Keep denied, and `A` first
+shows the hash/CUE delta before a separate explicit durable add.
 
 `session status` and `session list` reconcile liveness: a session still marked
 `running` whose recorded process is gone — or whose PID now names a different

@@ -9,6 +9,13 @@ OFF-LIMITS: do not add `network:"progressive"`, `network:"ask"`, or agent-trigge
 
 WORKTREE: `.worktrees/0096-contained-hybrid-default-profiles/`
 
+> Follow-on: `specs/0103-progressive-egress-review.md` adds value-free Keep
+> denied acknowledgements plus separately typed `persistentEgress` policy rules.
+> Those rules are hash-checked `profile egress preview|add|remove` transactions,
+> distinct from legacy `profile.egress` and this session-only overlay; a durable
+> rule affects future sessions only after normal policy re-trust. Neither review
+> path permits an agent-triggered modal or automatic authority.
+
 ## Design
 
 Problem: contained-hybrid defaults need "progressive network" while preserving safeslop's current enforceable posture: container deny traffic goes through Squid; host/network:allow are not enforceable; `profile.egress` remains static trusted policy.

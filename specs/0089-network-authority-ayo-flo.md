@@ -60,8 +60,9 @@ base allowlist
 ∪ policy.AgentEgress(agent)
 ∪ package RuntimeEgress
 ∪ policy.CredsEgress(profile)
-∪ profile.egress
-∪ session egress grants
+∪ profile.egress (legacy static semantics)
+∪ profile.persistentEgress (typed exact policy / future sessions)
+∪ session egress grants (dynamic this-session overlay)
 ```
 
 Every surface that summarizes network authority should show the source and lifetime of each contributor: base, agent, package, credential, profile policy, or session overlay.
@@ -120,7 +121,8 @@ In-session UX should support:
 - list blocked FQDN:port observations;
 - grant exact destination for this session;
 - revoke a session grant;
-- copy/suggest a persistent CUE edit, requiring explicit profile edit and trust;
+- preview a typed persistent-rule CUE delta, then explicitly write it with the
+  reviewed current policy hash and re-enter policy-byte trust for future sessions;
 - no agent-triggered modal prompts.
 
 ## Rejected
@@ -132,6 +134,17 @@ In-session UX should support:
 - Moving a denied container onto the egress network to satisfy a temporary grant.
 - New long-lived privileged firewall/daemon dependency in this decision.
 - Letting sandboxed agents reach credential broker/mint endpoints.
+
+## Follow-on implementation
+
+`specs/0103-progressive-egress-review.md` landed the typed `persistentEgress`
+path: exact normalized FQDN:80/443 rules are valid only for container-deny
+profiles, remain distinct from legacy `profile.egress`, and are changed only by
+hash-checked `profile egress preview|add|remove`. Preview is value-free and
+non-mutating; add/remove atomically validate the complete CUE policy, leave its
+new bytes untrusted, and affect future sessions only. It also adds value-free
+session dismissal acknowledgements and an operator-opened Emacs review; neither
+proxy traffic nor an acknowledgement can open a modal or change authority.
 
 ## Deferred / owed specs
 

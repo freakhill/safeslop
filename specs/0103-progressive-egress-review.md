@@ -1,6 +1,6 @@
 # 0103 — Progressive egress review and typed persistent rules
 
-Status: in progress
+Status: complete
 Date: 2026-07-15
 
 SCOPE: make existing `environment:"container"` + `network:"deny"` progressive egress legible in Emacs and add an explicitly reviewed, policy-trusted durable exact-FQDN:port authority path. In the profile composer, label deny as **Deny (progressive review)**; in session detail, operator-opened review surfaces value-free denied destinations with **Allow now**, **Always allow**, and **Keep denied**.
@@ -53,7 +53,7 @@ At container launch, persistent exact rules and session grants are rendered thro
   VERIFY:   `make test-emacs EMACS=$(command -v emacs)`
   EXPECTED: ERT proves exact argv for preview/add/remove/dismiss, composer progressive labeling, value-free review rendering, passive/non-modal discovery, explicit operator-only actions, stale-hash handling, and no accidental CUE edit or egress action from an observation.
 
-- [ ] T6 — Synchronize operator documentation and verify the complete change
+- [x] T6 — Synchronize operator documentation and verify the complete change
   FILE:     `README.md`, `skills/agent-sandbox-ops/SKILL.md`, `specs/0089-network-authority-ayo-flo.md`, `specs/0097-progressive-network-session-grants.md`, `specs/0103-progressive-egress-review.md`
   CHANGE:   Document the new exact typed `persistentEgress` field and CLI commands, progressive composer/review behavior, session-vs-future lifetime, hash/CUE-delta review and re-trust, Keep-denied semantics, non-grantable classes, and the absolute ban on agent-triggered modals/automatic authority. Mark this plan complete only after every verification command succeeds.
   VERIFY:   `git diff --check && make check && make build`

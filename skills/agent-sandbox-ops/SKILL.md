@@ -252,22 +252,43 @@ Compose, matching the image user and writable tmpfs home.
 ### Progressive session egress
 
 For a running or created `container` + `network: deny` session, inspect denied,
-value-free proxy observations and explicitly grant only one exact FQDN:port:
+value-free proxy observations and make an explicit session-only choice:
 
 ```bash
 safeslop session egress observations --session-id ID --output json
 safeslop session egress grants --session-id ID --output json
 safeslop session egress grant --session-id ID --host api.example.com --port 443 --output json
+safeslop session egress dismiss --session-id ID --host api.example.com --port 443 --output json
 safeslop session egress revoke --session-id ID --grant-id G --output json
 ```
 
-Observations never grant traffic. Grants are session-scoped overlay state, never
-mutate `profile.egress` or `safeslop.cue`, and proxy update failure preserves the
-previous deny posture. Only `container` + `network: deny` is enforceable; host and
-`network: allow` sessions are rejected. IP literals, private/link-local/metadata,
-broker/mint, wildcard, suffix, URL, and non-80/443 targets are non-grantable.
-Emacs exposes the same explicit controls in session detail (`o` observations, `G`
-grants, `+` grant, `-` revoke); agent traffic never triggers a modal prompt.
+Observations never grant traffic. A grant is `session-grant / this session`;
+`dismiss` is **Keep denied** acknowledgement state, not authority, and later
+traffic reappears for review. Neither mutates `profile.egress` or `safeslop.cue`.
+Proxy update failure preserves the previous deny posture.
+
+For a typed durable rule for **future sessions**, use `persistentEgress`, never
+legacy `egress`:
+
+```cue
+persistentEgress: [{fqdn: "api.example.com", port: 443}]
+```
+
+Use `safeslop profile egress preview|add|remove <profile> [safeslop.cue] --host
+api.example.com --port 443 --expected-policy-hash HASH --output json`. Preview
+is a value-free CUE-delta/hash review and never writes. Add/remove require the
+exact current hash, fail closed when stale, atomically validate the complete
+policy, leave it untrusted, and affect only a new session after `safeslop trust`.
+They must never be used as a shortcut to alter a running session.
+
+Only `container` + `network: deny` is enforceable; host and `network: allow`
+sessions are rejected. IP literals, private/link-local/metadata, broker/mint,
+wildcard, suffix, URL, and non-80/443 targets are non-grantable. Emacs labels
+container deny **Deny (progressive review)** without granting authority; its
+session detail shows a passive count and `v` opens operator review. There `a`
+allows now, `k` keeps denied, and `A` previews a hash/CUE delta before a separate
+explicit add. Agent traffic never triggers a modal, focuses a buffer, edits CUE,
+or changes authority.
 
 ### VM profile
 

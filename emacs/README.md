@@ -101,6 +101,18 @@ reconciles a crashed session (marked running but whose process is gone) to
 Detached sessions are explicit because they survive the Emacs buffer and keep
 staged credentials until stop/revoke.  Coupled run remains the default.
 
+For a `container` + `deny` session, the details buffer performs an asynchronous,
+passive denied-destination count; it never focuses a buffer or changes authority
+when proxy traffic arrives. Press `v` to open the operator review: it renders
+only value-free FQDN:port/count/time/grantability rows. At a row, `a` explicitly
+**Allows now** for this session, `k` **Keeps denied** without authority, and `A`
+opens a separate hash-checked persistent-rule/CUE-delta review. Its `a` key is a
+second, explicit write for future sessions only; after it succeeds, review and
+re-trust the changed policy before creating a new session. The profile composer
+labels container deny **Deny (progressive review)** as a workflow cue, never as
+an authorization. No proxy event opens a prompt, focuses a review buffer, edits
+CUE, or grants access.
+
 Creating a new ad-hoc host session (`c` / `safeslop-session-new` with
 environment `host`) asks an explicit yes/no host acknowledgement before passing
 `--trust-host` to `safeslop session create`; a no answer aborts before the CLI is
