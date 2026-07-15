@@ -1,6 +1,6 @@
 # 0104 — Editable profile compose fields and engine-owned deletion
 
-Status: in progress
+Status: complete
 Date: 2026-07-15
 
 SCOPE: make every field of a newly composed profile editable from the Emacs compose buffer, and replace the Profiles surface's guided-manual CUE deletion with an explicit, validated CLI deletion contract.
@@ -39,7 +39,7 @@ Chosen approach: render each compose field as a `RET`-actionable row and keep th
   VERIFY:   `make test-emacs EMACS=$(command -v emacs)`
   EXPECTED: ERT proves the exact argv, no subprocess on declined confirmation, and successful deletion refreshes the list without opening the CUE file.
 
-- [ ] T5 — Synchronize help and operator docs
+- [x] T5 — Synchronize help and operator docs
   FILE:     `README.md`, `skills/agent-sandbox-ops/SKILL.md`, `emacs/safeslop-profiles.el`, `specs/0104-profile-compose-fields.md`
   CHANGE:   Document `profile delete`, editable compose fields/keys, and that compose is creation-only; update surface help/docstrings and mark this spec complete only after verification.
   VERIFY:   `git diff --check && make check && make build`

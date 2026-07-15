@@ -1388,7 +1388,7 @@ in place, so deletion never requires hand-editing a profile block."
                    (alist-get 'agent state) (alist-get 'catalog state))))
     (erase-buffer)
     (insert "safeslop Profiles compose buffer\n")
-    (insert "Keys: RET toggle, ? help, g refresh catalog, C-c C-c preview/save, q cancel; L = included by source\n\n")
+    (insert "Keys: RET edit/toggle, ? help, g refresh catalog, C-c C-c preview/save, q cancel; L = included by source\n\n")
     (insert "Fields (RET edits):\n")
     (safeslop-profiles-compose--insert-field 'name "Name" (alist-get 'name state))
     (safeslop-profiles-compose--insert-field 'agent "Agent" (alist-get 'agent state))
@@ -1808,7 +1808,7 @@ through `profile create'."
 (defun safeslop-profiles ()
   "Open the safeslop profiles surface: the profiles in your safeslop.cue.
 Keys: RET/i inspect, r launch, e edit, c create, C clone, v validate,
-D delete (guided), g refresh; P/I/F switch surface, [/] cycle."
+D delete, g refresh; P/I/F switch surface, [/] cycle."
   (interactive)
   (let ((buf (get-buffer-create safeslop-profiles-buffer-name)))
     (with-current-buffer buf

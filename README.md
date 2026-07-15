@@ -75,6 +75,7 @@ safeslop bundle add|remove <name> <pkg>...       mutate bundle membership (re-va
 safeslop bundle list --output json               curated bundles for UIs
 safeslop profile list|presets|defaults --output json profiles, scaffold presets, or builtin defaults
 safeslop profile create --name N --agent A --environment E [--bundle B] [--package P] [--no-default-bundle] [--dry-run] --output json
+safeslop profile delete <name> [safeslop.cue] --output json  delete one validated project profile
 safeslop profile show <name> --output json         profile + recipe + three-section safety evaluation
 safeslop profile credentials set <profile> [safeslop.cue] --provider <github|forgejo> [--use-origin|--repo owner/name ...] [--write-repo owner/name ...] --output json
 safeslop profile credentials clear <profile> [safeslop.cue] --output json
@@ -467,15 +468,18 @@ packages, egress, image recipe, and three-section evaluation (read-only, no file
 edit); `r` fetches and displays the engine evaluation before offering to launch a
 session from the selected profile; `e` opens
 the CUE file jumped to that profile's block; `c` opens `*safeslop profile
-compose*`; `C` clones the row at point (only a new name is required); `D` guides
-deletion (pick the target, confirm, then remove the block by hand); `g` refreshes.
+compose*`; `C` clones the row at point (only a new name is required); `D` asks
+for confirmation, then deletes the selected project profile through the validated
+CLI and refreshes in place; `g` refreshes.
 
 The compose buffer defaults to a container/deny profile and uses the catalog
 bundle defaults (`data.defaults`) to show inherited packages as selected and
-locked. `L` means a row is included by its displayed source and cannot be partly
-toggled. `RET` toggles unlocked bundle/package rows while retaining the logical row
-and each showing window's scroll position; `g` refreshes catalog data with the same
-context preservation. An `Automatic agent bundle` control is the deliberate
+locked. Its Name, Agent, Environment, Network, and Workspace rows are `RET`-editable;
+agent changes recompute default-package inheritance before preview. `L` means a row
+is included by its displayed source and cannot be partly toggled. `RET` toggles
+unlocked bundle/package rows while retaining the logical row and each showing
+window's scroll position; `g` refreshes catalog data with the same context
+preservation. An `Automatic agent bundle` control is the deliberate
 all-or-nothing opt-out for an agent default: disabling it emits
 `--no-default-bundle`, retains explicit selections, and can leave the agent without
 its runtime so launch may fail. It does not relax the container, network, or
@@ -486,8 +490,9 @@ final write, and `q` cancels without
 writing. Project marker suggestions (`go.mod`, `package.json`, `pyproject.toml`,
 `Cargo.toml`) are visible suggestions rather than automatic authority expansion.
 File reach is workspace-only in this slice; arbitrary custom host mounts are
-deferred until a mount capability model is specified. Creating still routes through
-`profile create`, while CUE stays the stored source of truth. This repo also
+deferred until a mount capability model is specified. Compose authors new profiles
+only; it does not partially overwrite existing profiles with fields outside its UI.
+Creating still routes through `profile create`, while CUE stays the stored source of truth. This repo also
 dogfoods a checked-in `safeslop.cue` with `default`, `pi`, and `shell` profiles so
 the Profiles surface has useful local rows immediately.
 

@@ -28,6 +28,7 @@ file transfer between host and sandboxed runtimes.
 - `safeslop bundle add|remove <name> <pkg>...` — mutate bundle membership, re-validating references.
 - `safeslop bundle list --output json` — list curated bundles.
 - `safeslop profile create --name N --agent A --environment E [--bundle B] [--package P] [--no-default-bundle] [--dry-run] --output json` — create or update a `safeslop.cue` profile; `--no-default-bundle` deliberately omits automatic agent-runtime inclusion and can leave an agent unable to launch, while `--dry-run` resolves packages/recipe and returns the engine's three-section safety evaluation without writing.
+- `safeslop profile delete <name> [safeslop.cue] --output json` — remove exactly one project profile: load, render, and validate the full remaining CUE before writing; builtins are never mutable through this command.
 - `safeslop profile credentials set <profile> [safeslop.cue] --provider github|forgejo [--use-origin] [--repo owner/name] [--write-repo owner/name] --output json` — engine-owned CUE mutation for GitHub/Forgejo repo scopes; preserves other credential providers/secrets and clears only the opposite forge.
 - `safeslop profile credentials clear <profile> [safeslop.cue] --output json` — remove only `credentials.github`/`credentials.forgejo`, deleting the `credentials` object if it becomes empty.
 - `safeslop creds list|show [<profile>] --output json` — inspect the credential posture of `safeslop.cue` profiles (declared creds + value-free readiness status); read-only, never reveals secret values.
@@ -161,13 +162,16 @@ In Emacs, `C-c s F` opens the Profiles surface. Use `RET`/`i` to inspect a
 profile's resolved packages/egress/recipe and Authority/Trust/Readiness findings,
 `r` to review a freshly fetched engine evaluation before offering to launch a
 session from the row, `e` to edit the CUE at that profile's block,
-`c` to open `*safeslop profile compose*`, `C` to clone, `D` for guided manual
-deletion, and `g` to refresh. The compose buffer shows catalog defaults as
-selected/locked inherited rows; `L` means a row is included by its displayed source
-and cannot be partly toggled. It marks local project-language suggestions and uses
-`RET` to toggle unlocked rows, `?` for bundle/package help, `g` to refresh, and
+`c` to open `*safeslop profile compose*`, `C` to clone, `D` to confirm an
+engine-owned deletion and refresh in place, and `g` to refresh. The compose buffer
+shows catalog defaults as selected/locked inherited rows; its Name, Agent,
+Environment, Network, and Workspace rows are `RET`-editable, and an agent change
+recomputes default-package inheritance. `L` means a row is included by its displayed
+source and cannot be partly toggled. It marks local project-language suggestions and
+uses `RET` to toggle unlocked rows, `?` for bundle/package help, `g` to refresh, and
 preserves the logical row and scroll context in every showing window for either
-operation. The `Automatic agent bundle` control is the all-or-nothing opt-out for
+operation. Compose remains creation-only so it cannot partially overwrite
+unrepresented existing-profile fields. The `Automatic agent bundle` control is the all-or-nothing opt-out for
 that automatic inclusion: it emits `--no-default-bundle`, retains explicit
 selections, and may leave the agent without its runtime, but it does not relax
 isolation, network, or workspace-only file reach. `C-c C-c` requests the engine

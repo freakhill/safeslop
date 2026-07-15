@@ -154,17 +154,19 @@ safety legends as the portal.
 | `c` | create a profile with structured prompts |
 | `C` | clone the selected profile |
 | `v` | validate the backing `safeslop.cue` |
-| `D` | guided delete (manual CUE edit anchored at the block) |
+| `D` | confirm, then delete through the validated CLI and refresh |
 | `g` (Evil: `gr`) | refresh |
 
 The intended flow is profile → inspect → launch → portal.  Inspect buffers are no
 longer dead ends: `r`, `e`, and `C` act from the detail view too; `g` (Evil:
 `gr`) re-fetches and re-renders the faced view, and `RET` returns to the list.
-The compose buffer uses `RET` to toggle unlocked bundle/package rows, `?` for
-row help, `g` (Evil: `gr`) to refresh, `C-c C-c` to preview/save, and `q` to
-cancel. `L` marks a row that is included by its displayed source and cannot be
-partly toggled. Toggle and refresh preserve the logical row and scroll position in
-every showing window. When an agent has a catalog default, the `Automatic agent
+The compose buffer uses `RET` to edit its Name, Agent, Environment, Network, and
+Workspace rows, and to toggle unlocked bundle/package rows; `?` shows row help,
+`g` (Evil: `gr`) refreshes, `C-c C-c` previews/saves, and `q` cancels. `L` marks a
+row that is included by its displayed source and cannot be partly toggled. Agent
+changes recompute inherited default packages; compose remains creation-only, so it
+cannot partially overwrite fields outside its UI. Toggle and refresh preserve the
+logical row and scroll position in every showing window. When an agent has a catalog default, the `Automatic agent
 bundle` row deliberately toggles the all-or-nothing automatic inclusion: disabling
 it sends `--no-default-bundle`, keeps explicit selections, and can leave the agent
 without its runtime so launch may fail. It does not change the isolation, network,
