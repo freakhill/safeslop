@@ -1764,6 +1764,60 @@ func TestSessionEgressObservationsAreValueFreeAndFailureDoesNotMutateGrants(t *t
 	}
 }
 
+func TestSessionEgressDismissFiltersOnlyAcknowledgedObservationsWithoutAuthority(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+	store := sessionStore()
+	sess, err := store.Create("pi", "container", ws, nowForTest(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := time.Now().UTC().Add(-time.Minute)
+	oldObserve := observeSessionEgress
+	observeSessionEgress = func(context.Context, engsession.Session) ([]container.EgressObservation, error) {
+		return []container.EgressObservation{{Host: "api.example.com", Port: 443, LastSeen: seen, Count: 2, Grantable: true}}, nil
+	}
+	t.Cleanup(func() { observeSessionEgress = oldObserve })
+
+	out, err := runRootForTest(t, ws, "session", "egress", "dismiss", "--session-id", sess.ID, "--host", "API.Example.com", "--port", "443", "--output", "json")
+	if err != nil {
+		t.Fatalf("dismiss: %v\\nout=%s", err, out)
+	}
+	env := parseEnvelopeForTest(t, out)
+	if !env.OK || env.Data["egress_grant_revision"] != float64(0) {
+		t.Fatalf("dismiss must not grant authority: %+v", env)
+	}
+	if acknowledgements, ok := env.Data["egress_acknowledgements"].([]any); !ok || len(acknowledgements) != 1 {
+		t.Fatalf("dismiss acknowledgement response = %#v", env.Data["egress_acknowledgements"])
+	}
+
+	out, err = runRootForTest(t, ws, "session", "egress", "observations", "--session-id", sess.ID, "--output", "json")
+	if err != nil {
+		t.Fatalf("observations after dismiss: %v\\nout=%s", err, out)
+	}
+	env = parseEnvelopeForTest(t, out)
+	if pending, ok := env.Data["observations"].([]any); !ok || len(pending) != 0 || env.Data["pending_count"] != float64(0) {
+		t.Fatalf("dismissed observation remained pending: %+v", env.Data)
+	}
+
+	seen = time.Now().UTC().Add(time.Minute)
+	out, err = runRootForTest(t, ws, "session", "egress", "observations", "--session-id", sess.ID, "--output", "json")
+	if err != nil {
+		t.Fatalf("later observations: %v\\nout=%s", err, out)
+	}
+	env = parseEnvelopeForTest(t, out)
+	if pending, ok := env.Data["observations"].([]any); !ok || len(pending) != 1 || env.Data["pending_count"] != float64(1) {
+		t.Fatalf("later denial must reappear: %+v", env.Data)
+	}
+	stored, err := store.Get(sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.EgressGrants) != 0 || len(stored.EgressAcknowledgements) != 1 {
+		t.Fatalf("dismiss must only store acknowledgement: %+v", stored)
+	}
+}
+
 func TestSessionEgressRejectsNonEnforceableAndInvalidTargets(t *testing.T) {
 	ws := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
@@ -1780,6 +1834,17 @@ func TestSessionEgressRejectsNonEnforceableAndInvalidTargets(t *testing.T) {
 	env := parseEnvelopeForTest(t, out)
 	if env.OK || len(env.Errors) != 1 || env.Errors[0].Code != jsoncontract.CodeInvalidArgument || !strings.Contains(env.Errors[0].Message, "only enforceable for container deny") {
 		t.Fatalf("host grant envelope = %+v", env)
+	}
+	out, err = runRootForTest(t, ws, "session", "egress", "dismiss", "--session-id", host.ID, "--host", "example.com", "--port", "443", "--output", "json")
+	if !errors.Is(err, errOutputEmitted) {
+		t.Fatalf("host dismiss error = %v, want contract error\\nout=%s", err, out)
+	}
+	if env := parseEnvelopeForTest(t, out); env.OK || len(env.Errors) != 1 || env.Errors[0].Code != jsoncontract.CodeInvalidArgument {
+		t.Fatalf("host dismiss envelope = %+v", env)
+	}
+	storedHost, err := store.Get(host.ID)
+	if err != nil || len(storedHost.EgressAcknowledgements) != 0 {
+		t.Fatalf("host dismissal mutated session: %+v err=%v", storedHost, err)
 	}
 
 	containerSess, err := store.Create("pi", "container", ws, nowForTest(t))

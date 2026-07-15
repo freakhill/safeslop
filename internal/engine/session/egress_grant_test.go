@@ -175,6 +175,28 @@ func TestRevokeGrantUnknownIDErrors(t *testing.T) {
 	}
 }
 
+func TestDismissEgressAcknowledgesWithoutGrantingAuthority(t *testing.T) {
+	now := testNow()
+	sess, acknowledgement, err := DismissEgress(grantSession(), "API.Example.com", 443, now)
+	if err != nil {
+		t.Fatalf("DismissEgress: %v", err)
+	}
+	if acknowledgement.Host != "api.example.com" || acknowledgement.Port != 443 || !acknowledgement.AcknowledgedAt.Equal(now) {
+		t.Fatalf("acknowledgement = %+v", acknowledgement)
+	}
+	if len(sess.EgressAcknowledgements) != 1 || len(sess.EgressGrants) != 0 || sess.GrantRevision != 0 {
+		t.Fatalf("dismissal must not grant authority: %+v", sess)
+	}
+	later := now.Add(time.Minute)
+	sess, acknowledgement, err = DismissEgress(sess, "api.example.com", 443, later)
+	if err != nil || len(sess.EgressAcknowledgements) != 1 || !acknowledgement.AcknowledgedAt.Equal(later) {
+		t.Fatalf("repeat dismissal must replace its acknowledgement: sess=%+v ack=%+v err=%v", sess, acknowledgement, err)
+	}
+	if _, _, err := DismissEgress(Session{Environment: "host", Network: "deny"}, "api.example.com", 443, now); err != ErrSessionNotGrantable {
+		t.Fatalf("host dismissal error = %v, want ErrSessionNotGrantable", err)
+	}
+}
+
 func TestEgressGrantCarriesNoCredentialValue(t *testing.T) {
 	// A grant is value-free: only host+port+source+id+time. Pin that the JSON has no place for a
 	// token/path/header — the struct has exactly those fields.

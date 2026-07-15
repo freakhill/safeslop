@@ -41,7 +41,7 @@ At container launch, persistent exact rules and session grants are rendered thro
   VERIFY:   `go test ./internal/cli -run 'ProfileEgress|PersistentEgress|PolicyHash|Help|ValueFree' -v`
   EXPECTED: Preview is non-mutating; add/remove require a matching hash, reject stale/invalid/non-enforceable requests, preserve unrelated profile fields and legacy egress, and produce a changed policy that normal launch trust rejects until re-trusted.
 
-- [ ] T4 — Add session-scoped denial acknowledgements and review contracts
+- [x] T4 — Add session-scoped denial acknowledgements and review contracts
   FILE:     `internal/engine/session/session.go`, `internal/engine/session/egress_grant.go`, `internal/engine/session/session_test.go`, `internal/cli/cli.go`, `internal/cli/cli_session_test.go`, `internal/jsoncontract/testdata/*.golden.json`
   CHANGE:   Add a value-free session acknowledgement record keyed by normalized observed FQDN:port and timestamp, plus `session egress dismiss --session-id ID --host H --port P --output json`. Filter only observations at/before the acknowledgement from the review result; later denied traffic becomes visible again. The action is container-deny-only, explicit, and has no proxy write/reload or profile mutation. Return pending observations and acknowledgement metadata sufficient for a UI count without request material.
   VERIFY:   `go test ./internal/engine/session ./internal/cli -run 'EgressDismiss|EgressObservation|Acknowledg|KeepDenied|NoAuthority|ValueFree' -v`

@@ -614,7 +614,7 @@ func cmdSessionEgress() *cobra.Command {
 		Use:   "egress",
 		Short: "Inspect and manage session-scoped container egress grants",
 	}
-	c.AddCommand(cmdSessionEgressObservations(), cmdSessionEgressGrants(), cmdSessionEgressGrant(), cmdSessionEgressRevoke())
+	c.AddCommand(cmdSessionEgressObservations(), cmdSessionEgressGrants(), cmdSessionEgressGrant(), cmdSessionEgressRevoke(), cmdSessionEgressDismiss())
 	return c
 }
 
@@ -636,7 +636,13 @@ func cmdSessionEgressObservations() *cobra.Command {
 			if observations == nil {
 				observations = []container.EgressObservation{}
 			}
-			data := map[string]any{"session_id": id, "observations": observations}
+			observations = filterAcknowledgedEgressObservations(sess, observations)
+			data := map[string]any{
+				"session_id":              id,
+				"observations":            observations,
+				"pending_count":           len(observations),
+				"egress_acknowledgements": egressAcknowledgementsOrEmpty(sess.EgressAcknowledgements),
+			}
 			if err != nil {
 				// Observing is read-only: never turn a proxy/log failure into traffic
 				// authority, and do not return backend output that might include request
@@ -703,6 +709,32 @@ func cmdSessionEgressGrant() *cobra.Command {
 	return c
 }
 
+func cmdSessionEgressDismiss() *cobra.Command {
+	var id, host, output string
+	var port int
+	c := &cobra.Command{
+		Use:   "dismiss --session-id <id> --host <fqdn> --port <80|443> --output json",
+		Short: "Keep one observed exact destination denied for this session",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if output != "json" {
+				return fmt.Errorf("session egress dismiss requires --output json")
+			}
+			sess, _, err := dismissSessionEgress(sessionStore(), id, host, port, time.Now())
+			if err != nil {
+				return emitEgressError(err, id)
+			}
+			emitContract(jsoncontract.OK(sessionEgressData(sess)))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&id, "session-id", "", "session id")
+	c.Flags().StringVar(&host, "host", "", "exact FQDN to acknowledge as denied")
+	c.Flags().IntVar(&port, "port", 0, "destination port (80 or 443)")
+	c.Flags().StringVar(&output, "output", "", "output format: json")
+	return c
+}
+
 func cmdSessionEgressRevoke() *cobra.Command {
 	var id, grantID, output string
 	c := &cobra.Command{
@@ -736,10 +768,39 @@ func sessionEgressData(sess engsession.Session) map[string]any {
 		grants = []engsession.EgressGrant{}
 	}
 	return map[string]any{
-		"session_id":            sess.ID,
-		"egress_grants":         grants,
-		"egress_grant_revision": sess.GrantRevision,
+		"session_id":              sess.ID,
+		"egress_grants":           grants,
+		"egress_acknowledgements": egressAcknowledgementsOrEmpty(sess.EgressAcknowledgements),
+		"egress_grant_revision":   sess.GrantRevision,
 	}
+}
+
+func egressAcknowledgementsOrEmpty(acknowledgements []engsession.EgressAcknowledgement) []engsession.EgressAcknowledgement {
+	if acknowledgements == nil {
+		return []engsession.EgressAcknowledgement{}
+	}
+	return acknowledgements
+}
+
+// filterAcknowledgedEgressObservations suppresses only the snapshot already
+// acknowledged by the operator. A later denial for the same FQDN:port remains
+// pending and cannot be hidden by a historical Keep denied action.
+func filterAcknowledgedEgressObservations(sess engsession.Session, observations []container.EgressObservation) []container.EgressObservation {
+	if len(observations) == 0 || len(sess.EgressAcknowledgements) == 0 {
+		return observations
+	}
+	acknowledgedAt := make(map[string]time.Time, len(sess.EgressAcknowledgements))
+	for _, ack := range sess.EgressAcknowledgements {
+		acknowledgedAt[fmt.Sprintf("%s:%d", ack.Host, ack.Port)] = ack.AcknowledgedAt
+	}
+	out := make([]container.EgressObservation, 0, len(observations))
+	for _, observation := range observations {
+		if at, ok := acknowledgedAt[fmt.Sprintf("%s:%d", observation.Host, observation.Port)]; ok && !observation.LastSeen.After(at) {
+			continue
+		}
+		out = append(out, observation)
+	}
+	return out
 }
 
 // egressSession loads an enforceable session before a read-only egress command.
@@ -1723,6 +1784,24 @@ func grantSessionEgress(ctx context.Context, store engsession.Store, id, host st
 	return next, grant, nil
 }
 
+func dismissSessionEgress(store engsession.Store, id, host string, port int, now time.Time) (engsession.Session, engsession.EgressAcknowledgement, error) {
+	sess, err := store.Get(id)
+	if err != nil {
+		return engsession.Session{}, engsession.EgressAcknowledgement{}, err
+	}
+	if sess.Status == engsession.StatusStopped {
+		return engsession.Session{}, engsession.EgressAcknowledgement{}, fmt.Errorf("session stopped")
+	}
+	next, acknowledgement, err := engsession.DismissEgress(sess, host, port, now)
+	if err != nil {
+		return engsession.Session{}, engsession.EgressAcknowledgement{}, err
+	}
+	if err := store.Save(next); err != nil {
+		return engsession.Session{}, engsession.EgressAcknowledgement{}, err
+	}
+	return next, acknowledgement, nil
+}
+
 func revokeSessionEgress(ctx context.Context, store engsession.Store, id, grantID string, now time.Time) (engsession.Session, error) {
 	sess, err := store.Get(id)
 	if err != nil {
@@ -1853,6 +1932,9 @@ func sessionData(sess engsession.Session) map[string]any {
 	}
 	if len(sess.EgressGrants) > 0 {
 		out["egress_grants"] = sess.EgressGrants
+	}
+	if len(sess.EgressAcknowledgements) > 0 {
+		out["egress_acknowledgements"] = sess.EgressAcknowledgements
 	}
 	if sess.GrantRevision > 0 {
 		out["egress_grant_revision"] = sess.GrantRevision

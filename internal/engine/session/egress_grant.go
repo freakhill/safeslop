@@ -23,6 +23,15 @@ type EgressGrant struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// EgressAcknowledgement is a value-free, session-local review acknowledgement.
+// It has no grant id or authority field because it must never be confused with
+// a proxy rule (specs/0103).
+type EgressAcknowledgement struct {
+	Host           string    `json:"host"`
+	Port           int       `json:"port"`
+	AcknowledgedAt time.Time `json:"acknowledged_at"`
+}
+
 // ErrSessionNotGrantable is returned when a grant is requested for a session that cannot enforce
 // one. Grants are only meaningful for environment:"container" + network:"deny" sessions: host
 // sessions have no isolation boundary to scope, and network:"allow" sessions already have open
@@ -85,6 +94,31 @@ func AppendGrant(sess Session, host string, port int, now time.Time) (Session, E
 // RevokeGrant removes the grant with the given ID and bumps the revision. An unknown ID is an
 // error (the caller surfaces it rather than silently no-op'ing, so a stale UI does not look like
 // success). Like AppendGrant it never touches profile policy.
+// DismissEgress records a session-local acknowledgement for one normalized exact
+// destination. It deliberately shares the grantability boundary so acknowledgements
+// cannot make host/open sessions appear enforceable, but it does not write or
+// reload the proxy and does not alter grants or their revision.
+func DismissEgress(sess Session, host string, port int, now time.Time) (Session, EgressAcknowledgement, error) {
+	if !CanGrant(sess) {
+		return sess, EgressAcknowledgement{}, ErrSessionNotGrantable
+	}
+	h, p, err := ValidateEgressGrant(host, port)
+	if err != nil {
+		return sess, EgressAcknowledgement{}, err
+	}
+	ack := EgressAcknowledgement{Host: h, Port: p, AcknowledgedAt: now.UTC()}
+	for i, existing := range sess.EgressAcknowledgements {
+		if existing.Host == h && existing.Port == p {
+			sess.EgressAcknowledgements[i] = ack
+			sess.UpdatedAt = now.UTC()
+			return sess, ack, nil
+		}
+	}
+	sess.EgressAcknowledgements = append(sess.EgressAcknowledgements, ack)
+	sess.UpdatedAt = now.UTC()
+	return sess, ack, nil
+}
+
 func RevokeGrant(sess Session, id string, now time.Time) (Session, error) {
 	if !CanGrant(sess) {
 		return sess, ErrSessionNotGrantable

@@ -55,7 +55,7 @@ func TestSessionEgressSubcommandsRegistered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("session egress command missing: %v", err)
 	}
-	for _, want := range []string{"observations", "grants", "grant", "revoke"} {
+	for _, want := range []string{"observations", "grants", "grant", "revoke", "dismiss"} {
 		var found bool
 		for _, c := range egress.Commands() {
 			if c.Name() == want {

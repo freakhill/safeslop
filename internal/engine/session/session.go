@@ -123,7 +123,11 @@ type Session struct {
 	// authority already captured for this session (specs/0103).
 	PersistentEgress []policy.PersistentEgressRule `json:"persistent_egress,omitempty"`
 	EgressGrants     []EgressGrant                 `json:"egress_grants,omitempty"`
-	GrantRevision    int                           `json:"egress_grant_revision,omitempty"`
+	// EgressAcknowledgements only suppress already-seen review rows through the
+	// recorded time. They are not grants, never affect proxy policy, and later
+	// denied traffic becomes visible again (specs/0103).
+	EgressAcknowledgements []EgressAcknowledgement `json:"egress_acknowledgements,omitempty"`
+	GrantRevision          int                     `json:"egress_grant_revision,omitempty"`
 	// Detached marks a session whose recorded PID is a detached supervisor that
 	// leads its own process group, so `stop` signals the group, not a bare PID
 	// (specs/0051 D4). Internal routing state; not surfaced in the JSON envelope.
