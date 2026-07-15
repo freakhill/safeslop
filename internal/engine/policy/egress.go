@@ -1,5 +1,9 @@
 package policy
 
+import (
+	"net/url"
+)
+
 // AgentEgress returns the built-in extra egress allowlist domains a given agent needs
 // beyond the shared base allowlist. The base already carries the common providers
 // (.anthropic.com + .openrouter.ai) plus the clone/dep-install infra, so only agents
@@ -30,16 +34,26 @@ func AgentEgress(agent string) []string {
 	}
 }
 
-// CredsEgress returns the egress hosts a profile needs because its git credentials are staged.
-// GitHub over HTTPS reaches github.com plus the CDN hosts that clones and LFS objects redirect to
-// (specs/0068 FIX-b); api.github.com is intentionally excluded in P1 because API-token staging is
-// P2. These are exact-host entries (no leading dot). They are unioned with AgentEgress + the
-// per-profile egress: at allowlist materialization (network:deny profiles only, specs/0046).
-// Forgejo rides SSH deploy keys whose egress is handled elsewhere (specs/0008/0046) and is
-// unchanged here; Forgejo host:443 also waits for P2 API staging.
+// CredsEgress returns the exact HTTPS destinations a profile's staged forge credentials need.
+// Host-side mint/renew/revoke traffic never reaches this sandbox allowlist. GitHub git staging needs
+// github.com plus clone/LFS CDN hosts; api.github.com is added only when the policy enables App API
+// staging. Forgejo deploy-key SSH egress is handled separately; its API hostname is added only after
+// policy validation accepted an enabled API declaration with HTTPS/default port 443.
 func CredsEgress(prof *Profile) []string {
-	if prof == nil || prof.Credentials == nil || prof.Credentials.Github == nil {
+	if prof == nil || prof.Credentials == nil {
 		return nil
 	}
-	return []string{"github.com", "codeload.github.com", "objects.githubusercontent.com"}
+	var hosts []string
+	if github := prof.Credentials.Github; github != nil {
+		hosts = append(hosts, "github.com", "codeload.github.com", "objects.githubusercontent.com")
+		if github.Api != nil && github.Api.Enabled {
+			hosts = append(hosts, "api.github.com")
+		}
+	}
+	if forgejo := prof.Credentials.Forgejo; forgejo != nil && forgejo.Api != nil && forgejo.Api.Enabled {
+		if u, err := url.Parse(forgejo.URL); err == nil && u.Scheme == "https" && u.Hostname() != "" && u.User == nil && (u.Port() == "" || u.Port() == "443") {
+			hosts = append(hosts, u.Hostname())
+		}
+	}
+	return hosts
 }

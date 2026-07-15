@@ -9,9 +9,12 @@ package policy
 import (
 	_ "embed"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"time"
 
 	"cuelang.org/go/cue"
 	"cuelang.org/go/cue/cuecontext"
@@ -90,11 +93,11 @@ type GithubCreds struct {
 	Ttl   string     `json:"ttl,omitempty"`
 	Pat   string     `json:"pat,omitempty"` // secret ref for mode:"pat"; token value is staged 0600, never embedded in config
 	Repos []RepoCred `json:"repos,omitempty"`
-	Api   *GithubApi `json:"api,omitempty"` // opt-in staged API token (P2; staging with Enabled errors in P1)
+	Api   *GithubApi `json:"api,omitempty"` // opt-in repository/permission-downscoped App API token
 }
 
-// GithubApi opts a profile into a staged GitHub API token whose permission set is token-wide
-// (specs/0068 F5). P1 lands the struct for schema stability; staging with Enabled is a P2 error.
+// GithubApi opts a profile into a staged GitHub App API token, downscoped to the declared
+// repositories and these token-wide permissions.
 type GithubApi struct {
 	Enabled     bool     `json:"enabled,omitempty"`
 	Permissions []string `json:"permissions,omitempty"`
@@ -111,17 +114,71 @@ type ForgejoCreds struct {
 	URL     string      `json:"url,omitempty"`
 	Repos   []RepoCred  `json:"repos,omitempty"`    // multi-repo: one deploy key per entry (specs/0047 P2)
 	SSHPort int         `json:"ssh-port,omitempty"` // instance git SSH port for multi-repo rewrites (default 22)
-	Api     *ForgejoApi `json:"api,omitempty"`      // opt-in staged API token (P2; enabling requires AckAccountWide, specs/0068 F5)
+	Api     *ForgejoApi `json:"api,omitempty"`      // opt-in opaque linked API token; scope may be account-wide
 	// The account token that registers/revokes deploy keys now lives in ~/.config/safeslop/accounts.cue
 	// (safeslop creds link forgejo), never in policy — Mode/Token/Pat were removed in specs/0069.
 }
 
-// ForgejoApi opts a profile into a staged Forgejo API token. Forgejo tokens are account-wide (not
-// repo-scoped), so Enabled requires AckAccountWide (enforced at load). P1 lands the struct for
-// schema stability; staging with Enabled is a P2 error.
+// ForgejoApi opts a profile into a staged opaque linked Forgejo API token. Safeslop cannot verify
+// the operator-provisioned provider scope, so Enabled requires explicit acknowledgement that it may
+// be account-wide rather than claiming repository restriction.
 type ForgejoApi struct {
 	Enabled        bool `json:"enabled,omitempty"`
 	AckAccountWide bool `json:"ackAccountWide,omitempty"`
+}
+
+var githubPermissionRE = regexp.MustCompile(`^[a-z][a-z-]*:(read|write)$`)
+
+func validateCredentialTTL(provider, raw string) error {
+	if raw == "" {
+		return nil // Explicitly unbounded: staging/renewal lasts until normal teardown.
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return fmt.Errorf("credentials.%s.ttl must be empty or a strictly positive Go duration", provider)
+	}
+	return nil
+}
+
+func validateGithubAPI(github *GithubCreds) error {
+	if github == nil || github.Api == nil || !github.Api.Enabled {
+		return nil
+	}
+	mode := github.Mode
+	if mode == "" {
+		mode = "app"
+	}
+	if mode != "app" {
+		return fmt.Errorf("credentials.github.api.enabled requires mode: \"app\"")
+	}
+	if len(github.Api.Permissions) == 0 {
+		return fmt.Errorf("credentials.github.api.enabled requires one or more declared github.api.permissions")
+	}
+	seen := make(map[string]struct{}, len(github.Api.Permissions))
+	for _, permission := range github.Api.Permissions {
+		if !githubPermissionRE.MatchString(permission) {
+			return fmt.Errorf("credentials.github.api.permissions contains invalid permission %q (want permission:read or permission:write)", permission)
+		}
+		if _, duplicate := seen[permission]; duplicate {
+			return fmt.Errorf("credentials.github.api.permissions contains duplicate permission %q", permission)
+		}
+		seen[permission] = struct{}{}
+	}
+	return nil
+}
+
+func validateForgejoAPI(forgejo *ForgejoCreds) error {
+	if forgejo == nil || forgejo.Api == nil || !forgejo.Api.Enabled {
+		return nil
+	}
+	if !forgejo.Api.AckAccountWide {
+		return fmt.Errorf("credentials.forgejo.api.enabled requires api.ackAccountWide: true — Forgejo API token scope is operator-provisioned, unverified, and may be account-wide")
+	}
+	u, err := url.Parse(forgejo.URL)
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || (u.Port() != "" && u.Port() != "443") {
+		return fmt.Errorf("credentials.forgejo.api.enabled requires credentials.forgejo.url with HTTPS and default port 443")
+	}
+	return nil
 }
 
 // Credentials groups the credential providers a profile uses (SP2; aws/gcp SP/0009; kube SP/0010;
@@ -292,13 +349,23 @@ func LoadBytes(data []byte) (*Config, error) {
 		if prof.Projection != nil && projectionAuthored(*prof.Projection) {
 			return nil, fmt.Errorf("profile %q: projection is engine-owned and not yet settable in safeslop.cue (specs/0096); use a builtin profile (pi/claude/fish/zsh)", name)
 		}
-		// Forgejo API tokens are account-wide, not repo-scoped: enabling API staging must be an
-		// explicit, acknowledged decision (specs/0068 F5). Enforced here (post-decode) rather than in
-		// CUE because "required-only-when-enabled, no silent default" is awkward with CUE defaults.
-		// Staging with api.enabled still errors as P2 (see StageForgejo).
-		if c := prof.Credentials; c != nil && c.Forgejo != nil && c.Forgejo.Api != nil &&
-			c.Forgejo.Api.Enabled && !c.Forgejo.Api.AckAccountWide {
-			return nil, fmt.Errorf("profile %q: credentials.forgejo.api.enabled requires api.ackAccountWide: true — Forgejo API tokens are account-wide, not repo-scoped (specs/0068 F5)", name)
+		if c := prof.Credentials; c != nil {
+			if c.Github != nil {
+				if err := validateCredentialTTL("github", c.Github.Ttl); err != nil {
+					return nil, fmt.Errorf("profile %q: %w", name, err)
+				}
+				if err := validateGithubAPI(c.Github); err != nil {
+					return nil, fmt.Errorf("profile %q: %w", name, err)
+				}
+			}
+			if c.Forgejo != nil {
+				if err := validateCredentialTTL("forgejo", c.Forgejo.Ttl); err != nil {
+					return nil, fmt.Errorf("profile %q: %w", name, err)
+				}
+				if err := validateForgejoAPI(c.Forgejo); err != nil {
+					return nil, fmt.Errorf("profile %q: %w", name, err)
+				}
+			}
 		}
 	}
 	return &cfg, nil

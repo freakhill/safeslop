@@ -299,6 +299,30 @@ func TestCredentialScopeAllProvidersAndEffectiveWrite(t *testing.T) {
 	}
 }
 
+func TestCredentialScopeAPIDisclosureIsScopeAccurate(t *testing.T) {
+	a := EvaluateAuthority(Profile{
+		Environment: "container",
+		Network:     "deny",
+		Credentials: &Credentials{
+			Github:  &GithubCreds{Api: &GithubApi{Enabled: true, Permissions: []string{"contents:read"}}},
+			Forgejo: &ForgejoCreds{Api: &ForgejoApi{Enabled: true, AckAccountWide: true}},
+		},
+	})
+	wire, err := json.Marshal(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(wire)
+	for _, want := range []string{"contents:read", "repository and permission downscoped", "operator-provisioned scope unverified", "may be account-wide"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("API authority disclosure missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "op://") || strings.Contains(text, "token-ref") {
+		t.Fatalf("API authority disclosure leaked secret material: %s", text)
+	}
+}
+
 func TestCredentialScopeProviderWriteAndPersistentPAT(t *testing.T) {
 	a := EvaluateAuthority(Profile{
 		Environment: "host",

@@ -8,7 +8,7 @@ WORKTREE: `.worktrees/0102-forge-credential-p2/`
 
 Contract: `credentials.github.ttl` and `credentials.forgejo.ttl` default to `"1h"`; explicit `""` has no fixed horizon; another value must be a strictly positive Go duration. The horizon begins at staging and bars future safeslop staging/minting without retroactively invalidating an issued GitHub token. Initial staging removes abandoned state for the exact run identity before minting and fails closed on cleanup failure. The shared `runProfileCtx` lifecycle owns the manager for ordinary, coupled-session, and detached-session runs.
 
-- [ ] Validate P2 policy and authority/egress contracts
+- [x] Validate P2 policy and authority/egress contracts
   FILE:     `internal/engine/policy/schema/schema.cue`, `internal/engine/policy/policy.go`, `internal/engine/policy/policy_test.go`, `internal/engine/policy/egress.go`, `internal/engine/policy/egress_test.go`, `internal/engine/policy/evaluation.go`, `internal/engine/policy/evaluation_test.go`
   CHANGE:   Add strict duration parsing for both forge TTLs; permit `""` only as unbounded horizon; reject GitHub API unless App mode with nonempty unique grammar-checked `permission:read|write` entries; retain Forgejo acknowledgement validation; require HTTPS/default 443 for enabled Forgejo API; report GitHub API as repository/permission downscoped and Forgejo API as operator-provisioned scope unverified/may be account-wide. Add `api.github.com` only for enabled GitHub API and only the validated Forgejo API hostname for enabled Forgejo API.
   VERIFY:   `go test ./internal/engine/policy/ -run 'TTL|Api|API|Egress|Authority' -v`
