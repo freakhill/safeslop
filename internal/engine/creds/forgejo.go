@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/freakhill/safeslop/internal/engine/policy"
 	"github.com/freakhill/safeslop/internal/engine/secrets"
@@ -113,9 +114,34 @@ func parseForgejoRemote(out []byte) (host, port, owner, repo string, err error) 
 
 // ---- transport ----
 
-// forgejoDo issues an authenticated Forgejo API request and returns body + status. The token is a
-// resolved secret value; it is sent in the Authorization header and never logged.
+const forgejoAPITokenFile = ".forgejo-api-token"
+
+// ForgejoHTTP is the host-only Forgejo REST transport seam shared by staging, cleanup, and the
+// explicit GC command. Implementations receive the token only long enough to place it in the
+// Authorization header; they must never log or persist it.
+type ForgejoHTTP interface {
+	Do(ctx context.Context, method, url, token string, body []byte) ([]byte, int, error)
+}
+
+type forgejoHTTP struct{ client *http.Client }
+
+// NewForgejoHTTP returns the production Forgejo transport with a bounded request timeout.
+func NewForgejoHTTP() ForgejoHTTP {
+	return &forgejoHTTP{client: &http.Client{Timeout: 30 * time.Second}}
+}
+
+// forgejoDo retains the package-local convenience for probes. Staging and cleanup take an
+// explicit ForgejoHTTP, keeping their tests hermetic and their authority narrow.
 func forgejoDo(ctx context.Context, method, url, token string, body []byte) ([]byte, int, error) {
+	return forgejoDoWith(ctx, NewForgejoHTTP(), method, url, token, body)
+}
+
+// forgejoDoWith delegates to the injected host-only transport.
+func forgejoDoWith(ctx context.Context, client ForgejoHTTP, method, url, token string, body []byte) ([]byte, int, error) {
+	return client.Do(ctx, method, url, token, body)
+}
+
+func (h *forgejoHTTP) Do(ctx context.Context, method, url, token string, body []byte) ([]byte, int, error) {
 	var r io.Reader
 	if body != nil {
 		r = bytes.NewReader(body)
@@ -129,7 +155,7 @@ func forgejoDo(ctx context.Context, method, url, token string, body []byte) ([]b
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := h.client.Do(req)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -185,39 +211,102 @@ func StageForgejo(ctx context.Context, creds *policy.Credentials, stageDir strin
 	if creds == nil || creds.Forgejo == nil {
 		return nil, nil
 	}
-	fc := creds.Forgejo
-	if fc.Api != nil && fc.Api.Enabled {
-		return nil, fmt.Errorf("forge API staging lands in P2 (specs/0068 F5)")
-	}
-
-	// Multi-repo: one deploy key per named repo, staged with SSH aliases + insteadOf (specs/0047 P2).
-	if len(fc.Repos) > 0 {
-		return stageForgejoMulti(ctx, fc, stageDir, accounts)
-	}
-
-	rOut, err := runSSHCmd(ctx, []string{"git", "remote", "get-url", "origin"}, "run safeslop from a repo with a Forgejo origin")
-	if err != nil {
-		return nil, err
-	}
-	host, port, owner, repo, err := parseForgejoRemote(rOut)
-	if err != nil {
-		return nil, err
-	}
-	base := forgejoAPIBase(fc, host)
-
-	return stageForgejoMulti(ctx, &policy.ForgejoCreds{
-		Write:   fc.Write,
-		Ttl:     fc.Ttl,
-		URL:     base,
-		Repos:   []policy.RepoCred{{Repo: owner + "/" + repo, Write: fc.Write}},
-		SSHPort: atoiOrZero(port),
-	}, stageDir, accounts)
+	return stageForgejoWithHTTP(ctx, creds.Forgejo, stageDir, accounts, NewForgejoHTTP())
 }
 
-// RevokeForgejo best-effort revokes the staged Forgejo deploy key (reads stageDir/.ssh/revoke-info,
-// re-resolves the token ref). Never relied upon for security; errors are swallowed (the stageDir
-// wipe is the real cleanup).
+func stageForgejoWithHTTP(ctx context.Context, fc *policy.ForgejoCreds, stageDir string, accounts *userconfig.Accounts, client ForgejoHTTP) ([]string, error) {
+	if fc == nil {
+		return nil, nil
+	}
+	resolved := fc
+	if len(fc.Repos) == 0 {
+		rOut, err := runSSHCmd(ctx, []string{"git", "remote", "get-url", "origin"}, "run safeslop from a repo with a Forgejo origin")
+		if err != nil {
+			return nil, err
+		}
+		host, port, owner, repo, err := parseForgejoRemote(rOut)
+		if err != nil {
+			return nil, err
+		}
+		resolved = &policy.ForgejoCreds{Write: fc.Write, Ttl: fc.Ttl, URL: forgejoAPIBase(fc, host), Repos: []policy.RepoCred{{Repo: owner + "/" + repo, Write: fc.Write}}, SSHPort: atoiOrZero(port), Api: fc.Api}
+	}
+
+	var apiToken string
+	if resolved.Api != nil && resolved.Api.Enabled {
+		if !resolved.Api.AckAccountWide {
+			return nil, fmt.Errorf("forgejo API staging requires api.ackAccountWide: true")
+		}
+		var err error
+		apiToken, err = resolveForgejoAPIToken(ctx, resolved, accounts)
+		if err != nil {
+			return nil, err
+		}
+	}
+	env, err := stageForgejoMultiWithHTTP(ctx, resolved, stageDir, accounts, client)
+	if err != nil {
+		return nil, err
+	}
+	if apiToken == "" {
+		return env, nil
+	}
+	path, err := stageForgejoAPIToken(stageDir, apiToken)
+	if err != nil {
+		return nil, err
+	}
+	return append(env, "SAFESLOP_FORGEJO_TOKEN_FILE="+path), nil
+}
+
+func resolveForgejoAPIToken(ctx context.Context, fc *policy.ForgejoCreds, accounts *userconfig.Accounts) (string, error) {
+	host := hostFromURL(fc.URL)
+	if host == "" {
+		return "", fmt.Errorf("could not parse host from forgejo url")
+	}
+	owners := map[string]struct{}{}
+	for _, rc := range fc.Repos {
+		owner, _, err := splitOwnerRepo(rc.Repo)
+		if err != nil {
+			return "", err
+		}
+		owners[owner] = struct{}{}
+	}
+	if len(owners) != 1 {
+		return "", fmt.Errorf("forgejo API staging requires repos for exactly one linked owner")
+	}
+	var owner string
+	for owner = range owners {
+	}
+	link := accounts.Lookup(host, owner)
+	if link == nil || link.Forgejo == nil {
+		return "", fmt.Errorf("no forgejo account link for %s/%s — run: safeslop creds link forgejo", host, owner)
+	}
+	token, err := secrets.Resolve(ctx, link.Forgejo.TokenRef)
+	if err != nil {
+		return "", fmt.Errorf("forgejo API token: %w", err)
+	}
+	return token, nil
+}
+
+func stageForgejoAPIToken(stageDir, token string) (string, error) {
+	path := filepath.Join(stageDir, forgejoAPITokenFile)
+	if err := os.WriteFile(path+".new", []byte(token), 0o600); err != nil {
+		return "", err
+	}
+	if err := os.Chmod(path+".new", 0o600); err != nil {
+		return "", err
+	}
+	if err := os.Rename(path+".new", path); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// RevokeForgejo best-effort revokes the staged Forgejo deploy keys. Never relied upon for
+// security; errors are swallowed because stage wipe is the cleanup guarantee.
 func RevokeForgejo(ctx context.Context, stageDir string) {
+	revokeForgejoWithHTTP(ctx, stageDir, NewForgejoHTTP())
+}
+
+func revokeForgejoWithHTTP(ctx context.Context, stageDir string, client ForgejoHTTP) {
 	b, err := os.ReadFile(filepath.Join(stageDir, ".ssh", "revoke-info"))
 	if err != nil {
 		return
@@ -237,6 +326,17 @@ func RevokeForgejo(ctx context.Context, stageDir string) {
 		if err != nil {
 			continue
 		}
-		_, _, _ = forgejoDo(ctx, http.MethodDelete, forgejoKeyURL(base, or[0], or[1], id), token, nil)
+		_, _, _ = forgejoDoWith(ctx, client, http.MethodDelete, forgejoKeyURL(base, or[0], or[1], id), token, nil)
 	}
+}
+
+// ExpireForgejo applies the bounded Forgejo horizon: it removes the canonical API token first,
+// then attempts deploy-key cleanup. An unbounded lease keeps both until normal teardown.
+func ExpireForgejo(ctx context.Context, stageDir string) {
+	expireForgejoWithHTTP(ctx, stageDir, NewForgejoHTTP())
+}
+
+func expireForgejoWithHTTP(ctx context.Context, stageDir string, client ForgejoHTTP) {
+	_ = os.Remove(filepath.Join(stageDir, forgejoAPITokenFile))
+	revokeForgejoWithHTTP(ctx, stageDir, client)
 }

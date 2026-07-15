@@ -331,6 +331,68 @@ func TestStageForgejoMultiRepo(t *testing.T) {
 	}
 }
 
+type fakeForgejoHTTP struct {
+	requests []struct{ method, url, token string }
+}
+
+func (f *fakeForgejoHTTP) Do(_ context.Context, method, url, token string, _ []byte) ([]byte, int, error) {
+	f.requests = append(f.requests, struct{ method, url, token string }{method, url, token})
+	if method == http.MethodPost {
+		return []byte(`{"id":555}`), http.StatusCreated, nil
+	}
+	return nil, http.StatusNoContent, nil
+}
+
+func TestStageForgejoAPIRequiresAcknowledgement(t *testing.T) {
+	_, err := stageForgejoWithHTTP(context.Background(), &policy.ForgejoCreds{
+		URL: "https://git.example.test", Repos: []policy.RepoCred{{Repo: "acme/web"}}, Api: &policy.ForgejoApi{Enabled: true},
+	}, t.TempDir(), nil, &fakeForgejoHTTP{})
+	if err == nil || !strings.Contains(err.Error(), "ackAccountWide") {
+		t.Fatalf("unacknowledged Forgejo API staging must fail closed, got %v", err)
+	}
+}
+
+func TestStageForgejoAPIUsesFileOnlyAndExpiresWithDeployKeys(t *testing.T) {
+	binDir := t.TempDir()
+	fakeStub(t, binDir, "ssh-keygen", `eval "p=\${$#}"; echo PRIV > "$p"; echo "ssh-ed25519 AAAAPUB safeslop" > "$p.pub"`)
+	fakeStub(t, binDir, "ssh-keyscan", `eval "h=\${$#}"; echo "$h ssh-ed25519 AAAAHOSTKEY"`)
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+	t.Setenv("FORGEJO_TOKEN", "secret-tok")
+
+	stage := t.TempDir()
+	client := &fakeForgejoHTTP{}
+	fc := &policy.ForgejoCreds{
+		URL:   "https://git.example.test",
+		Repos: []policy.RepoCred{{Repo: "acme/web"}},
+		Api:   &policy.ForgejoApi{Enabled: true, AckAccountWide: true},
+	}
+	env, err := stageForgejoWithHTTP(context.Background(), fc, stage, forgejoAcc("git.example.test", "acme", "env:FORGEJO_TOKEN", 0), client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	apiFile := filepath.Join(stage, forgejoAPITokenFile)
+	if fi, err := os.Stat(apiFile); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("API token must stage canonically at 0600: %v", err)
+	}
+	if !strings.Contains(strings.Join(env, "\n"), "SAFESLOP_FORGEJO_TOKEN_FILE="+apiFile) {
+		t.Fatalf("API file path missing from env: %v", env)
+	}
+	if strings.Contains(strings.Join(env, "\n"), "secret-tok") {
+		t.Fatalf("API token must never be exported as a value: %v", env)
+	}
+	if len(client.requests) != 1 || client.requests[0].method != http.MethodPost || client.requests[0].token != "secret-tok" {
+		t.Fatalf("deploy-key registration must use only the linked host/owner token: %+v", client.requests)
+	}
+
+	expireForgejoWithHTTP(context.Background(), stage, client)
+	if _, err := os.Stat(apiFile); !os.IsNotExist(err) {
+		t.Fatalf("horizon expiry must remove API token file: %v", err)
+	}
+	if len(client.requests) != 2 || client.requests[1].method != http.MethodDelete {
+		t.Fatalf("horizon expiry must attempt deploy-key cleanup: %+v", client.requests)
+	}
+}
+
 func TestRevokeForgejoMultiRevokesAll(t *testing.T) {
 	var paths []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

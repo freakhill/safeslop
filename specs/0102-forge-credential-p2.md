@@ -26,7 +26,7 @@ Contract: `credentials.github.ttl` and `credentials.forgejo.ttl` default to `"1h
   VERIFY:   `go test ./internal/engine/creds/ ./internal/engine/creds/githubapp/ -run 'Github|GitHub|Mint|Revoke|Renew|API' -v`
   EXPECTED: Tests prove full-batch atomicity, 0600 modes, replacement visibility, retained-token teardown revocation, partition isolation, API downscoping, and no token bytes in manifests/errors.
 
-- [ ] Stage Forgejo API files and expose a hermetic HTTP seam
+- [x] Stage Forgejo API files and expose a hermetic HTTP seam
   FILE:     `internal/engine/creds/forgejo.go`, `internal/engine/creds/multirepo.go`, `internal/engine/creds/forgejo_test.go`, `internal/engine/creds/multirepo_test.go`
   CHANGE:   Replace direct Forgejo transport use with an injectable interface shared by staging, cleanup, and GC. When API is enabled and acknowledged, resolve only the matching host/owner link in host memory and stage a 0600 canonical token file exposed solely as `SAFESLOP_FORGEJO_TOKEN_FILE`; never export a token value. At the bounded horizon remove that file and attempt best-effort deploy-key cleanup; leave unbounded leases to normal teardown.
   VERIFY:   `go test ./internal/engine/creds/ -run 'Forgejo|forgejo' -v`
