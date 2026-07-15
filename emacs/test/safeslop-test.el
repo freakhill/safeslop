@@ -1602,3 +1602,17 @@ after its name became descriptive (specs/0086 T3)."
             (should (string-match-p "Policy changed" (buffer-string)))
             (should-not (lookup-key (current-local-map) (kbd "a")))))
       (when (get-buffer review) (kill-buffer review)))))
+
+(ert-deftest safeslop-test-session-terminal-failure-opens-detail ()
+  "A fast terminal exit with a stored failure opens durable session details."
+  (let (shown message)
+    (cl-letf (((symbol-function 'safeslop-session--fetch-data)
+               (lambda (_id) '((session_id . "sess-fail")
+                               (last_error . "projection rejected"))))
+              ((symbol-function 'safeslop-session-detail)
+               (lambda (id data) (setq shown (list id data))))
+              ((symbol-function 'message)
+               (lambda (fmt &rest args) (setq message (apply #'format fmt args)))))
+      (safeslop-session--report-terminal-failure "sess-fail"))
+    (should (equal (car shown) "sess-fail"))
+    (should (string-match-p "projection rejected" message))))

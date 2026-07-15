@@ -390,6 +390,15 @@ Idempotent per buffer via `safeslop-session--fallback-done'."
         (setq safeslop-session--fallback-done t)
         (safeslop-session-status-fallback session-id)))))
 
+(defun safeslop-session--report-terminal-failure (session-id)
+  "Open SESSION-ID details when its terminal exits with a stored failure reason."
+  (when-let* ((data (safeslop-session--fetch-data session-id))
+              (reason (alist-get 'last_error data))
+              ((stringp reason))
+              ((not (string-empty-p reason))))
+    (message "safeslop session failed: %s" reason)
+    (safeslop-session-detail session-id data)))
+
 ;;; Self-describing live buffers (specs/0086 T3) -----------------------------
 ;; A live agent buffer used to be named by opaque session id (`*safeslop-<id>*'),
 ;; so an operator with several sessions could not answer "which buffer, which
@@ -729,10 +738,14 @@ fallback (`safeslop-session-status-fallback')."
         (add-function :after (process-sentinel proc)
                       (lambda (p _event)
                         (unless (process-live-p p)
-                          (safeslop-session--maybe-status-fallback buf session-id))))
+                          (unless (or (safeslop-session--maybe-status-fallback buf session-id)
+                                      (zerop (process-exit-status p)))
+                            (safeslop-session--report-terminal-failure session-id))))))
         ;; Backstop for a process that already exited before the sentinel was wired.
-        (unless (process-live-p proc)
-          (safeslop-session--maybe-status-fallback buf session-id))))
+        (when (and proc (not (process-live-p proc)))
+          (unless (or (safeslop-session--maybe-status-fallback buf session-id)
+                      (zerop (process-exit-status proc)))
+            (safeslop-session--report-terminal-failure session-id))))
     (pop-to-buffer buf)
     buf))
 
