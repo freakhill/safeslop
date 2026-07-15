@@ -27,7 +27,7 @@ Chosen approach: render each compose field as a `RET`-actionable row and keep th
   VERIFY:   `go test ./internal/cli/ -run 'TestProfileDelete' -v`
   EXPECTED: The command preserves remaining profiles, refuses missing targets without a write, and emits the required JSON envelope.
 
-- [ ] T3 — Specify and implement editable creation fields in compose
+- [x] T3 — Specify and implement editable creation fields in compose
   FILE:     `emacs/safeslop-profiles.el`, `emacs/test/safeslop-profiles-test.el`
   CHANGE:   Render Name, Agent, Environment, Network, and Workspace as field rows; `RET` opens the relevant prompt, validates profile names, uses completion for finite choices, normalizes workspace, and rerenders while preserving context. Changing agent recomputes package rows/default bundle; the existing `C-c C-c` dry-run/save uses the changed state. Keep compose creation-only.
   VERIFY:   `make test-emacs EMACS=$(command -v emacs)`

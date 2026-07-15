@@ -1366,6 +1366,13 @@ save is re-validated."
     (when disabled
       (insert "  Warning: automatic agent runtime packages are omitted; the agent may not launch.\n"))))
 
+(defun safeslop-profiles-compose--insert-field (name label value)
+  "Insert editable compose field NAME with displayed LABEL and VALUE."
+  (let ((start (point)))
+    (insert (format "%s: %s  [RET edit]\n" label (or value "")))
+    (put-text-property start (point) 'safeslop-row
+                       (list (cons 'type 'field) (cons 'name name)))))
+
 (defun safeslop-profiles-compose--render ()
   "Render the current compose state."
   (let* ((inhibit-read-only t)
@@ -1375,12 +1382,16 @@ save is re-validated."
     (erase-buffer)
     (insert "safeslop Profiles compose buffer\n")
     (insert "Keys: RET toggle, ? help, g refresh catalog, C-c C-c preview/save, q cancel; L = included by source\n\n")
-    (insert (format "Name: %s\nAgent: %s\nEnvironment: %s\nNetwork: %s\nWorkspace: %s\n\n"
-                    (alist-get 'name state) (alist-get 'agent state)
-                    (alist-get 'environment state)
-                    (safeslop-profiles--network-label
-                     (alist-get 'environment state) (alist-get 'network state))
-                    (or (alist-get 'workspace state) "")))
+    (insert "Fields (RET edits):\n")
+    (safeslop-profiles-compose--insert-field 'name "Name" (alist-get 'name state))
+    (safeslop-profiles-compose--insert-field 'agent "Agent" (alist-get 'agent state))
+    (safeslop-profiles-compose--insert-field 'environment "Environment" (alist-get 'environment state))
+    (safeslop-profiles-compose--insert-field
+     'network "Network"
+     (safeslop-profiles--network-label
+      (alist-get 'environment state) (alist-get 'network state)))
+    (safeslop-profiles-compose--insert-field 'workspace "Workspace" (alist-get 'workspace state))
+    (insert "\n")
     (when (and (equal (alist-get 'environment state) "container")
                (equal (alist-get 'network state) "deny"))
       (insert "  Passive denied-destination review is operator-opened; it grants nothing automatically.\n"))
@@ -1476,8 +1487,50 @@ save is re-validated."
                "safeslop: %s is locked because it is included by %s; toggle that source instead")
              name source)))
 
+(defun safeslop-profiles-compose--set-field (field value)
+  "Set compose FIELD to VALUE after its local UI validation.
+The engine remains the authoritative policy validator at dry-run/save time."
+  (let ((state safeslop-profiles-compose--state))
+    (pcase field
+      ('name
+       (unless (safeslop-profiles--valid-name-p value)
+         (user-error "Profile name must match %s" safeslop-profiles--name-regexp)))
+      ('agent
+       (unless (member value safeslop-profiles--agents)
+         (user-error "Unsupported agent: %s" value)))
+      ('environment
+       (unless (member value safeslop-profiles--environments)
+         (user-error "Unsupported environment: %s" value)))
+      ('network
+       (unless (member value safeslop-profiles--networks)
+         (user-error "Unsupported network policy: %s" value)))
+      ('workspace (setq value (safeslop-profiles--normalize-workspace value)))
+      (_ (user-error "Unknown compose field: %s" field)))
+    (setcdr (assq field state) value)
+    (when (eq field 'agent)
+      (setcdr (assq 'package-rows state)
+              (safeslop-profiles--package-rows
+               (alist-get 'agent state) (alist-get 'bundles state) (alist-get 'packages state)
+               (alist-get 'no-default-bundle state) (alist-get 'catalog state))))))
+
+(defun safeslop-profiles-compose-edit-field (field)
+  "Prompt for and apply FIELD in the current creation compose state."
+  (interactive)
+  (let* ((state safeslop-profiles-compose--state)
+         (old (or (alist-get field state) ""))
+         (value
+          (pcase field
+            ('name (read-string "Profile name: " old))
+            ('agent (completing-read "Agent: " safeslop-profiles--agents nil t nil nil old))
+            ('environment (completing-read "Environment: " safeslop-profiles--environments nil t nil nil old))
+            ('network (completing-read "Network: " safeslop-profiles--networks nil t nil nil old))
+            ('workspace (read-string "Workspace (empty for default): " old))
+            (_ (user-error "Unknown compose field: %s" field)))))
+    (safeslop-profiles-compose--set-field field value)
+    (safeslop-profiles-compose--render-preserving-context)))
+
 (defun safeslop-profiles-compose-toggle ()
-  "Toggle the bundle or unlocked direct package row at point."
+  "Toggle a selectable row or edit a field at point."
   (interactive)
   (let* ((row (safeslop-profiles-compose--row-at-point))
          (type (alist-get 'type row))
@@ -1485,6 +1538,7 @@ save is re-validated."
          (state safeslop-profiles-compose--state)
          changed)
     (pcase type
+      ('field (safeslop-profiles-compose-edit-field name))
       ('default-bundle
        (let ((default (safeslop-profiles--lookup-default-bundle
                        (alist-get 'agent state) (alist-get 'catalog state))))

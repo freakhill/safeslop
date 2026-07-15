@@ -273,6 +273,85 @@
   (should (eq (lookup-key safeslop-profiles-compose-mode-map (kbd "q"))
               #'safeslop-profiles-compose-cancel)))
 
+(defun safeslop-test-profiles--goto-compose-field (field)
+  "Move point to FIELD's interactive compose row."
+  (goto-char (point-min))
+  (unless (search-forward (format "%s:" (capitalize (symbol-name field))) nil t)
+    (ert-fail (format "missing compose field %s" field)))
+  (beginning-of-line))
+
+(ert-deftest safeslop-test-profiles-compose-fields-are-editable-and-feed-argv ()
+  "RET edits every creation field and the dry-run/create argv uses the new state."
+  (let* ((catalog (safeslop-profiles--catalog-indexes
+                   safeslop-test-profiles--bundle-envelope
+                   safeslop-test-profiles--package-envelope))
+         (state (safeslop-profiles--compose-state
+                 "review" "claude" "container" nil nil "deny" "." nil catalog)))
+    (with-temp-buffer
+      (safeslop-profiles-compose-mode)
+      (setq safeslop-profiles-compose--state state)
+      (safeslop-profiles-compose--render)
+      (cl-letf (((symbol-function 'read-string)
+                 (lambda (prompt &rest _)
+                   (cond ((string-prefix-p "Profile name" prompt) "alternate")
+                         ((string-prefix-p "Workspace" prompt) "../workspace")
+                         (t (ert-fail (format "unexpected prompt: %s" prompt))))))
+                ((symbol-function 'completing-read)
+                 (lambda (prompt &rest _)
+                   (cond ((string-prefix-p "Agent" prompt) "pi")
+                         ((string-prefix-p "Environment" prompt) "host")
+                         ((string-prefix-p "Network" prompt) "allow")
+                         (t (ert-fail (format "unexpected prompt: %s" prompt)))))))
+        (dolist (field '(name agent environment network workspace))
+          (safeslop-test-profiles--goto-compose-field field)
+          (should (equal (alist-get 'type (safeslop-profiles-compose--row-at-point)) 'field))
+          (should (eq (alist-get 'name (safeslop-profiles-compose--row-at-point)) field))
+          (safeslop-profiles-compose-toggle)))
+      (should (equal (alist-get 'name state) "alternate"))
+      (should (equal (alist-get 'agent state) "pi"))
+      (should (equal (alist-get 'environment state) "host"))
+      (should (equal (alist-get 'network state) "allow"))
+      (let ((workspace (safeslop-profiles--normalize-workspace "../workspace")))
+        (should (equal (alist-get 'workspace state) workspace))
+        (should (equal (safeslop-profiles--compose-args state)
+                       (list "profile" "create" "--name" "alternate" "--agent" "pi"
+                             "--environment" "host" "--workspace" workspace
+                             "--network" "allow" "--output" "json")))))))
+
+(ert-deftest safeslop-test-profiles-compose-agent-change-recomputes-default-package-rows ()
+  "Changing agent updates inherited package/default-bundle state before preview."
+  (let* ((catalog (safeslop-profiles--catalog-indexes
+                   safeslop-test-profiles--bundle-envelope
+                   safeslop-test-profiles--package-envelope))
+         (state (safeslop-profiles--compose-state
+                 "review" "claude" "container" nil nil "deny" "." nil catalog)))
+    (with-temp-buffer
+      (safeslop-profiles-compose-mode)
+      (setq safeslop-profiles-compose--state state)
+      (safeslop-profiles-compose--render)
+      (should (alist-get 'locked (cdr (assoc "node" (alist-get 'package-rows state)))))
+      (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "fish")))
+        (safeslop-test-profiles--goto-compose-field 'agent)
+        (safeslop-profiles-compose-toggle))
+      (should-not (alist-get 'checked (cdr (assoc "node" (alist-get 'package-rows state)))))
+      (should-not (string-match-p "Automatic agent bundle:" (buffer-string))))))
+
+(ert-deftest safeslop-test-profiles-compose-invalid-name-does-not-mutate-state ()
+  "Invalid profile names are rejected before they can change compose state."
+  (let* ((catalog (safeslop-profiles--catalog-indexes
+                   safeslop-test-profiles--bundle-envelope
+                   safeslop-test-profiles--package-envelope))
+         (state (safeslop-profiles--compose-state
+                 "review" "claude" "container" nil nil "deny" "." nil catalog)))
+    (with-temp-buffer
+      (safeslop-profiles-compose-mode)
+      (setq safeslop-profiles-compose--state state)
+      (safeslop-profiles-compose--render)
+      (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "not valid")))
+        (safeslop-test-profiles--goto-compose-field 'name)
+        (should-error (safeslop-profiles-compose-toggle) :type 'user-error))
+      (should (equal (alist-get 'name state) "review")))))
+
 (ert-deftest safeslop-test-profiles-compose-render-help-and-locked-toggle ()
   "Compose rendering marks checked/locked rows, help uses catalog detail, and locks do not toggle."
   (let* ((catalog (safeslop-profiles--catalog-indexes
