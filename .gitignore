@@ -19,6 +19,8 @@ library/layer/container/agent-tools.env
 
 # Generated/reference outputs
 library/.generated/
+# Local ayo/FLO worker packets and evaluations; canonical decisions live in specs/.
+agent/tmp/
 
 # Go build artifacts
 /safeslop
