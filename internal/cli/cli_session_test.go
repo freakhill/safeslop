@@ -1525,6 +1525,38 @@ func TestSessionDataSurfacesCredentialScopes(t *testing.T) {
 // TestSessionDataOmitsEmptyCredentialScopes proves a session with no scopes (an
 // ad-hoc or legacy record) omits the key, so old records still render cleanly
 // (specs/0086 T1: backward compatible).
+func TestSessionDataSurfacesValueFreeCredentialLease(t *testing.T) {
+	now := nowForTest(t)
+	sess := engsession.Session{ID: "sess-lease000", Agent: "pi", Workspace: "/workspace/project", Environment: "container", Network: "deny", Status: engsession.StatusRunning, CreatedAt: now, UpdatedAt: now,
+		CredentialLease: &engsession.CredentialLease{Provider: "github", State: "healthy", CurrentExpiresAt: now.Add(time.Hour), GithubMinExpiresAt: now.Add(time.Hour), GithubPartitions: 2},
+	}
+	data := sessionData(sess)
+	lease, ok := data["credential_lease"].(*engsession.CredentialLease)
+	if !ok || lease.Provider != "github" || lease.GithubPartitions != 2 {
+		t.Fatalf("credential_lease = %#v", data["credential_lease"])
+	}
+	encoded, err := json.Marshal(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"op://", "env:", "token", "/safeslop/runtime"} {
+		if strings.Contains(string(encoded), forbidden) {
+			t.Fatalf("credential lease output leaked %q: %s", forbidden, encoded)
+		}
+	}
+}
+
+func TestSessionDataMarksCrashedLeaseUnavailable(t *testing.T) {
+	now := time.Now().UTC()
+	sess := engsession.Session{ID: "sess-crashed0", Agent: "pi", Workspace: "/workspace/project", Environment: "container", Network: "deny", Status: engsession.StatusStopped, LastError: "run process exited without recording status", CreatedAt: now, UpdatedAt: now,
+		CredentialLease: &engsession.CredentialLease{Provider: "github", State: "healthy", CurrentExpiresAt: now.Add(time.Hour)},
+	}
+	lease := sessionData(sess)["credential_lease"].(*engsession.CredentialLease)
+	if lease.State != "degraded" || lease.Reason != "manager_unavailable" {
+		t.Fatalf("crashed lease = %#v", lease)
+	}
+}
+
 func TestSessionDataOmitsEmptyCredentialScopes(t *testing.T) {
 	sess := engsession.Session{
 		ID:          "sess-nocreds0",

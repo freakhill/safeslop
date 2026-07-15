@@ -54,6 +54,18 @@ type CredentialScope struct {
 	Scope string `json:"scope"`
 }
 
+// CredentialLease is the additive, value-free renewal snapshot. It deliberately excludes token
+// values, account-link refs, key IDs, provider responses, and stage paths.
+type CredentialLease struct {
+	Provider           string    `json:"provider"`
+	State              string    `json:"state"`
+	Reason             string    `json:"reason,omitempty"`
+	CurrentExpiresAt   time.Time `json:"current_expires_at,omitempty"`
+	Horizon            time.Time `json:"horizon,omitempty"`
+	GithubMinExpiresAt time.Time `json:"github_min_expires_at,omitempty"`
+	GithubPartitions   int       `json:"github_partitions,omitempty"`
+}
+
 // Session is the durable, non-secret state for an Emacs-visible session. Do not
 // add staged credential values or resolved secret material here; the JSONL status
 // path serializes this object for clients.
@@ -75,6 +87,7 @@ type Session struct {
 	// time and surfaced by session create/list/status. Empty (omitted) for ad-hoc
 	// sessions and profiles without credentials (specs/0086 T1).
 	CredentialScopes   []CredentialScope `json:"credential_scopes,omitempty"`
+	CredentialLease    *CredentialLease  `json:"credential_lease,omitempty"`
 	Status             string            `json:"status"`
 	CreatedAt          time.Time         `json:"created_at"`
 	UpdatedAt          time.Time         `json:"updated_at"`

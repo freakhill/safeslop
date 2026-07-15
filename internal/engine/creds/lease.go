@@ -55,6 +55,9 @@ type LeaseConfig struct {
 	Renew     func(context.Context) (time.Time, error)
 	// Jitter is injectable for deterministic tests. Production defaults to a bounded 0–20% delay.
 	Jitter func(time.Duration) time.Duration
+	// OnChange receives only value-free renewal metadata. It is host lifecycle bookkeeping, not a
+	// listener: callbacks must not expose a credential service to the sandbox.
+	OnChange func(LeaseSnapshot)
 }
 
 // LeaseSnapshot is safe for session/status persistence: it contains no token, reference, path, or
@@ -70,9 +73,10 @@ type LeaseSnapshot struct {
 
 // Lease renews a host-staged credential until cancellation, expiry, or the optional policy horizon.
 type Lease struct {
-	clock  LeaseClock
-	renew  func(context.Context) (time.Time, error)
-	jitter func(time.Duration) time.Duration
+	clock    LeaseClock
+	renew    func(context.Context) (time.Time, error)
+	jitter   func(time.Duration) time.Duration
+	onChange func(LeaseSnapshot)
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -104,11 +108,12 @@ func StartLease(config LeaseConfig) (*Lease, error) {
 		horizon = &copy
 	}
 	lease := &Lease{
-		clock: config.Clock, renew: config.Renew, jitter: config.Jitter,
+		clock: config.Clock, renew: config.Renew, jitter: config.Jitter, onChange: config.OnChange,
 		ctx: ctx, cancel: cancel, done: make(chan struct{}),
 		snapshot: LeaseSnapshot{State: LeaseHealthy, CurrentExpiresAt: config.ExpiresAt.UTC(), Horizon: horizon},
 	}
 	go lease.run()
+	lease.notify()
 	return lease, nil
 }
 
@@ -177,47 +182,53 @@ func (l *Lease) deadline(snapshot LeaseSnapshot) time.Time {
 
 func (l *Lease) expiredAt(now time.Time) bool {
 	l.mu.Lock()
-	defer l.mu.Unlock()
+	expired := false
 	if l.snapshot.Horizon != nil && !now.Before(*l.snapshot.Horizon) {
 		l.snapshot.State = LeaseExpired
 		l.snapshot.Reason = "horizon_reached"
 		l.snapshot.NextRetry = 0
-		return true
-	}
-	if !now.Before(l.snapshot.CurrentExpiresAt) {
+		expired = true
+	} else if !now.Before(l.snapshot.CurrentExpiresAt) {
 		l.snapshot.State = LeaseExpired
 		l.snapshot.Reason = "token_expired"
 		l.snapshot.NextRetry = 0
-		return true
+		expired = true
 	}
-	return false
+	l.mu.Unlock()
+	if expired {
+		l.notify()
+	}
+	return expired
 }
 
 func (l *Lease) setRenewing() {
 	l.mu.Lock()
-	defer l.mu.Unlock()
 	l.snapshot.State = LeaseRenewing
 	l.snapshot.Reason = ""
+	l.mu.Unlock()
+	l.notify()
 }
 
 func (l *Lease) setRenewalFailure() {
 	l.mu.Lock()
-	defer l.mu.Unlock()
 	l.snapshot.State = LeaseDegraded
 	l.snapshot.Reason = "renewal_failed"
 	l.snapshot.Attempts++
 	base := leaseRetryDelay(l.snapshot.Attempts)
 	l.snapshot.NextRetry = boundedLeaseJitter(base, l.jitter(base))
+	l.mu.Unlock()
+	l.notify()
 }
 
 func (l *Lease) setRenewalSuccess(expiresAt time.Time) {
 	l.mu.Lock()
-	defer l.mu.Unlock()
 	l.snapshot.State = LeaseHealthy
 	l.snapshot.Reason = ""
 	l.snapshot.CurrentExpiresAt = expiresAt.UTC()
 	l.snapshot.NextRetry = 0
 	l.snapshot.Attempts = 0
+	l.mu.Unlock()
+	l.notify()
 }
 
 func leaseRetryDelay(attempt int) time.Duration {
@@ -253,6 +264,12 @@ func boundedLeaseJitter(base, candidate time.Duration) time.Duration {
 		return maximum
 	}
 	return candidate
+}
+
+func (l *Lease) notify() {
+	if l.onChange != nil {
+		l.onChange(l.Snapshot())
+	}
 }
 
 func (l *Lease) Snapshot() LeaseSnapshot {

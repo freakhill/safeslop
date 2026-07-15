@@ -32,7 +32,7 @@ Contract: `credentials.github.ttl` and `credentials.forgejo.ttl` default to `"1h
   VERIFY:   `go test ./internal/engine/creds/ -run 'Forgejo|forgejo' -v`
   EXPECTED: Local HTTP fakes prove exact authorization requests, file-only API delivery, horizon cleanup, no value/ref leakage, and unchanged per-repository deploy-key isolation.
 
-- [ ] Integrate lease ownership into every run lifecycle and session status
+- [x] Integrate lease ownership into every run lifecycle and session status
   FILE:     `internal/cli/cli.go`, `internal/cli/supervise.go`, `internal/engine/session/session.go`, `internal/engine/session/session_test.go`, `internal/cli/cli_runprofile_test.go`, `internal/cli/cli_session_test.go`, `internal/cli/cli_detach_test.go`, `internal/cli/cli_stage_test.go`
   CHANGE:   Create and start one manager after safe initial staging in `runProfileCtx`, stopping it before credential teardown. Remove abandoned exact-run stage state first. Ensure coupled `run`, coupled `session run`, and detached supervisor use the same owner, while the supervisor exposes no credential service. Persist and render only additive, value-free `credential_lease` state (provider/aggregate state, reason/error class, timestamps, bounded horizon, GitHub minimum expiry/partition count); retain compatible `github_creds`. Mark a dead manager degraded until known expiry then expired.
   VERIFY:   `go test ./internal/cli/ ./internal/engine/session/ -run 'RunProfile|Stage|Session|Detach|Lease|Credential' -v`
