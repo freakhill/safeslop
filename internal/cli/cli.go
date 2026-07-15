@@ -994,6 +994,10 @@ func createSessionFromProfile(store engsession.Store, profile string) (engsessio
 	// before saving, so create/list/status all surface the same legibility rows and no
 	// later re-read of the policy is needed (specs/0086 T1).
 	sess.CredentialScopes = credentialScopesFromProfile(prof)
+	// Snapshot trusted durable rules now. Session launch later reconstructs the
+	// profile only for trust verification, never to widen this session after a
+	// policy edit (specs/0103).
+	sess.PersistentEgress = append([]policy.PersistentEgressRule(nil), prof.PersistentEgress...)
 	if err := store.Save(sess); err != nil {
 		return engsession.Session{}, emitContractError(jsoncontract.CodeIOError, "save session", map[string]any{"error": err.Error()})
 	}
@@ -1039,6 +1043,7 @@ func createBuiltinSession(store engsession.Store, name string) (engsession.Sessi
 	sess.PolicyPath, sess.PolicyHash = "builtin:"+name, builtin.Hash
 	sess.RecipeID, sess.Image, sess.Resolved = recipe.RecipeID, recipe.AgentImage, resolvedMetadata(resolved)
 	sess.CredentialScopes = credentialScopesFromProfile(prof)
+	sess.PersistentEgress = append([]policy.PersistentEgressRule(nil), prof.PersistentEgress...)
 	if err := store.Save(sess); err != nil {
 		return engsession.Session{}, emitContractError(jsoncontract.CodeIOError, "save session", map[string]any{"error": err.Error()})
 	}
@@ -1708,7 +1713,7 @@ func grantSessionEgress(ctx context.Context, store engsession.Store, id, host st
 		return engsession.Session{}, engsession.EgressGrant{}, err
 	}
 	if sess.Status == engsession.StatusRunning {
-		if err := applySessionGrantOverlay(ctx, sess, sessionGrantViews(next.EgressGrants)); err != nil {
+		if err := applySessionGrantOverlay(ctx, sess, sessionEgressViews(next)); err != nil {
 			return engsession.Session{}, engsession.EgressGrant{}, err
 		}
 	}
@@ -1731,7 +1736,7 @@ func revokeSessionEgress(ctx context.Context, store engsession.Store, id, grantI
 		return engsession.Session{}, err
 	}
 	if sess.Status == engsession.StatusRunning {
-		if err := applySessionGrantOverlay(ctx, sess, sessionGrantViews(next.EgressGrants)); err != nil {
+		if err := applySessionGrantOverlay(ctx, sess, sessionEgressViews(next)); err != nil {
 			return engsession.Session{}, err
 		}
 	}
@@ -1752,6 +1757,33 @@ func sessionGrantViews(grants []engsession.EgressGrant) []container.SessionGrant
 	return out
 }
 
+// sessionEgressViews merges the immutable profile-persistent snapshot with the
+// mutable session grants for the shared Squid exact include. Persistent entries
+// lead and duplicate pairs are coalesced so an explicit temporary grant never
+// changes their source/lifetime or creates redundant ACLs (specs/0103).
+func sessionEgressViews(sess engsession.Session) []container.SessionGrant {
+	out := make([]container.SessionGrant, 0, len(sess.PersistentEgress)+len(sess.EgressGrants))
+	seen := make(map[string]struct{}, cap(out))
+	add := func(host string, port int) {
+		key := fmt.Sprintf("%s:%d", host, port)
+		if _, duplicate := seen[key]; duplicate {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, container.SessionGrant{Host: host, Port: port})
+	}
+	for _, rule := range sess.PersistentEgress {
+		add(rule.FQDN, rule.Port)
+	}
+	for _, grant := range sess.EgressGrants {
+		add(grant.Host, grant.Port)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func sessionGrantViewsFromRunName(name string) []container.SessionGrant {
 	if !strings.HasPrefix(name, "session-") {
 		return nil
@@ -1760,7 +1792,7 @@ func sessionGrantViewsFromRunName(name string) []container.SessionGrant {
 	if err != nil {
 		return nil
 	}
-	return sessionGrantViews(sess.EgressGrants)
+	return sessionEgressViews(sess)
 }
 
 func sessionData(sess engsession.Session) map[string]any {
@@ -1808,6 +1840,16 @@ func sessionData(sess engsession.Session) map[string]any {
 			}
 		}
 		out["credential_lease"] = &lease
+	}
+	if len(sess.PersistentEgress) > 0 {
+		rows := make([]map[string]any, 0, len(sess.PersistentEgress))
+		for _, rule := range sess.PersistentEgress {
+			rows = append(rows, map[string]any{
+				"fqdn": rule.FQDN, "port": rule.Port,
+				"source": "profile-persistent", "lifetime": "future-sessions",
+			})
+		}
+		out["persistent_egress"] = rows
 	}
 	if len(sess.EgressGrants) > 0 {
 		out["egress_grants"] = sess.EgressGrants

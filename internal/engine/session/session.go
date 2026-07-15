@@ -16,6 +16,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/freakhill/safeslop/internal/engine/policy"
 )
 
 const (
@@ -115,8 +117,13 @@ type Session struct {
 	// container deny session (specs/0089/0097). Runtime overlay state only — never mutates profile.
 	// egress policy; revoked with the session. Empty (omitted) for host/allow sessions and sessions
 	// with no grants.
-	EgressGrants  []EgressGrant `json:"egress_grants,omitempty"`
-	GrantRevision int           `json:"egress_grant_revision,omitempty"`
+	// PersistentEgress is the normalized exact-rule snapshot from a trusted
+	// profile at session creation. It is deliberately separate from the mutable
+	// session overlay, so later grant/revoke operations cannot erase durable
+	// authority already captured for this session (specs/0103).
+	PersistentEgress []policy.PersistentEgressRule `json:"persistent_egress,omitempty"`
+	EgressGrants     []EgressGrant                 `json:"egress_grants,omitempty"`
+	GrantRevision    int                           `json:"egress_grant_revision,omitempty"`
 	// Detached marks a session whose recorded PID is a detached supervisor that
 	// leads its own process group, so `stop` signals the group, not a bare PID
 	// (specs/0051 D4). Internal routing state; not surfaced in the JSON envelope.

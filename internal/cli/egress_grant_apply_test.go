@@ -96,6 +96,56 @@ func TestSessionGrantApplyFailClosedDoesNotSave(t *testing.T) {
 	}
 }
 
+func TestSessionGrantApplyPreservesPersistentSnapshotOnGrantAndRevoke(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+	store := sessionStore()
+	sess, err := store.Create("pi", "container", ws, nowForTest(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess.Status = engsession.StatusRunning
+	sess.PersistentEgress = []policy.PersistentEgressRule{{FQDN: "always.example.com", Port: 443}}
+	if err := store.Save(sess); err != nil {
+		t.Fatal(err)
+	}
+	seedSessionOverlayForTest(t, sess)
+
+	var applies [][]container.SessionGrant
+	oldApply := applySessionGrantOverlay
+	applySessionGrantOverlay = func(_ context.Context, _ engsession.Session, desired []container.SessionGrant) error {
+		applies = append(applies, append([]container.SessionGrant(nil), desired...))
+		return nil
+	}
+	t.Cleanup(func() { applySessionGrantOverlay = oldApply })
+
+	updated, grant, err := grantSessionEgress(context.Background(), store, sess.ID, "now.example.com", 443, nowForTest(t))
+	if err != nil {
+		t.Fatalf("grantSessionEgress: %v", err)
+	}
+	if _, err := revokeSessionEgress(context.Background(), store, updated.ID, grant.ID, nowForTest(t)); err != nil {
+		t.Fatalf("revokeSessionEgress: %v", err)
+	}
+	if len(applies) != 2 {
+		t.Fatalf("overlay applies = %#v, want grant and revoke", applies)
+	}
+	for _, want := range []struct {
+		at int
+		n  int
+	}{{0, 2}, {1, 1}} {
+		if len(applies[want.at]) != want.n || applies[want.at][0].Host != "always.example.com" || applies[want.at][0].Port != 443 {
+			t.Fatalf("overlay %d = %#v, persistent snapshot must remain first", want.at, applies[want.at])
+		}
+	}
+	stored, err := store.Get(sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.PersistentEgress) != 1 || stored.PersistentEgress[0].FQDN != "always.example.com" || len(stored.EgressGrants) != 0 {
+		t.Fatalf("stored session = %+v, persistent snapshot must survive overlay mutations", stored)
+	}
+}
+
 func TestSessionGrantApplyLaunchThreadsStoredGrants(t *testing.T) {
 	ws := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
@@ -104,6 +154,7 @@ func TestSessionGrantApplyLaunchThreadsStoredGrants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	sess.PersistentEgress = []policy.PersistentEgressRule{{FQDN: "always.example.com", Port: 443}}
 	sess, _, err = engsession.AppendGrant(sess, "example.com", 443, nowForTest(t))
 	if err != nil {
 		t.Fatal(err)
@@ -128,8 +179,8 @@ func TestSessionGrantApplyLaunchThreadsStoredGrants(t *testing.T) {
 	if _, err := runProfileCtx(context.Background(), "session-"+sess.ID, prof, argv, ws); err != nil {
 		t.Fatalf("runProfileCtx: %v", err)
 	}
-	if len(got) != 1 || got[0].Host != "example.com" || got[0].Port != 443 {
-		t.Fatalf("launch grants = %+v, want stored example.com:443", got)
+	if len(got) != 2 || got[0].Host != "always.example.com" || got[0].Port != 443 || got[1].Host != "example.com" || got[1].Port != 443 {
+		t.Fatalf("launch grants = %+v, want persistent always.example.com:443 then session example.com:443", got)
 	}
 }
 

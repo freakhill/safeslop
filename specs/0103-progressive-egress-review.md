@@ -29,7 +29,7 @@ At container launch, persistent exact rules and session grants are rendered thro
   VERIFY:   `go test ./internal/engine/policy ./internal/engine/session -run 'PersistentEgress|EgressGrant|ExactEgress|IPLiteral|Metadata|NetworkAllow|Host' -v`
   EXPECTED: Valid exact lowercase FQDN:443 rules decode; suffix/wildcard/IP/URL/metadata/other-port, duplicate, host, and open-network rules fail with no profile/session mutation; existing `profile.egress` fixtures remain compatible.
 
-- [ ] T2 — Materialize persistent rules without weakening the runtime overlay
+- [x] T2 — Materialize persistent rules without weakening the runtime overlay
   FILE:     `internal/engine/container/policy.go`, `internal/engine/container/policy_test.go`, `internal/engine/container/launch.go`, `internal/engine/container/launch_test.go`, `internal/engine/session/session.go`, `internal/engine/session/session_test.go`, `internal/cli/cli.go`, `internal/cli/egress_grant_apply_test.go`, `internal/cli/cli_session_test.go`
   CHANGE:   Snapshot typed persistent rules on profile-backed session creation; render their exact FQDN:port entries together with session grants into the existing Squid exact include on launch. Change grant/revoke overlay reconstruction to preserve the snapshot, while exposing source/lifetime separately in session data. Do not change a running session when its profile later changes; only a newly created, trusted session consumes a durable rule.
   VERIFY:   `go test ./internal/engine/container ./internal/engine/session ./internal/cli -run 'PersistentEgress|SessionGrant|ProxyReload|FailClosed|FutureSession|NoProfileMutation' -v && make check-assets`

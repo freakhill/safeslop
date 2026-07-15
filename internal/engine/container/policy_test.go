@@ -129,6 +129,25 @@ func TestRenderSessionGrantsEmitsExactACLs(t *testing.T) {
 	}
 }
 
+// TestPersistentEgressUsesTheSameExactIncludeAndHardDeny proves durable rules
+// use the same exact, hard-deny-preserving Squid include as session grants.
+func TestPersistentEgressUsesTheSameExactIncludeAndHardDeny(t *testing.T) {
+	persistent := []SessionGrant{{Host: "always.example.com", Port: 443}}
+	if !DecideWithGrants("always.example.com", 443, "deny", persistent) {
+		t.Fatal("persistent exact pair must be permitted through the shared include")
+	}
+	if DecideWithGrants("sub.always.example.com", 443, "deny", persistent) {
+		t.Fatal("persistent rule must not permit a subdomain")
+	}
+	if DecideWithGrants("metadata.google.internal", 443, "deny", append(persistent, SessionGrant{Host: "metadata.google.internal", Port: 443})) {
+		t.Fatal("hard denial must still win over a persistent exact entry")
+	}
+	out := RenderSessionGrants(persistent)
+	if !strings.Contains(out, `^always\.example\.com$`) {
+		t.Fatalf("persistent rule must render through the exact include:\\n%s", out)
+	}
+}
+
 // TestSquidConfIncludesSessionGrantsBeforeDenyAll pins the include ordering: session-grants.conf
 // is included after the hard denies + static allowlist and before the final deny-all, so a grant
 // extends egress but cannot bypass a hard deny (specs/0097).

@@ -1278,6 +1278,41 @@ func writeProfileCueAndTrust(t *testing.T, ws, cue string) {
 	trustFixtureForTest(t, ws)
 }
 
+func TestSessionCreateFromProfileSnapshotsPersistentEgressForFutureSessions(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+	cue := `package safeslop
+
+safeslop: {
+	version: 1
+	profiles: reviewed: {
+		agent: "pi"
+		environment: "container"
+		network: "deny"
+		workspace: "project"
+		persistentEgress: [{fqdn: "Always.Example.com", port: 443}]
+	}
+}
+`
+	writeProfileCueAndTrust(t, ws, cue)
+	out, err := runRootForTest(t, ws, "session", "create", "--profile", "reviewed", "--output", "json")
+	if err != nil {
+		t.Fatalf("session create: %v\\nout=%s", err, out)
+	}
+	env := parseEnvelopeForTest(t, out)
+	id, _ := env.Data["session_id"].(string)
+	stored, err := sessionStore().Get(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.PersistentEgress) != 1 || stored.PersistentEgress[0].FQDN != "always.example.com" || stored.PersistentEgress[0].Port != 443 {
+		t.Fatalf("persistent snapshot = %+v, want normalized exact rule", stored.PersistentEgress)
+	}
+	if got, ok := env.Data["persistent_egress"].([]any); !ok || len(got) != 1 {
+		t.Fatalf("create envelope persistent_egress = %#v, want one value-free source/lifetime row", env.Data["persistent_egress"])
+	}
+}
+
 // TestSessionCreateFromProfileComputesCredentialScopes proves a profile-backed
 // session's create envelope AND its persisted record carry value-free
 // credential_scopes computed from the trusted policy: declared github repos use
