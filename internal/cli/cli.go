@@ -1796,6 +1796,19 @@ func sessionData(sess engsession.Session) map[string]any {
 	if len(sess.CredentialScopes) > 0 {
 		out["credential_scopes"] = sess.CredentialScopes
 	}
+	if sess.CredentialLease != nil {
+		lease := *sess.CredentialLease
+		// A reconciled crash cannot leave a stale healthy lease in status. Until the last
+		// known token expiry it is degraded/manager_unavailable; afterwards it is expired.
+		if sess.LastError == "run process exited without recording status" && lease.State != string(creds.LeaseExpired) {
+			if !lease.CurrentExpiresAt.IsZero() && !time.Now().Before(lease.CurrentExpiresAt) {
+				lease.State, lease.Reason = string(creds.LeaseExpired), "token_expired"
+			} else {
+				lease.State, lease.Reason = string(creds.LeaseDegraded), "manager_unavailable"
+			}
+		}
+		out["credential_lease"] = &lease
+	}
 	if len(sess.EgressGrants) > 0 {
 		out["egress_grants"] = sess.EgressGrants
 	}
@@ -2222,7 +2235,7 @@ var credsProber = creds.DefaultProber
 // readiness status — it never handles or reveals a secret value.
 func cmdCreds() *cobra.Command {
 	c := &cobra.Command{Use: "creds", Short: "Inspect the credential posture of safeslop.cue profiles"}
-	c.AddCommand(cmdCredsList(), cmdCredsShow(), cmdCredsLink(), cmdCredsUnlink(), cmdCredsStatus())
+	c.AddCommand(cmdCredsList(), cmdCredsShow(), cmdCredsLink(), cmdCredsUnlink(), cmdCredsStatus(), cmdCredsGC())
 	return c
 }
 
@@ -2936,6 +2949,67 @@ var observeSessionEgress = func(ctx context.Context, sess engsession.Session) ([
 	return container.ReadDeniedEgressObservations(ctx, engineForSession(sess), filepath.Join(stageDir, "compose.yml"))
 }
 
+// credentialManager owns host-side renewal and bounded Forgejo cleanup for one run. It has no
+// listener or sandbox-facing API: the agent sees only staged files.
+type credentialManager struct {
+	github       *creds.Lease
+	forgejoTimer *time.Timer
+}
+
+func startCredentialManager(stagedAt time.Time, runName string, prof policy.Profile, stageDir string) (*credentialManager, error) {
+	manager := &credentialManager{}
+	var err error
+	manager.github, err = creds.StartGithubCredentialLease(stagedAt, prof.Credentials, stageDir, func(snapshot creds.LeaseSnapshot) {
+		persistLeaseSnapshot(runName, stageDir, snapshot)
+	})
+	if err != nil {
+		return nil, err
+	}
+	if prof.Credentials != nil && prof.Credentials.Forgejo != nil && prof.Credentials.Forgejo.Ttl != "" {
+		ttl, err := time.ParseDuration(prof.Credentials.Forgejo.Ttl)
+		if err != nil || ttl <= 0 {
+			manager.github.Stop()
+			return nil, fmt.Errorf("forgejo credential lease: invalid ttl")
+		}
+		manager.forgejoTimer = time.AfterFunc(ttl, func() { creds.ExpireForgejo(context.Background(), stageDir) })
+	}
+	return manager, nil
+}
+
+// persistLeaseSnapshot writes only lease metadata for session-owned run names. The stage path is
+// used solely as an internal lookup key and is never serialized.
+func persistLeaseSnapshot(runName, stageDir string, snapshot creds.LeaseSnapshot) {
+	if !strings.HasPrefix(runName, "session-") {
+		return
+	}
+	id := strings.TrimPrefix(runName, "session-")
+	if id == "" {
+		return
+	}
+	store := sessionStore()
+	sess, err := store.Get(id)
+	if err != nil {
+		return
+	}
+	partitions, _ := creds.GithubCredsPartitionCount(stageDir)
+	lease := &engsession.CredentialLease{Provider: "github", State: string(snapshot.State), Reason: snapshot.Reason, CurrentExpiresAt: snapshot.CurrentExpiresAt.UTC(), GithubMinExpiresAt: snapshot.CurrentExpiresAt.UTC(), GithubPartitions: partitions}
+	if snapshot.Horizon != nil {
+		lease.Horizon = snapshot.Horizon.UTC()
+	}
+	sess.CredentialLease = lease
+	_ = store.Save(sess)
+}
+
+func (m *credentialManager) Stop() {
+	if m == nil {
+		return
+	}
+	if m.forgejoTimer != nil {
+		m.forgejoTimer.Stop()
+	}
+	m.github.Stop()
+}
+
 func runProfileCtx(ctx context.Context, name string, prof policy.Profile, argv []string, ws string, stdio ...runIO) (int, error) {
 	var rio runIO
 	if len(stdio) > 0 {
@@ -2945,6 +3019,11 @@ func runProfileCtx(ctx context.Context, name string, prof policy.Profile, argv [
 	if err != nil {
 		return 1, err
 	}
+	// A crashed wrapper can leave a stage directory for this exact run identity. Never reuse it:
+	// retired tokens and stale canonical files must be removed before any new mint/stage action.
+	if err := os.RemoveAll(stageDir); err != nil {
+		return 1, fmt.Errorf("remove abandoned credential stage: %w", err)
+	}
 	defer os.RemoveAll(stageDir) // wipe staged secrets/.npmrc regardless of outcome
 
 	// kube/ssh creds are staged as files in stageDir and delivered via the /safeslop/runtime bind
@@ -2952,7 +3031,12 @@ func runProfileCtx(ctx context.Context, name string, prof policy.Profile, argv [
 	if err := seedAgentDefaults(prof, ws); err != nil {
 		return 1, err
 	}
+	stagedAt := time.Now()
 	secretEnv, pathEnv, err := stageProfile(ctx, prof, stageDir)
+	if err != nil {
+		return 1, err
+	}
+	manager, err := startCredentialManager(stagedAt, name, prof, stageDir)
 	if err != nil {
 		return 1, err
 	}
@@ -2964,6 +3048,8 @@ func runProfileCtx(ctx context.Context, name string, prof policy.Profile, argv [
 	if prof.Credentials != nil && prof.Credentials.Forgejo != nil {
 		defer creds.RevokeForgejo(context.Background(), stageDir)
 	}
+	// Register after teardown callbacks so LIFO stops renewal before any revoke or wipe.
+	defer manager.Stop()
 
 	// Detect (and warn about) any change the agent makes to git's executable surface —
 	// a planted .git/hooks script or a .git/config hooksPath/fsmonitor/filter that the

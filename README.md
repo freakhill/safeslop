@@ -79,6 +79,7 @@ safeslop profile show <name> --output json         profile + recipe + three-sect
 safeslop profile credentials set <profile> [safeslop.cue] --provider <github|forgejo> [--use-origin|--repo owner/name ...] [--write-repo owner/name ...] --output json
 safeslop profile credentials clear <profile> [safeslop.cue] --output json
 safeslop creds link|unlink|status                 manage value-free forge account links
+safeslop creds gc --host H --repo owner/repo ... [--dry-run|--yes] [--output json]  narrow Forgejo deploy-key cleanup
 safeslop creds status --output json               account-link status envelope for UIs
 safeslop lock [profile] --output json              write repo-root safeslop.lock.json
 safeslop trust [safeslop.cue]       approve this policy's exact bytes
@@ -508,8 +509,8 @@ unavailable** using `risk`/`risk_axes`. A present but malformed or unsupported
 evaluation instead renders loud `UNKNOWN — update required` and does not fall
 back to a reassuring legacy level.
 
-Custom host-mount authoring and forge credential P2 remain deferred, along with
-live remote permission inference and arbitrary remediation execution.
+Custom host-mount authoring, live remote permission inference, and arbitrary
+remediation execution remain deferred.
 
 ### Trust model
 
@@ -565,31 +566,52 @@ Token revocation is best-effort; deletion of the staged token/key on exit is the
 decay-first safety guarantee.
 
 - GitHub uses `credentials.github`. In the default `app` mode safeslop mints an
-  ephemeral, repo-scoped GitHub App installation token (contents + metadata) and
-  stages it as a git-over-HTTPS credential — no deploy keys, no `gh` CLI. Each
-  owner needs an account link (`safeslop creds link github`); repos are
-  partitioned by `write` so a read-only repo never gets a write token. Owner/repo
-  names, whether declared or inferred from `origin`, must match `[A-Za-z0-9._-]+`
-  before any git config is staged. The P1 token lifetime is capped at ~1h (no
-  renewal yet; renewal lands in P2). PAT mode (`mode: "pat"`, `pat: <ref>`)
-  stages one existing fine-grained token instead.
+  ephemeral, repo-scoped GitHub App installation token and stages it as a
+  git-over-HTTPS credential — no deploy keys, no `gh` CLI. Each owner needs an
+  account link (`safeslop creds link github`); repos are partitioned by `write` so
+  a read-only repo never gets a write token. Owner/repo names, whether declared or
+  inferred from `origin`, must match `[A-Za-z0-9._-]+` before any git config is
+  staged. The **host-owned** lease renews App-token batches atomically; containers
+  receive files only and cannot mint, renew, or revoke. `ttl` defaults to `"1h"`;
+  a positive Go duration caps future staging/renewal from initial staging, while
+  explicit `""` leaves the lease until normal teardown. A horizon never
+  retroactively invalidates an already-issued token. PAT mode (`mode: "pat"`,
+  `pat: <ref>`) stages one existing fine-grained token instead and is not renewed.
+- Set `credentials.github.api` only with App mode and nonempty unique
+  `permissions: ["permission:read"|"permission:write", ...]`. Safeslop stages
+  API tokens in canonical 0600 files: one partition exposes
+  `SAFESLOP_GITHUB_TOKEN_FILE`; multiple partitions expose
+  `SAFESLOP_GITHUB_TOKEN_DIR` plus `SAFESLOP_GITHUB_TOKEN_MANIFEST`. It never
+  injects `GITHUB_TOKEN`: any copied compatibility value would be stale after a
+  host renewal. GitHub API egress (`api.github.com`) is added only for this
+  explicit API opt-in; normal Git/LFS staging adds only `github.com`,
+  `codeload.github.com`, and `objects.githubusercontent.com`.
 - Forgejo/Gitea uses `credentials.forgejo` (deploy keys, one per repo, with
   per-repo SSH host aliases + git URL rewrites). The account token that registers
   each key comes from `~/.config/safeslop/accounts.cue`
   (`safeslop creds link forgejo`), never from `safeslop.cue`. Origin-inferred or
   declared owner/repo names must match `[A-Za-z0-9._-]+`; malformed remotes fail
   closed before `.gitconfig`/`.ssh/config` are rendered. Forgejo account tokens
-  are account-wide — prefer a dedicated bot account.
+  are account-wide — prefer a dedicated bot account. `ttl` follows the same
+  horizon rules; at a bounded horizon safeslop removes an opted-in Forgejo API
+  file and attempts best-effort deploy-key cleanup.
+- Set `credentials.forgejo.api.enabled: true` only with
+  `ackAccountWide: true`, an HTTPS `url`, and default port 443. The staged API
+  token is file-only (`SAFESLOP_FORGEJO_TOKEN_FILE`); its provider scope is
+  operator-provisioned, unverified, and may be account-wide. Its exact hostname is
+  added to deny-tier egress only for this opt-in.
 - Account links live in `~/.config/safeslop/accounts.cue` (0600, host-only): they
   hold non-secret ids + secret *refs* only, never a token or key value, and are
   never serialized into a container or stage dir. Manage them with `safeslop creds
   link|unlink|status`; UI clients use `safeslop creds status --output json`, whose
   `data.links` rows expose only forge, host, owner, non-secret ids, value-free
   probe class, SSH port, and TTL model.
-- When github creds are staged on a `network: "deny"` profile, the egress
-  allowlist gains `github.com`, `codeload.github.com`, and
-  `objects.githubusercontent.com` (clone + LFS). `api.github.com` is not added in
-  P1 (API-token staging is P2).
+- `safeslop creds gc --host H --repo owner/repo ...` is a narrow Forgejo deploy-key
+  cleanup. It defaults to discovery-only; deletion requires `--yes` (which cannot
+  be combined with `--dry-run`). It discovers every requested repository before
+  deleting, matches only exact `safeslop-<owner>-<repo>` titles, rechecks each
+  candidate, and treats HTTP 404 as already absent. It never discovers or deletes
+  outside the explicitly named repositories.
 
 ### Inspecting credential posture (Emacs `C-c s K`, `safeslop creds`)
 

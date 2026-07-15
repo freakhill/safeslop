@@ -320,8 +320,57 @@ safeslop: profiles: deploy: {agent: "claude", environment: "container", network:
 
 func TestLoadAcceptsForgejoApiWithAck(t *testing.T) {
 	if _, err := loadStr(t, `package safeslop
-safeslop: profiles: deploy: {agent: "claude", environment: "container", network: "deny", credentials: forgejo: {api: {enabled: true, ackAccountWide: true}}}`); err != nil {
+safeslop: profiles: deploy: {agent: "claude", environment: "container", network: "deny", credentials: forgejo: {url: "https://forge.example.com", api: {enabled: true, ackAccountWide: true}}}`); err != nil {
 		t.Fatalf("forgejo api with ack must load: %v", err)
+	}
+}
+
+func TestLoadValidatesForgeCredentialTTLHorizons(t *testing.T) {
+	for _, provider := range []string{"github", "forgejo"} {
+		for _, ttl := range []string{"0", "-1s", "not-a-duration"} {
+			_, err := loadStr(t, `package safeslop
+safeslop: profiles: deploy: {agent: "claude", environment: "container", credentials: `+provider+`: {ttl: "`+ttl+`"}}`)
+			if err == nil || !strings.Contains(err.Error(), "ttl") {
+				t.Fatalf("%s ttl %q must fail with ttl guidance, got %v", provider, ttl, err)
+			}
+		}
+		cfg, err := loadStr(t, `package safeslop
+safeslop: profiles: deploy: {agent: "claude", environment: "container", credentials: `+provider+`: {ttl: ""}}`)
+		if err != nil {
+			t.Fatalf("%s empty ttl must permit teardown-bounded staging: %v", provider, err)
+		}
+		if cfg.Profiles["deploy"].Credentials == nil {
+			t.Fatalf("%s credentials did not decode", provider)
+		}
+	}
+}
+
+func TestLoadValidatesGithubAPIStaging(t *testing.T) {
+	valid := `package safeslop
+safeslop: profiles: deploy: {agent: "claude", environment: "container", credentials: github: {mode: "app", api: {enabled: true, permissions: ["contents:read", "issues:write"]}}}`
+	if _, err := loadStr(t, valid); err != nil {
+		t.Fatalf("valid app API declaration rejected: %v", err)
+	}
+	for _, declaration := range []string{
+		`github: {mode: "pat", pat: "env:T", repos: [{repo: "acme/repo"}], api: {enabled: true, permissions: ["contents:read"]}}`,
+		`github: {api: {enabled: true}}`,
+		`github: {api: {enabled: true, permissions: ["contents:read", "contents:read"]}}`,
+		`github: {api: {enabled: true, permissions: ["contents:admin"]}}`,
+	} {
+		if _, err := loadStr(t, `package safeslop
+safeslop: profiles: deploy: {agent: "claude", environment: "container", credentials: `+declaration+`}`); err == nil || !strings.Contains(err.Error(), "github.api") {
+			t.Fatalf("invalid GitHub API declaration must fail with github.api guidance: %s; err=%v", declaration, err)
+		}
+	}
+}
+
+func TestLoadRejectsForgejoAPIWithoutHTTPSDefaultPort(t *testing.T) {
+	for _, rawURL := range []string{"http://forge.example.com", "https://forge.example.com:8443"} {
+		_, err := loadStr(t, `package safeslop
+safeslop: profiles: deploy: {agent: "claude", environment: "container", credentials: forgejo: {url: "`+rawURL+`", api: {enabled: true, ackAccountWide: true}}}`)
+		if err == nil || !strings.Contains(err.Error(), "forgejo.api") {
+			t.Fatalf("Forgejo API URL %q must fail with forgejo.api guidance, got %v", rawURL, err)
+		}
 	}
 }
 

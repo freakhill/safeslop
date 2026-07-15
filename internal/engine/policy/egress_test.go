@@ -51,7 +51,8 @@ func TestCredsEgressGithub(t *testing.T) {
 	if got := CredsEgress(nil); got != nil {
 		t.Errorf("nil profile must add no egress, got %v", got)
 	}
-	// With github creds -> the HTTPS + CDN hosts, but NOT api.github.com (P2).
+	// GitHub git credentials get HTTPS + CDN hosts, but the API hostname requires
+	// explicit API staging.
 	p := &Profile{Credentials: &Credentials{Github: &GithubCreds{}}}
 	got := CredsEgress(p)
 	for _, want := range []string{"github.com", "codeload.github.com", "objects.githubusercontent.com"} {
@@ -60,6 +61,16 @@ func TestCredsEgressGithub(t *testing.T) {
 		}
 	}
 	if egHas(got, "api.github.com") {
-		t.Errorf("api.github.com must NOT be added in P1 (API staging is P2): %v", got)
+		t.Errorf("GitHub API hostname must require api.enabled: %v", got)
+	}
+
+	got = CredsEgress(&Profile{Credentials: &Credentials{Github: &GithubCreds{Api: &GithubApi{Enabled: true, Permissions: []string{"contents:read"}}}}})
+	if !egHas(got, "api.github.com") {
+		t.Errorf("enabled GitHub API staging must add api.github.com: %v", got)
+	}
+
+	got = CredsEgress(&Profile{Credentials: &Credentials{Forgejo: &ForgejoCreds{URL: "https://forge.example.com", Api: &ForgejoApi{Enabled: true, AckAccountWide: true}}}})
+	if len(got) != 1 || got[0] != "forge.example.com" {
+		t.Errorf("enabled Forgejo API staging must add only its configured host: %v", got)
 	}
 }

@@ -32,6 +32,7 @@ file transfer between host and sandboxed runtimes.
 - `safeslop profile credentials clear <profile> [safeslop.cue] --output json` — remove only `credentials.github`/`credentials.forgejo`, deleting the `credentials` object if it becomes empty.
 - `safeslop creds list|show [<profile>] --output json` — inspect the credential posture of `safeslop.cue` profiles (declared creds + value-free readiness status); read-only, never reveals secret values.
 - `safeslop creds link|unlink|status` — manage host-only account links in `~/.config/safeslop/accounts.cue` (refs + non-secret ids only); `creds status --output json` is the Emacs account-link status envelope.
+- `safeslop creds gc --host H --repo owner/repo ... [--dry-run|--yes] [--output json]` — narrow Forgejo deploy-key cleanup. It defaults to dry-run; `--yes` is required to delete and conflicts with `--dry-run`. It considers only exact safeslop titles in the explicitly named repos, rechecks before deletion, and never expands egress or container authority.
 - `safeslop profile defaults --output json` — list signed-binary builtin launchable defaults (`claude`, `fish`, `pi`, `zsh`), distinct from scaffold `profile presets`; each uses container/deny, the pinned buildable `personal` image inputs, and an allowlisted read-only host projection. Project profiles take precedence and an invalid local policy fails closed.
 - `safeslop profile show <name> --output json` — inspect a resolved project or builtin profile with package set, dry-run image recipe, source/path/hash provenance, and structured Authority/Trust/Readiness evaluation.
 - `safeslop lock [profile] --output json` — write repo-root `safeslop.lock.json` for the selected profile's recipe identity.
@@ -118,8 +119,8 @@ evaluation before final launch confirmation. If evaluation is absent, the client
 labels the `risk`/`risk_axes` compatibility view **Legacy safety summary — trust
 and readiness unavailable**. Present malformed/unsupported evaluation is loud
 `UNKNOWN — update required`, never a legacy green fallback. Custom host-mount
-authoring, forge credential P2, live remote permission inference, and arbitrary
-action execution remain deferred.
+authoring, live remote permission inference, and arbitrary action execution remain
+deferred.
 
 ## Common workflows
 

@@ -15,6 +15,23 @@ import (
 // case for sessions without a github account link, so it is not an error. The
 // returned instant is the TTL ceiling the session's HTTPS access is capped at —
 // the 1h App-token lifetime (specs/0069 T8).
+// GithubCredsPartitionCount reports the current git-token partition count from the same
+// value-free manifest used for expiry/status. It never reads a token file.
+func GithubCredsPartitionCount(stageDir string) (int, error) {
+	b, err := os.ReadFile(filepath.Join(stageDir, githubDir, githubMetaFile))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	var meta githubMeta
+	if err := json.Unmarshal(b, &meta); err != nil {
+		return 0, err
+	}
+	return len(meta.Tokens), nil
+}
+
 func GithubCredsExpiry(stageDir string) (time.Time, bool, error) {
 	b, err := os.ReadFile(filepath.Join(stageDir, githubDir, githubMetaFile))
 	if err != nil {

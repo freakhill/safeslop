@@ -174,6 +174,10 @@ func readAndRemovePublicKey(keyPath, repo string) ([]byte, error) {
 // SSH port from fc.SSHPort (default 22); the host key is pinned once via ssh-keyscan. revoke-info
 // gets one "<base> <owner>/<repo> <id> <token-ref>" line per key (the token REF, never its value).
 func stageForgejoMulti(ctx context.Context, fc *policy.ForgejoCreds, stageDir string, accounts *userconfig.Accounts) ([]string, error) {
+	return stageForgejoMultiWithHTTP(ctx, fc, stageDir, accounts, NewForgejoHTTP())
+}
+
+func stageForgejoMultiWithHTTP(ctx context.Context, fc *policy.ForgejoCreds, stageDir string, accounts *userconfig.Accounts, client ForgejoHTTP) ([]string, error) {
 	if fc.URL == "" {
 		return nil, fmt.Errorf("forgejo multi-repo (repos) requires `url` (the instance base, e.g. https://codeberg.org)")
 	}
@@ -230,7 +234,7 @@ func stageForgejoMulti(ctx context.Context, fc *policy.ForgejoCreds, stageDir st
 			return nil, err
 		}
 		body := forgejoKeyBody(title, strings.TrimSpace(string(pub)), rc.Write)
-		respBody, code, err := forgejoDo(ctx, http.MethodPost, forgejoKeysURL(base, owner, repo), tok, body)
+		respBody, code, err := forgejoDoWith(ctx, client, http.MethodPost, forgejoKeysURL(base, owner, repo), tok, body)
 		if err != nil {
 			return nil, fmt.Errorf("forgejo deploy-key register (%s): %w", rc.Repo, err)
 		}

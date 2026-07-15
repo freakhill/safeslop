@@ -1063,6 +1063,8 @@ func githubAPIDrafts(api *GithubApi, lifetime string) ([]credentialScopeDraft, b
 		if bad {
 			target = "declared GitHub API permission"
 			unknown = true
+		} else {
+			target += " — repository and permission downscoped"
 		}
 		drafts = append(drafts, credentialScopeDraft{
 			CredentialScope: CredentialScope{
@@ -1098,7 +1100,7 @@ func forgejoCredentialAuthority(forgejo *ForgejoCreds) credentialProviderAuthori
 	}
 	if forgejo.Api != nil && forgejo.Api.Enabled {
 		provider.Drafts = append(provider.Drafts, credentialScopeDraft{CredentialScope: CredentialScope{
-			Target: "Forgejo account API", Access: CredentialAccessProviderDefault,
+			Target: "operator-provisioned scope unverified; may be account-wide", Access: CredentialAccessExternalPolicy,
 			Lifetime: CredentialLifetimePersistent, Basis: CredentialBasisProviderDefault,
 		}, Unknown: !forgejo.Api.AckAccountWide})
 		provider.Persistent = true

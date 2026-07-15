@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/freakhill/safeslop/internal/engine/creds"
@@ -139,5 +140,27 @@ func TestCredsListRequiresJSON(t *testing.T) {
 	writeCredsCue(t, ws)
 	if _, err := runRootForTest(t, ws, "creds", "list"); err == nil {
 		t.Fatalf("expected error without --output json")
+	}
+}
+
+func TestCredsGCRequiresHostRepoAndYes(t *testing.T) {
+	ws := t.TempDir()
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "host", args: []string{"creds", "gc", "--repo", "acme/web", "--yes"}, want: "--host"},
+		{name: "repo", args: []string{"creds", "gc", "--host", "forge.example"}, want: "--repo"},
+		{name: "default dry run", args: []string{"creds", "gc", "--host", "forge.example", "--repo", "acme/web"}, want: "no Forgejo account link"},
+		{name: "exclusive flags", args: []string{"creds", "gc", "--host", "forge.example", "--repo", "acme/web", "--yes", "--dry-run"}, want: "mutually exclusive"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := runRootForTest(t, ws, tc.args...)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+		})
 	}
 }

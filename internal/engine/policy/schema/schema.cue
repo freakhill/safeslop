@@ -110,7 +110,8 @@ package safeslop
 	// specs/0047 renderer). App-token permissions are token-wide, so repos partition into ro/rw
 	// scopes by write. Omit repos in app mode to infer the single repo from the cwd origin.
 	repos?: [...#RepoCred]
-	// Opt-in staged API token; permissions are token-wide (specs/0068 F5). Staging errors in P1.
+	// Opt-in GitHub App API token. Enabled staging requires nonempty unique
+	// permission:read|write declarations; the host mints it downscoped to declared repos.
 	api?: #GithubApi
 	if mode == "pat" {
 		pat:   #SecretRef
@@ -136,8 +137,8 @@ package safeslop
 	// ~/.config/safeslop/accounts.cue (safeslop creds link forgejo), never from this file (specs/0069).
 	repos?:      [...#RepoCred]
 	"ssh-port"?: int | *22
-	// Opt-in staged API token (P2 staging). Forgejo tokens are account-wide, so enabling requires
-	// an explicit ackAccountWide (enforced at load, specs/0068 F5).
+	// Opt-in staged API token. The opaque linked token's operator-provisioned scope is unverified
+	// and may be account-wide; enabling requires an explicit acknowledgement.
 	api?: #ForgejoApi
 }
 
