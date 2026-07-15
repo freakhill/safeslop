@@ -1,6 +1,7 @@
 package session
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -10,6 +11,31 @@ import (
 )
 
 func testNow() time.Time { return time.Date(2026, 6, 26, 0, 0, 0, 0, time.UTC) }
+
+func TestSessionFailureJSONIsStructuredAndValueFree(t *testing.T) {
+	var sess Session
+	sess.SetFailure(Failure{
+		Version: 1, Phase: "projection", Code: "projection_target_excluded",
+		Projection: "builtin.fish-config", Source: "~/.config/fish/config.fish", Required: false,
+		Summary: "Config projection points to an excluded credential or cache path.",
+		Action:  "Remove that link from the projected config path.",
+	})
+	got, err := json.Marshal(sess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(got)
+	for _, want := range []string{"\"last_failure\"", "projection_target_excluded", "builtin.fish-config"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("failure JSON %s missing %q", text, want)
+		}
+	}
+	for _, forbidden := range []string{"/Users/jojo/.ssh/id_ed25519", "secret-value", "raw OS error"} {
+		if strings.Contains(text, forbidden) {
+			t.Errorf("failure JSON leaked %q: %s", forbidden, text)
+		}
+	}
+}
 
 // TestSocketPathFitsSunPath pins the sun_path-overflow guard (specs/0051): a
 // per-session socket path must fit the platform sun_path cap (104 bytes on macOS),

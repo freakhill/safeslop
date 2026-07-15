@@ -71,6 +71,31 @@ type CredentialLease struct {
 // Session is the durable, non-secret state for an Emacs-visible session. Do not
 // add staged credential values or resolved secret material here; the JSONL status
 // path serializes this object for clients.
+// Failure is a versioned, value-free operator explanation for a terminal session
+// failure.  Its summary and action must be selected by engine-owned code: never
+// put raw OS errors, resolved paths, command output, or secret material here.
+type Failure struct {
+	Version    int    `json:"version"`
+	Phase      string `json:"phase"`
+	Code       string `json:"code"`
+	Projection string `json:"projection,omitempty"`
+	Source     string `json:"source,omitempty"`
+	Required   bool   `json:"required"`
+	Summary    string `json:"summary"`
+	Action     string `json:"action"`
+}
+
+const maxLastErrorBytes = 240
+
+// SetFailure records the structured reason and its bounded compatibility summary.
+func (s *Session) SetFailure(f Failure) {
+	s.LastFailure = &f
+	s.LastError = f.Summary
+	if len(s.LastError) > maxLastErrorBytes {
+		s.LastError = s.LastError[:maxLastErrorBytes]
+	}
+}
+
 type Session struct {
 	ID            string            `json:"session_id"`
 	Profile       string            `json:"profile,omitempty"`
@@ -102,9 +127,10 @@ type Session struct {
 	// New sessions record it when the platform exposes one so liveness and stop can detect
 	// PID reuse before signalling a stale detached process group (specs/0077 M3). Legacy
 	// records leave it empty and fall back to signal-0 liveness.
-	ProcessToken string `json:"process_token,omitempty"`
-	ExitCode     *int   `json:"exit_code,omitempty"`
-	LastError    string `json:"last_error,omitempty"`
+	ProcessToken string   `json:"process_token,omitempty"`
+	ExitCode     *int     `json:"exit_code,omitempty"`
+	LastError    string   `json:"last_error,omitempty"`
+	LastFailure  *Failure `json:"last_failure,omitempty"`
 	// PolicyPath/PolicyHash pin the safeslop.cue that was host-approved when a profile
 	// session was created: the canonical (symlink-free, absolute) path and the sha256 of the
 	// approved bytes. run/supervise rebuild the profile from this record and never re-read the
