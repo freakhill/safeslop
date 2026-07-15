@@ -837,6 +837,15 @@ flight, so slow `session list' calls can't stack up."
   (should (equal (safeslop-session--trust-args "/w/safeslop.cue")
                  '("trust" "/w/safeslop.cue"))))
 
+(ert-deftest safeslop-test-session-profile-names-include-nonshadowed-builtins ()
+  "New-session completion includes builtin profile names and de-duplicates overrides."
+  (let ((data '((profiles . ((review . ((agent . "claude")))
+                             (pi . ((agent . "pi")))))
+                (builtins . [((name . "claude") (profile . ((agent . "claude"))))
+                             ((name . "pi") (profile . ((agent . "pi"))))]))))
+    (should (equal (safeslop-session--profile-names data)
+                   '("claude" "pi" "review")))))
+
 (ert-deftest safeslop-test-session-create-host-trust-args ()
   "Ad-hoc host create appends --trust-host only when explicitly requested."
   (let ((workspace "/w"))

@@ -61,10 +61,14 @@ raw argv shape.  TRUST-HOST appends `--trust-host' only for ad-hoc host sessions
   (list "session" "create" "--profile" profile "--output" "json"))
 
 (defun safeslop-session--profile-names (data)
-  "Return sorted profile names from `profile list' DATA."
-  (sort (mapcar (lambda (entry) (symbol-name (car entry)))
-                (alist-get 'profiles data))
-        #'string<))
+  "Return sorted, de-duplicated project and builtin names from list DATA."
+  (sort
+   (delete-dups
+    (append (mapcar (lambda (entry) (symbol-name (car entry)))
+                    (alist-get 'profiles data))
+            (mapcar (lambda (builtin) (alist-get 'name builtin))
+                    (append (alist-get 'builtins data) nil))))
+   #'string<))
 
 (defun safeslop-session--read-profile-choice ()
   "Prompt for a profile name, or return nil for ad-hoc creation."
