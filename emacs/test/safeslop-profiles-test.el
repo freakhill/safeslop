@@ -185,6 +185,50 @@
       (should (equal (nth 5 create-args) "allow"))      ; network copied
       (should (eq (nth 8 create-args) t)))))            ; bareAgent copied
 
+(ert-deftest safeslop-test-profiles-delete-calls-engine-and-refreshes-in-place ()
+  "D confirms then uses the exact engine deletion argv rather than opening CUE."
+  (let (seen refreshed opened)
+    (cl-letf (((symbol-function 'tabulated-list-get-id) (lambda () "review"))
+              ((symbol-function 'safeslop-profiles--names) (lambda () '("review" "keep")))
+              ((symbol-function 'safeslop-profiles--row-summary) (lambda (_name) "claude/container/deny"))
+              ((symbol-function 'completing-read) (lambda (&rest _) "review"))
+              ((symbol-function 'yes-or-no-p)
+               (lambda (prompt)
+                 (should (string-match-p "Delete profile `review'" prompt))
+                 t))
+              ((symbol-function 'safeslop--call-json-async)
+               (lambda (args callback)
+                 (setq seen args)
+                 (funcall callback (safeslop-contract-parse-string
+                                    "{\"schema_version\":1,\"ok\":true,\"data\":{\"removed\":true,\"profile\":\"review\"},\"warnings\":[],\"errors\":[]}"))))
+              ((symbol-function 'safeslop-profiles--render)
+               (lambda (&optional keep-point) (setq refreshed keep-point)))
+              ((symbol-function 'safeslop-profiles--open-config)
+               (lambda (&rest _) (setq opened t))))
+      (with-temp-buffer
+        (safeslop-profiles-mode)
+        (setq safeslop-profiles--config-path "/repo/safeslop.cue")
+        (safeslop-profiles-delete))
+      (should (equal seen
+                     '("profile" "delete" "review" "/repo/safeslop.cue" "--output" "json")))
+      (should refreshed)
+      (should-not opened))))
+
+(ert-deftest safeslop-test-profiles-delete-declined-does-not-call-cli ()
+  "Declining D's confirmation leaves both CUE and the CLI untouched."
+  (let (called)
+    (cl-letf (((symbol-function 'tabulated-list-get-id) (lambda () "review"))
+              ((symbol-function 'safeslop-profiles--names) (lambda () '("review")))
+              ((symbol-function 'safeslop-profiles--row-summary) (lambda (_name) nil))
+              ((symbol-function 'completing-read) (lambda (&rest _) "review"))
+              ((symbol-function 'yes-or-no-p) (lambda (&rest _) nil))
+              ((symbol-function 'safeslop--call-json-async) (lambda (&rest _) (setq called t))))
+      (with-temp-buffer
+        (safeslop-profiles-mode)
+        (setq safeslop-profiles--config-path "/repo/safeslop.cue")
+        (safeslop-profiles-delete))
+      (should-not called))))
+
 (ert-deftest safeslop-test-profiles-catalog-names ()
   "Catalog envelopes feed bundle/package multi-select candidates by name."
   (let* ((env (safeslop-contract-parse-string

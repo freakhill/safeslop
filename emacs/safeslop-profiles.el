@@ -12,9 +12,9 @@
 ;; active safeslop.cue, over `safeslop profile list --output json'.  Authoring
 ;; stays CUE-canonical (specs/0029): editing opens the safeslop.cue itself and
 ;; validates on save; creating goes through the structured `profile create' CLI
-;; (specs/0058 IW4) rather than handwritten snippets; and deleting is guided
-;; (open the file at the block, remove it, re-validate) rather than a fragile
-;; machine rewrite of the guard.  All slow calls are async (specs/0052 #7).  The
+;; (specs/0058 IW4) rather than handwritten snippets; and deletion goes through
+;; the validated `profile delete' CLI rather than a fragile client-side rewrite
+;; of the guard.  All slow calls are async (specs/0052 #7).  The
 ;; Env column reuses the shared isolation-tier colouring (safeslop-surface).
 ;;
 ;; Ergonomics (CRUD), following mature Emacs list UIs (package.el, magit, dired,
@@ -28,8 +28,8 @@
 ;;   - C        clone: prefill create from the row's full `profile show' data,
 ;;     so a variant is one keystroke plus a new name.
 ;;   - D        delete: completing-read the target (default: row at point),
-;;     confirm with a one-line summary, then open the file anchored at the block
-;;     and fail loudly if it cannot be found.
+;;     confirm with a one-line summary, then use the validated engine mutation
+;;     and refresh the list in place.
 ;;   The empty state is persistent in-buffer guidance (specs/0062).
 ;; Navigation to a profile in the CUE file anchors to the field-opening brace
 ;; (`name: {'), not a loose word search that would also hit comments, string
@@ -1174,12 +1174,11 @@ quietly re-validated."
 ;;; ---- delete --------------------------------------------------------------
 
 (defun safeslop-profiles-delete ()
-  "Guide removal of a profile from the safeslop.cue (specs/0052 D5).
-Deletion is a guided manual edit, not a machine rewrite of the guard: the target
-is chosen with completion (defaulting to the profile at point), confirmed with a
-one-line summary, and the file is opened anchored at the profile's block.  If the
-block cannot be found, this fails loudly rather than silently doing nothing.  The
-save is re-validated."
+  "Delete a selected profile through the validated engine mutation.
+The target is chosen with completion (defaulting to the profile at point) and
+requires a final explicit confirmation.  The CLI renders and validates the
+complete remaining CUE before writing; on success this Profiles buffer refreshes
+in place, so deletion never requires hand-editing a profile block."
   (interactive)
   (let ((path safeslop-profiles--config-path)
         (names (safeslop-profiles--names))
@@ -1191,16 +1190,24 @@ save is re-validated."
                       (format "Delete profile (default %s): " at-point)
                     "Delete profile: ")
                   names nil t nil nil at-point))
-           (summary (safeslop-profiles--row-summary name)))
-      (when (yes-or-no-p (format "Open %s to remove profile `%s'%s? "
-                                 (file-name-nondirectory path)
+           (summary (safeslop-profiles--row-summary name))
+           (args (list "profile" "delete" name path "--output" "json"))
+           (buffer (current-buffer)))
+      (when (yes-or-no-p (format "Delete profile `%s'%s from %s? "
                                  name
-                                 (if summary (format " [%s]" summary) "")))
-        (safeslop-profiles--open-config path)
-        (if (safeslop-profiles--goto-profile-block name)
-            (message "Remove the `%s' profile block here, then save to re-validate" name)
-          (user-error "Could not find the `%s' block in %s — it may already be gone; review the file"
-                      name (file-name-nondirectory path)))))))
+                                 (if summary (format " [%s]" summary) "")
+                                 (file-name-nondirectory path)))
+        (safeslop--call-json-async
+         args
+         (lambda (env)
+           (if (safeslop-contract-ok-p env)
+               (progn
+                 (message "safeslop: profile `%s' deleted" name)
+                 (when (buffer-live-p buffer)
+                   (with-current-buffer buffer
+                     (safeslop-profiles--render t))))
+             (message "safeslop: profile delete failed: %s"
+                      (safeslop-surface--error-message env "profile delete failed")))))))))
 
 ;;; ---- compose buffer ------------------------------------------------------
 

@@ -33,7 +33,7 @@ Chosen approach: render each compose field as a `RET`-actionable row and keep th
   VERIFY:   `make test-emacs EMACS=$(command -v emacs)`
   EXPECTED: ERT first proves each field changes compose state and resulting argv, invalid names are rejected without mutation, and agent changes update automatic-bundle/package inheritance.
 
-- [ ] T4 — Route Profiles deletion through the CLI and refresh in place
+- [x] T4 — Route Profiles deletion through the CLI and refresh in place
   FILE:     `emacs/safeslop-profiles.el`, `emacs/test/safeslop-profiles-test.el`
   CHANGE:   Make `D` require an explicit confirmation, invoke `profile delete <name> <known-config> --output json` asynchronously, surface failures, and rerender the Profiles list with point/scroll preservation on success. Keep raw CUE `e` as an advanced escape hatch, not the required deletion path.
   VERIFY:   `make test-emacs EMACS=$(command -v emacs)`
