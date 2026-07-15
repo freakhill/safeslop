@@ -47,7 +47,7 @@ At container launch, persistent exact rules and session grants are rendered thro
   VERIFY:   `go test ./internal/engine/session ./internal/cli -run 'EgressDismiss|EgressObservation|Acknowledg|KeepDenied|NoAuthority|ValueFree' -v`
   EXPECTED: A dismissal does not add grants or alter proxy policy, suppresses only the acknowledged existing observation, and later denial reappears; invalid/non-enforceable calls return contract errors with no stored mutation.
 
-- [ ] T5 — Build the non-modal Emacs progressive-review flow
+- [x] T5 — Build the non-modal Emacs progressive-review flow
   FILE:     `emacs/safeslop-session.el`, `emacs/safeslop-profiles.el`, `emacs/safeslop-portal.el`, `emacs/test/safeslop-test.el`, `emacs/README.md`
   CHANGE:   Label container deny in compose as `Deny (progressive review)` with concise non-authorizing help. Add asynchronous session-detail/portal discovery of a passive pending-denial count and an operator-opened review buffer. Render only sanitized host:port, count, time, grantability, and source/lifetime; bind explicit actions for Allow now (existing grant argv), Keep denied (dismiss argv), and Always allow (hash-bearing preview, review buffer, then explicit add argv). Keep every network request asynchronous; never focus, pop, or invoke a confirmation from proxy traffic. Persistent review identifies the profile/policy hashes and logical rule delta; it cannot alter a running session.
   VERIFY:   `make test-emacs EMACS=$(command -v emacs)`

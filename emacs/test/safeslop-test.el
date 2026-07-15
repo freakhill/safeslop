@@ -1505,3 +1505,91 @@ after its name became descriptive (specs/0086 T3)."
     (should (string-match-p "observations" detail))
     (should (string-match-p "grant" detail))
     (should (string-match-p "revoke" detail))))
+
+;;; specs/0103: passive progressive egress review ---------------------------
+
+(ert-deftest safeslop-test-progressive-egress-argv-is-exact ()
+  "Dismiss and durable-rule actions retain their explicit hash-bearing argv."
+  (should (equal (safeslop-session--egress-dismiss-args "sess-9" "api.example.com" 443)
+                 '("session" "egress" "dismiss" "--session-id" "sess-9" "--host" "api.example.com" "--port" "443" "--output" "json")))
+  (dolist (operation '("preview" "add" "remove"))
+    (should (equal (safeslop-session--profile-egress-args
+                    operation "review" "/repo/safeslop.cue" "api.example.com" 443 "hash-current")
+                   (list "profile" "egress" operation "review" "/repo/safeslop.cue"
+                         "--host" "api.example.com" "--port" "443"
+                         "--expected-policy-hash" "hash-current" "--output" "json")))))
+
+(ert-deftest safeslop-test-progressive-egress-composer-label-is-non-authorizing ()
+  "Only container deny advertises review, and the label does not promise access."
+  (should (equal (safeslop-profiles--network-label "container" "deny")
+                 "Deny (progressive review)"))
+  (should (equal (safeslop-profiles--network-label "host" "deny") "deny"))
+  (should (equal (safeslop-profiles--network-label "container" "allow") "allow")))
+
+(ert-deftest safeslop-test-progressive-egress-review-is-passive-and-value-free ()
+  "The operator opens one buffer; async observations update it without refocusing."
+  (let ((review "*safeslop egress review*") callback pop-count)
+    (unwind-protect
+        (cl-letf (((symbol-function 'safeslop-session-egress-observations)
+                   (lambda (_id cb _quiet) (setq callback cb)))
+                  ((symbol-function 'pop-to-buffer)
+                   (lambda (&rest _) (setq pop-count (1+ (or pop-count 0))))))
+          (safeslop-session-egress-review
+           "sess-9" '((profile . "review") (policy_path . "/repo/safeslop.cue")
+                      (policy_hash . "hash-current")))
+          (should (= pop-count 1))
+          (with-current-buffer review
+            (should (string-match-p "Loading passive denied destinations" (buffer-string))))
+          (funcall callback (safeslop-contract-parse-string
+                             "{\"schema_version\":1,\"ok\":true,\"data\":{\"observations\":[{\"host\":\"api.example.com\",\"port\":443,\"count\":2,\"last_seen\":\"2026-07-15T00:00:00Z\",\"grantable\":true,\"path\":\"/secret?q=1\",\"headers\":\"Bearer token\"}],\"pending_count\":1},\"warnings\":[],\"errors\":[]}"))
+          (should (= pop-count 1))
+          (with-current-buffer review
+            (let ((text (buffer-string)))
+              (should (string-match-p "api.example.com:443" text))
+              (should (string-match-p "count=2" text))
+              (should-not (string-match-p "/secret\\|Bearer\\|token" text)))))
+      (when (get-buffer review) (kill-buffer review)))))
+
+(ert-deftest safeslop-test-progressive-egress-detail-pending-count-is-async ()
+  "Portal session detail displays a passive count without waiting or popping later."
+  (let ((detail "*safeslop session sess-9*") callback pop-count)
+    (unwind-protect
+        (cl-letf (((symbol-function 'safeslop-session-egress-observations)
+                   (lambda (_id cb _quiet) (setq callback cb)))
+                  ((symbol-function 'pop-to-buffer)
+                   (lambda (&rest _) (setq pop-count (1+ (or pop-count 0))))))
+          (safeslop-session-detail
+           "sess-9" '((session_id . "sess-9") (agent . "pi") (status . "created")
+                      (workspace . "/w") (environment . "container") (network . "deny")))
+          (should (= pop-count 1))
+          (with-current-buffer detail
+            (should (string-match-p "Egress review: checking passive denied destinations" (buffer-string))))
+          (funcall callback (safeslop-contract-parse-string
+                             "{\"schema_version\":1,\"ok\":true,\"data\":{\"pending_count\":3,\"observations\":[]},\"warnings\":[],\"errors\":[]}"))
+          (should (= pop-count 1))
+          (with-current-buffer detail
+            (should (string-match-p "Egress review: 3 pending denied destinations" (buffer-string))))
+      (when (get-buffer detail) (kill-buffer detail))))))
+
+(ert-deftest safeslop-test-progressive-egress-always-allow-needs-explicit-add ()
+  "Preview renders policy delta first; a stale hash sends no durable add request."
+  (let ((review "*safeslop profile egress review*") calls)
+    (unwind-protect
+        (cl-letf (((symbol-function 'safeslop-session--egress-dispatch)
+                   (lambda (args _buffer callback _quiet)
+                     (push args calls)
+                     (when callback
+                       (funcall callback (safeslop-contract-parse-string
+                                          "{\"schema_version\":1,\"ok\":false,\"data\":{\"current_policy_hash\":\"hash-new\"},\"warnings\":[],\"errors\":[{\"code\":\"INVALID_ARGUMENT\",\"message\":\"expected policy hash is stale\",\"retryable\":false}]}")))))
+                  ((symbol-function 'pop-to-buffer) (lambda (&rest _) nil)))
+          (safeslop-session--profile-egress-review
+           '((profile . "review") (policy_path . "/repo/safeslop.cue") (policy_hash . "hash-current"))
+           '((host . "api.example.com") (port . 443)))
+          (should (equal (nreverse calls)
+                         '(("profile" "egress" "preview" "review" "/repo/safeslop.cue"
+                            "--host" "api.example.com" "--port" "443"
+                            "--expected-policy-hash" "hash-current" "--output" "json"))))
+          (with-current-buffer review
+            (should (string-match-p "Policy changed" (buffer-string)))
+            (should-not (lookup-key (current-local-map) (kbd "a")))))
+      (when (get-buffer review) (kill-buffer review)))))

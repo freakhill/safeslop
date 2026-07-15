@@ -924,66 +924,129 @@ edits a profile policy."
   (or (get-text-property (point) 'safeslop-egress-observation)
       (user-error "Move point to a denied destination")))
 
-(defun safeslop-session--review-render (session-id session-data envelope)
-  "Render an operator-opened, non-modal review buffer from ENVELOPE only."
-  (let ((buf (get-buffer-create "*safeslop egress review*"))
-        (observations (alist-get 'observations (safeslop-contract-data envelope))))
+(defun safeslop-session--open-review-buffer (name title loading)
+  "Open operator-requested NAME once, then return it for an async update.
+LOADING is rendered before dispatch so a later proxy response cannot focus or pop
+any window."
+  (let ((buf (get-buffer-create name)))
     (with-current-buffer buf
       (safeslop-output-mode)
+      ;; Review keys carry session-specific closures; isolate them from the
+      ;; shared output-mode map used by unrelated read-only surfaces.
+      (use-local-map (copy-keymap (current-local-map)))
       (let ((inhibit-read-only t))
         (erase-buffer)
-        (insert (format "Progressive egress review — session %s\n" session-id))
-        (insert "Passive observations are denied traffic, not prompts or authority.\n")
-        (insert "Keys: a Allow now, k Keep denied, A Always allow, g refresh, q quit\n\n")
+        (insert title "\n" loading "\n")))
+    (pop-to-buffer buf)
+    buf))
+
+(defun safeslop-session--review-render (session-id session-data envelope &optional buffer)
+  "Render a value-free operator review into BUFFER without selecting it."
+  (let ((buf (or buffer (get-buffer-create "*safeslop egress review*")))
+        (observations (alist-get 'observations (safeslop-contract-data envelope))))
+    (when (buffer-live-p buf)
+      (with-current-buffer buf
+        (let ((inhibit-read-only t))
+          (erase-buffer)
+          (insert (format "Progressive egress review — session %s\n" session-id))
+          (insert "Passive observations are denied traffic, not prompts or authority.\n")
+          (insert "Keys: a Allow now, k Keep denied, A Always allow, g refresh, q quit\n\n")
+          (if (not (safeslop-contract-ok-p envelope))
+              (insert "Could not read observations; retry with g.\n")
+            (if (null observations)
+                (insert "No pending denied destinations.\n")
+              (dolist (obs observations)
+                (let ((start (point))
+                      (host (safeslop-session--safe-display-field (alist-get 'host obs)))
+                      (port (alist-get 'port obs)))
+                  ;; Deliberately render no request URI, header, or payload.
+                  (insert (format "%s:%s  count=%s  last=%s  %s\n"
+                                  (or host "[redacted]") (or port "?")
+                                  (or (alist-get 'count obs) 0)
+                                  (or (alist-get 'last_seen obs) "?")
+                                  (if (eq (alist-get 'grantable obs) t) "grantable" "keep denied")))
+                  (put-text-property start (point) 'safeslop-egress-observation obs)))))
+          (local-set-key (kbd "a")
+                         (lambda () (interactive)
+                           (let ((o (safeslop-session--review-observation-at-point)))
+                             (safeslop-session-egress-grant session-id (alist-get 'host o) (alist-get 'port o) nil t))))
+          (local-set-key (kbd "k")
+                         (lambda () (interactive)
+                           (let ((o (safeslop-session--review-observation-at-point)))
+                             (safeslop-session-egress-dismiss session-id (alist-get 'host o) (alist-get 'port o) nil t))))
+          (local-set-key (kbd "A")
+                         (lambda () (interactive)
+                           (safeslop-session--profile-egress-review
+                            session-data (safeslop-session--review-observation-at-point))))
+          (local-set-key (kbd "g") (lambda () (interactive) (safeslop-session-egress-review session-id session-data)))
+          (goto-char (point-min)))))))
+
+(defun safeslop-session--profile-egress-render (session-data observation envelope buffer)
+  "Render the hash-checked persistent-rule review into BUFFER, never focusing it."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (let ((inhibit-read-only t)
+            (data (safeslop-contract-data envelope)))
+        (erase-buffer)
         (if (not (safeslop-contract-ok-p envelope))
-            (insert "Could not read observations; retry with g.\n")
-          (if (null observations)
-              (insert "No pending denied destinations.\n")
-            (dolist (obs observations)
-              (let ((start (point))
-                    (host (safeslop-session--safe-display-field (alist-get 'host obs)))
-                    (port (alist-get 'port obs)))
-                ;; Deliberately render no request URI, header, or payload.
-                (insert (format "%s:%s  count=%s  last=%s  %s\n"
-                                (or host "[redacted]") (or port "?")
-                                (or (alist-get 'count obs) 0)
-                                (or (alist-get 'last_seen obs) "?")
-                                (if (eq (alist-get 'grantable obs) t) "grantable" "keep denied")))
-                (put-text-property start (point) 'safeslop-egress-observation obs)))))
-        (local-set-key (kbd "a")
-                       (lambda () (interactive)
-                         (let ((o (safeslop-session--review-observation-at-point)))
-                           (safeslop-session-egress-grant session-id (alist-get 'host o) (alist-get 'port o) nil t))))
-        (local-set-key (kbd "k")
-                       (lambda () (interactive)
-                         (let ((o (safeslop-session--review-observation-at-point)))
-                           (safeslop-session-egress-dismiss session-id (alist-get 'host o) (alist-get 'port o) nil t))))
-        (local-set-key (kbd "A")
-                       (lambda () (interactive)
-                         (let* ((o (safeslop-session--review-observation-at-point))
-                                (profile (alist-get 'profile session-data))
-                                (hash (alist-get 'policy_hash session-data))
-                                (path (alist-get 'policy_path session-data)))
-                           (unless (and (stringp profile) (stringp hash) (not (string-prefix-p "builtin:" (or path ""))))
-                             (user-error "Always allow requires a project profile snapshot"))
-                           ;; Preview is review-only.  It never follows itself with add.
-                           (safeslop-session--egress-dispatch
-                            (safeslop-session--profile-egress-args "preview" profile path
-                                                                  (alist-get 'host o) (alist-get 'port o) hash)
-                            "*safeslop profile egress preview*" nil nil))))
-        (local-set-key (kbd "g") (lambda () (interactive) (safeslop-session-egress-review session-id session-data)))
-        (goto-char (point-min))))
-    (pop-to-buffer buf)))
+            (progn
+              ;; A stale snapshot is a hard stop: add is deliberately unbound.
+              (insert "Policy changed; no persistent rule was written. Re-open review to inspect current policy.\n")
+              (local-set-key (kbd "a") nil))
+          (insert "Persistent egress review — future sessions only\n")
+          (insert (format "Profile: %s\n" (or (alist-get 'profile data) "[redacted]")))
+          (insert (format "Current policy hash: %s\n" (or (alist-get 'current_policy_hash data) "[redacted]")))
+          (insert (format "Candidate policy hash: %s\n" (or (alist-get 'candidate_policy_hash data) "[redacted]")))
+          (insert (format "Delta: + persistentEgress: {%s, %s}\n"
+                          (or (safeslop-session--safe-display-field (alist-get 'host observation)) "[redacted]")
+                          (or (alist-get 'port observation) "?")))
+          (insert "Source/lifetime: profile-persistent / future sessions\n")
+          (insert "\nPress a to add this exact rule, changing policy bytes; then review and re-trust before a new session can use it.\n")
+          (local-set-key
+           (kbd "a")
+           (lambda () (interactive)
+             (safeslop-session--egress-dispatch
+              (safeslop-session--profile-egress-args
+               "add" (alist-get 'profile session-data) (alist-get 'policy_path session-data)
+               (alist-get 'host observation) (alist-get 'port observation)
+               (alist-get 'policy_hash session-data))
+              "*safeslop profile egress add*"
+              (lambda (result)
+                (if (safeslop-contract-ok-p result)
+                    (message "safeslop: persistent rule written; review and re-trust before creating a new session")
+                  (safeslop-session--profile-egress-render session-data observation result buffer)))
+              t))))
+        (goto-char (point-min))))))
+
+(defun safeslop-session--profile-egress-review (session-data observation)
+  "Preview OBSERVATION as a durable rule; only a later explicit key writes it."
+  (let ((profile (alist-get 'profile session-data))
+        (hash (alist-get 'policy_hash session-data))
+        (path (alist-get 'policy_path session-data)))
+    (unless (and (stringp profile) (stringp hash)
+                 (not (string-prefix-p "builtin:" (or path ""))))
+      (user-error "Always allow requires a project profile snapshot"))
+    (let ((buf (safeslop-session--open-review-buffer
+                "*safeslop profile egress review*" "Persistent egress review"
+                "Loading hash-checked policy delta; no policy is being changed.")))
+      (safeslop-session--egress-dispatch
+       (safeslop-session--profile-egress-args "preview" profile path
+                                             (alist-get 'host observation) (alist-get 'port observation) hash)
+       "*safeslop profile egress preview*"
+       (lambda (envelope) (safeslop-session--profile-egress-render session-data observation envelope buf)) t))))
 
 ;;;###autoload
 (defun safeslop-session-egress-review (&optional session-id session-data)
   "Open a passive review buffer only on explicit operator invocation.
 The observation query is asynchronous and never steals focus when it completes."
   (interactive (list (safeslop-session--read-id "Review denied egress for session: ") nil))
-  (safeslop-session-egress-observations
-   session-id
-   (lambda (envelope) (safeslop-session--review-render session-id session-data envelope))
-   t))
+  (let ((buf (safeslop-session--open-review-buffer
+              "*safeslop egress review*" (format "Progressive egress review — session %s" session-id)
+              "Loading passive denied destinations; no network authority will change.")))
+    (safeslop-session-egress-observations
+     session-id
+     (lambda (envelope) (safeslop-session--review-render session-id session-data envelope buf))
+     t)))
 
 (defun safeslop-session--egress-grants-summary (data)
   "Return DATA's value-free session grants as a compact detail string."
@@ -1122,6 +1185,29 @@ the portal so row actions refresh in place instead of stealing the window."
                      (_ "Next: c new session · P portal"))))
        "\n"))))
 
+(defun safeslop-session--detail-pending-render (buffer envelope)
+  "Replace BUFFER's passive egress-count line without selecting its window."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (let ((inhibit-read-only t)
+            (count (alist-get 'pending_count (safeslop-contract-data envelope))))
+        (save-excursion
+          (goto-char (point-min))
+          (when (re-search-forward "^Egress review:.*$" nil t)
+            (replace-match
+             (if (and (safeslop-contract-ok-p envelope) (integerp count))
+                 (format "Egress review: %d pending denied destination%s (v to review)"
+                         count (if (= count 1) "" "s"))
+               "Egress review: unavailable; press v to retry"))))))))
+
+(defun safeslop-session--detail-request-pending-count (session-id data buffer)
+  "Asynchronously discover the passive count for a container-deny detail view."
+  (when (and (equal (alist-get 'environment data) "container")
+             (equal (alist-get 'network data) "deny"))
+    (safeslop-session-egress-observations
+     session-id
+     (lambda (envelope) (safeslop-session--detail-pending-render buffer envelope)) t)))
+
 ;;;###autoload
 (defun safeslop-session-detail (&optional session-id data)
   "Show a read-only detail buffer for SESSION-ID using DATA or `session status'."
@@ -1142,6 +1228,10 @@ the portal so row actions refresh in place instead of stealing the window."
             (erase-buffer)
             (insert (safeslop-surface--breadcrumb safeslop-output--args))
             (insert (safeslop-session--detail-format data))
+            (if (and (equal (alist-get 'environment data) "container")
+                     (equal (alist-get 'network data) "deny"))
+                (insert "\nEgress review: checking passive denied destinations…\n")
+              (insert "\nEgress review: unavailable outside container + deny\n"))
             ;; Detail-buffer keys are explicit operator controls. Proxy traffic
             ;; never calls them, so observations remain non-modal and grants
             ;; cannot be created by agent activity alone (specs/0097).
@@ -1152,6 +1242,9 @@ the portal so row actions refresh in place instead of stealing the window."
             (local-set-key (kbd "-") (lambda () (interactive) (safeslop-session-egress-revoke session-id)))
             (goto-char (point-min))))
         (pop-to-buffer buf)
+        ;; This read-only follow-up is intentionally after the operator-opened
+        ;; detail is visible.  Its callback updates text in place and never pops.
+        (safeslop-session--detail-request-pending-count session-id data buf)
         buf)
     (safeslop-session-status session-id)))
 
