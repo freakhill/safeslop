@@ -2235,7 +2235,7 @@ var credsProber = creds.DefaultProber
 // readiness status — it never handles or reveals a secret value.
 func cmdCreds() *cobra.Command {
 	c := &cobra.Command{Use: "creds", Short: "Inspect the credential posture of safeslop.cue profiles"}
-	c.AddCommand(cmdCredsList(), cmdCredsShow(), cmdCredsLink(), cmdCredsUnlink(), cmdCredsStatus())
+	c.AddCommand(cmdCredsList(), cmdCredsShow(), cmdCredsLink(), cmdCredsUnlink(), cmdCredsStatus(), cmdCredsGC())
 	return c
 }
 

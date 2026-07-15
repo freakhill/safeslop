@@ -38,7 +38,7 @@ Contract: `credentials.github.ttl` and `credentials.forgejo.ttl` default to `"1h
   VERIFY:   `go test ./internal/cli/ ./internal/engine/session/ -run 'RunProfile|Stage|Session|Detach|Lease|Credential' -v`
   EXPECTED: Every launch lane starts/stops one host-only lease; stale-stage cleanup happens before minting; records/status contain neither values, refs, nor stage paths.
 
-- [ ] Add narrow confirmation-gated Forgejo deploy-key GC
+- [x] Add narrow confirmation-gated Forgejo deploy-key GC
   FILE:     `internal/cli/creds_link.go`, `internal/cli/creds_gc.go`, `internal/cli/cli.go`, `internal/cli/cli_creds_test.go`, `internal/cli/creds_link_test.go`
   CHANGE:   Add `creds gc --host HOST --repo OWNER/REPO ... [--dry-run|--yes] [--output json]`. Require host and at least one repo; default dry-run; make `--yes` destructive and mutually exclusive with `--dry-run`. Resolve only matching Forgejo links in host memory, discover all requested repos before deleting, select only exact `safeslop-<owner>-<repo>` titles, re-fetch/recheck before each delete, treat 404 as absent, attempt all candidates, and return nonzero for remaining failure classes. Emit only host/repository/title/action/count/error class.
   VERIFY:   `go test ./internal/cli/ -run 'CredsGC|Creds.*GC|GC' -v`
