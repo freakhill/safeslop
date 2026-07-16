@@ -8,12 +8,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"syscall"
 	"time"
 
+	"github.com/freakhill/safeslop/internal/engine/hostpath"
 	"github.com/freakhill/safeslop/internal/engine/policy"
 	engsession "github.com/freakhill/safeslop/internal/engine/session"
-	"golang.org/x/sys/unix"
 )
 
 const (
@@ -27,10 +26,7 @@ const (
 	PiOAuthNearExpiry          = "pi_oauth_near_expiry"
 	PiOAuthStageFailed         = "pi_oauth_stage_failed"
 
-	piOAuthMaxSourceBytes = 1 << 20
 	piOAuthMaxAccessBytes = 64 << 10
-	piOAuthReadAttempts   = 10
-	piOAuthRetryDelay     = 50 * time.Millisecond
 	piOAuthMinHeadroom    = 15 * time.Minute
 )
 
@@ -88,11 +84,7 @@ func PiOAuthErrorCode(err error) string {
 	return ""
 }
 
-var (
-	piOAuthNow       = time.Now
-	piOAuthSleep     = time.Sleep
-	piOAuthAfterRead func(attempt int)
-)
+var piOAuthNow = time.Now
 
 // StagePiOAuth snapshots only the selected provider's access bearer into a
 // synthetic Pi auth file. It never copies refresh/account metadata or writes to
@@ -126,148 +118,17 @@ func readPiOAuthSource() ([]byte, error) {
 	if err != nil || home == "" {
 		return nil, newPiOAuthError(PiOAuthSourceMissing)
 	}
-	homeFD, err := openDirectoryAt(unix.AT_FDCWD, home)
-	if err != nil {
-		return nil, classifyPiOAuthOpenError(err)
-	}
-	defer unix.Close(homeFD)
-	piFD, err := openDirectoryAt(homeFD, ".pi")
-	if err != nil {
-		return nil, classifyPiOAuthOpenError(err)
-	}
-	defer unix.Close(piFD)
-	if !safePiOAuthDirectory(piFD) {
+	body, status := hostpath.ReadPiOAuthSource(home)
+	switch status {
+	case hostpath.PiOAuthSourceOK:
+		return body, nil
+	case hostpath.PiOAuthSourceMissing:
+		return nil, newPiOAuthError(PiOAuthSourceMissing)
+	case hostpath.PiOAuthSourceBusy:
+		return nil, newPiOAuthError(PiOAuthSourceBusy)
+	default:
 		return nil, newPiOAuthError(PiOAuthSourceUnsafe)
 	}
-	agentFD, err := openDirectoryAt(piFD, "agent")
-	if err != nil {
-		return nil, classifyPiOAuthOpenError(err)
-	}
-	defer unix.Close(agentFD)
-	if !safePiOAuthDirectory(agentFD) {
-		return nil, newPiOAuthError(PiOAuthSourceUnsafe)
-	}
-
-	for attempt := 0; attempt < piOAuthReadAttempts; attempt++ {
-		locked, lockErr := piOAuthLockExists(agentFD)
-		if lockErr != nil {
-			return nil, newPiOAuthError(PiOAuthSourceUnsafe)
-		}
-		if locked {
-			if attempt+1 < piOAuthReadAttempts {
-				piOAuthSleep(piOAuthRetryDelay)
-				continue
-			}
-			return nil, newPiOAuthError(PiOAuthSourceBusy)
-		}
-
-		body, stable, readErr := readStablePiOAuthFile(agentFD, attempt)
-		if readErr != nil {
-			return nil, readErr
-		}
-		if stable {
-			return body, nil
-		}
-		if attempt+1 < piOAuthReadAttempts {
-			piOAuthSleep(piOAuthRetryDelay)
-		}
-	}
-	return nil, newPiOAuthError(PiOAuthSourceBusy)
-}
-
-func openDirectoryAt(parentFD int, name string) (int, error) {
-	return unix.Openat(parentFD, name, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
-}
-
-func classifyPiOAuthOpenError(err error) error {
-	if errors.Is(err, unix.ENOENT) {
-		return newPiOAuthError(PiOAuthSourceMissing)
-	}
-	return newPiOAuthError(PiOAuthSourceUnsafe)
-}
-
-func safePiOAuthDirectory(fd int) bool {
-	var stat unix.Stat_t
-	if err := unix.Fstat(fd, &stat); err != nil {
-		return false
-	}
-	return stat.Mode&unix.S_IFMT == unix.S_IFDIR && stat.Mode&0o077 == 0 && stat.Uid == uint32(os.Geteuid())
-}
-
-func ownedByCurrentUser(info os.FileInfo) bool {
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	return ok && stat.Uid == uint32(os.Geteuid())
-}
-
-func singleLink(info os.FileInfo) bool {
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	return ok && stat.Nlink == 1
-}
-
-func piOAuthLockExists(agentFD int) (bool, error) {
-	var stat unix.Stat_t
-	err := unix.Fstatat(agentFD, "auth.json.lock", &stat, unix.AT_SYMLINK_NOFOLLOW)
-	if errors.Is(err, unix.ENOENT) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
-func readStablePiOAuthFile(agentFD, attempt int) ([]byte, bool, error) {
-	fd, err := unix.Openat(agentFD, "auth.json", unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
-	if err != nil {
-		return nil, false, classifyPiOAuthOpenError(err)
-	}
-	file := os.NewFile(uintptr(fd), "")
-	if file == nil {
-		unix.Close(fd)
-		return nil, false, newPiOAuthError(PiOAuthSourceUnsafe)
-	}
-	defer file.Close()
-
-	before, err := file.Stat()
-	if err != nil || !before.Mode().IsRegular() || before.Mode().Perm()&0o077 != 0 ||
-		!ownedByCurrentUser(before) || !singleLink(before) || before.Size() > piOAuthMaxSourceBytes {
-		return nil, false, newPiOAuthError(PiOAuthSourceUnsafe)
-	}
-	body, err := io.ReadAll(io.LimitReader(file, piOAuthMaxSourceBytes+1))
-	if err != nil || len(body) > piOAuthMaxSourceBytes {
-		return nil, false, newPiOAuthError(PiOAuthSourceUnsafe)
-	}
-	if piOAuthAfterRead != nil {
-		piOAuthAfterRead(attempt)
-	}
-	after, err := file.Stat()
-	if err != nil {
-		return nil, false, newPiOAuthError(PiOAuthSourceUnsafe)
-	}
-	freshFD, err := unix.Openat(agentFD, "auth.json", unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
-	if err != nil {
-		return nil, false, classifyPiOAuthOpenError(err)
-	}
-	fresh := os.NewFile(uintptr(freshFD), "")
-	if fresh == nil {
-		unix.Close(freshFD)
-		return nil, false, newPiOAuthError(PiOAuthSourceUnsafe)
-	}
-	freshInfo, statErr := fresh.Stat()
-	fresh.Close()
-	if statErr != nil {
-		return nil, false, newPiOAuthError(PiOAuthSourceUnsafe)
-	}
-	locked, lockErr := piOAuthLockExists(agentFD)
-	if lockErr != nil {
-		return nil, false, newPiOAuthError(PiOAuthSourceUnsafe)
-	}
-	stable := !locked && samePiOAuthSnapshot(before, after) && samePiOAuthSnapshot(after, freshInfo) && os.SameFile(after, freshInfo)
-	return body, stable, nil
-}
-
-func samePiOAuthSnapshot(a, b os.FileInfo) bool {
-	return a.Size() == b.Size() && a.Mode() == b.Mode() && a.ModTime().Equal(b.ModTime())
 }
 
 func parsePiOAuthAccess(body []byte, now time.Time) (string, time.Time, error) {

@@ -20,15 +20,9 @@ type proofCharacterizationAPI struct {
 
 var sharedProofCharacterization = proofCharacterizationAPI{
 	absoluteTarget: strictAbsoluteTarget,
-	directorySafe: func(uid, currentUID uint32, mode fs.FileMode) bool {
-		return mode.IsDir() && uid == currentUID && mode.Perm()&0o022 == 0
-	},
-	mountSafe: func(rootMount, nodeMount uint64, known bool) bool {
-		return known && rootMount != 0 && rootMount == nodeMount
-	},
-	linkCountSafe: func(dereferences int) bool {
-		return dereferences >= 0 && dereferences <= 40
-	},
+	directorySafe:  safePiOAuthDirectoryMetadata,
+	mountSafe:      sameProofMount,
+	linkCountSafe:  proofLinkCountSafe,
 }
 
 func TestHostPathCharacterizationAbsoluteTargets(t *testing.T) {

@@ -31,14 +31,20 @@ func TestStageProfileResolvesEnvSecret(t *testing.T) {
 	}
 }
 
-func TestStageProfileStagesPiOAuthAccessFile(t *testing.T) {
+func TestStagePiOAuthProfileAcceptsLinked0755HomeSource(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	agentDir := filepath.Join(home, ".pi", "agent")
-	if err := os.MkdirAll(agentDir, 0o700); err != nil {
+	piDir := filepath.Join(home, "dotfiles", "pi")
+	agentDir := filepath.Join(piDir, "agent")
+	if err := os.MkdirAll(agentDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(filepath.Join(home, ".pi"), 0o700); err != nil {
+	for _, dir := range []string{filepath.Join(home, "dotfiles"), piDir, agentDir} {
+		if err := os.Chmod(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink("dotfiles/pi", filepath.Join(home, ".pi")); err != nil {
 		t.Fatal(err)
 	}
 	body := `{"openai-codex":{"type":"oauth","access":"ACCESS_CANARY","refresh":"REFRESH_SENTINEL","expires":` +

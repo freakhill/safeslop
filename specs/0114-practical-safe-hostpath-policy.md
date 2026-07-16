@@ -28,7 +28,7 @@ Decision notes: `specs/research/2026-07-17-hostpath-policy-ayo.md`, `specs/resea
   VERIFY:   `go test ./internal/engine/hostpath ./internal/engine/container -run 'HostPath|Projection|Snapshot|Symlink|AbsoluteTarget|PinnedRoot' -count=1 -v`
   EXPECTED: One core owns source-path resolution and every projection characterization remains unchanged, including race/mount/non-disclosure failures.
 
-- [ ] Migrate Pi to the typed fixed-source facade
+- [x] Migrate Pi to the typed fixed-source facade
   FILE:     `internal/engine/hostpath/pi.go`, `internal/engine/hostpath/*_test.go`, `internal/engine/creds/pi.go`, `internal/engine/creds/pi_test.go`, `internal/cli/cli_stage_test.go`
   CHANGE:   Replace Pi's raw no-link walker with a complete fixed `.pi/agent/auth.json` proof from retained HOME. Accept only proven same-root/same-mount links; require every reached directory to be current-user-owned with `mode & 0022 == 0`; retain exact regular/0600/nlink1/size leaf, lexical sibling lock before/after, descriptor read, fresh full proof, byte zeroing, ten attempts/nine 50 ms sleeps, JSON/access/expiry/stage/teardown, and existing value-free failure mappings.
   VERIFY:   `go test ./internal/engine/hostpath ./internal/engine/creds ./internal/cli -run 'HostPath|PiOAuth|StagePi' -count=1 -v`

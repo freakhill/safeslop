@@ -2,7 +2,6 @@ package creds
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,13 +31,9 @@ func piOAuthFixture(t *testing.T, now time.Time, body string) (home, auth string
 	if err := os.WriteFile(auth, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	oldNow, oldSleep, oldAfterRead := piOAuthNow, piOAuthSleep, piOAuthAfterRead
+	oldNow := piOAuthNow
 	piOAuthNow = func() time.Time { return now }
-	piOAuthSleep = func(time.Duration) {}
-	piOAuthAfterRead = nil
-	t.Cleanup(func() {
-		piOAuthNow, piOAuthSleep, piOAuthAfterRead = oldNow, oldSleep, oldAfterRead
-	})
+	t.Cleanup(func() { piOAuthNow = oldNow })
 	return home, auth
 }
 
@@ -269,92 +264,34 @@ func TestPiOAuthSymlinkAndAncestryRejectsUnsafeLayoutsValueFree(t *testing.T) {
 	}
 }
 
-func TestStagePiOAuthRejectsParentSymlink(t *testing.T) {
+func TestStagePiOAuthRejectsOutsideParentSymlink(t *testing.T) {
 	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	real := filepath.Join(home, "real-agent")
-	must(t, os.MkdirAll(real, 0o700))
-	must(t, os.WriteFile(filepath.Join(real, "auth.json"), []byte(validPiOAuthJSON(now.Add(time.Hour), "ACCESS_CANARY")), 0o600))
-	must(t, os.Symlink("real-agent", filepath.Join(home, ".pi")))
-	oldNow, oldSleep := piOAuthNow, piOAuthSleep
-	piOAuthNow, piOAuthSleep = func() time.Time { return now }, func(time.Duration) {}
-	t.Cleanup(func() { piOAuthNow, piOAuthSleep = oldNow, oldSleep })
+	outside := t.TempDir()
+	agent := filepath.Join(outside, "agent")
+	must(t, os.MkdirAll(agent, 0o700))
+	must(t, os.WriteFile(filepath.Join(agent, "auth.json"), []byte(validPiOAuthJSON(now.Add(time.Hour), "ACCESS_CANARY")), 0o600))
+	must(t, os.Symlink(outside, filepath.Join(home, ".pi")))
+	oldNow := piOAuthNow
+	piOAuthNow = func() time.Time { return now }
+	t.Cleanup(func() { piOAuthNow = oldNow })
 	_, err := StagePiOAuth(piOAuthPolicy, t.TempDir())
 	if PiOAuthErrorCode(err) != PiOAuthSourceUnsafe {
-		t.Fatalf("parent symlink error = %v", err)
+		t.Fatalf("outside parent symlink error = %v", err)
 	}
 }
 
-func TestStagePiOAuthLockAndStableRead(t *testing.T) {
+func TestStagePiOAuthPreservesHeldLock(t *testing.T) {
 	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
-	t.Run("lock-held", func(t *testing.T) {
-		_, auth := piOAuthFixture(t, now, validPiOAuthJSON(now.Add(time.Hour), "ACCESS_CANARY"))
-		must(t, os.Mkdir(auth+".lock", 0o700))
-		_, err := StagePiOAuth(piOAuthPolicy, t.TempDir())
-		if PiOAuthErrorCode(err) != PiOAuthSourceBusy {
-			t.Fatalf("lock error = %v", err)
-		}
-		if _, statErr := os.Stat(auth + ".lock"); statErr != nil {
-			t.Fatalf("safeslop removed Pi lock: %v", statErr)
-		}
-	})
-	t.Run("mutation-retries", func(t *testing.T) {
-		_, auth := piOAuthFixture(t, now, validPiOAuthJSON(now.Add(time.Hour), "ACCESS_OLD"))
-		piOAuthAfterRead = func(attempt int) {
-			if attempt == 0 {
-				must(t, os.WriteFile(auth, []byte(validPiOAuthJSON(now.Add(time.Hour), "ACCESS_NEW")), 0o600))
-			}
-		}
-		stage := t.TempDir()
-		if _, err := StagePiOAuth(piOAuthPolicy, stage); err != nil {
-			t.Fatal(err)
-		}
-		body, _ := os.ReadFile(stagedPiAuthPath(stage))
-		if !strings.Contains(string(body), "ACCESS_NEW") || strings.Contains(string(body), "ACCESS_OLD") {
-			t.Fatalf("stable retry staged wrong bytes: %s", body)
-		}
-	})
-	t.Run("replacement-retries", func(t *testing.T) {
-		_, auth := piOAuthFixture(t, now, validPiOAuthJSON(now.Add(time.Hour), "ACCESS_OLD"))
-		piOAuthAfterRead = func(attempt int) {
-			if attempt == 0 {
-				must(t, os.Rename(auth, auth+".replaced"))
-				must(t, os.WriteFile(auth, []byte(validPiOAuthJSON(now.Add(time.Hour), "ACCESS_NEW")), 0o600))
-			}
-		}
-		stage := t.TempDir()
-		if _, err := StagePiOAuth(piOAuthPolicy, stage); err != nil {
-			t.Fatal(err)
-		}
-		body, _ := os.ReadFile(stagedPiAuthPath(stage))
-		if !strings.Contains(string(body), "ACCESS_NEW") || strings.Contains(string(body), "ACCESS_OLD") {
-			t.Fatalf("replacement retry staged wrong bytes: %s", body)
-		}
-	})
-}
-
-func TestStagePiOAuthUsesLockedTenAttemptRetryBudget(t *testing.T) {
-	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
-	_, auth := piOAuthFixture(t, now, validPiOAuthJSON(now.Add(time.Hour), "ACCESS_000"))
-	reads := 0
-	piOAuthAfterRead = func(attempt int) {
-		reads++
-		must(t, os.WriteFile(auth, []byte(validPiOAuthJSON(now.Add(time.Hour), fmt.Sprintf("ACCESS_%03d", attempt+1))), 0o600))
-	}
-	var sleeps []time.Duration
-	piOAuthSleep = func(d time.Duration) { sleeps = append(sleeps, d) }
+	_, auth := piOAuthFixture(t, now, validPiOAuthJSON(now.Add(time.Hour), "ACCESS_CANARY"))
+	must(t, os.Mkdir(auth+".lock", 0o700))
 	_, err := StagePiOAuth(piOAuthPolicy, t.TempDir())
 	if PiOAuthErrorCode(err) != PiOAuthSourceBusy {
-		t.Fatalf("unstable source error = %v", err)
+		t.Fatalf("lock error = %v", err)
 	}
-	if reads != 10 || len(sleeps) != 9 {
-		t.Fatalf("retry budget reads=%d sleeps=%d, want 10/9", reads, len(sleeps))
-	}
-	for i, d := range sleeps {
-		if d != 50*time.Millisecond {
-			t.Fatalf("sleep %d = %s, want 50ms", i, d)
-		}
+	if _, statErr := os.Stat(auth + ".lock"); statErr != nil {
+		t.Fatalf("safeslop removed Pi lock: %v", statErr)
 	}
 }
 
@@ -420,9 +357,9 @@ func TestStagePiOAuthMissingAndStageFailure(t *testing.T) {
 	t.Run("missing", func(t *testing.T) {
 		home := t.TempDir()
 		t.Setenv("HOME", home)
-		oldNow, oldSleep := piOAuthNow, piOAuthSleep
-		piOAuthNow, piOAuthSleep = func() time.Time { return now }, func(time.Duration) {}
-		t.Cleanup(func() { piOAuthNow, piOAuthSleep = oldNow, oldSleep })
+		oldNow := piOAuthNow
+		piOAuthNow = func() time.Time { return now }
+		t.Cleanup(func() { piOAuthNow = oldNow })
 		_, err := StagePiOAuth(piOAuthPolicy, t.TempDir())
 		if PiOAuthErrorCode(err) != PiOAuthSourceMissing {
 			t.Fatalf("missing error = %v", err)

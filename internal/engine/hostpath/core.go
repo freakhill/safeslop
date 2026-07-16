@@ -9,6 +9,14 @@ import (
 
 const maxProofLinks = 40
 
+func proofLinkCountSafe(dereferences int) bool {
+	return dereferences >= 0 && dereferences <= maxProofLinks
+}
+
+func sameProofMount(rootMount, nodeMount uint64, known bool) bool {
+	return known && rootMount != 0 && rootMount == nodeMount
+}
+
 type proofFailure uint8
 
 const (
@@ -24,6 +32,7 @@ const (
 type proofError struct {
 	failure proofFailure
 	absent  bool
+	linked  bool
 }
 
 func (e *proofError) Error() string { return "host path proof failed" }
@@ -72,6 +81,23 @@ func openProofRoot(path string) (*proofRoot, error) {
 		return nil, &proofError{failure: proofUnsupported}
 	}
 	return &proofRoot{path: filepath.Clean(path), root: root, before: before, mountID: mountID}, nil
+}
+
+func (r *proofRoot) clone() (*proofRoot, error) {
+	if r == nil || r.root == nil {
+		return nil, &proofError{failure: proofChanged}
+	}
+	root, err := r.root.OpenRoot(".")
+	if err != nil {
+		return nil, &proofError{failure: proofChanged}
+	}
+	before, err := root.Stat(".")
+	mountID, mountOK := mountIDForRoot(root)
+	if err != nil || !os.SameFile(r.before, before) || !mountOK || mountID != r.mountID {
+		_ = root.Close()
+		return nil, &proofError{failure: proofChanged}
+	}
+	return &proofRoot{path: r.path, root: root, before: before, mountID: mountID}, nil
 }
 
 func (r *proofRoot) close() {
@@ -164,7 +190,17 @@ func mountIDForRoot(root *os.Root) (uint64, bool) {
 	return proofMountID(file)
 }
 
+type proofPolicy struct {
+	validateCanonical func(string) error
+	validateDirectory func(os.FileInfo) error
+	afterReadlink     func()
+}
+
 func openPinnedPath(root *proofRoot, rel string, validate func(string) error, afterReadlink func()) (*pinnedNode, error) {
+	return openPinnedPathWithPolicy(root, rel, proofPolicy{validateCanonical: validate, afterReadlink: afterReadlink})
+}
+
+func openPinnedPathWithPolicy(root *proofRoot, rel string, policy proofPolicy) (*pinnedNode, error) {
 	rel = filepath.Clean(rel)
 	if rel == "." {
 		return nil, &proofError{failure: proofSourceType}
@@ -181,7 +217,7 @@ func openPinnedPath(root *proofRoot, rel string, validate func(string) error, af
 			if err != nil {
 				closeRoots(opened)
 				if errors.Is(err, os.ErrNotExist) {
-					return nil, &proofError{failure: proofUnavailable, absent: true}
+					return nil, &proofError{failure: proofUnavailable, absent: true, linked: links > 0}
 				}
 				if errors.Is(err, os.ErrPermission) {
 					return nil, &proofError{failure: proofUnavailable}
@@ -190,7 +226,7 @@ func openPinnedPath(root *proofRoot, rel string, validate func(string) error, af
 			}
 			canonical := filepath.Join(prefix, part)
 			if info.Mode()&os.ModeSymlink != 0 {
-				if visited[canonical] || links >= maxProofLinks {
+				if visited[canonical] || !proofLinkCountSafe(links+1) {
 					closeRoots(opened)
 					return nil, &proofError{failure: proofSymlinkLoop}
 				}
@@ -201,8 +237,8 @@ func openPinnedPath(root *proofRoot, rel string, validate func(string) error, af
 					closeRoots(opened)
 					return nil, &proofError{failure: proofChanged}
 				}
-				if afterReadlink != nil {
-					afterReadlink()
+				if policy.afterReadlink != nil {
+					policy.afterReadlink()
 				}
 				afterLink, statErr := current.Lstat(part)
 				targetAfter, readErr := current.Readlink(part)
@@ -229,8 +265,8 @@ func openPinnedPath(root *proofRoot, rel string, validate func(string) error, af
 					closeRoots(opened)
 					return nil, &proofError{failure: proofOutsideRoot}
 				}
-				if validate != nil {
-					if err := validate(filepath.Join(root.path, next)); err != nil {
+				if policy.validateCanonical != nil {
+					if err := policy.validateCanonical(filepath.Join(root.path, next)); err != nil {
 						closeRoots(opened)
 						return nil, err
 					}
@@ -257,6 +293,13 @@ func openPinnedPath(root *proofRoot, rel string, validate func(string) error, af
 							return nil, &proofError{failure: proofUnsupported}
 						}
 						return nil, &proofError{failure: proofUnsafe}
+					}
+					if policy.validateDirectory != nil {
+						if err := policy.validateDirectory(after); err != nil {
+							_ = dir.Close()
+							closeRoots(opened)
+							return nil, err
+						}
 					}
 					if err := root.retainEdge(current, part, after, "", false); err != nil {
 						_ = dir.Close()
@@ -314,6 +357,13 @@ func openPinnedPath(root *proofRoot, rel string, validate func(string) error, af
 					return nil, &proofError{failure: proofUnsupported}
 				}
 				return nil, &proofError{failure: proofUnsafe}
+			}
+			if policy.validateDirectory != nil {
+				if err := policy.validateDirectory(after); err != nil {
+					_ = nextRoot.Close()
+					closeRoots(opened)
+					return nil, err
+				}
 			}
 			if err := root.retainEdge(current, part, after, "", false); err != nil {
 				_ = nextRoot.Close()
