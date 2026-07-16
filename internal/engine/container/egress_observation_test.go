@@ -58,7 +58,7 @@ func TestSquidEgressObservationLogFormatExcludesRequestURIs(t *testing.T) {
 	}
 	for _, want := range []string{
 		"logformat safeslop_observation %ts.%03tu %Ss/%03>Hs %>rm %>rd %>rP",
-		"access_log stdio:/dev/stdout safeslop_observation",
+		"access_log stdio:/var/log/squid/access.log safeslop_observation",
 	} {
 		if !strings.Contains(conf, want) {
 			t.Fatalf("squid.conf missing value-free observation log format %q:\n%s", want, conf)

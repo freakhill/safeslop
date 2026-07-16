@@ -422,6 +422,45 @@ func projectionFailureForTest(t *testing.T) error {
 	return err
 }
 
+type structuredRuntimeFailureError struct {
+	failure engsession.Failure
+}
+
+func (e structuredRuntimeFailureError) Error() string { return "raw runtime detail must not persist" }
+func (e structuredRuntimeFailureError) Failure() engsession.Failure { return e.failure }
+
+func TestSessionStructuredRuntimeFailurePersistsValueFree(t *testing.T) {
+	store := engsession.NewStore(t.TempDir())
+	sess, err := store.Create("fish", "container", t.TempDir(), nowForTest(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.MarkRunning(sess.ID, os.Getpid(), nowForTest(t)); err != nil {
+		t.Fatal(err)
+	}
+	failure := engsession.Failure{
+		Version: 1,
+		Phase:   "network",
+		Code:    "network_proxy_unavailable",
+		Required: true,
+		Summary: "The required network proxy did not become ready.",
+		Action:  "Check the container runtime, then retry the session.",
+	}
+	if err := finishSessionRun(store, sess.ID, 1, structuredRuntimeFailureError{failure: failure}, nowForTest(t)); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.Get(sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.LastFailure == nil || stored.LastFailure.Code != "network_proxy_unavailable" {
+		t.Fatalf("stored structured runtime failure = %+v", stored.LastFailure)
+	}
+	if stored.LastError != failure.Summary || strings.Contains(stored.LastError, "raw runtime detail") {
+		t.Fatalf("last_error = %q, want fixed value-free summary", stored.LastError)
+	}
+}
+
 func TestSessionProjectionFailurePersistsAtomically(t *testing.T) {
 	store := engsession.NewStore(t.TempDir())
 	sess, err := store.Create("fish", "container", t.TempDir(), nowForTest(t))

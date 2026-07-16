@@ -8,10 +8,10 @@ OFF-LIMITS: do not relax deny topology or ACL ordering; do not auto-grant any mo
 
 WORKTREE: `.worktrees/0112-progressive-runtime-readiness/`
 
-- [ ] Capture RED proxy startup and readiness regressions
+- [x] Capture RED proxy startup and readiness regressions
   FILE:     `internal/engine/container/egress_observation_test.go`, `internal/engine/container/container_test.go`, `internal/cli/cli_session_test.go`, `specs/research/2026-07-16-progressive-runtime-readiness.md`
   CHANGE:   Pin the real failure (`ubuntu/squid` exits because cache_effective_user cannot open `stdio:/dev/stdout`), require the generated config to use the image's tailed `/var/log/squid/access.log`, require `Up` to run a bounded `squid -k check` after compose-up and tear the stack down on exhaustion, and require session finish to persist a value-free `network_proxy_unavailable` failure rather than raw runtime output.
-  VERIFY:   `go test ./internal/engine/container ./internal/cli -run 'Proxy|SquidEgressObservationLog|StructuredRuntimeFailure' -count=1 -v`
+  VERIFY:   `! go test ./internal/engine/container ./internal/cli -run 'Proxy|SquidEgressObservationLog|StructuredRuntimeFailure' -count=1 -v`
   EXPECTED: New assertions fail on the stdout log target, absent readiness probe/teardown, and legacy raw-error persistence—not on test plumbing.
 
 - [ ] Fix proxy logging and enforce launch-time readiness

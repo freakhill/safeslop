@@ -15,19 +15,26 @@ type fakeEngine struct {
 	t        *testing.T
 	outputs  map[string]string
 	failures map[string]int
+	onRun    map[string]func()
 	mu       sync.Mutex
 	runs     []string
 }
 
 func newFakeEngine(t *testing.T, outputs map[string]string) *fakeEngine {
 	t.Helper()
-	return &fakeEngine{t: t, outputs: outputs, failures: map[string]int{}}
+	return &fakeEngine{t: t, outputs: outputs, failures: map[string]int{}, onRun: map[string]func(){}}
 }
 
 func (f *fakeEngine) fail(key string, code int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.failures[key] = code
+}
+
+func (f *fakeEngine) runHook(key string, hook func()) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.onRun[key] = hook
 }
 
 func (f *fakeEngine) Name() string { return "fake" }
@@ -41,7 +48,11 @@ func (f *fakeEngine) Command(ctx context.Context, args ...string) *exec.Cmd {
 	f.mu.Lock()
 	f.runs = append(f.runs, key)
 	code := f.failures[key]
+	hook := f.onRun[key]
 	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	out := f.outputs[key]
 	return fakeCommand(ctx, out, code)
 }
