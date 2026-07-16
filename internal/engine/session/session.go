@@ -285,7 +285,7 @@ func (s Store) markRunning(id string, pid int, detached bool, now time.Time) (Se
 	return sess, s.Save(sess)
 }
 
-func (s Store) Finish(id string, exitCode int, lastErr string, now time.Time) (Session, error) {
+func (s Store) Finish(id string, exitCode int, lastErr string, now time.Time, failure ...Failure) (Session, error) {
 	sess, err := s.Get(id)
 	if err != nil {
 		return Session{}, err
@@ -294,7 +294,12 @@ func (s Store) Finish(id string, exitCode int, lastErr string, now time.Time) (S
 	sess.PID = 0
 	sess.ProcessToken = ""
 	sess.ExitCode = &exitCode
-	sess.LastError = lastErr
+	sess.LastFailure = nil
+	if len(failure) > 0 {
+		sess.SetFailure(failure[0])
+	} else {
+		sess.LastError = lastErr
+	}
 	sess.StoppedAt = now.UTC()
 	sess.UpdatedAt = now.UTC()
 	return sess, s.Save(sess)

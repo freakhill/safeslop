@@ -26,7 +26,7 @@ WORKTREE: `.worktrees/0107-builtin-projection-symlinks/`
   VERIFY: `go test ./internal/engine/container -run 'Projection|Snapshot|Symlink' -count=1 -v`
   EXPECTED: in-home `.config` symlink snapshots correctly; escapes/exclusions/loops/races fail closed; compose never mounts a live resolved source.
 
-- [ ] Persist run-preparation failures atomically
+- [x] Persist run-preparation failures atomically
   FILE: `internal/cli/cli.go`, `internal/cli/cli_session_test.go`, `internal/cli/supervise_test.go`
   CHANGE: record `last_failure`/bounded compatibility `last_error` before terminal launch failure exits; expose it in list/status contracts without leaking raw resolver internals.
   VERIFY: `go test ./internal/cli -run 'Session.*Failure|Projection' -count=1 -v`

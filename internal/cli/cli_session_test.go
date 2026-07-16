@@ -398,6 +398,120 @@ func TestSessionCreateAcceptsFishAgent(t *testing.T) {
 	}
 }
 
+func projectionFailureForTest(t *testing.T) error {
+	t.Helper()
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".ssh"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".ssh", "config"), []byte("seeded-secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".config"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../.ssh/config", filepath.Join(home, ".config", "fish")); err != nil {
+		t.Fatal(err)
+	}
+	_, err := container.SnapshotProjection(home, t.TempDir(), policy.Projection{Items: []policy.ProjectionItem{{
+		Source: "~/.config/fish", Label: "fish",
+	}}})
+	if err == nil {
+		t.Fatal("test projection unexpectedly succeeded")
+	}
+	return err
+}
+
+func TestSessionProjectionFailurePersistsAtomically(t *testing.T) {
+	store := engsession.NewStore(t.TempDir())
+	sess, err := store.Create("fish", "container", t.TempDir(), nowForTest(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.MarkRunning(sess.ID, os.Getpid(), nowForTest(t)); err != nil {
+		t.Fatal(err)
+	}
+	if err := finishSessionRun(store, sess.ID, 1, projectionFailureForTest(t), nowForTest(t)); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.Get(sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != engsession.StatusStopped || stored.LastFailure == nil {
+		t.Fatalf("stored session = %+v", stored)
+	}
+	if stored.LastFailure.Code != container.ProjectionTargetExcluded || stored.LastError != stored.LastFailure.Summary {
+		t.Fatalf("stored failure = %+v, last_error=%q", stored.LastFailure, stored.LastError)
+	}
+	encoded, err := json.Marshal(stored.LastFailure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"seeded-secret", ".ssh/config", "/var/folders/", "/tmp/"} {
+		if strings.Contains(string(encoded), forbidden) {
+			t.Fatalf("stored failure leaked %q: %s", forbidden, encoded)
+		}
+	}
+}
+
+func TestSessionProjectionFailureAppearsInStatusAndListContracts(t *testing.T) {
+	state := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", state)
+	store := sessionStore()
+	sess, err := store.Create("fish", "container", workspace, nowForTest(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.MarkRunning(sess.ID, os.Getpid(), nowForTest(t)); err != nil {
+		t.Fatal(err)
+	}
+	if err := finishSessionRun(store, sess.ID, 1, projectionFailureForTest(t), nowForTest(t)); err != nil {
+		t.Fatal(err)
+	}
+
+	statusOut, err := runRootForTest(t, workspace, "session", "status", "--session-id", sess.ID, "--output", "json")
+	if err != nil {
+		t.Fatalf("status: %v\n%s", err, statusOut)
+	}
+	status := parseEnvelopeForTest(t, statusOut)
+	failure, _ := status.Data["last_failure"].(map[string]any)
+	if failure["code"] != container.ProjectionTargetExcluded {
+		t.Fatalf("status last_failure = %#v", status.Data["last_failure"])
+	}
+
+	listOut, err := runRootForTest(t, workspace, "session", "list", "--output", "json")
+	if err != nil {
+		t.Fatalf("list: %v\n%s", err, listOut)
+	}
+	list := parseEnvelopeForTest(t, listOut)
+	rows, _ := list.Data["sessions"].([]any)
+	if len(rows) != 1 {
+		t.Fatalf("list sessions = %#v", list.Data["sessions"])
+	}
+	row, _ := rows[0].(map[string]any)
+	listedFailure, _ := row["last_failure"].(map[string]any)
+	if listedFailure["code"] != container.ProjectionTargetExcluded {
+		t.Fatalf("list last_failure = %#v", row["last_failure"])
+	}
+}
+
+func TestSessionFailureDataIncludesStructuredReason(t *testing.T) {
+	sess := engsession.Session{ID: "sess-failure", Agent: "fish", Environment: "container", Status: engsession.StatusStopped}
+	sess.SetFailure(engsession.Failure{
+		Version: 1, Phase: "projection", Code: container.ProjectionTargetExcluded,
+		Projection: "builtin.fish", Source: "~/.config/fish/config.fish",
+		Summary: "Config projection points to an excluded credential or cache path.",
+		Action:  "Remove that link from the projected config path.",
+	})
+	data := sessionData(sess)
+	failure, ok := data["last_failure"].(*engsession.Failure)
+	if !ok || failure.Code != container.ProjectionTargetExcluded {
+		t.Fatalf("session data last_failure = %#v", data["last_failure"])
+	}
+}
+
 func TestSessionStatusJSONLEmitsSingleLineContract(t *testing.T) {
 	ws := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())

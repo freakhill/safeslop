@@ -1517,11 +1517,9 @@ func cmdSessionRun() *cobra.Command {
 				return err
 			}
 			code, runErr := runProfile("session-"+id, prof, argv, sess.Workspace)
-			lastErr := ""
-			if runErr != nil {
-				lastErr = runErr.Error()
+			if err := finishSessionRun(store, id, code, runErr, time.Now()); err != nil {
+				return err
 			}
-			_, _ = store.Finish(id, code, lastErr, time.Now())
 			if runErr != nil {
 				return runErr
 			}
@@ -1575,6 +1573,22 @@ var launchSupervisor = func(id string) (int, error) {
 // emits the session envelope. On readiness timeout it kills the half-born
 // supervisor and emits a contract error, leaving the session not-running so no
 // phantom is left for liveness/reconcile or `session stop` (specs/0051 Q1).
+// finishSessionRun persists a value-free structured projection failure in the same atomic session
+// save that records the terminal state. Other failures retain the legacy error path.
+func finishSessionRun(store engsession.Store, id string, code int, runErr error, now time.Time) error {
+	var projectionErr *container.ProjectionError
+	if errors.As(runErr, &projectionErr) {
+		_, err := store.Finish(id, code, "", now, projectionErr.Failure())
+		return err
+	}
+	lastErr := ""
+	if runErr != nil {
+		lastErr = runErr.Error()
+	}
+	_, err := store.Finish(id, code, lastErr, now)
+	return err
+}
+
 func runDetach(store engsession.Store, id string) error {
 	if sess, err := store.Get(id); err == nil {
 		if _, err := recordSessionBackend(store, sess); err != nil {
@@ -1956,6 +1970,9 @@ func sessionData(sess engsession.Session) map[string]any {
 	}
 	if sess.LastError != "" {
 		out["last_error"] = sess.LastError
+	}
+	if sess.LastFailure != nil {
+		out["last_failure"] = sess.LastFailure
 	}
 	if path, ok := sessionSocket(sess); ok {
 		out["socket"] = path

@@ -146,12 +146,11 @@ func Supervise(ctx context.Context, store engsession.Store, id string, now func(
 	if jsonl != nil {
 		_ = jsonl.Close()
 	}
-	lastErr := ""
-	if ax.err != nil {
-		lastErr = ax.err.Error()
-	}
-	_, _ = store.Finish(id, ax.code, lastErr, now())
+	finishErr := finishSessionRun(store, id, ax.code, ax.err, now())
 	_ = ptmx.Close()
+	if finishErr != nil {
+		return ax.code, finishErr
+	}
 	return ax.code, nil
 }
 

@@ -12,6 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/freakhill/safeslop/internal/engine/container"
+	engexec "github.com/freakhill/safeslop/internal/engine/exec"
+	"github.com/freakhill/safeslop/internal/engine/policy"
 	engsession "github.com/freakhill/safeslop/internal/engine/session"
 	"github.com/freakhill/safeslop/internal/engine/session/wire"
 )
@@ -184,6 +187,34 @@ func TestSuperviseExitRunsTeardownAndRemovesSocket(t *testing.T) {
 
 // TestSuperviseRecordsSupervisorPIDAlive proves the recorded PID is the
 // supervisor's own (it runs in-process here) and is alive while the agent runs.
+func TestSuperviseSessionProjectionFailurePersists(t *testing.T) {
+	store, id, _ := newSupervisedStubSessionIn(t, "#!/bin/sh\nexit 0\n", shortStateDir(t), "container")
+	projectionErr := projectionFailureForTest(t)
+	oldLaunch := containerLaunch
+	containerLaunch = func(context.Context, engexec.LaunchSpec, string, string, []string, []string, string, []string, *policy.Projection, ...container.SessionGrant) (int, error) {
+		return 1, projectionErr
+	}
+	t.Cleanup(func() { containerLaunch = oldLaunch })
+
+	code, err := Supervise(context.Background(), store, id, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != 1 {
+		t.Fatalf("code = %d, want 1", code)
+	}
+	stored, err := store.Get(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != engsession.StatusStopped || stored.LastFailure == nil {
+		t.Fatalf("stored session = %+v", stored)
+	}
+	if stored.LastFailure.Code != container.ProjectionTargetExcluded {
+		t.Fatalf("last_failure = %+v", stored.LastFailure)
+	}
+}
+
 func TestSuperviseRecordsSupervisorPIDAlive(t *testing.T) {
 	store, id, _ := newSupervisedStubSession(t, "#!/bin/sh\nread x\n") // blocks until cancel
 	ctx, cancel := context.WithCancel(context.Background())
