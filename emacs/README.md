@@ -190,18 +190,25 @@ class, and TTL model — never token/key refs or values.
 | key | action |
 |---|---|
 | `RET` / `i` | inspect one profile's credential posture (`creds show`) |
-| `a` | link a GitHub App or Forgejo account; prompts collect refs/ids only |
-| `u` | unlink a linked account (`host/owner`) |
-| `p` | repo picker: choose profile/provider, origin inference or explicit `owner/repo` rows, and read/write scope |
+| `A` | link a GitHub App or Forgejo account after a value-free identity review |
+| `U` | unlink a linked account (`host/owner`); profile declarations are unchanged |
+| `R` | configure profile repos: existing provider/origin/read/write scopes are prefilled, then replaced after a before/after review |
+| `X` | clear only a profile's GitHub/Forgejo scopes; account links and other providers remain |
 | `e` | edit the CUE block directly |
-| `g` | refresh account status and credential readiness |
+| `g` (Evil: `gr`) | refresh account status and credential readiness |
 
-The repo picker writes through `safeslop profile credentials set|clear --output
-json`; Emacs does not rewrite CUE itself. It preserves non-forge credential
-providers and clears only the opposite forge because staging currently supports
-one forge per profile. live repo discovery is deliberately deferred: GitHub
-discovery would require a minted installation token and Forgejo discovery
-would use the account-wide token, so this slice accepts origin inference and
+These uppercase action keys work in raw Emacs and Evil normal state; lowercase
+`a`/`u`/`p` remain raw-only compatibility aliases. First-time flow: create or
+clone a project profile in `F`, then `A` link account → `R` assign origin or
+explicit repositories → inspect/re-trust the changed policy → launch. `R` fetches
+the project profile list independently of credential rows, so an empty profile is
+selectable. It writes through `safeslop profile credentials set --output json`;
+`X` uses `profile credentials clear`. Emacs never rewrites CUE itself. Setting one
+forge clears only the opposite forge declaration and preserves other credential
+providers. A failed `R` write keeps its value-free draft; return with `K`, then
+press `R` to correct/retry. Live repo discovery remains deliberately deferred:
+GitHub discovery would require a minted installation token and Forgejo discovery
+would use the account-wide token, so the surface accepts origin inference and
 manual `owner/repo` entries only.
 
 ## Debug buffer
@@ -253,9 +260,10 @@ alias for the canonical `claude` engine agent.
 
 Under Evil, dashboard keys follow evil-collection convention (specs/0063):
 `j`/`k`, `gg`/`G`, `/`+`n`, `f`, and `a` stay pure motions/searches; refresh is
-`gr`, and the portal auto-refresh toggle is `ga`.  The raw (non-Evil) keymaps
-keep single-key actions such as `g` refresh, portal `a` auto-toggle, and
-Credentials `a` account-link.
+`gr`, and the portal auto-refresh toggle is `ga`. Credentials uses universal
+uppercase `A/U/R/X` actions in both raw and Evil modes, while raw Emacs retains
+lowercase compatibility aliases. The raw (non-Evil) keymaps otherwise keep
+single-key actions such as `g` refresh and portal `a` auto-toggle.
 
 ## Local UI compatibility matrix
 

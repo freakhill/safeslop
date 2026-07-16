@@ -10,6 +10,16 @@ OFF-LIMITS: no secret-value entry/display/storage; no live forge calls in tests;
 
 WORKTREE: `.worktrees/0090-credential-connection-repo-picker/`
 
+POST-COMPLETION REFINEMENT: spec 0111 supersedes this spec's raw-only `a/u/p`
+key wording, credential-row-derived profile candidates, blank replacement picker,
+and success-envelope behavior. The implemented universal raw/Evil actions are
+`A/U/R/X`; project profiles come from existing `profile list`; current value-free
+scope rows prefill a before/after replacement; `X` calls the existing profile
+forge clear contract; successful mutations stay in the surface; failures retain
+a value-free retry draft. Account links remain distinct from profile scopes,
+policy writes still require re-trust, and every no-values/no-live-discovery/session-
+owned lifecycle law remains unchanged.
+
 ## Problem
 
 The Credentials surface can show declared credential posture, but activation still requires leaving Emacs and hand-writing CUE for the two hardest steps: linking forge accounts and declaring which repositories receive read/write credentials.

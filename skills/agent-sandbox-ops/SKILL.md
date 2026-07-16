@@ -200,10 +200,15 @@ write, and `q` cancels. `r` fetches a fresh `profile show` evaluation and displa
 it before final launch confirmation; the CLI launch gates remain authoritative.
 Arbitrary custom host mounts are deferred until a mount capability model is
 specified.
-`C-c s K` opens the Credentials surface: `a` links GitHub App / Forgejo accounts
-using refs/ids only, `u` unlinks, and `p` opens the repo picker that writes
-through `profile credentials set` (origin inference or manual `owner/repo` rows;
-live repo discovery is deferred).
+`C-c s K` opens the Credentials surface. Universal raw/Evil keys: `A` links a
+GitHub App/Forgejo account using refs/ids only, `U` unlinks the reusable account,
+`R` configures a project profile's origin/manual `owner/repo` scopes, and `X`
+clears only that profile's forge scopes (`g` refresh raw, `gr` Evil). Create or
+clone a project profile first; builtins are immutable. `R` works when credential
+rows are empty, preloads existing read/write scopes, confirms full replacement,
+and retains a value-free failed draft for `K → R` retry. `R`/`X` write through
+`profile credentials set|clear`; review and re-trust changed policy bytes. Live
+repo discovery remains deferred.
 
 `C-c s P` opens the Sessions portal. The tab strip shows each surface's direct
 switch key (`P` Sessions, `F` Profiles, `K` Credentials); `TAB`/`S-TAB` or

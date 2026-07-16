@@ -38,7 +38,7 @@ WORKTREE: `.worktrees/0111-credentials-journey-ux/`
   VERIFY:   `emacs --batch -L emacs -l ert -l emacs/test/safeslop-test.el -l emacs/test/safeslop-profiles-test.el -l emacs/test/safeslop-credentials-test.el --eval '(ert-run-tests-batch-and-exit "safeslop-test-credentials-journey-.*\\(first-run\\|existing\\|clear\\|retry\\)")'`
   EXPECTED: Empty-profile setup completes; unchanged repos survive focused edits; removal is distinct from unlink; failure retry preserves value-free inputs; no mutation occurs on cancel or failed fetch.
 
-- [ ] Synchronize docs and replay the journeys
+- [x] Synchronize docs and replay the journeys
   FILE:     `README.md`, `emacs/README.md`, `skills/agent-key-lifecycle/SKILL.md`, `skills/agent-sandbox-ops/SKILL.md`, `specs/0090-credential-connection-repo-picker.md`, `specs/research/2026-07-16-credentials-journey-baseline.md`, `specs/0111-credentials-journey-ux.md`
   CHANGE:   Document universal keys, first-run sequence, project-vs-account removal, prefilled replacement semantics, retry, policy re-trust, and no live discovery; append post-fix key traces and completion scores; mark 0090's original empty-state/key wording superseded only by 0111.
   VERIFY:   `git diff --check && rg -n 'A.*link|R.*repo|X.*clear|re-trust|post-fix|5/5|0111' README.md emacs/README.md skills/agent-key-lifecycle/SKILL.md skills/agent-sandbox-ops/SKILL.md specs/0090-credential-connection-repo-picker.md specs/research/2026-07-16-credentials-journey-baseline.md`

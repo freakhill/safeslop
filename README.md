@@ -682,9 +682,22 @@ exit) or **ref-backed**, and — for the ref-backed ones — a value-free **read
 status**: `resolvable`, `missing`, `op-signed-out`, `op-unavailable`, `ephemeral`,
 or `ambient` (host SSO/ADC). The header also shows linked GitHub App / Forgejo
 account links from `creds status --output json` without token/key refs or values.
-Keys: `RET`/`i` inspect, `a` link a GitHub App or Forgejo account using refs/ids
-only, `u` unlink an account, `p` open the repo picker, `e` opens the
-`safeslop.cue` credentials block, and `g` re-probes.
+Universal raw/Evil keys are: `RET`/`i` inspect, `A` link a GitHub App or Forgejo
+account using refs/ids only, `U` unlink an account, `R` configure profile
+repository scopes, `X` clear only a profile's GitHub/Forgejo scopes, and `e` open
+the `safeslop.cue` credentials block. Refresh is `g` in raw Emacs and `gr` in
+Evil normal state. Lowercase `a`/`u`/`p` remain raw-Emacs compatibility aliases.
+
+For first-time setup, create or clone a **project** profile first (builtins are
+immutable), then press `A` to link the host account and `R` to assign origin or
+explicit read/write repositories. Account identity is reviewed value-free before
+linking. `R` loads all project profiles even when the credential table is empty,
+prefills existing provider/mode/read/write scopes, and confirms a before/after
+full replacement; changing provider clears only the other forge declaration.
+`X` removes profile forge scopes while retaining reusable account links and
+unrelated credential providers. A failed scope write retains its value-free draft:
+return with `K` and press `R` to correct/retry. Successful scope changes alter
+policy bytes, so review and re-trust before launching a new session.
 
 The surface is backed by `safeslop creds list [safeslop.cue] --output json`,
 `safeslop creds show <profile> --output json`, `safeslop creds status --output
@@ -692,7 +705,7 @@ json`, and `safeslop profile credentials set|clear ... --output json` for
 structured profile credential mutation. The repo picker can choose origin
 inference or manually entered `owner/repo` rows with read/write access and writes
 `credentials.github` or `credentials.forgejo` while preserving other credential
-providers; setting one forge clears the other. live repo discovery is
+providers; setting one forge clears the other. Live repo discovery is
 deliberately deferred: GitHub listing would require an installation token and
 Forgejo listing would use an account-wide token outside this slice's
 session-owned lifecycle. The readiness probe resolves each ref only to keep the

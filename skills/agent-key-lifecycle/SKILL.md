@@ -46,8 +46,15 @@ enumerate every declared secret/credential across profiles with a value-free
 **readiness status** (does its `op://`/`env:` ref resolve now? is the key
 `ephemeral` or the cloud auth `ambient`?). The probe resolves each ref only to
 keep the pass/fail result and discards the value — no secret is read into the
-output. This is surfaced in Emacs as the Credentials surface (`C-c s K`), which
-also has `a` account link, `u` unlink, and `p` repo picker actions. It never
+output. This is surfaced in Emacs as the Credentials surface (`C-c s K`). Its universal
+raw/Evil actions are `A` link account, `U` unlink account, `R` configure profile
+repository scopes, and `X` clear only profile GitHub/Forgejo scopes (`g` refreshes
+in raw Emacs, `gr` in Evil). First create/clone a project profile, then use
+`A → R`; builtins are immutable. `R` sources candidates from `profile list` even
+when no credential rows exist, preloads current value-free read/write scopes, and
+confirms the complete replacement. Failed writes retain a value-free draft for
+`K → R` retry. Scope changes modify policy bytes and require review/re-trust.
+Account unlink and profile clear are deliberately separate. The surface never
 reveals values and never mints/revokes; staging stays at run time and revocation
 at `session stop`.
 

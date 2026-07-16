@@ -53,3 +53,24 @@ Use a vertical, trace-driven repair rather than rewriting the panel:
 - replay the same key journeys in raw, Evil, and Doom/Evil matrix slots.
 
 Rejected: a new form/wizard framework (too large), key/docs-only repair (leaves first-run/removal/data bugs), adding profile names to the creds JSON wire (unnecessary public-surface expansion), live repository discovery (credential-lifecycle expansion), and live account/provider tests.
+
+## Post-fix replay
+
+The same raw/Evil key harness produced:
+
+```text
+TRACE scenario=raw-link-account key=A binding=safeslop-credentials-link-account outcome=task-action
+TRACE scenario=raw-pick-repositories key=R binding=safeslop-credentials-pick-repositories outcome=task-action
+TRACE scenario=raw-unlink-account key=U binding=safeslop-credentials-unlink-account outcome=task-action
+TRACE scenario=raw-clear-profile-forge key=X binding=safeslop-credentials-clear-profile-forge outcome=task-action
+TRACE scenario=raw-guidance link=true repos=true profile=true refresh=true
+TRACE scenario=evil-link-account key=A binding=safeslop-credentials-link-account outcome=task-action
+TRACE scenario=evil-pick-repositories key=R binding=safeslop-credentials-pick-repositories outcome=task-action
+TRACE scenario=evil-unlink-account key=U binding=safeslop-credentials-unlink-account outcome=task-action
+TRACE scenario=evil-clear-profile-forge key=X binding=safeslop-credentials-clear-profile-forge outcome=task-action
+TRACE scenario=evil-guidance refresh=true
+```
+
+Seven hermetic journey tests then passed: first-run profile discovery with no credential rows, account confirmation/context, existing mixed-scope prefill and replacement warning, profile-only forge clear, value-free failed-draft retry, guidance, and universal key dispatch. The raw/Evil/Doom-Evil UI matrix resolves every displayed action. Mixed GitHub/Forgejo inspection now reports each repository's own read/write access.
+
+Post-fix scores: raw first-run **5/5**, Evil first-run **5/5**, existing scope change/removal **4/5** (manual repo text remains because live discovery is deliberately deferred), failure recovery **4/5** (draft is retained; correction still reopens `R`). No live account, forge, 1Password, secret, network, or session state was touched.
