@@ -110,22 +110,37 @@ terminal cells, so a wide-rune name (CJK/emoji, N1) can't overflow the row."
     ((or "exited" "failed" "error" "cancelled") 'error)
     (_ 'default)))
 
+(defconst safeslop-portal--status-width 44
+  "Display width of Status plus a bounded terminal failure reason.")
+
 (defun safeslop-portal--status-help (sess)
   "Return a one-line lifecycle/safety summary for SESS."
-  (let ((socket (safeslop-portal--field sess 'socket))
-        (revoked (eq (alist-get 'credentials_revoked sess) t))
-        (err (safeslop-portal--field sess 'last_error)))
+  (let* ((socket (safeslop-portal--field sess 'socket))
+         (revoked (eq (alist-get 'credentials_revoked sess) t))
+         (failure (safeslop-session--structured-failure sess))
+         (reason (or (alist-get 'summary failure)
+                     (safeslop-session--failure-safe-text
+                      (alist-get 'last_error sess))))
+         (action (alist-get 'action failure)))
     (string-join
      (delq nil (list (safeslop-session--posture-help sess)
                      (if (and (stringp socket) (not (string-empty-p socket))) "detached" "coupled")
                      (if revoked "credentials revoked" "credentials live")
-                     (unless (string-empty-p err) (concat "last error: " err))))
+                     (when reason (concat (if failure "failure: " "last error: ") reason))
+                     (when action (concat "action: " action))))
      " · ")))
 
 (defun safeslop-portal--status-cell (status &optional sess)
-  "Return STATUS as a tabulated-list cell coloured by its status face."
-  (apply #'propertize status 'face (safeslop-portal--status-face status)
-         (when sess (list 'help-echo (safeslop-portal--status-help sess)))))
+  "Return STATUS with a visible bounded failure reason for terminal rows."
+  (let* ((terminal (member status '("stopped" "exited" "failed" "error" "cancelled")))
+         (reason (and terminal sess (safeslop-session--failure-summary sess)))
+         (text (if reason
+                   (truncate-string-to-width
+                    (format "%s — %s" status reason)
+                    safeslop-portal--status-width nil nil "…")
+                 status)))
+    (apply #'propertize text 'face (safeslop-portal--status-face status)
+           (when sess (list 'help-echo (safeslop-portal--status-help sess))))))
 
 (defun safeslop-portal--status-legend ()
   "Return a one-line legend for status colours."
@@ -685,7 +700,7 @@ A nil or non-positive interval leaves the portal static (manual `g' only)."
                 '("Agent" 12 nil)
                 '("Env" 10 nil)
                 '("Net" 5 nil)
-                '("Status" 10 nil)
+                (list "Status" safeslop-portal--status-width nil)
                 '("PID" 7 nil)
                 '("Age" 6 nil)
                 '("Recipe" 24 nil)

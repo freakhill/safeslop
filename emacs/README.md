@@ -68,7 +68,7 @@ network, status, PID, age, recipe/image, workspace — that you act on in place:
 | `r` | run the created session at point coupled (same risk confirm) |
 | `R` | start detached after a staged-credential lifetime warning |
 | `A` | reattach only when a detached supervisor socket exists |
-| `i` | details buffer (lifecycle, credentials, last error, next action; tier-coloured like the table) |
+| `i` | details buffer (lifecycle, credentials, structured failure/action, next action; tier-coloured like the table) |
 | `s` | stop, revoke credentials, and tear down the boundary |
 | `x` | remove one stopped/created session record from the list |
 | `X` | prune — remove every stopped session at once |
@@ -90,13 +90,18 @@ and rename is allowed in any status.  When set, it rides inside the Session cell
 as a suffix (`sess-abcd… my-label`, truncated to the cell) and in the annotated
 session pickers — never in its own column.
 
-A session that has exited stays listed as `stopped` so you can read its exit code
-and last error; `x` clears one such record and `X` clears them all in one call, so
-the portal never fills up with dead-session corpses.  `x`/`X` refuse a running
-session (stop it first with `s`); the CLI (`session rm` / `session prune`) revokes
-any still-live staged credentials before deleting a record, and `prune` also
-reconciles a crashed session (marked running but whose process is gone) to
-`stopped` and sweeps it in the same pass.
+A session that has exited stays listed as `stopped`.  Failed rows include a
+bounded, visible engine-owned reason in the Status column; `i` shows the full
+structured summary, action, and stable code, with legacy `last_error` only as a
+fallback.  If a coupled terminal exits during startup, Emacs fetches status once,
+opens that durable detail view, refreshes a live portal, and emits one deduplicated
+summary/action message.  Raw resolver paths, command output, and secret values are
+not rendered.  `x` clears one stopped record and `X` clears them all, so the portal
+never fills up with dead-session corpses.  `x`/`X` refuse a running session (stop
+it first with `s`); the CLI (`session rm` / `session prune`) revokes any still-live
+staged credentials before deleting a record, and `prune` also reconciles a crashed
+session (marked running but whose process is gone) to `stopped` and sweeps it in
+the same pass.
 
 Detached sessions are explicit because they survive the Emacs buffer and keep
 staged credentials until stop/revoke.  Coupled run remains the default.

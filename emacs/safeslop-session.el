@@ -390,14 +390,68 @@ Idempotent per buffer via `safeslop-session--fallback-done'."
         (setq safeslop-session--fallback-done t)
         (safeslop-session-status-fallback session-id)))))
 
+(defconst safeslop-session--failure-text-width 160
+  "Maximum displayed width of one structured failure summary or action.")
+
+(defconst safeslop-session--failure-unsafe-patterns
+  '("op://" "begin .*key" "seeded-secret" "\\btoken\\b"
+    "/Users/" "/home/" "/tmp/" "\\.ssh/" "\\.aws/" "\\.kube/")
+  "Case-insensitive patterns suppressed from failure UI as a defensive backstop.")
+
+(defun safeslop-session--failure-safe-text (value)
+  "Return bounded one-line VALUE when display-safe, otherwise nil."
+  (when (and (stringp value) (not (string-empty-p value)))
+    (let* ((one-line (string-trim
+                      (replace-regexp-in-string "[[:cntrl:]]+" " " value)))
+           (case-fold-search t))
+      (unless (or (string-empty-p one-line)
+                  (cl-some (lambda (re) (string-match-p re one-line))
+                           safeslop-session--failure-unsafe-patterns))
+        (truncate-string-to-width one-line safeslop-session--failure-text-width
+                                  nil nil "…")))))
+
+(defun safeslop-session--structured-failure (data)
+  "Return DATA's validated, value-free v1 `last_failure' alist, or nil."
+  (let* ((raw (and (listp data) (alist-get 'last_failure data)))
+         (version (and (listp raw) (alist-get 'version raw)))
+         (code (and (listp raw) (alist-get 'code raw)))
+         (summary (and (listp raw)
+                       (safeslop-session--failure-safe-text
+                        (alist-get 'summary raw))))
+         (action (and (listp raw)
+                      (safeslop-session--failure-safe-text
+                       (alist-get 'action raw)))))
+    (when (and (equal version 1) (stringp code)
+               (string-match-p "\\`[a-z0-9_]+\\'" code)
+               summary action)
+      `((version . ,version) (code . ,code)
+        (summary . ,summary) (action . ,action)))))
+
+(defun safeslop-session--failure-summary (data)
+  "Return structured failure summary from DATA, with safe legacy fallback."
+  (or (alist-get 'summary (safeslop-session--structured-failure data))
+      (safeslop-session--failure-safe-text (alist-get 'last_error data))))
+
+(defvar safeslop-session--reported-failures (make-hash-table :test #'equal)
+  "Failure notification keys already shown during this Emacs process.")
+
 (defun safeslop-session--report-terminal-failure (session-id)
-  "Open SESSION-ID details when its terminal exits with a stored failure reason."
+  "Show SESSION-ID's stored failure once and refresh a live portal."
   (when-let* ((data (safeslop-session--fetch-data session-id))
-              (reason (alist-get 'last_error data))
-              ((stringp reason))
-              ((not (string-empty-p reason))))
-    (message "safeslop session failed: %s" reason)
-    (safeslop-session-detail session-id data)))
+              (reason (safeslop-session--failure-summary data)))
+    (let* ((failure (safeslop-session--structured-failure data))
+           (action (alist-get 'action failure))
+           (key (if failure
+                    (list session-id (alist-get 'version failure)
+                          (alist-get 'code failure))
+                  (list session-id 'legacy reason))))
+      (unless (gethash key safeslop-session--reported-failures)
+        (puthash key t safeslop-session--reported-failures)
+        (message "safeslop session failed: %s%s"
+                 reason (if action (concat " " action) ""))
+        (safeslop-session-detail session-id data)
+        (when (fboundp 'safeslop-portal--reveal-session)
+          (safeslop-portal--reveal-session session-id))))))
 
 ;;; Self-describing live buffers (specs/0086 T3) -----------------------------
 ;; A live agent buffer used to be named by opaque session id (`*safeslop-<id>*'),
@@ -1167,7 +1221,13 @@ the portal so row actions refresh in place instead of stealing the window."
            (socket (field 'socket))
            (network (field 'network))
            (revoked (eq (alist-get 'credentials_revoked data) t))
-           (last-error (field 'last_error))
+           (failure (safeslop-session--structured-failure data))
+           (failure-summary (alist-get 'summary failure))
+           (failure-action (alist-get 'action failure))
+           (failure-code (alist-get 'code failure))
+           (last-error (and (null failure)
+                            (safeslop-session--failure-safe-text
+                             (alist-get 'last_error data))))
            (detached (and (not (string-empty-p socket)) socket)))
       (mapconcat
        #'identity
@@ -1191,7 +1251,10 @@ the portal so row actions refresh in place instead of stealing the window."
                    (line "Credentials:" (if revoked "revoked" "live") (if revoked 'success 'warning))
                    (unless (string-empty-p (field 'pid)) (line "PID:" (field 'pid)))
                    (unless (string-empty-p (field 'exit_code)) (line "Exit code:" (field 'exit_code)))
-                   (unless (string-empty-p last-error) (line "Last error:" last-error 'error))
+                   (when failure-summary (line "Failure:" failure-summary 'error))
+                   (when failure-action (line "Action:" failure-action))
+                   (when failure-code (line "Failure code:" failure-code 'shadow))
+                   (when last-error (line "Last error:" last-error 'error))
                    (when detached (line "Socket:" socket))
                    ""
                    (pcase status

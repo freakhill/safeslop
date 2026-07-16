@@ -32,7 +32,7 @@ WORKTREE: `.worktrees/0107-builtin-projection-symlinks/`
   VERIFY: `go test ./internal/cli -run 'Session.*Failure|Projection' -count=1 -v`
   EXPECTED: a failed builtin Fish projection is visibly stopped/failed with a structured reason in every session response.
 
-- [ ] Promote failure reasons in Emacs
+- [x] Promote failure reasons in Emacs
   FILE: `emacs/safeslop-session.el`, `emacs/safeslop-portal.el`, `emacs/test/safeslop-test.el`, `emacs/README.md`
   CHANGE: terminal sentinel fetches session status on early process exit, renders a persistent value-free failure buffer/banner, refreshes portal data, deduplicates notification, and adds bounded visible failure reason to stopped/failed rows; detail renders structured summary/action first with legacy fallback.
   VERIFY: `make test-emacs EMACS=$(command -v emacs)`

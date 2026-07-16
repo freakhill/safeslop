@@ -336,6 +336,21 @@ mysterious bare table."
     (should (string-suffix-p
              "coupled · credentials live · last error: agent exited" help))))
 
+(ert-deftest safeslop-test-portal-status-cell-shows-structured-failure ()
+  "Stopped rows show a bounded structured reason without relying on a tooltip."
+  (let* ((summary "Config projection points to an excluded credential or cache path.")
+         (sess `((status . "stopped")
+                 (last_error . "legacy seeded-secret /Users/operator/.ssh/config")
+                 (last_failure . ((version . 1) (phase . "projection")
+                                  (code . "projection_target_excluded")
+                                  (summary . ,summary)
+                                  (action . "Remove that link from the projected config path.")))))
+         (cell (safeslop-portal--status-cell "stopped" sess)))
+    (should (string-match-p "stopped.*Config projection" cell))
+    (should (<= (string-width cell) safeslop-portal--status-width))
+    (should-not (string-match-p "seeded-secret" cell))
+    (should (string-match-p summary (get-text-property 0 'help-echo cell)))))
+
 (ert-deftest safeslop-test-portal-status-help-old-record-posture ()
   "Old credential-less rows get explicit env/net posture and no-scope text."
   (let ((help (safeslop-portal--status-help
@@ -1602,6 +1617,49 @@ after its name became descriptive (specs/0086 T3)."
             (should (string-match-p "Policy changed" (buffer-string)))
             (should-not (lookup-key (current-local-map) (kbd "a")))))
       (when (get-buffer review) (kill-buffer review)))))
+
+(ert-deftest safeslop-test-session-detail-prefers-structured-failure ()
+  "Structured summary/action render first and suppress unsafe legacy internals."
+  (let ((detail (safeslop-session--detail-format
+                 '((session_id . "sess-fail") (status . "stopped")
+                   (workspace . "/w") (environment . "container") (network . "deny")
+                   (last_error . "seeded-secret /Users/operator/.ssh/config")
+                   (last_failure . ((version . 1) (phase . "projection")
+                                    (code . "projection_target_excluded")
+                                    (summary . "Config projection points to an excluded credential or cache path.")
+                                    (action . "Remove that link from the projected config path.")))))))
+    (should (string-match-p "Failure:.*Config projection points" detail))
+    (should (string-match-p "Action:.*Remove that link" detail))
+    (should (string-match-p "Failure code:.*projection_target_excluded" detail))
+    (should-not (string-match-p "seeded-secret" detail))
+    (should-not (string-match-p "/Users/operator" detail))))
+
+(ert-deftest safeslop-test-session-terminal-structured-failure-deduplicates ()
+  "A structured startup failure notifies once, opens detail, and refreshes portal."
+  (let ((safeslop-session--reported-failures (make-hash-table :test #'equal))
+        shown messages revealed)
+    (cl-letf (((symbol-function 'safeslop-session--fetch-data)
+               (lambda (_id)
+                 '((session_id . "sess-fail")
+                   (last_error . "seeded-secret /Users/operator/.ssh/config")
+                   (last_failure . ((version . 1) (phase . "projection")
+                                    (code . "projection_target_excluded")
+                                    (summary . "Config projection points to an excluded credential or cache path.")
+                                    (action . "Remove that link from the projected config path."))))))
+              ((symbol-function 'safeslop-session-detail)
+               (lambda (id data) (push (list id data) shown)))
+              ((symbol-function 'safeslop-portal--reveal-session)
+               (lambda (id) (push id revealed)))
+              ((symbol-function 'message)
+               (lambda (fmt &rest args) (push (apply #'format fmt args) messages))))
+      (safeslop-session--report-terminal-failure "sess-fail")
+      (safeslop-session--report-terminal-failure "sess-fail"))
+    (should (= (length shown) 1))
+    (should (= (length messages) 1))
+    (should (= (length revealed) 1))
+    (should (string-match-p "Config projection points" (car messages)))
+    (should (string-match-p "Remove that link" (car messages)))
+    (should-not (string-match-p "seeded-secret" (car messages)))))
 
 (ert-deftest safeslop-test-session-terminal-failure-opens-detail ()
   "A fast terminal exit with a stored failure opens durable session details."
