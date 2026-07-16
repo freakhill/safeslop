@@ -184,6 +184,23 @@ func TestStagePiOAuthLockAndStableRead(t *testing.T) {
 			t.Fatalf("stable retry staged wrong bytes: %s", body)
 		}
 	})
+	t.Run("replacement-retries", func(t *testing.T) {
+		_, auth := piOAuthFixture(t, now, validPiOAuthJSON(now.Add(time.Hour), "ACCESS_OLD"))
+		piOAuthAfterRead = func(attempt int) {
+			if attempt == 0 {
+				must(t, os.Rename(auth, auth+".replaced"))
+				must(t, os.WriteFile(auth, []byte(validPiOAuthJSON(now.Add(time.Hour), "ACCESS_NEW")), 0o600))
+			}
+		}
+		stage := t.TempDir()
+		if _, err := StagePiOAuth(piOAuthPolicy, stage); err != nil {
+			t.Fatal(err)
+		}
+		body, _ := os.ReadFile(stagedPiAuthPath(stage))
+		if !strings.Contains(string(body), "ACCESS_NEW") || strings.Contains(string(body), "ACCESS_OLD") {
+			t.Fatalf("replacement retry staged wrong bytes: %s", body)
+		}
+	})
 }
 
 func TestStagePiOAuthUsesLockedTenAttemptRetryBudget(t *testing.T) {
@@ -241,6 +258,30 @@ func TestStagePiOAuthRejectsMalformedAndExpiryBoundaries(t *testing.T) {
 			t.Fatalf("headroom+1ms rejected: %v", err)
 		}
 	})
+}
+
+func TestStagePiOAuthRechecksHeadroomBeforeWrite(t *testing.T) {
+	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
+	piOAuthFixture(t, now, validPiOAuthJSON(now.Add(20*time.Minute), "ACCESS"))
+	calls := 0
+	piOAuthNow = func() time.Time {
+		calls++
+		if calls == 1 {
+			return now
+		}
+		return now.Add(10 * time.Minute)
+	}
+	stage := t.TempDir()
+	_, err := StagePiOAuth(piOAuthPolicy, stage)
+	if PiOAuthErrorCode(err) != PiOAuthNearExpiry {
+		t.Fatalf("second headroom check error = %v", err)
+	}
+	if calls < 2 {
+		t.Fatalf("clock calls = %d, want at least two", calls)
+	}
+	if _, statErr := os.Stat(stagedPiAuthPath(stage)); !os.IsNotExist(statErr) {
+		t.Fatalf("near-expiry second check wrote auth: %v", statErr)
+	}
 }
 
 func TestStagePiOAuthMissingAndStageFailure(t *testing.T) {

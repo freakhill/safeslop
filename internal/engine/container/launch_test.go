@@ -82,6 +82,40 @@ func TestMaterializeRunScopesEgressPerAgent(t *testing.T) {
 
 // TestProvisionThreadsProjectionIntoCompose pins the descriptor-snapshot launch contract: compose
 // mounts a private stage snapshot, never the live source under $HOME. No docker is invoked.
+func TestMaterializeRunPiOAuthSentinelStaysInAuthFile(t *testing.T) {
+	stage := t.TempDir()
+	providerDir := filepath.Join(stage, "pi", "openai-codex")
+	if err := os.MkdirAll(providerDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const access = "ACCESS_SENTINEL_ONLY_IN_AUTH"
+	authPath := filepath.Join(providerDir, "auth.json")
+	if err := os.WriteFile(authPath, []byte(`{"openai-codex":{"type":"api_key","key":"`+access+`"}}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := materializeRun(composeParams{RuntimeDir: stage, StageDir: stage, Workspace: "/workspace"}, false); err != nil {
+		t.Fatal(err)
+	}
+	forbidden := []string{access, "REFRESH_SENTINEL", "OTHER_PROVIDER_SENTINEL", "/home/private/.pi/agent/auth.json"}
+	if err := filepath.Walk(stage, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() || path == authPath {
+			return err
+		}
+		body, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		for _, sentinel := range forbidden {
+			if strings.Contains(string(body), sentinel) {
+				t.Errorf("Pi OAuth sentinel %q leaked into %s", sentinel, filepath.Base(path))
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestProvisionThreadsProjectionIntoCompose(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
