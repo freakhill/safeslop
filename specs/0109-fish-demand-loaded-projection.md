@@ -26,7 +26,7 @@ WORKTREE: `.worktrees/0109-fish-demand-loaded-projection/`
   VERIFY:   `go test ./internal/engine/policy ./internal/engine/container ./internal/cli -run 'BuiltinFish|FishBuiltin|AgentArgvAcceptsFish|SessionProfile.*Builtin' -count=1 -v`
   EXPECTED: Two-glob projection, exact hash migration, normal argv, snapshot minimization, and fail-closed old records pass.
 
-- [ ] Synchronize operator documentation
+- [x] Synchronize operator documentation
   FILE:     `README.md`, `skills/agent-sandbox-ops/SKILL.md`, `specs/0096-contained-hybrid-default-profiles.md`, `specs/0108-safe-optional-projection-globs.md`, `specs/0109-fish-demand-loaded-projection.md`
   CHANGE:   Replace broad Fish-config wording/four-item allowlist with exact demand-loaded functions/completions; explain eager host startup exclusion and fresh-session migration while preserving snapshot laws.
   VERIFY:   `git diff --check && rg -n 'demand-loaded|config\.fish|conf\.d|fresh Fish session' README.md skills/agent-sandbox-ops/SKILL.md specs/0096-contained-hybrid-default-profiles.md specs/0108-safe-optional-projection-globs.md`

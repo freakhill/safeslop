@@ -8,6 +8,8 @@ OFF-LIMITS: no following terminal glob symlinks; no absolute/outside/excluded ta
 
 WORKTREE: `.worktrees/0108-safe-optional-projection-globs/`
 
+POST-COMPLETION REFINEMENT: spec 0109 removes eager host `config.fish` and `conf.d/*.fish` from the builtin Fish allowlist. This spec's physical-regular optional-glob contract remains active for the retained demand-loaded function/completion globs and for any future engine-owned optional glob; no snapshot safety law changes.
+
 - [x] Land the approved selector decision
   FILE:     `specs/research/2026-07-16-optional-projection-globs-ayo.md`, `specs/research/2026-07-16-optional-projection-globs-flo.md`, `specs/0108-safe-optional-projection-globs.md`
   CHANGE:   Record the reproduced topology, prior-art lessons, physical-regular selector verdict, deterministic laws, rejected alternatives, and executable plan.

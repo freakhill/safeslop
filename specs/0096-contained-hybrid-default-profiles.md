@@ -63,11 +63,11 @@ Initial allowlist:
 - pi/agent config:
   - `~/.pi/agent/AGENTS.md` (required file)
   - `~/.pi/agent/skills/` (optional directory; shared instruction/code corpus)
-- fish config:
-  - `~/.config/fish/config.fish` (optional file)
-  - `~/.config/fish/conf.d/*.fish` (optional glob)
+- fish demand-loaded assets (spec 0109; host startup scripts are deliberately excluded):
   - `~/.config/fish/functions/*.fish` (optional glob)
   - `~/.config/fish/completions/*.fish` (optional glob)
+
+Builtin Fish does not resolve, snapshot, or create skipped rows for host `config.fish` or `conf.d/*.fish`; normal container-owned startup remains authoritative. The exact embedded CUE bytes carry a projection-v2 marker, so old created Fish sessions fail hash fidelity and operators create a fresh Fish session.
 - zsh/shell config:
   - `~/.zshrc` (optional file)
   - `~/.zprofile` (optional file)

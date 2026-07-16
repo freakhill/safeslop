@@ -128,24 +128,29 @@ Debian snapshot. Image handlers verify the selected artifact before installation
 so profile inspection fails closed if a package lacks a reviewed build path.
 
 Builtin host projection is read-only and allowlist-only. Pi/Claude receive pi
-instructions and skills; Fish receives Fish configuration; Zsh receives Zsh and
-Starship configuration. On macOS and Linux, sources are walked from a pinned home
-descriptor and copied into a private per-session `0700` snapshot; Compose mounts
-only those completed snapshots under opaque paths, never the live source. This
-accepts ordinary **relative** in-home layouts such as
-`~/.config -> dotfiles/files/.config`. Fish's optional `*.fish` globs select only
-physical regular files: terminal symlinks, directories, and special-file matches
-are never followed or opened and produce one aggregate `skipped-nonregular`
-manifest status while safe siblings continue. This is selection, not new read
-authority. Configured/direct links that are absolute, escape home, or enter an
-excluded credential/cache root still fail closed, as do internal recursive-tree
-links, required-glob non-regular matches, loops, mount crossings, source races,
-and unsupported descriptor/mount-identity platforms; there is no pathname
-fallback. The workspace remains the only read-write host mount. All of `$HOME`,
-raw Git configuration, `.ssh`, cloud/Kubernetes/Docker config, npm/cargo
-credentials, browser/keychain data, and safeslop state is never projected.
-Network authority still starts denied and can be expanded only through the
-explicit session-scoped grant commands below.
+instructions and skills; Fish receives only demand-loaded functions/completions;
+Zsh receives Zsh and Starship configuration. The builtin Fish profile deliberately
+does not copy or execute host `config.fish` or `conf.d` startup scripts: arbitrary
+host startup assumptions are not portable into the contained OS/tool set. Normal
+container-owned Fish startup remains active. Create a fresh Fish session after
+this builtin contract update; exact-byte hash fidelity rejects old created records
+instead of silently changing them. On macOS and Linux, sources are walked from a
+pinned home descriptor and copied into a private per-session `0700` snapshot;
+Compose mounts only those completed snapshots under opaque paths, never the live
+source. This accepts ordinary **relative** in-home layouts such as
+`~/.config -> dotfiles/files/.config`. Fish's retained optional `*.fish` globs
+select only physical regular files: terminal symlinks, directories, and
+special-file matches are never followed or opened and produce one aggregate
+`skipped-nonregular` manifest status while safe siblings continue. This is
+selection, not new read authority. Configured/direct links that are absolute,
+escape home, or enter an excluded credential/cache root still fail closed, as do
+internal recursive-tree links, required-glob non-regular matches, loops, mount
+crossings, source races, and unsupported descriptor/mount-identity platforms;
+there is no pathname fallback. The workspace remains the only read-write host
+mount. All of `$HOME`, raw Git configuration, `.ssh`, cloud/Kubernetes/Docker
+config, npm/cargo credentials, browser/keychain data, and safeslop state is never
+projected. Network authority still starts denied and can be expanded only through
+the explicit session-scoped grant commands below.
 
 `session create --profile`, `session status`, and `session list` include
 value-free credential scope in the JSON contract as `credential_scopes` for

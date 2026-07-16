@@ -136,18 +136,22 @@ safeslop session create --profile pi --output json
 The four builtins (`claude`, `fish`, `pi`, `zsh`) start at container + deny and
 resolve the `personal` bundle from pinned image inputs: binary URL/SHA256 per
 architecture and exact Debian-snapshot apt coordinates. Pi/Claude project pi
-instructions and skills, Fish projects Fish config, and Zsh projects Zsh/Starship
-config. On macOS/Linux the engine follows only relative source-path links that
-stay inside the pinned home root, copies descriptor-pinned bytes into a private
-`0700` per-session snapshot, and mounts only that snapshot before copying into
-ephemeral home. `~/.config -> dotfiles/files/.config` is supported. Optional Fish
-globs select physical regular matches; terminal links/directories/special files
-are never followed or opened and yield one aggregate `skipped-nonregular` status
-while eligible siblings continue. Direct/configured links, required globs, and
-recursive trees remain fail-closed for absolute/escaping links, excluded targets,
-internal links, loops, special files, mount crossings, or concurrent changes;
-unsupported OS/filesystem safety has no pathname fallback. Only the workspace is
-a read-write host mount. Never broaden projection to all home, raw Git config, or
+instructions and skills, Fish projects only demand-loaded `functions/*.fish` and
+`completions/*.fish`, and Zsh projects Zsh/Starship config. Builtin Fish never
+copies or auto-executes host `config.fish`/`conf.d`; normal container-owned Fish
+startup is authoritative. Create a fresh Fish session after this contract update,
+because exact-byte builtin hash fidelity rejects old records. On macOS/Linux the
+engine follows only relative source-path links that stay inside the pinned home
+root, copies descriptor-pinned bytes into a private `0700` per-session snapshot,
+and mounts only that snapshot before copying into ephemeral home.
+`~/.config -> dotfiles/files/.config` is supported. Retained optional Fish globs
+select physical regular matches; terminal links/directories/special files are
+never followed or opened and yield one aggregate `skipped-nonregular` status while
+eligible siblings continue. Direct/configured links, required globs, and recursive
+trees remain fail-closed for absolute/escaping links, excluded targets, internal
+links, loops, special files, mount crossings, or concurrent changes; unsupported
+OS/filesystem safety has no pathname fallback. Only the workspace is a read-write
+host mount. Never broaden projection to all home, raw Git config, or
 credential-bearing paths.
 A project profile of the same name wins with normal trust/provenance checks, and
 an invalid project policy fails closed rather than falling back. Progressive
