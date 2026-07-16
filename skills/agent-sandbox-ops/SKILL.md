@@ -299,7 +299,10 @@ safeslop session egress revoke --session-id ID --grant-id G --output json
 Observations never grant traffic. A grant is `session-grant / this session`;
 `dismiss` is **Keep denied** acknowledgement state, not authority, and later
 traffic reappears for review. Neither mutates `profile.egress` or `safeslop.cue`.
-Proxy update failure preserves the previous deny posture.
+Proxy update failure preserves the previous deny posture. Launch also requires the
+proxy configuration check and local listener to become ready before the agent starts.
+Failure removes the partial stack and persists only the structured
+`network_proxy_unavailable` summary/action/code, never raw Squid/Compose output.
 
 For a typed durable rule for **future sessions**, use `persistentEgress`, never
 legacy `egress`:

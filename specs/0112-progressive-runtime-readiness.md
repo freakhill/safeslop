@@ -26,7 +26,7 @@ WORKTREE: `.worktrees/0112-progressive-runtime-readiness/`
   VERIFY:   `go test ./internal/engine/policy -run 'Catalog|Pi' -count=1 -v && make check-catalog-sync`
   EXPECTED: Authored/rendered catalogs agree, Pi is pinned exactly once at the reviewed patch, and every catalog law remains green.
 
-- [ ] Synchronize operator docs and runtime smoke path
+- [x] Synchronize operator docs and runtime smoke path
   FILE:     `README.md`, `skills/agent-sandbox-ops/SKILL.md`, `ci/progressive-egress-smoke.sh`, `Makefile`, `specs/0112-progressive-runtime-readiness.md`
   CHANGE:   Document that deny/progressive launch requires a ready proxy and now fails before agent start with structured remediation. Add an opt-in real-runtime smoke that creates an isolated Fish container/deny session, proves deny→observation→exact grant→success→revoke→deny, then stop/remove cleanup; it must never touch existing sessions.
   VERIFY:   `bash -n ci/progressive-egress-smoke.sh && git diff --check && rg -n 'network_proxy_unavailable|proxy.*ready|progressive-egress-smoke' README.md skills/agent-sandbox-ops/SKILL.md Makefile ci/progressive-egress-smoke.sh`

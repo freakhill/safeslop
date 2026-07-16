@@ -14,7 +14,7 @@ CONTAINER_SRC := library/layer/container
 CONTAINER_DST := internal/engine/container/assets
 SYNCED        := allowlist.domains Dockerfile.agent Dockerfile.agent.tools
 
-.PHONY: build test test-emacs test-emacs-ui-matrix vet fmt fmtcheck check check-assets check-catalog-sync check-pivot-denylist check-host-helper-exec sync-container-assets render-catalog install install-emacs install-mcp dist clean
+.PHONY: build test test-emacs test-emacs-ui-matrix test-progressive-egress-smoke vet fmt fmtcheck check check-assets check-catalog-sync check-pivot-denylist check-host-helper-exec sync-container-assets render-catalog install install-emacs install-mcp dist clean
 
 ## Build the local binary (static — no cgo, immune to the WARP/uv install path).
 build:
@@ -38,6 +38,9 @@ test-emacs:
 
 test-emacs-ui-matrix:
 	EMACS="$(EMACS)" ci/emacs-ui-matrix.sh
+
+test-progressive-egress-smoke: build
+	SAFESLOP_BIN="$(CURDIR)/$(BINARY)" ci/progressive-egress-smoke.sh
 
 vet:
 	go vet ./...
