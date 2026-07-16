@@ -34,7 +34,7 @@ Decision notes: `specs/research/2026-07-17-hostpath-policy-ayo.md`, `specs/resea
   VERIFY:   `go test ./internal/engine/hostpath ./internal/engine/creds ./internal/cli -run 'HostPath|PiOAuth|StagePi' -count=1 -v`
   EXPECTED: Realistic same-HOME links and 0755 ancestry pass; outside/unstable/writable/cross-mount/unsafe leaf cases fail before launch; access-only bytes and public contracts are unchanged.
 
-- [ ] Seal architecture and synchronize operator contracts
+- [x] Seal architecture and synchronize operator contracts
   FILE:     `ci/hostpath-import-denylist.sh`, `Makefile`, `internal/engine/hostpath/api_test.go`, `README.md`, `emacs/README.md`, `skills/agent-key-lifecycle/SKILL.md`, `skills/agent-sandbox-ops/SKILL.md`, `specs/0113-pi-oauth-staging.md`, `specs/0114-practical-safe-hostpath-policy.md`
   CHANGE:   Add a deterministic import/API gate allowing only container/creds typed hostpath uses and rejecting generic root/path/options/accessors. Document exact same-root links, current-user non-writable `0755` ancestry, unchanged strict leaf/lock/fresh proof, and rejected outside/mount/race cases. Mark 0113 superseded only for link interpretation and ancestry threshold; use synthetic/value-free examples only.
   VERIFY:   `bash -n ci/hostpath-import-denylist.sh && make check-hostpath-imports && git diff --check && rg -n 'same-HOME|0755|0022|0600|same mount|supersed' README.md emacs/README.md skills/agent-key-lifecycle/SKILL.md skills/agent-sandbox-ops/SKILL.md specs/0113-pi-oauth-staging.md`

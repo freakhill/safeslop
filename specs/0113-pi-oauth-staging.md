@@ -10,6 +10,13 @@ WORKTREE: `.worktrees/0113-pi-oauth-staging/`
 
 Decision notes: `specs/research/2026-07-16-pi-oauth-staging-ayo.md`, `specs/research/2026-07-16-pi-oauth-staging-flo.md`.
 
+Supersession: spec 0114 supersedes only this spec's blanket source-link rejection
+and owner-only ancestry threshold. The fixed source now accepts proven relative or
+exact-absolute same-HOME links; every reached directory is current-user-owned with
+`mode & 0022 == 0` (`0755` is valid). Exact regular `0600` leaf, same mount,
+lexical lock, fresh full proof, retry, JSON, expiry, access-only staging, teardown,
+and value-free public-contract laws remain binding.
+
 - [x] Add RED policy, authority, argv, and session-scope tests
   FILE:     `internal/engine/policy/schema/schema.cue`, `internal/engine/policy/policy_test.go`, `internal/engine/policy/evaluation_test.go`, `internal/cli/cli_agentargv_test.go`, `internal/cli/cli_session_test.go`
   CHANGE:   Test the ideal `credentials.pi {provider,model}` contract: only Pi/container/deny plus literal `openai-codex/gpt-5.6-luna`; builtins absent; Authority reports honest provider-default short-lived host snapshot; Pi argv includes the exact provider/model pair; session create persists only `pi-oauth|openai-codex/gpt-5.6-luna|access snapshot, short-lived`.
@@ -55,7 +62,9 @@ Decision notes: `specs/research/2026-07-16-pi-oauth-staging-ayo.md`, `specs/rese
 Acceptance note (2026-07-17 JST): host Luna and full deny → observe → exact
 `chatgpt.com:443` grant → isolated Luna marker → revoke → deny passed. The real
 host auth bytes were unchanged and all test session/container/trust/temp state was
-removed. The host's normal `.pi/agent` is intentionally symlinked and therefore
-correctly rejected by the locked no-parent-symlink rule; the isolated acceptance
-used an owner-only temporary HOME containing only the real access+expiry fields
-(no refresh/account/other-provider data).
+removed. The host's normal `.pi/agent` was intentionally symlinked and was correctly
+rejected by the then-binding no-parent-symlink rule; the isolated acceptance used
+an owner-only temporary HOME containing only synthetic access+expiry fields (no
+refresh/account/other-provider data). Spec 0114 supersedes that link interpretation
+and accepts the proven same-HOME layout directly without weakening the remaining
+source, `0600` leaf, same-mount, staging, or teardown laws.

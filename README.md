@@ -646,9 +646,16 @@ decay-first safety guarantee.
   ```
 
   At launch safeslop safely reads the default host Pi store
-  (`~/.pi/agent/auth.json`). Both `.pi` and `agent` must be owner-only real
-  directories and `auth.json` must be an owner-only, single-link regular file;
-  symlinks and group/other permissions fail closed. Safeslop requires more than
+  (`~/.pi/agent/auth.json`). Its fixed source may traverse relative same-HOME
+  links or exact-spelling absolute links whose raw target is a proper descendant
+  of that same HOME, including links at `.pi`, `agent`, or the final leaf. HOME
+  and every reached directory must be current-user-owned with `mode & 0022 == 0`,
+  so ordinary `0755` ancestry is accepted; the ultimate file remains an exact
+  regular `0600`, current-user-owned, single-link, bounded leaf on the same mount.
+  The lexical sibling lock is checked before and after descriptor reading, then a
+  fresh full proof must match. Outside/prefix/ambiguous targets, loops, dangling
+  links, writable or wrong-owner ancestry, mount crossings, and source races fail
+  closed without exposing the resolved topology. Safeslop requires more than
   15 minutes of remaining access lifetime, and stages only a synthetic `{type:"api_key", key:<access>}` entry
   into the container's tmpfs home. It never copies the refresh token, account
   metadata, another provider, or the host file. There is no renewal, listener,

@@ -281,9 +281,14 @@ profiles: luna: {
 }
 ```
 
-Launch reads only default `~/.pi/agent/auth.json`, requires more than 15 minutes
-of access lifetime, and copies only a synthetic access snapshot into tmpfs. It
-never copies refresh/account/other-provider data and never renews. A lingering
+Launch reads only default `~/.pi/agent/auth.json`. It accepts proven relative
+same-HOME links and exact absolute same-HOME descendant links while requiring
+current-user ownership and `mode & 0022 == 0` on every reached directory (`0755`
+is valid). The leaf remains exact regular `0600`, single-link, bounded, and on the
+same mount; lexical lock checks and a fresh full proof reject outside/ambiguous
+links, writable ancestry, mount crossings, and races. Launch also requires more
+than 15 minutes of access lifetime and copies only a synthetic access snapshot
+into tmpfs. It never copies refresh/account/other-provider data and never renews. A lingering
 Pi lock is handled by waiting for host Pi or running `pi --list-models
 gpt-5.6-luna`, then starting a new session. The bearer retains provider-default
 replay authority: Luna selection and egress rules do not cryptographically

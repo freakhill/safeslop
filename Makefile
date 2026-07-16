@@ -14,7 +14,7 @@ CONTAINER_SRC := library/layer/container
 CONTAINER_DST := internal/engine/container/assets
 SYNCED        := allowlist.domains Dockerfile.agent Dockerfile.agent.tools
 
-.PHONY: build test test-emacs test-emacs-ui-matrix test-progressive-egress-smoke vet fmt fmtcheck check check-assets check-catalog-sync check-pivot-denylist check-host-helper-exec sync-container-assets render-catalog install install-emacs install-mcp dist clean
+.PHONY: build test test-emacs test-emacs-ui-matrix test-progressive-egress-smoke vet fmt fmtcheck check check-assets check-catalog-sync check-pivot-denylist check-host-helper-exec check-hostpath-imports sync-container-assets render-catalog install install-emacs install-mcp dist clean
 
 ## Build the local binary (static — no cgo, immune to the WARP/uv install path).
 build:
@@ -86,7 +86,10 @@ check-pivot-denylist:
 check-host-helper-exec:
 	ci/host-helper-exec-denylist.sh
 
-check: check-assets check-catalog-sync check-pivot-denylist check-host-helper-exec vet fmtcheck test test-emacs
+check-hostpath-imports:
+	ci/hostpath-import-denylist.sh
+
+check: check-assets check-catalog-sync check-pivot-denylist check-host-helper-exec check-hostpath-imports vet fmtcheck test test-emacs
 
 install-emacs:
 	mkdir -p "$(HOME)/.local/share/safeslop/emacs"

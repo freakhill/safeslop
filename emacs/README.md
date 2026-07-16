@@ -217,8 +217,14 @@ Pi OAuth is inspection-only in the Emacs MVP: a row exposes only
 readiness/authority, and no ref, host path, token, account, or exact expiry. There
 is no Pi OAuth mutation key. Use `e` to add the literal `credentials.pi` block to
 a Pi/container/deny **project** profile, review and re-trust the exact policy
-bytes, then create a new session. Launch requires more than 15 minutes of access
-lifetime; the snapshot has no refresh or renewal. Review the denied
+bytes, then create a new session. The fixed source accepts proven relative
+same-HOME links and exact absolute same-HOME descendant links. HOME and every
+reached directory must be current-user-owned with `mode & 0022 == 0` (`0755` is
+valid); the ultimate leaf remains regular `0600`, single-link, bounded, and on the
+same mount. The lexical lock, descriptor read, and fresh full proof remain
+mandatory; outside/ambiguous links, writable ancestry, mount crossings, and races
+fail closed. Launch requires more than 15 minutes of access lifetime; the snapshot
+has no refresh or renewal. Review the denied
 `chatgpt.com:443` observation from the Sessions surface and grant only that
 session. Stop/remove wipes local stage/tmpfs copies but does not revoke the
 upstream bearer.

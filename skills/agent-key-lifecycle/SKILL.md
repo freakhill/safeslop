@@ -90,8 +90,15 @@ profiles: luna: {
 ```
 
 Review the complete policy and run `safeslop trust`. At each new launch,
-safeslop safely reads only the default host `~/.pi/agent/auth.json`, rejects a
-busy/unsafe/malformed source, and requires **more than 15 minutes** of access
+safeslop safely reads only the default host `~/.pi/agent/auth.json`. Relative
+same-HOME links and exact absolute same-HOME descendant links are accepted at the
+fixed components or final leaf. HOME and every reached directory must be owned by
+the current user with `mode & 0022 == 0` (`0755` is valid); the ultimate leaf is
+still exact regular `0600`, single-link, bounded, and on the same mount. Safeslop
+checks the lexical sibling lock before/after the descriptor read and requires a
+matching fresh full proof. Outside/ambiguous/dangling links, writable or
+wrong-owner ancestry, mount crossings, and races remain unsafe. It rejects a
+busy/unsafe/malformed source and requires **more than 15 minutes** of access
 lifetime. It stages only a synthetic `type:api_key` entry in the container tmpfs;
 refresh, account metadata, other providers, exact expiry, source path, and bearer
 never enter public output. There is no broker, listener, startup injection,
