@@ -51,3 +51,11 @@ Decision notes: `specs/research/2026-07-16-pi-oauth-staging-ayo.md`, `specs/rese
   CHANGE:   Run focused suites and 0112 progressive smoke; build the new Pi image; with explicit live opt-in run host Luna marker and trusted project session: deny observation of `chatgpt.com:443`, exact grant, real Luna marker, revoke/deny, stop/remove. Compare host auth bytes before/after without outputting them; prove no test state remains. Then run UI/check/build, mark both specs complete, merge/push both remotes, install matching binary/Emacs files, and remove both worktrees/branches.
   VERIFY:   `git diff --check && make test-progressive-egress-smoke && make test-emacs-ui-matrix && make check && make build`
   EXPECTED: Hermetic and live gates pass; real access-only Luna works only after the session grant; host auth is unchanged; staged/container/session/temp state is absent; installed version and both remotes match.
+
+Acceptance note (2026-07-17 JST): host Luna and full deny → observe → exact
+`chatgpt.com:443` grant → isolated Luna marker → revoke → deny passed. The real
+host auth bytes were unchanged and all test session/container/trust/temp state was
+removed. The host's normal `.pi/agent` is intentionally symlinked and therefore
+correctly rejected by the locked no-parent-symlink rule; the isolated acceptance
+used an owner-only temporary HOME containing only the real access+expiry fields
+(no refresh/account/other-provider data).

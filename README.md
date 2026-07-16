@@ -646,8 +646,10 @@ decay-first safety guarantee.
   ```
 
   At launch safeslop safely reads the default host Pi store
-  (`~/.pi/agent/auth.json`), requires more than 15 minutes of remaining access
-  lifetime, and stages only a synthetic `{type:"api_key", key:<access>}` entry
+  (`~/.pi/agent/auth.json`). Both `.pi` and `agent` must be owner-only real
+  directories and `auth.json` must be an owner-only, single-link regular file;
+  symlinks and group/other permissions fail closed. Safeslop requires more than
+  15 minutes of remaining access lifetime, and stages only a synthetic `{type:"api_key", key:<access>}` entry
   into the container's tmpfs home. It never copies the refresh token, account
   metadata, another provider, or the host file. There is no renewal, listener,
   broker, or startup-code injection. This bearer remains **provider-default
