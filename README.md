@@ -628,6 +628,44 @@ Credentials are staged under the run's runtime directory and wiped on exit.
 Token revocation is best-effort; deletion of the staged token/key on exit is the
 decay-first safety guarantee.
 
+- Pi OAuth is an explicit **project-profile-only** access snapshot for exactly
+  `openai-codex/gpt-5.6-luna`; no builtin enables it. Declare the literal block
+  below on a Pi/container/deny profile, review the whole policy, and run
+  `safeslop trust` before creating the session:
+
+  ```cue
+  profiles: luna: {
+    agent:       "pi"
+    environment: "container"
+    network:     "deny"
+    credentials: pi: {
+      provider: "openai-codex"
+      model:    "gpt-5.6-luna"
+    }
+  }
+  ```
+
+  At launch safeslop safely reads the default host Pi store
+  (`~/.pi/agent/auth.json`), requires more than 15 minutes of remaining access
+  lifetime, and stages only a synthetic `{type:"api_key", key:<access>}` entry
+  into the container's tmpfs home. It never copies the refresh token, account
+  metadata, another provider, or the host file. There is no renewal, listener,
+  broker, or startup-code injection. This bearer remains **provider-default
+  replay authority**: selecting Luna and granting one hostname constrain the
+  workflow but do not cryptographically downscope the token. If Pi's lock remains
+  busy, let host Pi finish or run `pi --list-models gpt-5.6-luna`, then retry a
+  new session. `chatgpt.com` is intentionally not a static allowlist entry; after
+  reviewing a denied observation, grant only the current session and revoke it
+  when finished:
+
+  ```bash
+  safeslop session egress grant --session-id ID --host chatgpt.com --port 443 --output json
+  safeslop session egress revoke --session-id ID --grant-id G --output json
+  ```
+
+  Stop/remove/reconcile wipes host staging and the container tmpfs copy. That is
+  local deletion, **not issuer revocation**; the copied access bearer remains
+  valid until its upstream expiry.
 - GitHub uses `credentials.github`. In the default `app` mode safeslop mints an
   ephemeral, repo-scoped GitHub App installation token and stages it as a
   git-over-HTTPS credential — no deploy keys, no `gh` CLI. Each owner needs an
@@ -684,8 +722,11 @@ and credential with its **source ref** (`op://…`/`env:NAME` — a reference, n
 value), whether it is **ephemeral** (a deploy key minted per session and wiped on
 exit) or **ref-backed**, and — for the ref-backed ones — a value-free **readiness
 status**: `resolvable`, `missing`, `op-signed-out`, `op-unavailable`, `ephemeral`,
-or `ambient` (host SSO/ADC). The header also shows linked GitHub App / Forgejo
-account links from `creds status --output json` without token/key refs or values.
+or `ambient` (host SSO/ADC or a launch-validated Pi OAuth snapshot). A Pi row
+shows only `openai-codex/gpt-5.6-luna`, short-lived access-snapshot lifetime, and
+provider-default authority — never its host path, exact expiry, account metadata,
+or bearer. The header also shows linked GitHub App / Forgejo account links from
+`creds status --output json` without token/key refs or values.
 Universal raw/Evil keys are: `RET`/`i` inspect, `A` link a GitHub App or Forgejo
 account using refs/ids only, `U` unlink an account, `R` configure profile
 repository scopes, `X` clear only a profile's GitHub/Forgejo scopes, and `e` open
@@ -718,7 +759,9 @@ session-owned lifecycle. The readiness probe resolves each ref only to keep the
 pass/fail result and **discards the value**, so no secret is ever read into the UI
 or the envelope. There is no in-UI mint/revoke — ephemeral keys live and die with
 a session (`run`/`session`), so the surface is account linking + repo scope
-selection, not a secret vault.
+selection, not a secret vault. Pi OAuth is likewise inspection-only in Emacs MVP:
+add its literal CUE block manually, review/re-trust the changed exact bytes, and
+create a new session.
 
 ## Development
 

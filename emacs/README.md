@@ -212,6 +212,17 @@ GitHub discovery would require a minted installation token and Forgejo discovery
 would use the account-wide token, so the surface accepts origin inference and
 manual `owner/repo` entries only.
 
+Pi OAuth is inspection-only in the Emacs MVP: a row exposes only
+`openai-codex/gpt-5.6-luna`, `access snapshot, short-lived`, provider-default
+readiness/authority, and no ref, host path, token, account, or exact expiry. There
+is no Pi OAuth mutation key. Use `e` to add the literal `credentials.pi` block to
+a Pi/container/deny **project** profile, review and re-trust the exact policy
+bytes, then create a new session. Launch requires more than 15 minutes of access
+lifetime; the snapshot has no refresh or renewal. Review the denied
+`chatgpt.com:443` observation from the Sessions surface and grant only that
+session. Stop/remove wipes local stage/tmpfs copies but does not revoke the
+upstream bearer.
+
 ## Debug buffer
 
 `M-x safeslop-debug-log` (`C-c s L`) opens `*safeslop debug*`, a redacted client

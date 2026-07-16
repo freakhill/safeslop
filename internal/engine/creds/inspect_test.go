@@ -207,6 +207,29 @@ func TestInspectCloudAmbient(t *testing.T) {
 
 // TestInspectNeverLeaksValue is the load-bearing redaction guard: even a resolvable secret's
 // value must never appear in any row (rows carry the ref, not the value).
+func TestInspectPiOAuthIsValueFreeAmbientSnapshot(t *testing.T) {
+	cfg := cfgWith(policy.Profile{Credentials: &policy.Credentials{Pi: &policy.PiCreds{
+		Provider: "openai-codex", Model: "gpt-5.6-luna",
+	}}})
+	rep := Inspect(context.Background(), cfg, fakeProber(nil, false, false, nil, nil))
+	r, ok := rowFor(rep.Rows, "pi-oauth", "openai-codex/gpt-5.6-luna")
+	if !ok {
+		t.Fatalf("no Pi OAuth row: %+v", rep.Rows)
+	}
+	if r.Scope != "access snapshot, short-lived; provider-default authority" || r.Status != StatusAmbient || r.Ref != "" {
+		t.Fatalf("Pi OAuth inspection row = %+v", r)
+	}
+	wire, err := json.Marshal(rep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"auth.json", "refresh", "accountId", "expires", "op://", "env:"} {
+		if strings.Contains(string(wire), forbidden) {
+			t.Fatalf("Pi OAuth inspection leaked %q: %s", forbidden, wire)
+		}
+	}
+}
+
 func TestInspectNeverLeaksValue(t *testing.T) {
 	const secret = "SUPERSECRETVALUE-abc123"
 	cfg := cfgWith(policy.Profile{Secrets: map[string]string{"FOO": "env:BAR"}})

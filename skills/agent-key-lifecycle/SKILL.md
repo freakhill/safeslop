@@ -1,14 +1,14 @@
 ---
 name: agent-key-lifecycle
 description: >
-  Use safeslop's Go credential providers to stage short-lived GitHub/Forgejo
-  credentials for agent sessions and verify cleanup behavior.
+  Use safeslop's Go credential providers to stage short-lived GitHub/Forgejo or
+  access-only Pi OAuth credentials for agent sessions and verify cleanup behavior.
 ---
 
 # Agent Key Lifecycle Skill
 
-Use this skill when a task touches GitHub or Forgejo credentials for agent
-sessions.
+Use this skill when a task touches GitHub, Forgejo, or Pi OAuth credentials for
+agent sessions.
 
 ## Required pre-read
 
@@ -22,7 +22,9 @@ sessions.
 Credential staging is driven by `safeslop run <profile>` from the profile's
 `credentials:` block. There is still no standalone credential mint UI: live
 GitHub/Forgejo credentials are created only for a run/session and are revoked or
-wiped by teardown.
+wiped by teardown. Pi OAuth is different: safeslop snapshots an existing host
+access bearer without refresh authority; teardown wipes local copies but cannot
+revoke it at the issuer.
 
 Forge account links are managed out of band with `safeslop creds
 link|unlink|status`: they live in `~/.config/safeslop/accounts.cue` (0600,
@@ -36,7 +38,7 @@ Profile forge scopes can be authored without hand-editing CUE through
 `safeslop profile credentials set|clear ... --output json`. `set` writes either
 `credentials.github` (GitHub App mode only; PAT fallback remains manual) or
 `credentials.forgejo`, preserves other credential providers (`pnpm`/`aws`/`gcp`/
-`kube`) and `secrets`, and clears only the opposite forge because staging
+`kube`/`pi`) and `secrets`, and clears only the opposite forge because staging
 supports one forge per profile. `--use-origin` keeps runtime origin inference;
 `--repo` and `--write-repo` declare explicit read/write `owner/repo` rows.
 
@@ -44,7 +46,7 @@ Read-only posture inspection exists (specs/0067): `safeslop creds list
 [safeslop.cue] --output json` and `safeslop creds show <profile> --output json`
 enumerate every declared secret/credential across profiles with a value-free
 **readiness status** (does its `op://`/`env:` ref resolve now? is the key
-`ephemeral` or the cloud auth `ambient`?). The probe resolves each ref only to
+`ephemeral` or the cloud/Pi host auth `ambient`?). The probe resolves each ref only to
 keep the pass/fail result and discards the value — no secret is read into the
 output. This is surfaced in Emacs as the Credentials surface (`C-c s K`). Its universal
 raw/Evil actions are `A` link account, `U` unlink account, `R` configure profile
@@ -66,7 +68,53 @@ Stop reconciles the recorded PID/process identity before signalling, so a reused
 detached supervisor PGID is not targeted. Revocation stays best-effort; the
 decay-first guarantee remains the local wipe of staged private keys: stop,
 status/list reconcile, remove, and prune all wipe the reconstructed host stage
-dir.
+dir. For Pi OAuth, `--revoke-credentials` means the same local wipe only; the
+access bearer remains valid until upstream expiry.
+
+## Pi OAuth (access-only MVP)
+
+Pi OAuth requires an explicit, exact-byte-trusted **project** profile; builtins
+never carry it. The only accepted MVP declaration is Pi + container + deny with
+the literal provider/model pair:
+
+```cue
+profiles: luna: {
+	agent:       "pi"
+	environment: "container"
+	network:     "deny"
+	credentials: pi: {
+		provider: "openai-codex"
+		model:    "gpt-5.6-luna"
+	}
+}
+```
+
+Review the complete policy and run `safeslop trust`. At each new launch,
+safeslop safely reads only the default host `~/.pi/agent/auth.json`, rejects a
+busy/unsafe/malformed source, and requires **more than 15 minutes** of access
+lifetime. It stages only a synthetic `type:api_key` entry in the container tmpfs;
+refresh, account metadata, other providers, exact expiry, source path, and bearer
+never enter public output. There is no broker, listener, startup injection,
+refresh, or renewal. If the Pi lock remains busy, let host Pi finish or run:
+
+```bash
+pi --list-models gpt-5.6-luna
+```
+
+The access token still has **provider-default replay authority**. Selecting Luna
+and allowing one destination are workflow controls, not cryptographic token
+downscoping. `chatgpt.com` is deliberately absent from static egress; review the
+denied observation, then grant/revoke only the current session:
+
+```bash
+safeslop session egress grant --session-id ID --host chatgpt.com --port 443 --output json
+safeslop session egress revoke --session-id ID --grant-id G --output json
+```
+
+Stop, reconcile, remove, and prune recursively delete host-stage and tmpfs copies.
+That is local wipe, not issuer revocation; start a new session after expiry or host
+refresh. Emacs has no Pi OAuth mutation action in this MVP: edit CUE, review, and
+re-trust.
 
 ## GitHub
 
@@ -175,7 +223,8 @@ unrequested repo or a merely similar title.
 - Prefer minted App tokens (GitHub) and dedicated bot accounts (Forgejo) over personal PATs.
 - Keep write access rare and profile-specific.
 - Keep credentialed profiles on `network: "deny"` or a constrained container/VM path.
-- Never commit token values; use `env:` or `op://` secret refs.
+- Never commit token values; use `env:` or `op://` secret refs, or the literal value-free Pi OAuth opt-in.
+- Treat Pi model/egress selection as workflow constraints, not bearer downscoping.
 - Verify cleanup by checking staged runtime directories are wiped on stop/reconcile/rm/prune and deploy-key revocation ran best-effort when requested.
 
 ## Verification
@@ -184,6 +233,6 @@ Run focused tests after credential changes:
 
 ```bash
 go test ./internal/engine/creds/ -v
-go test ./internal/cli/ -run 'Creds(Status|Link|Unlink|GC)|ProfileCredentials|StageProfile' -v
+go test ./internal/cli/ -run 'Creds(Status|Link|Unlink|GC)|ProfileCredentials|StageProfile|PiOAuth' -v
 make check
 ```

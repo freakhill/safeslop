@@ -40,7 +40,7 @@ Decision notes: `specs/research/2026-07-16-pi-oauth-staging-ayo.md`, `specs/rese
   VERIFY:   `go test ./internal/engine/container ./internal/cli -run 'PiOAuth|PiAuth|RunProfile.*Pi|Session.*Pi' -count=1 -v`
   EXPECTED: Synthetic auth reaches only tmpfs home before Pi; failure prevents agent start; all local/container copies disappear on every teardown path without claiming issuer revocation.
 
-- [ ] Synchronize inspection, docs, and operator workflow
+- [x] Synchronize inspection, docs, and operator workflow
   FILE:     `internal/engine/creds/inspect.go`, `internal/engine/creds/inspect_test.go`, `README.md`, `emacs/README.md`, `skills/agent-key-lifecycle/SKILL.md`, `skills/agent-sandbox-ops/SKILL.md`, `specs/0113-pi-oauth-staging.md`
   CHANGE:   Make credential inspection value-free for Pi OAuth and document explicit policy/trust, default host source, provider-default replay authority, no refresh/renewal, 15-minute launch headroom, stale-lock command `pi --list-models gpt-5.6-luna`, progressive `chatgpt.com:443` grant, and local-wipe-not-revocation semantics. No new Emacs mutation action in MVP.
   VERIFY:   `go test ./internal/engine/creds -run 'Inspect.*PiOAuth' -count=1 -v && git diff --check && rg -n 'credentials.*pi|gpt-5.6-luna|access snapshot|provider-default|15 minutes|chatgpt.com' README.md emacs/README.md skills/agent-key-lifecycle/SKILL.md skills/agent-sandbox-ops/SKILL.md`

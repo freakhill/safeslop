@@ -29,9 +29,9 @@ file transfer between host and sandboxed runtimes.
 - `safeslop bundle list --output json` — list curated bundles.
 - `safeslop profile create --name N --agent A --environment E [--bundle B] [--package P] [--no-default-bundle] [--dry-run] --output json` — create or update a `safeslop.cue` profile; `--no-default-bundle` deliberately omits automatic agent-runtime inclusion and can leave an agent unable to launch, while `--dry-run` resolves packages/recipe and returns the engine's three-section safety evaluation without writing.
 - `safeslop profile delete <name> [safeslop.cue] --output json` — remove exactly one project profile: load, render, and validate the full remaining CUE before writing; builtins are never mutable through this command.
-- `safeslop profile credentials set <profile> [safeslop.cue] --provider github|forgejo [--use-origin] [--repo owner/name] [--write-repo owner/name] --output json` — engine-owned CUE mutation for GitHub/Forgejo repo scopes; preserves other credential providers/secrets and clears only the opposite forge.
+- `safeslop profile credentials set <profile> [safeslop.cue] --provider github|forgejo [--use-origin] [--repo owner/name] [--write-repo owner/name] --output json` — engine-owned CUE mutation for GitHub/Forgejo repo scopes; preserves other credential providers (including `credentials.pi`)/secrets and clears only the opposite forge.
 - `safeslop profile credentials clear <profile> [safeslop.cue] --output json` — remove only `credentials.github`/`credentials.forgejo`, deleting the `credentials` object if it becomes empty.
-- `safeslop creds list|show [<profile>] --output json` — inspect the credential posture of `safeslop.cue` profiles (declared creds + value-free readiness status); read-only, never reveals secret values.
+- `safeslop creds list|show [<profile>] --output json` — inspect the credential posture of `safeslop.cue` profiles (declared creds + value-free readiness status, including Pi OAuth provider/model/lifetime only); read-only, never reveals secret values, refs, private paths, or exact expiry.
 - `safeslop creds link|unlink|status` — manage host-only account links in `~/.config/safeslop/accounts.cue` (refs + non-secret ids only); `creds status --output json` is the Emacs account-link status envelope.
 - `safeslop creds gc --host H --repo owner/repo ... [--dry-run|--yes] [--output json]` — narrow Forgejo deploy-key cleanup. It defaults to dry-run; `--yes` is required to delete and conflicts with `--dry-run`. It considers only exact safeslop titles in the explicitly named repos, rechecks before deletion, and never expands egress or container authority.
 - `safeslop profile defaults --output json` — list signed-binary builtin launchable defaults (`claude`, `fish`, `pi`, `zsh`), distinct from scaffold `profile presets`; each uses container/deny, the pinned buildable `personal` image inputs, and an allowlisted read-only host projection. Project profiles take precedence and an invalid local policy fails closed.
@@ -45,7 +45,7 @@ file transfer between host and sandboxed runtimes.
 - `safeslop session run --session-id <id> [--detach]` — run the session agent under safeslop isolation. Host-tier sessions require the per-launch yes/no comprehension gate first; for `--detach`, the gate runs before the supervisor is spawned. Coupled (default) needs a controlling terminal (Emacs supplies one via `make-term`); with no usable TTY it emits the `PTY_UNAVAILABLE` contract error and the caller switches to the `--output jsonl` status monitor. `--detach` launches a per-session supervisor that owns the agent + its PTY, serves it over a per-session unix socket, and returns immediately (the buffer is freed).
 - `safeslop session attach --session-id <id>` — rejoin a detached session's agent over its socket under a controlling terminal, exiting with the agent's code; one active attach at a time. No usable TTY emits `PTY_UNAVAILABLE`.
 - `safeslop session status --session-id <id> --output <json|jsonl>` — inspect or monitor session state; JSON/JSONL carries value-free credential scope for profile-backed sessions, and a running detached session also reports its `socket`.
-- `safeslop session stop --session-id <id> --revoke-credentials --output json` — stop idempotently, reconciling liveness/process identity before signalling, revoking ephemeral credentials before termination when requested, terminating the process (a detached supervisor's whole process group), removing the socket, and wiping the host stage dir.
+- `safeslop session stop --session-id <id> --revoke-credentials --output json` — stop idempotently, reconciling liveness/process identity before signalling, revoking revocable ephemeral credentials before termination when requested, terminating the process (a detached supervisor's whole process group), removing the socket, and wiping the host stage dir. Pi OAuth cleanup is local wipe, not issuer revocation.
 - `safeslop session rm --session-id <id> --output json` — permanently remove one stopped/created session record so the portal does not accumulate dead-session corpses. Refuses a running session (stop it first); revokes any still-live staged credentials and wipes the host stage dir before deleting, so removal never orphans secrets. Returns `data.removed` (the removed id).
 - `safeslop session rename --session-id <id> --name <label> --output json` — set (or, with an empty `--name`, clear) a session's human display name. Allowed in any status (created, running, or stopped) since a label touches no boundary, credential, or process state. The name is validated (control/format/bidi characters rejected, so it cannot break the JSONL line protocol or spoof a status) and, when set, is surfaced as `data.name` in the session envelope and shown in the portal. Unknown id → `SESSION_NOT_FOUND`; a rejected name → `INVALID_ARGUMENT`.
 - `safeslop session prune --output json` — remove every stopped session record in one call, leaving created and running sessions untouched. Runs the liveness/process-identity reconcile first, so a crashed session (marked `running` but whose process is gone or whose PID was reused) is persisted as `stopped`; stale sockets and host stage dirs are swept in the same pass. Returns `data.removed` (the removed ids). In Emacs these are the portal's `x` (remove one) and `X` (prune) keys.
@@ -108,8 +108,8 @@ an authorization token; the launch CLI re-applies its trust, host-consent,
 helper/runtime, network, and credential gates.
 
 Credential scopes contain only value-free target metadata (for example
-`owner/repo`, registry host, role/profile, API scope, or cluster label) plus
-access, lifetime, and basis. They exclude secret values/refs, private-key or
+`owner/repo`, registry host, role/profile, API scope, cluster label, or the
+literal Pi OAuth provider/model) plus access, lifetime, and basis. They exclude secret values/refs, private-key or
 account-link refs, staged paths, and private host paths; unknown is never treated
 as read-only. Remediation is typed engine guidance only: do not derive rules from
 prose, auto-edit CUE, or auto-trust a policy.
@@ -133,8 +133,8 @@ safeslop profile show pi --output json
 safeslop session create --profile pi --output json
 ```
 
-The four builtins (`claude`, `fish`, `pi`, `zsh`) start at container + deny and
-resolve the `personal` bundle from pinned image inputs: binary URL/SHA256 per
+The four builtins (`claude`, `fish`, `pi`, `zsh`) start at container + deny,
+carry no Pi OAuth credential opt-in, and resolve the `personal` bundle from pinned image inputs: binary URL/SHA256 per
 architecture and exact Debian-snapshot apt coordinates. Pi/Claude project pi
 instructions and skills, Fish projects only demand-loaded `functions/*.fish` and
 `completions/*.fish`, and Zsh projects Zsh/Starship config. Builtin Fish never
@@ -264,6 +264,34 @@ safeslop run review
 safeslop untrust   # revoke approval when this repo should no longer launch without review
 ```
 
+### Pi OAuth access-only project profile
+
+Builtins never inherit host Pi OAuth. Add this exact opt-in only to a reviewed
+project profile, then run `safeslop trust`:
+
+```cue
+profiles: luna: {
+	agent:       "pi"
+	environment: "container"
+	network:     "deny"
+	credentials: pi: {
+		provider: "openai-codex"
+		model:    "gpt-5.6-luna"
+	}
+}
+```
+
+Launch reads only default `~/.pi/agent/auth.json`, requires more than 15 minutes
+of access lifetime, and copies only a synthetic access snapshot into tmpfs. It
+never copies refresh/account/other-provider data and never renews. A lingering
+Pi lock is handled by waiting for host Pi or running `pi --list-models
+gpt-5.6-luna`, then starting a new session. The bearer retains provider-default
+replay authority: Luna selection and egress rules do not cryptographically
+downscope it. After a denied observation, explicitly grant and later revoke
+`chatgpt.com:443` for this session only. Stop/remove/reconcile wipes local copies
+but does not revoke upstream access. Emacs MVP inspection is value-free and has no
+Pi mutation action; edit/review/re-trust CUE manually.
+
 ### Container profile
 
 ```cue
@@ -296,7 +324,8 @@ safeslop session egress dismiss --session-id ID --host api.example.com --port 44
 safeslop session egress revoke --session-id ID --grant-id G --output json
 ```
 
-Observations never grant traffic. A grant is `session-grant / this session`;
+Observations never grant traffic. For Pi OAuth Luna, `chatgpt.com:443` follows
+this same explicit flow and is not statically allowed. A grant is `session-grant / this session`;
 `dismiss` is **Keep denied** acknowledgement state, not authority, and later
 traffic reappears for review. Neither mutates `profile.egress` or `safeslop.cue`.
 Proxy update failure preserves the previous deny posture. Launch also requires the

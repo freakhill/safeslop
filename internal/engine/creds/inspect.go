@@ -28,7 +28,7 @@ const (
 // value-free readiness status. It is the wire row behind `safeslop creds list` (specs/0067).
 type CredRow struct {
 	Profile string    `json:"profile"`
-	Kind    string    `json:"kind"`  // secret|pnpm|github|forgejo|aws|gcp|kube
+	Kind    string    `json:"kind"`  // secret|pnpm|github|forgejo|aws|gcp|kube|pi-oauth
 	Name    string    `json:"name"`  // env var (secret), host (pnpm), repo/"origin" (github/forgejo), cluster/profile (aws/gcp/kube)
 	Scope   string    `json:"scope"` // extra detail: mode/write/ttl/region/scope
 	Ref     string    `json:"ref"`   // op://.../env:NAME source ref, or "" for ambient/ephemeral (refs are not values)
@@ -162,6 +162,11 @@ func inspectProfile(ctx context.Context, profile string, prof policy.Profile, op
 		case k.Gke != nil:
 			row("kube", k.Gke.Name, "gke "+k.Gke.Location, "", StatusAmbient)
 		}
+	}
+	// Pi OAuth is host-ambient at inspection time and validated only when a run
+	// stages its access-only snapshot. Never expose the source path or expiry.
+	if pi := c.Pi; pi != nil {
+		row("pi-oauth", pi.Provider+"/"+pi.Model, "access snapshot, short-lived; provider-default authority", "", StatusAmbient)
 	}
 	return rows
 }
