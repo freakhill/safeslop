@@ -5,8 +5,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/freakhill/safeslop/internal/engine/container/runtime"
+)
+
+const (
+	proxyReconfigureAttempts = 10
+	proxyReconfigureDelay    = 50 * time.Millisecond
 )
 
 type overlayOptions struct {
@@ -86,6 +92,26 @@ func writeOverlayCandidate(path string, content []byte, hook func(string) error)
 }
 
 func reconfigureProxy(ctx context.Context, eng runtime.Engine, composeFile string) error {
-	cmd := eng.Command(ctx, "compose", "-f", composeFile, "exec", "-T", "proxy", "squid", "-k", "reconfigure")
-	return cmd.Run()
+	var lastErr error
+	for attempt := 0; attempt < proxyReconfigureAttempts; attempt++ {
+		cmd := eng.Command(ctx, "compose", "-f", composeFile, "exec", "-T", "proxy", "squid", "-k", "reconfigure")
+		if err := cmd.Run(); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+		if attempt+1 == proxyReconfigureAttempts {
+			break
+		}
+		timer := time.NewTimer(proxyReconfigureDelay)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return lastErr
 }

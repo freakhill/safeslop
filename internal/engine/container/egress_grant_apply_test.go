@@ -32,6 +32,43 @@ func TestSessionGrantApplyWritesOverlayAndReloadsProxy(t *testing.T) {
 	}
 }
 
+func TestSessionGrantApplyRetriesTransientReloadBeforeRollback(t *testing.T) {
+	dir := t.TempDir()
+	composeFile := filepath.Join(dir, "compose.yml")
+	if err := os.WriteFile(composeFile, []byte("services: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := RenderSessionGrants(nil)
+	if err := os.WriteFile(filepath.Join(dir, "session-grants.conf"), []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	eng := newFakeEngine(t, nil)
+	key := "compose -f " + composeFile + " exec -T proxy squid -k reconfigure"
+	eng.fail(key, 42)
+	calls := 0
+	eng.runHook(key, func() {
+		calls++
+		if calls == 1 {
+			eng.fail(key, 0)
+		}
+	})
+
+	err := ApplySessionGrants(context.Background(), eng, composeFile, dir, []SessionGrant{{Host: "example.com", Port: 443}})
+	if err != nil {
+		t.Fatalf("transient bind-visibility reload must retry: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("reconfigure calls = %d, want 2", calls)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "session-grants.conf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "^example\\.com$") {
+		t.Fatalf("transient reload restored old overlay: %s", body)
+	}
+}
+
 func TestSessionGrantApplyFailClosedRestoresPreviousOverlay(t *testing.T) {
 	dir := t.TempDir()
 	composeFile := filepath.Join(dir, "compose.yml")
