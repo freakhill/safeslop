@@ -253,6 +253,101 @@ func TestResolveProjectionGlobNoMatchOptionalSkips(t *testing.T) {
 	}
 }
 
+func TestSnapshotProjectionOptionalGlobSkipsNonRegularMatches(t *testing.T) {
+	home := projHome(t, ".config/fish/completions/ok.fish")
+	regular := filepath.Join(home, ".config/fish/completions/ok.fish")
+	if err := os.WriteFile(regular, []byte("regular-safe"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outsideDir := t.TempDir()
+	outside := filepath.Join(outsideDir, "outside-target-sentinel")
+	if err := os.WriteFile(outside, []byte("outside-content-sentinel"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	completions := filepath.Dir(regular)
+	if err := os.Symlink(outside, filepath.Join(completions, "outside-name-sentinel.fish")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(completions, "directory-name-sentinel.fish"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	oldReadlink := projectionAfterReadlink
+	readlinks := 0
+	projectionAfterReadlink = func(string) { readlinks++ }
+	t.Cleanup(func() { projectionAfterReadlink = oldReadlink })
+
+	m, err := SnapshotProjection(home, t.TempDir(), policy.Projection{Items: []policy.ProjectionItem{{
+		Source: "~/.config/fish/completions/*.fish", Kind: "glob", Label: "fish-completions",
+	}}})
+	if err != nil {
+		t.Fatalf("optional glob must omit non-regular matches: %v", err)
+	}
+	mounts := m.PresentMounts()
+	if len(mounts) != 1 || mounts[0].Target != ".config/fish/completions/ok.fish" {
+		t.Fatalf("optional glob mounts = %+v, want only ok.fish", mounts)
+	}
+	got, err := os.ReadFile(mounts[0].Host)
+	if err != nil || string(got) != "regular-safe" {
+		t.Fatalf("regular snapshot = %q, err=%v", got, err)
+	}
+	if readlinks != 0 {
+		t.Fatalf("terminal glob candidates must never be readlinked, calls=%d", readlinks)
+	}
+	if len(m.Items) != 2 || m.Items[1].Status != "skipped-nonregular" {
+		t.Fatalf("want one present and one aggregate omission, got %+v", m.Items)
+	}
+	encoded, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sentinel := range []string{"outside-name-sentinel", "directory-name-sentinel", outside, "outside-content-sentinel"} {
+		if strings.Contains(string(encoded), sentinel) {
+			t.Fatalf("manifest leaked omitted candidate sentinel %q: %s", sentinel, encoded)
+		}
+	}
+}
+
+func TestSnapshotProjectionOptionalGlobAllNonRegularSucceeds(t *testing.T) {
+	home := projHome(t, ".config/fish/completions/")
+	outside := filepath.Join(t.TempDir(), "outside")
+	if err := os.WriteFile(outside, []byte("never-read"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	completions := filepath.Join(home, ".config/fish/completions")
+	if err := os.Symlink(outside, filepath.Join(completions, "linked.fish")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(completions, "directory.fish"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := SnapshotProjection(home, t.TempDir(), policy.Projection{Items: []policy.ProjectionItem{{
+		Source: "~/.config/fish/completions/*.fish", Kind: "glob", Label: "fish-completions",
+	}}})
+	if err != nil {
+		t.Fatalf("all-nonregular optional glob must succeed: %v", err)
+	}
+	if len(m.PresentMounts()) != 0 || len(m.Items) != 1 || m.Items[0].Status != "skipped-nonregular" {
+		t.Fatalf("all-nonregular optional glob = %+v", m.Items)
+	}
+}
+
+func TestSnapshotProjectionRequiredGlobRejectsNonRegularMatch(t *testing.T) {
+	home := projHome(t, ".config/fish/completions/ok.fish")
+	outside := filepath.Join(t.TempDir(), "outside")
+	if err := os.WriteFile(outside, []byte("never-read"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(home, ".config/fish/completions/linked.fish")); err != nil {
+		t.Fatal(err)
+	}
+	_, err := SnapshotProjection(home, t.TempDir(), policy.Projection{Items: []policy.ProjectionItem{{
+		Source: "~/.config/fish/completions/*.fish", Kind: "glob", Optional: boolPtr(false),
+	}}})
+	requireProjectionCode(t, err, ProjectionUnsafeDescendant)
+}
+
 func TestSnapshotProjectionFollowsRelativeConfigSymlinkIntoPrivateStage(t *testing.T) {
 	home := projHome(t, "dotfiles/files/.config/fish/config.fish")
 	if err := os.RemoveAll(filepath.Join(home, ".config")); err != nil {
