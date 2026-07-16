@@ -52,6 +52,27 @@ func TestAgentArgvAcceptsPi(t *testing.T) {
 	}
 }
 
+func TestAgentArgvPiOAuthLuna(t *testing.T) {
+	cfg, err := policy.LoadBytes([]byte(`package safeslop
+safeslop: profiles: luna: {
+	agent: "pi"
+	environment: "container"
+	network: "deny"
+	credentials: pi: {provider: "openai-codex", model: "gpt-5.6-luna"}
+}`))
+	if err != nil {
+		t.Fatalf("load Pi OAuth profile: %v", err)
+	}
+	argv, err := agentArgv(cfg.Profiles["luna"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"pi", "--provider", "openai-codex", "--model", "gpt-5.6-luna"}
+	if strings.Join(argv, " ") != strings.Join(want, " ") {
+		t.Fatalf("Pi OAuth argv = %v, want %v", argv, want)
+	}
+}
+
 func TestAgentArgvAcceptsClaudeCode(t *testing.T) {
 	argv, err := agentArgv(policy.Profile{Agent: "claude"})
 	if err != nil {

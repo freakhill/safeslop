@@ -10,7 +10,7 @@ WORKTREE: `.worktrees/0113-pi-oauth-staging/`
 
 Decision notes: `specs/research/2026-07-16-pi-oauth-staging-ayo.md`, `specs/research/2026-07-16-pi-oauth-staging-flo.md`.
 
-- [ ] Add RED policy, authority, argv, and session-scope tests
+- [x] Add RED policy, authority, argv, and session-scope tests
   FILE:     `internal/engine/policy/schema/schema.cue`, `internal/engine/policy/policy_test.go`, `internal/engine/policy/evaluation_test.go`, `internal/cli/cli_agentargv_test.go`, `internal/cli/cli_session_test.go`
   CHANGE:   Test the ideal `credentials.pi {provider,model}` contract: only Pi/container/deny plus literal `openai-codex/gpt-5.6-luna`; builtins absent; Authority reports honest provider-default short-lived host snapshot; Pi argv includes the exact provider/model pair; session create persists only `pi-oauth|openai-codex/gpt-5.6-luna|access snapshot, short-lived`.
   VERIFY:   `! go test ./internal/engine/policy ./internal/cli -run 'PiOAuth|Pi.*Luna|AgentArgvPi' -count=1 -v`

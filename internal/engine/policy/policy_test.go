@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -112,6 +113,63 @@ safeslop: profiles: dev: {agent: "claude", environment: "host", toolchain: {kind
 	tc := cfg.Profiles["dev"].Toolchain
 	if tc == nil || tc.Kind != "mise" || tc.Run != "build" {
 		t.Fatalf("toolchain decoded wrong: %+v", tc)
+	}
+}
+
+func TestPiOAuthPolicyAndAuthorityContract(t *testing.T) {
+	valid := `package safeslop
+safeslop: profiles: luna: {
+	agent: "pi"
+	environment: "container"
+	network: "deny"
+	credentials: pi: {provider: "openai-codex", model: "gpt-5.6-luna"}
+}`
+	cfg, err := LoadBytes([]byte(valid))
+	if err != nil {
+		t.Fatalf("valid Pi OAuth profile rejected: %v", err)
+	}
+	prof := cfg.Profiles["luna"]
+	authority := EvaluateAuthority(prof)
+	if err := ValidateAuthorityEvaluation(authority); err != nil {
+		t.Fatalf("Pi OAuth authority invalid: %v", err)
+	}
+	if len(authority.CredentialScopes) != 1 {
+		t.Fatalf("Pi OAuth credential scopes = %+v, want one", authority.CredentialScopes)
+	}
+	scope := authority.CredentialScopes[0]
+	if scope.Provider != "pi-oauth" || scope.Target != "openai-codex/gpt-5.6-luna" ||
+		scope.Access != CredentialAccessProviderDefault || scope.Lifetime != CredentialLifetimeShortLived || scope.Basis != "host_snapshot" {
+		t.Fatalf("Pi OAuth scope = %+v", scope)
+	}
+	if findAuthority(authority, "authority.credentials.pi-oauth") == nil {
+		t.Fatalf("Pi OAuth authority finding missing: %+v", authority.Findings)
+	}
+
+	for name, profile := range map[string]string{
+		"wrong-agent":       `{agent:"claude", environment:"container", network:"deny", credentials:pi:{provider:"openai-codex", model:"gpt-5.6-luna"}}`,
+		"host":              `{agent:"pi", environment:"host", network:"deny", credentials:pi:{provider:"openai-codex", model:"gpt-5.6-luna"}}`,
+		"open-network":      `{agent:"pi", environment:"container", network:"allow", credentials:pi:{provider:"openai-codex", model:"gpt-5.6-luna"}}`,
+		"wrong-provider":    `{agent:"pi", environment:"container", network:"deny", credentials:pi:{provider:"openai", model:"gpt-5.6-luna"}}`,
+		"unsupported-model": `{agent:"pi", environment:"container", network:"deny", credentials:pi:{provider:"openai-codex", model:"gpt-5.6-sol"}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			src := "package safeslop\nsafeslop: profiles: bad: " + profile
+			if _, err := LoadBytes([]byte(src)); err == nil {
+				t.Fatal("invalid Pi OAuth boundary accepted")
+			}
+		})
+	}
+}
+
+func TestBuiltinProfilesNeverCarryPiOAuth(t *testing.T) {
+	for _, builtin := range BuiltinProfiles() {
+		wire, err := json.Marshal(builtin.Profile.Credentials)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(wire), `"pi"`) || strings.Contains(string(wire), "openai-codex") {
+			t.Fatalf("builtin %q gained ambient Pi OAuth: %s", builtin.Name, wire)
+		}
 	}
 }
 

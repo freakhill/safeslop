@@ -1466,6 +1466,44 @@ safeslop: {
 	}
 }
 
+func TestSessionCreatePiOAuthLunaCredentialScope(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+	cue := `package safeslop
+safeslop: {
+	version: 1
+	profiles: luna: {
+		agent: "pi"
+		environment: "container"
+		network: "deny"
+		workspace: "project"
+		credentials: pi: {provider: "openai-codex", model: "gpt-5.6-luna"}
+	}
+}`
+	writeProfileCueAndTrust(t, ws, cue)
+	out, err := runRootForTest(t, ws, "session", "create", "--profile", "luna", "--output", "json")
+	if err != nil {
+		t.Fatalf("session create Pi OAuth: %v\nout=%s", err, out)
+	}
+	env := parseEnvelopeForTest(t, out)
+	want := []string{"pi-oauth openai-codex/gpt-5.6-luna access snapshot, short-lived"}
+	if got := credentialScopeStringsForTest(t, env.Data); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("Pi OAuth credential scope = %v, want %v", got, want)
+	}
+	stored, err := sessionStore().Get(env.Data["session_id"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.CredentialScopes) != 1 || stored.CredentialScopes[0].Kind != "pi-oauth" {
+		t.Fatalf("stored Pi OAuth scope = %+v", stored.CredentialScopes)
+	}
+	for _, forbidden := range []string{"auth.json", "refresh", "accountId", "op://", "env:"} {
+		if strings.Contains(out, forbidden) {
+			t.Fatalf("Pi OAuth session output leaked %q: %s", forbidden, out)
+		}
+	}
+}
+
 // TestSessionCreateFromProfileComputesCredentialScopes proves a profile-backed
 // session's create envelope AND its persisted record carry value-free
 // credential_scopes computed from the trusted policy: declared github repos use
