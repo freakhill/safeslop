@@ -121,6 +121,35 @@ func TestSessionProfileRebuildsBuiltinAndFailsClosedOnDrift(t *testing.T) {
 	}
 }
 
+func TestSessionProfileRebuildsBuiltinFishProjectionV2(t *testing.T) {
+	builtin, ok := policy.BuiltinProfileByName("fish")
+	if !ok {
+		t.Fatal("fish builtin missing")
+	}
+	sess := engsession.Session{
+		ID: "builtin-fish", Profile: "fish", ProfileSource: "builtin", Agent: "fish",
+		Environment: "container", Network: "deny", Workspace: "/ws",
+		PolicyPath: "builtin:fish", PolicyHash: builtin.Hash,
+	}
+	prof, err := sessionProfile(sess)
+	if err != nil {
+		t.Fatalf("rebuild builtin fish session: %v", err)
+	}
+	if prof.Projection == nil || len(prof.Projection.Items) != 2 {
+		t.Fatalf("builtin fish projection = %#v", prof.Projection)
+	}
+	got := []string{prof.Projection.Items[0].Source, prof.Projection.Items[1].Source}
+	want := []string{"~/.config/fish/functions/*.fish", "~/.config/fish/completions/*.fish"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("builtin fish sources = %v, want %v", got, want)
+	}
+
+	sess.PolicyHash = "sha256:4154b2100c9e8a65f11c1d3a3c5cae98de9a5755dd44b68fb119002439957814"
+	if _, err := sessionProfile(sess); err == nil || !strings.Contains(err.Error(), "changed or is unavailable") {
+		t.Fatalf("old builtin fish hash must fail closed, got %v", err)
+	}
+}
+
 func TestSessionProfileAdHocStaysSynthetic(t *testing.T) {
 	sess := engsession.Session{ID: "s2", Agent: "zsh", Environment: "container", Network: "allow", Workspace: "/w2"}
 	prof, err := sessionProfile(sess)

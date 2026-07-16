@@ -20,7 +20,7 @@ WORKTREE: `.worktrees/0109-fish-demand-loaded-projection/`
   VERIFY:   `go test ./internal/engine/policy ./internal/engine/container -run 'BuiltinFish|FishBuiltin' -count=1 -v`
   EXPECTED: Tests fail because current builtin still includes and snapshots `config.fish`/`conf.d`.
 
-- [ ] Implement Fish projection v2 and hash migration
+- [x] Implement Fish projection v2 and hash migration
   FILE:     `internal/engine/policy/builtins.go`, `internal/engine/policy/builtins/fish.cue`, `internal/engine/policy/builtins_test.go`, `internal/cli/cli_agentargv_test.go`, `internal/cli/cli_session_profile_test.go`
   CHANGE:   Remove eager items; add the exact CUE contract marker; pin new hash `sha256:92da9d4ef90abd8f84031d9578650c319f22e3a7a7776ae34d33ed1e26e9a85e` and old-hash rejection; prove host/container argv stays exactly `fish` and fresh reconstruction gets the two-item projection.
   VERIFY:   `go test ./internal/engine/policy ./internal/engine/container ./internal/cli -run 'BuiltinFish|FishBuiltin|AgentArgvAcceptsFish|SessionProfile.*Builtin' -count=1 -v`

@@ -1,4 +1,5 @@
 // Fish shell in a contained container with deny-by-default network access.
+// Builtin contract: fish-projection-v2-functions-completions-only.
 package safeslop
 
 safeslop: {

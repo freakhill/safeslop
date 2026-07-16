@@ -18,6 +18,11 @@ func TestBuiltinFishProjectsDemandLoadedOnly(t *testing.T) {
 	if builtin.Profile.Projection == nil || !reflect.DeepEqual(builtin.Profile.Projection.Items, want) {
 		t.Fatalf("fish builtin projection = %#v, want %#v", builtin.Profile.Projection, want)
 	}
+	const oldHash = "sha256:4154b2100c9e8a65f11c1d3a3c5cae98de9a5755dd44b68fb119002439957814"
+	const wantHash = "sha256:92da9d4ef90abd8f84031d9578650c319f22e3a7a7776ae34d33ed1e26e9a85e"
+	if builtin.Hash != wantHash || builtin.Hash == oldHash {
+		t.Fatalf("fish builtin hash = %q, want v2 %q and not v1 %q", builtin.Hash, wantHash, oldHash)
+	}
 }
 
 func boolPtrForBuiltinTest(v bool) *bool { return &v }

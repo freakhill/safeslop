@@ -94,12 +94,16 @@ func TestAgentArgvRejectsUnknownAgent(t *testing.T) {
 }
 
 func TestAgentArgvAcceptsFish(t *testing.T) {
-	argv, err := agentArgv(policy.Profile{Agent: "fish"})
-	if err != nil {
-		t.Fatalf("agentArgv(fish): %v", err)
-	}
-	if len(argv) != 1 || argv[0] != "fish" {
-		t.Errorf("fish argv = %v, want [fish]", argv)
+	for _, environment := range []string{"host", "container"} {
+		t.Run(environment, func(t *testing.T) {
+			argv, err := agentArgv(policy.Profile{Agent: "fish", Environment: environment})
+			if err != nil {
+				t.Fatalf("agentArgv(fish): %v", err)
+			}
+			if len(argv) != 1 || argv[0] != "fish" {
+				t.Errorf("fish %s argv = %v, want [fish]", environment, argv)
+			}
+		})
 	}
 }
 
