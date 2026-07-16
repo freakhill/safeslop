@@ -14,7 +14,7 @@ WORKTREE: `.worktrees/0109-fish-demand-loaded-projection/`
   VERIFY:   `git diff --check && rg -n '94.25 / 100|functions-completions-only|does \*\*not\*\* project' specs/research/2026-07-16-fish-container-startup-*.md`
   EXPECTED: Notes pin a least-authority deterministic startup contract and migration.
 
-- [ ] Reproduce eager builtin projection as RED
+- [x] Reproduce eager builtin projection as RED
   FILE:     `internal/engine/policy/builtins_test.go`, `internal/engine/container/projection_test.go`
   CHANGE:   Add policy deep-equality expectations for exactly two ordered optional Fish globs and a fake-home snapshot test with eager sentinels plus regular function/completion fixtures; assert eager sources/bytes/manifest rows are absent and only demand-loaded assets publish.
   VERIFY:   `go test ./internal/engine/policy ./internal/engine/container -run 'BuiltinFish|FishBuiltin' -count=1 -v`

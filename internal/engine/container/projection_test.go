@@ -253,6 +253,59 @@ func TestResolveProjectionGlobNoMatchOptionalSkips(t *testing.T) {
 	}
 }
 
+func TestSnapshotProjectionFishBuiltinExcludesEagerStartup(t *testing.T) {
+	home := projHome(t,
+		".config/fish/config.fish",
+		".config/fish/conf.d/eager.fish",
+		".config/fish/functions/projected_fn.fish",
+		".config/fish/completions/flo_probe.fish",
+	)
+	contents := map[string]string{
+		".config/fish/config.fish":                 "EAGER_CONFIG_RAN",
+		".config/fish/conf.d/eager.fish":           "EAGER_CONFD_RAN",
+		".config/fish/functions/projected_fn.fish": "DEMAND_FUNCTION",
+		".config/fish/completions/flo_probe.fish":  "DEMAND_COMPLETION",
+	}
+	for rel, content := range contents {
+		if err := os.WriteFile(filepath.Join(home, rel), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	builtin, ok := policy.BuiltinProfileByName("fish")
+	if !ok || builtin.Profile.Projection == nil {
+		t.Fatal("fish builtin projection missing")
+	}
+	m, err := SnapshotProjection(home, t.TempDir(), *builtin.Profile.Projection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mounts := m.PresentMounts()
+	var targets []string
+	var snapshotBytes strings.Builder
+	for _, mount := range mounts {
+		targets = append(targets, mount.Target)
+		data, err := os.ReadFile(mount.Host)
+		if err != nil {
+			t.Fatal(err)
+		}
+		snapshotBytes.Write(data)
+	}
+	wantTargets := ".config/fish/functions/projected_fn.fish,.config/fish/completions/flo_probe.fish"
+	if got := strings.Join(targets, ","); got != wantTargets {
+		t.Fatalf("fish builtin snapshot targets = %q, want %q", got, wantTargets)
+	}
+	encoded, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	published := string(encoded) + snapshotBytes.String()
+	for _, sentinel := range []string{"config.fish", "conf.d", "EAGER_CONFIG_RAN", "EAGER_CONFD_RAN"} {
+		if strings.Contains(published, sentinel) {
+			t.Fatalf("fish builtin snapshot published eager sentinel %q", sentinel)
+		}
+	}
+}
+
 func TestSnapshotProjectionOptionalGlobSkipsNonRegularMatches(t *testing.T) {
 	home := projHome(t, ".config/fish/completions/ok.fish")
 	regular := filepath.Join(home, ".config/fish/completions/ok.fish")

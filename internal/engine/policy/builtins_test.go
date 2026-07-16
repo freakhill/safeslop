@@ -6,6 +6,22 @@ import (
 	"testing"
 )
 
+func TestBuiltinFishProjectsDemandLoadedOnly(t *testing.T) {
+	builtin, ok := BuiltinProfileByName("fish")
+	if !ok {
+		t.Fatal("fish builtin missing")
+	}
+	want := []ProjectionItem{
+		{Source: "~/.config/fish/functions/*.fish", Kind: "glob", Label: "fish-functions", Optional: boolPtrForBuiltinTest(true)},
+		{Source: "~/.config/fish/completions/*.fish", Kind: "glob", Label: "fish-completions", Optional: boolPtrForBuiltinTest(true)},
+	}
+	if builtin.Profile.Projection == nil || !reflect.DeepEqual(builtin.Profile.Projection.Items, want) {
+		t.Fatalf("fish builtin projection = %#v, want %#v", builtin.Profile.Projection, want)
+	}
+}
+
+func boolPtrForBuiltinTest(v bool) *bool { return &v }
+
 func TestBuiltinProfilesAreLaunchableAndDeterministic(t *testing.T) {
 	builtins := BuiltinProfiles()
 	if len(builtins) != 4 {
