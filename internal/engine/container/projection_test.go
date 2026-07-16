@@ -474,10 +474,198 @@ func TestSnapshotProjectionFollowsRelativeConfigSymlinkIntoPrivateStage(t *testi
 	}
 }
 
+func TestSnapshotProjectionAcceptsBuiltinAbsoluteInHomeSymlink(t *testing.T) {
+	for _, name := range []string{"pi", "claude"} {
+		t.Run(name, func(t *testing.T) {
+			home := projHome(t)
+			agent := filepath.Join(home, "workspace", "pi-dev-setup", "agent")
+			if err := os.MkdirAll(filepath.Join(agent, "skills", "probe"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(agent, "AGENTS.md"), []byte("absolute-agent-instructions"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(agent, "skills", "probe", "SKILL.md"), []byte("absolute-agent-skill"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Join(home, ".pi"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(agent, filepath.Join(home, ".pi", "agent")); err != nil {
+				t.Fatal(err)
+			}
+			builtin, ok := policy.BuiltinProfileByName(name)
+			if !ok || builtin.Profile.Projection == nil {
+				t.Fatalf("%s builtin projection missing", name)
+			}
+
+			manifest, err := SnapshotProjection(home, t.TempDir(), *builtin.Profile.Projection)
+			if err != nil {
+				var projectionErr *ProjectionError
+				if errors.As(err, &projectionErr) && projectionErr.Failure().Code == ProjectionTargetOutsideRoot {
+					t.Fatalf("exact in-home absolute symlink was rejected: %v", err)
+				}
+				t.Fatal(err)
+			}
+			got := map[string]string{}
+			for _, mount := range manifest.PresentMounts() {
+				contents, err := os.ReadFile(mount.Host)
+				if err != nil {
+					t.Fatal(err)
+				}
+				got[mount.Target] = string(contents)
+			}
+			want := map[string]string{
+				".pi/agent/AGENTS.md":             "absolute-agent-instructions",
+				".pi/agent/skills/probe/SKILL.md": "absolute-agent-skill",
+			}
+			if len(got) != len(want) {
+				t.Fatalf("%s projected targets = %#v, want %#v", name, got, want)
+			}
+			for target, contents := range want {
+				if got[target] != contents {
+					t.Fatalf("%s snapshot %s = %q, want %q", name, target, got[target], contents)
+				}
+			}
+		})
+	}
+}
+
+func TestSnapshotProjectionRejectsUnsafeAbsoluteTargetSpellings(t *testing.T) {
+	parent := t.TempDir()
+	home := filepath.Join(parent, "home")
+	if err := os.MkdirAll(filepath.Join(home, "store"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(parent, "outside-target-sentinel")
+	prefixCollision := home + "-attacker"
+	for _, dir := range []string{outside, prefixCollision} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cases := map[string]string{
+		"root":                home,
+		"outside":             outside,
+		"prefix-collision":    filepath.Join(prefixCollision, "file"),
+		"dot-component":       home + "/store/./file",
+		"dot-dot-component":   home + "/store/../file",
+		"duplicate-separator": home + "//store/file",
+		"trailing-separator":  home + "/store/",
+		"alternate-case":      strings.ToUpper(home) + "/store/file",
+		"unicode-alternate":   home + "\u0301/store/file",
+	}
+	for name, target := range cases {
+		t.Run(name, func(t *testing.T) {
+			link := filepath.Join(home, "link")
+			_ = os.Remove(link)
+			if err := os.Symlink(target, link); err != nil {
+				t.Fatal(err)
+			}
+			_, err := SnapshotProjection(home, t.TempDir(), policy.Projection{Items: []policy.ProjectionItem{{Source: "~/link/file", Optional: boolPtr(false)}}})
+			requireProjectionCode(t, err, ProjectionTargetOutsideRoot)
+			var projectionErr *ProjectionError
+			if !errors.As(err, &projectionErr) {
+				t.Fatal("missing projection failure")
+			}
+			encoded, marshalErr := json.Marshal(projectionErr.Failure())
+			if marshalErr != nil {
+				t.Fatal(marshalErr)
+			}
+			for _, sentinel := range []string{target, outside, prefixCollision} {
+				if sentinel != "" && strings.Contains(string(encoded), sentinel) {
+					t.Fatalf("failure leaked absolute target sentinel %q: %s", sentinel, encoded)
+				}
+			}
+		})
+	}
+}
+
+func TestSnapshotProjectionRejectsAbsoluteExcludedSymlink(t *testing.T) {
+	home := projHome(t, ".ssh/config")
+	if err := os.Symlink(filepath.Join(home, ".ssh", "config"), filepath.Join(home, "link")); err != nil {
+		t.Fatal(err)
+	}
+	_, err := SnapshotProjection(home, t.TempDir(), policy.Projection{Items: []policy.ProjectionItem{{Source: "~/link", Optional: boolPtr(false)}}})
+	requireProjectionCode(t, err, ProjectionTargetExcluded)
+}
+
+func TestSnapshotProjectionDetectsAbsoluteSymlinkReadRace(t *testing.T) {
+	home := projHome(t, "old", "new")
+	link := filepath.Join(home, ".zshrc")
+	if err := os.Symlink(filepath.Join(home, "old"), link); err != nil {
+		t.Fatal(err)
+	}
+	oldHook := projectionAfterReadlink
+	projectionAfterReadlink = func(string) {
+		projectionAfterReadlink = nil
+		if err := os.Remove(link); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(filepath.Join(home, "new"), link); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() { projectionAfterReadlink = oldHook })
+	_, err := SnapshotProjection(home, t.TempDir(), policy.Projection{Items: []policy.ProjectionItem{{Source: "~/.zshrc"}}})
+	requireProjectionCode(t, err, ProjectionSnapshotChanged)
+}
+
+func TestSnapshotProjectionUsesPinnedRootForAbsoluteSymlink(t *testing.T) {
+	parent := t.TempDir()
+	home := filepath.Join(parent, "home")
+	originalFile := filepath.Join(home, "store", "file")
+	if err := os.MkdirAll(filepath.Dir(originalFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(originalFile, []byte("original-pinned-bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(originalFile, filepath.Join(home, "link")); err != nil {
+		t.Fatal(err)
+	}
+	oldHome := filepath.Join(parent, "original-home")
+	oldHook := projectionAfterReadlink
+	projectionAfterReadlink = func(string) {
+		projectionAfterReadlink = nil
+		if err := os.Rename(home, oldHome); err != nil {
+			t.Fatal(err)
+		}
+		attackerFile := filepath.Join(home, "store", "file")
+		if err := os.MkdirAll(filepath.Dir(attackerFile), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(attackerFile, []byte("replacement-path-sentinel"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() { projectionAfterReadlink = oldHook })
+
+	manifest, err := SnapshotProjection(home, t.TempDir(), policy.Projection{Items: []policy.ProjectionItem{{Source: "~/link", Optional: boolPtr(false)}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mounts := manifest.PresentMounts()
+	if len(mounts) != 1 {
+		t.Fatalf("present mounts = %+v, want one", mounts)
+	}
+	got, err := os.ReadFile(mounts[0].Host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "original-pinned-bytes" || strings.Contains(string(got), "replacement-path-sentinel") {
+		t.Fatalf("snapshot followed replaced root pathname: %q", got)
+	}
+}
+
 func TestSnapshotProjectionRejectsAbsoluteEscapeExcludedAndLoopingSymlinks(t *testing.T) {
-	t.Run("absolute", func(t *testing.T) {
-		home := projHome(t, "real")
-		if err := os.Symlink(filepath.Join(home, "real"), filepath.Join(home, "link")); err != nil {
+	t.Run("absolute-outside", func(t *testing.T) {
+		home := projHome(t)
+		outside := filepath.Join(t.TempDir(), "outside")
+		if err := os.WriteFile(outside, []byte("never-read"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, filepath.Join(home, "link")); err != nil {
 			t.Fatal(err)
 		}
 		_, err := SnapshotProjection(home, t.TempDir(), policy.Projection{Items: []policy.ProjectionItem{{Source: "~/link"}}})

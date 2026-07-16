@@ -14,7 +14,7 @@ WORKTREE: `.worktrees/0110-in-home-absolute-symlinks/`
   VERIFY:   `git diff --check && rg -n '100 / 100|same approved root|Never resolve, open, stat, copy|exact in-root relative or absolute' specs/research/2026-07-16-in-home-absolute-symlinks-*.md`
   EXPECTED: Notes are whitespace-clean and pin syntax-only authority, descriptor restart, ambiguous-spelling rejection, tests, and docs.
 
-- [ ] Reproduce exact in-home absolute links as RED
+- [x] Reproduce exact in-home absolute links as RED
   FILE:     `internal/engine/container/projection_test.go`
   CHANGE:   Add strict lexical table coverage and production Pi/Claude builtin snapshot fixtures using `~/.pi/agent` as an exact-spelling absolute in-home link; retain outside/excluded/ambiguous/malformed rejection and add absolute-link replacement and pinned-root pathname-replacement proofs. Assert snapshot bytes and failures never expose or read attacker sentinels. Add the private helper signature in the GREEN task so RED fails on current behavior, not test plumbing.
   VERIFY:   `go test ./internal/engine/container -run 'Absolute.*Symlink|AbsoluteTarget|PinnedRoot' -count=1 -v`
