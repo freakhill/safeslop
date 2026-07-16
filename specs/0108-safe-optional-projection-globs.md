@@ -20,7 +20,7 @@ WORKTREE: `.worktrees/0108-safe-optional-projection-globs/`
   VERIFY:   `go test ./internal/engine/container -run 'OptionalGlob|RequiredGlob' -count=1 -v`
   EXPECTED: New optional tests fail specifically because current code returns `projection_unsafe_descendant`; unchanged required behavior passes.
 
-- [ ] Implement no-follow physical-regular glob selection
+- [x] Implement no-follow physical-regular glob selection
   FILE:     `internal/engine/container/projection.go`, `internal/engine/container/projection_test.go`
   CHANGE:   Add `skipped-nonregular`; classify basename matches with `os.Root.Lstat`; omit non-regular candidates only when the glob item is optional; add a test-only post-classification barrier and test, then compare classification identity to the no-follow opened file; retain every existing selected-file/mount/digest/directory/atomic-publication proof; keep classification/race failures fatal.
   VERIFY:   `go test ./internal/engine/container -run 'Projection|Snapshot|Symlink|OptionalGlob|RequiredGlob' -count=1 -v`

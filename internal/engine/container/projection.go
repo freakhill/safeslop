@@ -19,6 +19,7 @@ const (
 	projPresent           = "present"
 	projSkippedAbsent     = "skipped-absent"
 	projSkippedUnreadable = "skipped-unreadable"
+	projSkippedNonRegular = "skipped-nonregular"
 )
 
 const (
@@ -95,6 +96,9 @@ func projectionRoots(home string) (string, string) {
 // its descriptor is pinned; production leaves it nil. Snapshot bytes must still come from the fd.
 var projectionAfterOpen func(source string)
 var projectionAfterReadlink func(source string)
+
+// projectionAfterGlobLstat is a test-only barrier between candidate classification and open.
+var projectionAfterGlobLstat func(source, name string)
 
 // projectionMountID is injected in tests to model a same-device mount crossing without requiring
 // privileged mount operations. Production uses the OS-specific descriptor query.
@@ -384,6 +388,7 @@ func (r *projectionResolver) snapshotGlob(pattern string) ([]ProjectionMount, er
 	}
 	sort.Slice(names, func(i, j int) bool { return names[i].Name() < names[j].Name() })
 	var out []ProjectionMount
+	skippedNonRegular := false
 	for _, de := range names {
 		matched, matchErr := filepath.Match(basePattern, de.Name())
 		if matchErr != nil {
@@ -392,13 +397,27 @@ func (r *projectionResolver) snapshotGlob(pattern string) ([]ProjectionMount, er
 		if !matched {
 			continue
 		}
+		classified, statErr := node.dir.Lstat(de.Name())
+		if statErr != nil {
+			return nil, r.fail(ProjectionSnapshotChanged)
+		}
+		if !classified.Mode().IsRegular() {
+			if !r.optional {
+				return nil, r.fail(ProjectionUnsafeDescendant)
+			}
+			skippedNonRegular = true
+			continue
+		}
+		if projectionAfterGlobLstat != nil {
+			projectionAfterGlobLstat(r.item.Source, de.Name())
+		}
 		child, childErr := r.openDirect(node.dir, node.mountID, filepath.Join(node.canonical, de.Name()), de.Name())
 		if childErr != nil {
 			return nil, childErr
 		}
-		if child.file == nil || !child.info.Mode().IsRegular() {
+		if child.file == nil || !stableInfo(classified, child.info) {
 			child.close()
-			return nil, r.fail(ProjectionUnsafeDescendant)
+			return nil, r.fail(ProjectionSnapshotChanged)
 		}
 		target := targetFromAbs(r.home, r.xdg, filepath.Join(dirAbs, de.Name()))
 		entry, copyErr := r.snapshotFile(child, target, r.item.Label)
@@ -415,10 +434,13 @@ func (r *projectionResolver) snapshotGlob(pattern string) ([]ProjectionMount, er
 	if err := r.retainDirProof(node.dir, after); err != nil {
 		return nil, err
 	}
+	if len(out) == 0 && !r.optional {
+		return nil, r.fail(ProjectionRequiredAbsent)
+	}
+	if skippedNonRegular {
+		out = append(out, ProjectionMount{Host: displaySource(r.home, pattern), Optional: true, Label: r.item.Label, Status: projSkippedNonRegular})
+	}
 	if len(out) == 0 {
-		if !r.optional {
-			return nil, r.fail(ProjectionRequiredAbsent)
-		}
 		return []ProjectionMount{{Host: displaySource(r.home, pattern), Optional: true, Label: r.item.Label, Status: projSkippedAbsent}}, nil
 	}
 	return out, nil

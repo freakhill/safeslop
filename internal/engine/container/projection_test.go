@@ -348,6 +348,34 @@ func TestSnapshotProjectionRequiredGlobRejectsNonRegularMatch(t *testing.T) {
 	requireProjectionCode(t, err, ProjectionUnsafeDescendant)
 }
 
+func TestSnapshotProjectionOptionalGlobRejectsReplacementAfterClassification(t *testing.T) {
+	home := projHome(t, ".config/fish/completions/selected.fish")
+	selected := filepath.Join(home, ".config/fish/completions/selected.fish")
+	replacement := filepath.Join(home, ".config/fish/completions/replacement.tmp")
+	if err := os.WriteFile(replacement, []byte("replacement-sentinel"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldHook := projectionAfterGlobLstat
+	projectionAfterGlobLstat = func(_, name string) {
+		if name != "selected.fish" {
+			return
+		}
+		projectionAfterGlobLstat = nil
+		if err := os.Remove(selected); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(replacement, selected); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() { projectionAfterGlobLstat = oldHook })
+
+	_, err := SnapshotProjection(home, t.TempDir(), policy.Projection{Items: []policy.ProjectionItem{{
+		Source: "~/.config/fish/completions/*.fish", Kind: "glob",
+	}}})
+	requireProjectionCode(t, err, ProjectionSnapshotChanged)
+}
+
 func TestSnapshotProjectionFollowsRelativeConfigSymlinkIntoPrivateStage(t *testing.T) {
 	home := projHome(t, "dotfiles/files/.config/fish/config.fish")
 	if err := os.RemoveAll(filepath.Join(home, ".config")); err != nil {
