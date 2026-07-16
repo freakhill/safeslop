@@ -1,8 +1,10 @@
 package hostpath
 
 import (
+	"io"
 	"io/fs"
-	"strings"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -17,30 +19,7 @@ type proofCharacterizationAPI struct {
 }
 
 var sharedProofCharacterization = proofCharacterizationAPI{
-	absoluteTarget: func(root, target string) (string, bool) {
-		if root == "/" || !strings.HasPrefix(root, "/") || strings.HasSuffix(root, "/") {
-			return "", false
-		}
-		for _, part := range strings.Split(root[1:], "/") {
-			if part == "" || part == "." || part == ".." {
-				return "", false
-			}
-		}
-		prefix := root + "/"
-		if !strings.HasPrefix(target, prefix) {
-			return "", false
-		}
-		parts := strings.Split(target[len(prefix):], "/")
-		if len(parts) == 0 {
-			return "", false
-		}
-		for _, part := range parts {
-			if part == "" || part == "." || part == ".." {
-				return "", false
-			}
-		}
-		return strings.Join(parts, "/"), true
-	},
+	absoluteTarget: strictAbsoluteTarget,
 	directorySafe: func(uid, currentUID uint32, mode fs.FileMode) bool {
 		return mode.IsDir() && uid == currentUID && mode.Perm()&0o022 == 0
 	},
@@ -74,6 +53,75 @@ func TestHostPathCharacterizationAbsoluteTargets(t *testing.T) {
 				t.Fatalf("absolute target = %q,%v want %q,%v", got, ok, tc.want, tc.ok)
 			}
 		})
+	}
+}
+
+func TestHostPathProofRevalidatesChangedLink(t *testing.T) {
+	home := t.TempDir()
+	for name, body := range map[string]string{"old": "old", "new": "new"} {
+		if err := os.WriteFile(filepath.Join(home, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	link := filepath.Join(home, "source")
+	if err := os.Symlink("old", link); err != nil {
+		t.Fatal(err)
+	}
+	root, err := openProofRoot(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.close()
+	node, err := openPinnedPath(root, "source", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer node.close()
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("new", link); err != nil {
+		t.Fatal(err)
+	}
+	if root.revalidate() {
+		t.Fatal("changed source link retained a valid proof epoch")
+	}
+}
+
+func TestHostPathPinnedRootDoesNotReopenReplacementPath(t *testing.T) {
+	parent := t.TempDir()
+	home := filepath.Join(parent, "home")
+	if err := os.Mkdir(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "source"), []byte("pinned"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	root, err := openProofRoot(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.close()
+	if err := os.Rename(home, filepath.Join(parent, "original")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "source"), []byte("replacement"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	node, err := openPinnedPath(root, "source", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer node.close()
+	body, err := io.ReadAll(node.file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "pinned" {
+		t.Fatalf("proof reopened replacement root path: %q", body)
 	}
 }
 

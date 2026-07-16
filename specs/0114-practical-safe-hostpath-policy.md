@@ -22,7 +22,7 @@ Decision notes: `specs/research/2026-07-17-hostpath-policy-ayo.md`, `specs/resea
   VERIFY:   `! go test ./internal/engine/creds ./internal/engine/container ./internal/engine/hostpath -run 'HostPath|PiOAuth.*(Symlink|Ancestry)|Projection.*Characterization' -count=1 -v`
   EXPECTED: Only new safe Pi link/0755 acceptance assertions fail against the old blanket rejection; unsafe cases and projection characterization remain closed/green.
 
-- [ ] Extract the shared proof core and migrate projection without semantic delta
+- [x] Extract the shared proof core and migrate projection without semantic delta
   FILE:     `internal/engine/hostpath/*.go`, `internal/engine/container/projection.go`, `internal/engine/container/projection_identity_*.go`, `internal/engine/container/projection_test.go`
   CHANGE:   Move retained-root component/link proof, exact absolute-target conversion, mount-instance adapters, descriptor-backed pinned nodes, and revalidation into the unexported hostpath core with a typed projection facade. Preserve lazy HOME/XDG roots, exclusions after rewrites, 40-link limit, recursive/glob link rejection, digest/tree proofs, private atomic snapshots, manifests, and existing failure mappings byte-for-byte. Support linux/darwin only; other build tags return unsupported with no fallback.
   VERIFY:   `go test ./internal/engine/hostpath ./internal/engine/container -run 'HostPath|Projection|Snapshot|Symlink|AbsoluteTarget|PinnedRoot' -count=1 -v`

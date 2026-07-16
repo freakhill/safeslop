@@ -1,6 +1,6 @@
 //go:build linux
 
-package container
+package hostpath
 
 import (
 	"os"

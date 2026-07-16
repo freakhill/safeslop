@@ -8,7 +8,6 @@ import (
 	"text/template"
 
 	"github.com/freakhill/safeslop/internal/engine/container/runtime"
-	"github.com/freakhill/safeslop/internal/engine/policy"
 )
 
 // composeParams fills compose.yml.tmpl. RuntimeDir holds the rendered squid.conf +
@@ -81,7 +80,7 @@ func validateProjectionSnapshotMounts(stageDir string, manifest *ProjectionManif
 	for _, mount := range manifest.PresentMounts() {
 		rel, err := filepath.Rel(root, filepath.Clean(mount.Host))
 		if err != nil || escapesRoot(rel) || filepath.Dir(rel) != "." || rel == "." {
-			return newProjectionError(ProjectionSafetyUnsupported, policy.ProjectionItem{}, "", true)
+			return projectionBoundaryError()
 		}
 	}
 	return nil

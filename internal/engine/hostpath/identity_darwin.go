@@ -1,6 +1,6 @@
 //go:build darwin
 
-package container
+package hostpath
 
 import (
 	"os"
