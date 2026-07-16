@@ -1,6 +1,6 @@
 # 0112 — Progressive proxy runtime readiness and Pi activation pin
 
-Status: in progress
+Status: complete
 
 SCOPE: make container deny/progressive sessions fail closed before agent launch unless the Squid proxy is actually ready; fix the Ubuntu Squid log target that currently crashes the proxy; persist a value-free structured runtime failure; and advance the reviewed Pi npm pin to the smallest patch that contains GPT-5.6 Luna metadata.
 
@@ -32,7 +32,7 @@ WORKTREE: `.worktrees/0112-progressive-runtime-readiness/`
   VERIFY:   `bash -n ci/progressive-egress-smoke.sh && git diff --check && rg -n 'network_proxy_unavailable|proxy.*ready|progressive-egress-smoke' README.md skills/agent-sandbox-ops/SKILL.md Makefile ci/progressive-egress-smoke.sh`
   EXPECTED: Docs match the engine contract and the smoke script is isolated, self-cleaning, value-free, and opt-in.
 
-- [ ] Run full gates and real runtime acceptance
+- [x] Run full gates and real runtime acceptance
   FILE:     whole repo, `specs/0112-progressive-runtime-readiness.md`
   CHANGE:   Run focused tests, the real progressive smoke, UI/check/build gates, then mark this spec complete. Install only after all checks pass; merge/push both remotes and remove the worktree/branch after the dependent 0113 live Pi test confirms this runtime foundation.
   VERIFY:   `git diff --check && make test-progressive-egress-smoke && make test-emacs-ui-matrix && make check && make build`
