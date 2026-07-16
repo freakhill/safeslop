@@ -195,12 +195,11 @@ func provision(ctx context.Context, sessionID string, agentArgv []string, worksp
 	if err != nil {
 		return nil, "", nil, err
 	}
-	// specs/0096: resolve the engine-owned host projection against the launching user's $HOME.
-	// A resolver-law violation (credential dir, path escape, symlink, duplicate target, required
-	// source absent) fails closed here — the agent never launches under a half-resolved projection.
+	// Resolve through pinned descriptors and publish a private per-session snapshot. Compose sees
+	// only snapshot paths below stageDir, never a checked-then-reopened live host source.
 	var projectionManifest *ProjectionManifest
 	if policy.ProjectionActive(policy.Profile{Environment: "container", Projection: proj}) {
-		manifest, resErr := ResolveProjection(os.Getenv("HOME"), *proj)
+		manifest, resErr := SnapshotProjection(os.Getenv("HOME"), stageDir, *proj)
 		if resErr != nil {
 			return nil, "", nil, fmt.Errorf("resolve host projection: %w", resErr)
 		}

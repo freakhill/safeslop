@@ -80,11 +80,8 @@ func TestMaterializeRunScopesEgressPerAgent(t *testing.T) {
 	}
 }
 
-// TestProvisionThreadsProjectionIntoCompose pins specs/0096 T4c: provision resolves a profile's
-// projection against $HOME and materializes it into the per-run compose.yml (read-only mounts),
-// projection.json (manifest), and projection.tsv (entrypoint copy input) — fail-closed on a
-// resolver-law violation. No docker: the detectRuntime seam returns a fakeEngine whose commands
-// are no-op stubs.
+// TestProvisionThreadsProjectionIntoCompose pins the descriptor-snapshot launch contract: compose
+// mounts a private stage snapshot, never the live source under $HOME. No docker is invoked.
 func TestProvisionThreadsProjectionIntoCompose(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -106,8 +103,15 @@ func TestProvisionThreadsProjectionIntoCompose(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(yml), ":/safeslop/projected/0:ro") || !strings.Contains(string(yml), home+"/.zshrc:/safeslop/projected/0:ro") {
-		t.Errorf("provision must render the resolved projection mount ro:\n%s", yml)
+	snapshot := filepath.Join(stageDir, "projection-snapshots", "000000")
+	if !strings.Contains(string(yml), snapshot+":/safeslop/projected/0:ro") {
+		t.Errorf("provision must mount the private snapshot read-only:\n%s", yml)
+	}
+	if strings.Contains(string(yml), filepath.Join(home, ".zshrc")+":/safeslop/projected/") {
+		t.Errorf("provision mounted the live host source:\n%s", yml)
+	}
+	if got, err := os.ReadFile(snapshot); err != nil || string(got) != "# zsh" {
+		t.Errorf("snapshot bytes = %q, err=%v", got, err)
 	}
 	if _, err := os.ReadFile(filepath.Join(stageDir, "projection.json")); err != nil {
 		t.Errorf("provision must write projection.json: %v", err)

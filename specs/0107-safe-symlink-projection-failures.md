@@ -20,7 +20,7 @@ WORKTREE: `.worktrees/0107-builtin-projection-symlinks/`
   VERIFY: `go test ./internal/engine/session ./internal/engine/container -run 'Failure|Projection' -count=1 -v`
   EXPECTED: projection errors have stable value-free codes/templates and existing session JSON remains compatible.
 
-- [ ] Build descriptor-pinned private snapshots
+- [x] Build descriptor-pinned private snapshots
   FILE: `internal/engine/container/projection.go`, `internal/engine/container/launch.go`, `internal/engine/container/compose.go`, `internal/engine/container/*_test.go`
   CHANGE: add OS-specific descriptor-walk adapters; accept relative in-root source symlinks only; validate exclusions/type/identity per descriptor; snapshot under owned `0700` stage storage; mount only snapshots; add injected post-open test barriers and cleanup paths.
   VERIFY: `go test ./internal/engine/container -run 'Projection|Snapshot|Symlink' -count=1 -v`

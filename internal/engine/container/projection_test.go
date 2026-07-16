@@ -2,6 +2,7 @@ package container
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,6 +36,23 @@ func projHome(t *testing.T, rels ...string) string {
 
 func boolPtr(b bool) *bool { return &b }
 
+func requireProjectionCode(t *testing.T, err error, want string) {
+	t.Helper()
+	var projectionErr *ProjectionError
+	if !errors.As(err, &projectionErr) {
+		t.Fatalf("error %v is not a ProjectionError", err)
+	}
+	if got := projectionErr.Failure().Code; got != want {
+		t.Fatalf("projection code = %q, want %q", got, want)
+	}
+}
+
+// ResolveProjection keeps the pre-snapshot test table concise while routing every case through the
+// production snapshot API. The stage lives under t.TempDir-owned home and is removed by testing.
+func ResolveProjection(home string, proj policy.Projection) (ProjectionManifest, error) {
+	return SnapshotProjection(home, filepath.Join(home, ".test-projection-stage"), proj)
+}
+
 func TestResolveProjectionFilePresent(t *testing.T) {
 	home := projHome(t, ".pi/agent/AGENTS.md")
 	m, err := ResolveProjection(home, policy.Projection{Enabled: true, Items: []policy.ProjectionItem{
@@ -57,8 +75,8 @@ func TestResolveProjectionFilePresent(t *testing.T) {
 	if mt.Status != projPresent || mt.Label != "pi-agent" {
 		t.Errorf("status/label = %q/%q", mt.Status, mt.Label)
 	}
-	if mt.Host != filepath.Join(home, ".pi/agent/AGENTS.md") {
-		t.Errorf("host = %q", mt.Host)
+	if !strings.HasPrefix(mt.Host, filepath.Join(home, ".test-projection-stage", "projection-snapshots")+string(filepath.Separator)) {
+		t.Errorf("host is not the private snapshot: %q", mt.Host)
 	}
 }
 
@@ -83,9 +101,7 @@ func TestResolveProjectionRequiredAbsentFailsClosed(t *testing.T) {
 	_, err := ResolveProjection(home, policy.Projection{Enabled: true, Items: []policy.ProjectionItem{
 		{Source: "~/.pi/agent/AGENTS.md", Optional: boolPtr(false)},
 	}})
-	if err == nil || !strings.Contains(err.Error(), "required source absent") {
-		t.Fatalf("required absent must fail closed, got: %v", err)
-	}
+	requireProjectionCode(t, err, ProjectionRequiredAbsent)
 }
 
 func TestResolveProjectionRejectsCredentialDirs(t *testing.T) {
@@ -101,9 +117,11 @@ func TestResolveProjectionRejectsCredentialDirs(t *testing.T) {
 		_ = os.MkdirAll(filepath.Dir(filepath.Join(home, rel)), 0o755)
 		_ = os.WriteFile(filepath.Join(home, rel), []byte("x"), 0o644)
 		_, err := ResolveProjection(home, policy.Projection{Enabled: true, Items: []policy.ProjectionItem{{Source: src}}})
-		if err == nil || !strings.Contains(err.Error(), "excluded source") {
-			t.Errorf("credential/cache source %q must be rejected as excluded, got: %v", src, err)
+		if err == nil {
+			t.Errorf("credential/cache source %q was accepted", src)
+			continue
 		}
+		requireProjectionCode(t, err, ProjectionTargetExcluded)
 	}
 }
 
@@ -111,18 +129,14 @@ func TestResolveProjectionRejectsCargoCredentials(t *testing.T) {
 	home := projHome(t, ".cargo/credentials", ".cargo/credentials.toml")
 	for _, src := range []string{"~/.cargo/credentials", "~/.cargo/credentials.toml"} {
 		_, err := ResolveProjection(home, policy.Projection{Enabled: true, Items: []policy.ProjectionItem{{Source: src}}})
-		if err == nil || !strings.Contains(err.Error(), "cargo credentials") {
-			t.Errorf("%q must be rejected as cargo credentials, got: %v", src, err)
-		}
+		requireProjectionCode(t, err, ProjectionTargetExcluded)
 	}
 }
 
 func TestResolveProjectionRejectsBroadHome(t *testing.T) {
 	home := projHome(t, ".zshrc")
 	_, err := ResolveProjection(home, policy.Projection{Enabled: true, Items: []policy.ProjectionItem{{Source: "~"}}})
-	if err == nil || !strings.Contains(err.Error(), "broad root rejected") {
-		t.Fatalf("broad $HOME source must be rejected, got: %v", err)
-	}
+	requireProjectionCode(t, err, ProjectionSourceType)
 }
 
 func TestResolveProjectionRejectsPathEscape(t *testing.T) {
@@ -130,25 +144,26 @@ func TestResolveProjectionRejectsPathEscape(t *testing.T) {
 	_, err := ResolveProjection(home, policy.Projection{Enabled: true, Items: []policy.ProjectionItem{
 		{Source: "/etc/passwd"},
 	}})
-	if err == nil || !strings.Contains(err.Error(), "escapes") {
-		t.Fatalf("source outside $HOME must be rejected as escape, got: %v", err)
-	}
+	requireProjectionCode(t, err, ProjectionTargetOutsideRoot)
 }
 
-func TestResolveProjectionRejectsSymlinkSource(t *testing.T) {
+func TestResolveProjectionAcceptsRelativeInHomeSymlinkSource(t *testing.T) {
 	home := projHome(t, "real.rc")
-	if err := os.Symlink(filepath.Join(home, "real.rc"), filepath.Join(home, ".zshrc")); err != nil {
+	if err := os.Symlink("real.rc", filepath.Join(home, ".zshrc")); err != nil {
 		t.Fatal(err)
 	}
-	_, err := ResolveProjection(home, policy.Projection{Enabled: true, Items: []policy.ProjectionItem{
+	m, err := ResolveProjection(home, policy.Projection{Enabled: true, Items: []policy.ProjectionItem{
 		{Source: "~/.zshrc"},
 	}})
-	if err == nil || !strings.Contains(err.Error(), "symlink") {
-		t.Fatalf("symlink source must be rejected (TOCTOU), got: %v", err)
+	if err != nil {
+		t.Fatalf("relative in-home source symlink must resolve safely: %v", err)
+	}
+	if len(m.PresentMounts()) != 1 {
+		t.Fatalf("want one projected symlink source, got %+v", m.Items)
 	}
 }
 
-func TestResolveProjectionRejectsSymlinkComponent(t *testing.T) {
+func TestResolveProjectionAcceptsRelativeInHomeSymlinkComponent(t *testing.T) {
 	home := projHome(t)
 	realdir := filepath.Join(home, "realdir")
 	if err := os.MkdirAll(realdir, 0o755); err != nil {
@@ -157,15 +172,18 @@ func TestResolveProjectionRejectsSymlinkComponent(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(realdir, "file"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// ~/linkdir -> realdir ; a source under ~/linkdir/... has a symlink component.
-	if err := os.Symlink(realdir, filepath.Join(home, "linkdir")); err != nil {
+	// ~/linkdir -> realdir ; the pinned resolver follows it without reopening the source path.
+	if err := os.Symlink("realdir", filepath.Join(home, "linkdir")); err != nil {
 		t.Fatal(err)
 	}
-	_, err := ResolveProjection(home, policy.Projection{Enabled: true, Items: []policy.ProjectionItem{
+	m, err := ResolveProjection(home, policy.Projection{Enabled: true, Items: []policy.ProjectionItem{
 		{Source: "~/linkdir/file"},
 	}})
-	if err == nil || !strings.Contains(err.Error(), "symlink component") {
-		t.Fatalf("symlink component in path must be rejected, got: %v", err)
+	if err != nil {
+		t.Fatalf("relative in-home symlink component must resolve safely: %v", err)
+	}
+	if len(m.PresentMounts()) != 1 {
+		t.Fatalf("want one projected file, got %+v", m.Items)
 	}
 }
 
@@ -175,15 +193,11 @@ func TestResolveProjectionRejectsDuplicateTarget(t *testing.T) {
 		{Source: "~/.zshrc"},
 		{Source: "~/.zshrc"}, // same target
 	}})
-	if err == nil || !strings.Contains(err.Error(), "duplicate target") {
-		t.Fatalf("duplicate target must be rejected, got: %v", err)
-	}
+	requireProjectionCode(t, err, ProjectionSourceType)
 }
 
 func TestResolveProjectionDirExpandsPerFile(t *testing.T) {
 	home := projHome(t, ".pi/agent/skills/foo/SKILL.md", ".pi/agent/skills/bar/SKILL.md", ".pi/agent/skills/bar/handler.sh")
-	// a stray symlink inside the corpus must be skipped, not followed.
-	_ = os.Symlink(filepath.Join(home, ".pi/agent/skills/foo/SKILL.md"), filepath.Join(home, ".pi/agent/skills/link.md"))
 	m, err := ResolveProjection(home, policy.Projection{Enabled: true, Items: []policy.ProjectionItem{
 		{Source: "~/.pi/agent/skills", Kind: "dir", Label: "pi-skills"},
 	}})
@@ -192,7 +206,7 @@ func TestResolveProjectionDirExpandsPerFile(t *testing.T) {
 	}
 	mounts := m.PresentMounts()
 	if len(mounts) != 3 {
-		t.Fatalf("dir must expand to 3 regular files (symlink skipped), got %d: %+v", len(mounts), mounts)
+		t.Fatalf("dir must snapshot 3 regular files, got %d: %+v", len(mounts), mounts)
 	}
 	// sorted by target, opaque ids assigned in order
 	want := []string{".pi/agent/skills/bar/SKILL.md", ".pi/agent/skills/bar/handler.sh", ".pi/agent/skills/foo/SKILL.md"}
@@ -237,6 +251,238 @@ func TestResolveProjectionGlobNoMatchOptionalSkips(t *testing.T) {
 	if len(m.PresentMounts()) != 0 || len(m.Items) != 1 || m.Items[0].Status != projSkippedAbsent {
 		t.Fatalf("no-match optional glob must skip-absent, got %+v", m.Items)
 	}
+}
+
+func TestSnapshotProjectionFollowsRelativeConfigSymlinkIntoPrivateStage(t *testing.T) {
+	home := projHome(t, "dotfiles/files/.config/fish/config.fish")
+	if err := os.RemoveAll(filepath.Join(home, ".config")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("dotfiles/files/.config", filepath.Join(home, ".config")); err != nil {
+		t.Fatal(err)
+	}
+	stage := t.TempDir()
+	m, err := SnapshotProjection(home, stage, policy.Projection{Enabled: true, Items: []policy.ProjectionItem{{
+		Source: "~/.config/fish/config.fish", Label: "fish",
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mounts := m.PresentMounts()
+	if len(mounts) != 1 {
+		t.Fatalf("want one mount, got %+v", m.Items)
+	}
+	if !strings.HasPrefix(mounts[0].Host, filepath.Join(stage, "projection-snapshots")+string(filepath.Separator)) {
+		t.Fatalf("mount host is not a private snapshot: %q", mounts[0].Host)
+	}
+	if strings.HasPrefix(mounts[0].Host, home+string(filepath.Separator)) {
+		t.Fatalf("mount host points into live home: %q", mounts[0].Host)
+	}
+	got, err := os.ReadFile(mounts[0].Host)
+	if err != nil || string(got) != "x" {
+		t.Fatalf("snapshot bytes = %q, err=%v", got, err)
+	}
+	info, err := os.Stat(filepath.Join(stage, "projection-snapshots"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o700 {
+		t.Fatalf("snapshot dir mode = %#o, want 0700", info.Mode().Perm())
+	}
+	fileInfo, err := os.Stat(mounts[0].Host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fileInfo.Mode().Perm() != 0o444 {
+		t.Fatalf("snapshot file mode = %#o, want container-readable 0444", fileInfo.Mode().Perm())
+	}
+}
+
+func TestSnapshotProjectionRejectsAbsoluteEscapeExcludedAndLoopingSymlinks(t *testing.T) {
+	t.Run("absolute", func(t *testing.T) {
+		home := projHome(t, "real")
+		if err := os.Symlink(filepath.Join(home, "real"), filepath.Join(home, "link")); err != nil {
+			t.Fatal(err)
+		}
+		_, err := SnapshotProjection(home, t.TempDir(), policy.Projection{Items: []policy.ProjectionItem{{Source: "~/link"}}})
+		requireProjectionCode(t, err, ProjectionTargetOutsideRoot)
+	})
+	t.Run("escape", func(t *testing.T) {
+		parent := t.TempDir()
+		home := filepath.Join(parent, "home")
+		if err := os.Mkdir(home, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(parent, "outside"), []byte("no"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink("../outside", filepath.Join(home, "link")); err != nil {
+			t.Fatal(err)
+		}
+		_, err := SnapshotProjection(home, t.TempDir(), policy.Projection{Items: []policy.ProjectionItem{{Source: "~/link"}}})
+		requireProjectionCode(t, err, ProjectionTargetOutsideRoot)
+	})
+	t.Run("excluded", func(t *testing.T) {
+		home := projHome(t, ".ssh/config")
+		if err := os.MkdirAll(filepath.Join(home, ".config"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink("../.ssh/config", filepath.Join(home, ".config", "fish")); err != nil {
+			t.Fatal(err)
+		}
+		_, err := SnapshotProjection(home, t.TempDir(), policy.Projection{Items: []policy.ProjectionItem{{Source: "~/.config/fish"}}})
+		requireProjectionCode(t, err, ProjectionTargetExcluded)
+	})
+	t.Run("loop", func(t *testing.T) {
+		home := projHome(t)
+		if err := os.Symlink("b", filepath.Join(home, "a")); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink("a", filepath.Join(home, "b")); err != nil {
+			t.Fatal(err)
+		}
+		_, err := SnapshotProjection(home, t.TempDir(), policy.Projection{Items: []policy.ProjectionItem{{Source: "~/a"}}})
+		requireProjectionCode(t, err, ProjectionSymlinkLoop)
+	})
+}
+
+func TestSnapshotProjectionRejectsInternalSymlink(t *testing.T) {
+	home := projHome(t, "tree/a", "outside")
+	if err := os.Symlink("../outside", filepath.Join(home, "tree", "link")); err != nil {
+		t.Fatal(err)
+	}
+	_, err := SnapshotProjection(home, t.TempDir(), policy.Projection{Items: []policy.ProjectionItem{{Source: "~/tree", Kind: "dir"}}})
+	requireProjectionCode(t, err, ProjectionUnsafeDescendant)
+}
+
+func TestSnapshotProjectionRejectsInjectedMountCrossing(t *testing.T) {
+	home := projHome(t, "tree/cross/file")
+	original := projectionMountID
+	rootID, rootOK := uint64(0), false
+	projectionMountID = func(file *os.File) (uint64, bool) {
+		id, ok := original(file)
+		if !ok {
+			return 0, false
+		}
+		if !rootOK {
+			rootID, rootOK = id, true
+		}
+		clean := filepath.ToSlash(filepath.Clean(file.Name()))
+		if strings.HasSuffix(clean, "/cross") || strings.Contains(clean, "/cross/") {
+			return rootID + 1, true
+		}
+		return rootID, true
+	}
+	t.Cleanup(func() { projectionMountID = original })
+	_, err := SnapshotProjection(home, t.TempDir(), policy.Projection{Items: []policy.ProjectionItem{{Source: "~/tree", Kind: "dir"}}})
+	requireProjectionCode(t, err, ProjectionUnsafeDescendant)
+}
+
+func TestSnapshotProjectionDetectsSymlinkReadRace(t *testing.T) {
+	home := projHome(t, "old", "new")
+	link := filepath.Join(home, ".zshrc")
+	if err := os.Symlink("old", link); err != nil {
+		t.Fatal(err)
+	}
+	projectionAfterReadlink = func(string) {
+		projectionAfterReadlink = nil
+		if err := os.Remove(link); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink("new", link); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() { projectionAfterReadlink = nil })
+	_, err := SnapshotProjection(home, t.TempDir(), policy.Projection{Items: []policy.ProjectionItem{{Source: "~/.zshrc"}}})
+	requireProjectionCode(t, err, ProjectionSnapshotChanged)
+}
+
+func TestSnapshotProjectionPinsOpenedFileAcrossPathReplacement(t *testing.T) {
+	home := projHome(t)
+	oldPath := filepath.Join(home, "old")
+	newPath := filepath.Join(home, "new")
+	if err := os.WriteFile(oldPath, []byte("old-bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(newPath, []byte("new-bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(home, ".zshrc")
+	if err := os.Symlink("old", link); err != nil {
+		t.Fatal(err)
+	}
+	projectionAfterOpen = func(string) {
+		projectionAfterOpen = nil
+		if err := os.Remove(link); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink("new", link); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() { projectionAfterOpen = nil })
+	m, err := SnapshotProjection(home, t.TempDir(), policy.Projection{Items: []policy.ProjectionItem{{Source: "~/.zshrc"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(m.PresentMounts()[0].Host)
+	if err != nil || string(got) != "old-bytes" {
+		t.Fatalf("snapshot followed replacement: bytes=%q err=%v", got, err)
+	}
+}
+
+func TestSnapshotProjectionDetectsEarlierDirectoryFileMutation(t *testing.T) {
+	home := projHome(t)
+	first := filepath.Join(home, "tree", "a")
+	second := filepath.Join(home, "tree", "b")
+	if err := os.MkdirAll(filepath.Dir(first), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(first, []byte("first"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(second, []byte("second"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	opens := 0
+	projectionAfterOpen = func(string) {
+		opens++
+		if opens == 2 {
+			projectionAfterOpen = nil
+			if err := os.WriteFile(first, []byte("first-mutated-after-copy"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	t.Cleanup(func() { projectionAfterOpen = nil })
+	_, err := SnapshotProjection(home, t.TempDir(), policy.Projection{Items: []policy.ProjectionItem{{Source: "~/tree", Kind: "dir"}}})
+	requireProjectionCode(t, err, ProjectionSnapshotChanged)
+}
+
+func TestSnapshotProjectionIgnoresUnusedMissingExternalXDGRoot(t *testing.T) {
+	home := projHome(t, ".zshrc")
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "missing"))
+	if _, err := SnapshotProjection(home, t.TempDir(), policy.Projection{Items: []policy.ProjectionItem{{Source: "~/.zshrc"}}}); err != nil {
+		t.Fatalf("unused external XDG root broke home projection: %v", err)
+	}
+}
+
+func TestSnapshotProjectionDetectsOpenedFileMutation(t *testing.T) {
+	home := projHome(t)
+	source := filepath.Join(home, ".zshrc")
+	if err := os.WriteFile(source, []byte("before"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	projectionAfterOpen = func(string) {
+		projectionAfterOpen = nil
+		if err := os.WriteFile(source, []byte("after-content-is-longer"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() { projectionAfterOpen = nil })
+	_, err := SnapshotProjection(home, t.TempDir(), policy.Projection{Items: []policy.ProjectionItem{{Source: "~/.zshrc"}}})
+	requireProjectionCode(t, err, ProjectionSnapshotChanged)
 }
 
 func TestResolveProjectionMarshalsManifest(t *testing.T) {

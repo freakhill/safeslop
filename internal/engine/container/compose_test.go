@@ -358,15 +358,14 @@ func TestComposeForcesTruecolorTerm(t *testing.T) {
 	}
 }
 
-// TestComposeProjectionRendersReadOnlyMounts pins specs/0096 T4b: a resolved projection renders
-// one read-only bind mount per present file under opaque /safeslop/projected/<id> staging paths,
-// preserving the read-only rootfs + tmpfs home + no host-bridge invariants.
+// TestComposeProjectionRendersReadOnlyMounts pins that compose mounts only private snapshot files
+// under opaque targets while preserving the container hardening invariants.
 func TestComposeProjectionRendersReadOnlyMounts(t *testing.T) {
-	yml, err := renderCompose(composeParams{RuntimeDir: "/r", Workspace: "/w", StageDir: "/r", Projection: &ProjectionManifest{
+	yml, err := renderCompose(composeParams{RuntimeDir: "/r", Workspace: "/w", StageDir: "/stage", Projection: &ProjectionManifest{
 		Items: []ProjectionMount{
-			{Host: "/home/u/.pi/agent/AGENTS.md", Container: "/safeslop/projected/0", Target: ".pi/agent/AGENTS.md", Status: projPresent},
-			{Host: "/home/u/.zshrc", Container: "/safeslop/projected/1", Target: ".zshrc", Status: projPresent},
-			{Host: "/home/u/.config/fish/config.fish", Target: ".config/fish/config.fish", Status: projSkippedAbsent}, // skipped: no mount
+			{Host: "/stage/projection-snapshots/000000", Container: "/safeslop/projected/0", Target: ".pi/agent/AGENTS.md", Status: projPresent},
+			{Host: "/stage/projection-snapshots/000001", Container: "/safeslop/projected/1", Target: ".zshrc", Status: projPresent},
+			{Host: "~/.config/fish/config.fish", Target: ".config/fish/config.fish", Status: projSkippedAbsent}, // skipped: no mount
 		},
 	}})
 	if err != nil {
@@ -377,8 +376,8 @@ func TestComposeProjectionRendersReadOnlyMounts(t *testing.T) {
 		t.Fatalf("want 2 projection mounts (present only), got %d:\n%s", n, yml)
 	}
 	for _, want := range []string{
-		"/home/u/.pi/agent/AGENTS.md:/safeslop/projected/0:ro",
-		"/home/u/.zshrc:/safeslop/projected/1:ro",
+		"/stage/projection-snapshots/000000:/safeslop/projected/0:ro",
+		"/stage/projection-snapshots/000001:/safeslop/projected/1:ro",
 	} {
 		if !strings.Contains(yml, want) {
 			t.Errorf("missing projection mount %q:\n%s", want, yml)
@@ -386,6 +385,9 @@ func TestComposeProjectionRendersReadOnlyMounts(t *testing.T) {
 	}
 	if strings.Contains(yml, "config.fish:/safeslop/projected") {
 		t.Errorf("skipped-absent entry must not get a mount:\n%s", yml)
+	}
+	if strings.Contains(yml, "/home/u/") {
+		t.Errorf("compose must never mount a live resolved source:\n%s", yml)
 	}
 	// projection must not weaken container hardening (specs/0096 FLO law #10).
 	if !strings.Contains(yml, "read_only: true") || !strings.Contains(yml, "cap_drop: [ALL]") {
@@ -398,6 +400,13 @@ func TestComposeProjectionRendersReadOnlyMounts(t *testing.T) {
 
 // TestComposeNoProjectionIsUnchanged pins that a profile without projection renders no projection
 // mounts and no projection section (regression guard, specs/0096).
+func TestComposeRejectsLiveProjectionMount(t *testing.T) {
+	_, err := renderCompose(composeParams{RuntimeDir: "/r", Workspace: "/w", StageDir: "/stage", Projection: &ProjectionManifest{
+		Items: []ProjectionMount{{Host: "/home/u/.zshrc", Container: "/safeslop/projected/0", Target: ".zshrc", Status: projPresent}},
+	}})
+	requireProjectionCode(t, err, ProjectionSafetyUnsupported)
+}
+
 func TestComposeNoProjectionIsUnchanged(t *testing.T) {
 	yml, err := renderCompose(composeParams{RuntimeDir: "/r", Workspace: "/w", StageDir: "/r"})
 	if err != nil {
@@ -455,10 +464,11 @@ func readAssetFile(dir, name string) ([]byte, error) {
 // projection is present, and writes neither when there is none.
 func TestMaterializeRunWritesProjectionManifest(t *testing.T) {
 	dir := t.TempDir()
+	snapshotHost := filepath.Join(dir, "projection-snapshots", "000000")
 	_, err := materializeRun(composeParams{RuntimeDir: dir, Workspace: "/w", StageDir: dir, Projection: &ProjectionManifest{
 		Items: []ProjectionMount{
-			{Host: "/h/.zshrc", Container: "/safeslop/projected/0", Target: ".zshrc", Status: projPresent, Label: "zsh"},
-			{Host: "/h/.config/fish/config.fish", Target: ".config/fish/config.fish", Status: projSkippedAbsent},
+			{Host: snapshotHost, Container: "/safeslop/projected/0", Target: ".zshrc", Status: projPresent, Label: "zsh"},
+			{Host: "~/.config/fish/config.fish", Target: ".config/fish/config.fish", Status: projSkippedAbsent},
 		},
 	}}, false)
 	if err != nil {
@@ -469,7 +479,7 @@ func TestMaterializeRunWritesProjectionManifest(t *testing.T) {
 		t.Fatalf("projection.json not written: %v", err)
 	}
 	ps := string(pj)
-	for _, want := range []string{"\"host\"", "/h/.zshrc", projPresent, projSkippedAbsent, "\"label\": \"zsh\""} {
+	for _, want := range []string{"\"host\"", snapshotHost, projPresent, projSkippedAbsent, "\"label\": \"zsh\""} {
 		if !strings.Contains(ps, want) {
 			t.Errorf("projection.json missing %q:\n%s", want, ps)
 		}

@@ -8,6 +8,7 @@ import (
 	"text/template"
 
 	"github.com/freakhill/safeslop/internal/engine/container/runtime"
+	"github.com/freakhill/safeslop/internal/engine/policy"
 )
 
 // composeParams fills compose.yml.tmpl. RuntimeDir holds the rendered squid.conf +
@@ -45,6 +46,9 @@ type composeParams struct {
 }
 
 func renderCompose(p composeParams) (string, error) {
+	if err := validateProjectionSnapshotMounts(p.StageDir, p.Projection); err != nil {
+		return "", err
+	}
 	raw, err := readAsset("compose.yml.tmpl")
 	if err != nil {
 		return "", err
@@ -67,6 +71,20 @@ func renderCompose(p composeParams) (string, error) {
 		return "", err
 	}
 	return b.String(), nil
+}
+
+func validateProjectionSnapshotMounts(stageDir string, manifest *ProjectionManifest) error {
+	if manifest == nil {
+		return nil
+	}
+	root := filepath.Clean(filepath.Join(stageDir, "projection-snapshots"))
+	for _, mount := range manifest.PresentMounts() {
+		rel, err := filepath.Rel(root, filepath.Clean(mount.Host))
+		if err != nil || escapesRoot(rel) || filepath.Dir(rel) != "." || rel == "." {
+			return newProjectionError(ProjectionSafetyUnsupported, policy.ProjectionItem{}, "", true)
+		}
+	}
+	return nil
 }
 
 // writeSecretsEnv writes shell-escaped KEY='VAL' lines (0600) to stageDir/secrets.env so
