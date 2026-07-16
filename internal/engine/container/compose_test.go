@@ -81,7 +81,7 @@ func TestEntrypointCopiesPiOAuthIntoTmpfsBeforeExec(t *testing.T) {
 	home := t.TempDir()
 	marker := filepath.Join(t.TempDir(), "agent-started")
 	err := runEntrypointForTest(t, runtimeDir, home, `/bin/sh`, `-c`,
-		`test "$(cat "$HOME/.pi/agent/auth.json")" = '`+auth+`' && test "$(stat -c '%a' "$HOME/.pi/agent/auth.json")" = 600 && touch "`+marker+`"`)
+		`mode=$(stat -c '%a' "$HOME/.pi/agent/auth.json" 2>/dev/null || stat -f '%Lp' "$HOME/.pi/agent/auth.json") && test "$(cat "$HOME/.pi/agent/auth.json")" = '`+auth+`' && test "$mode" = 600 && touch "`+marker+`"`)
 	if err != nil {
 		t.Fatalf("entrypoint Pi OAuth copy: %v", err)
 	}

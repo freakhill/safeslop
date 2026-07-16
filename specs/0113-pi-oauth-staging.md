@@ -34,7 +34,7 @@ Decision notes: `specs/research/2026-07-16-pi-oauth-staging-ayo.md`, `specs/rese
   VERIFY:   `go test ./internal/engine/creds ./internal/cli -run 'PiOAuth|StagePi' -count=1 -v`
   EXPECTED: All source/race/expiry/leak/mode/cleanup tests pass; no refresh/account/other provider/source path crosses or serializes.
 
-- [ ] Copy Pi auth into tmpfs before agent start and prove teardown
+- [x] Copy Pi auth into tmpfs before agent start and prove teardown
   FILE:     `internal/engine/container/assets/entrypoint.sh`, `internal/engine/container/compose_test.go`, `internal/engine/container/launch_test.go`, `internal/cli/cli_runprofile_test.go`, `internal/cli/cli_session_test.go`
   CHANGE:   Add fixed conditional entrypoint handling for `/safeslop/runtime/pi/openai-codex/auth.json`: reject unsafe staged shape, create tmpfs Pi dirs 0700, copy atomically as 0600 before exec. Add sentinel scans proving no token/ref/path in argv/env/Compose/inspect-facing config/log/status/receipt/workspace and injected launch/stop/reconcile/remove cleanup coverage.
   VERIFY:   `go test ./internal/engine/container ./internal/cli -run 'PiOAuth|PiAuth|RunProfile.*Pi|Session.*Pi' -count=1 -v`

@@ -14,6 +14,51 @@ if [ -n "$home" ]; then
   mkdir -p "$home/.pi/agent/sessions" "$home/.claude" "$home/.config" \
     "$home/.cache" "$home/.local/state" 2>/dev/null || true
 fi
+
+# specs/0113: an opted-in Pi OAuth bearer enters through the read-only runtime
+# mount, then is copied once into the ephemeral tmpfs home before Pi starts.
+# Fail closed on any unexpected filesystem shape; never print file contents.
+pi_stage_root=/safeslop/runtime/pi
+if [ -e "$pi_stage_root" ] || [ -L "$pi_stage_root" ]; then
+  pi_provider_dir="$pi_stage_root/openai-codex"
+  pi_stage_auth="$pi_provider_dir/auth.json"
+  stat_perm() { stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null; }
+  stat_owner() { stat -c '%u' "$1" 2>/dev/null || stat -f '%u' "$1" 2>/dev/null; }
+  stat_links() { stat -c '%h' "$1" 2>/dev/null || stat -f '%l' "$1" 2>/dev/null; }
+  pi_auth_fail() {
+    printf '%s\n' 'safeslop: staged Pi OAuth snapshot failed safety checks' >&2
+    exit 78
+  }
+
+  [ -n "$home" ] || pi_auth_fail
+  [ -d "$pi_stage_root" ] && [ ! -L "$pi_stage_root" ] || pi_auth_fail
+  [ -d "$pi_provider_dir" ] && [ ! -L "$pi_provider_dir" ] || pi_auth_fail
+  [ -f "$pi_stage_auth" ] && [ ! -L "$pi_stage_auth" ] || pi_auth_fail
+  [ "$(stat_perm "$pi_stage_root")" = 700 ] || pi_auth_fail
+  [ "$(stat_perm "$pi_provider_dir")" = 700 ] || pi_auth_fail
+  [ "$(stat_perm "$pi_stage_auth")" = 600 ] || pi_auth_fail
+  [ "$(stat_owner "$pi_stage_root")" = "$(id -u)" ] || pi_auth_fail
+  [ "$(stat_owner "$pi_provider_dir")" = "$(id -u)" ] || pi_auth_fail
+  [ "$(stat_owner "$pi_stage_auth")" = "$(id -u)" ] || pi_auth_fail
+  [ "$(stat_links "$pi_stage_auth")" = 1 ] || pi_auth_fail
+  [ "$(find "$pi_stage_root" -print 2>/dev/null | wc -l | tr -d ' ')" = 3 ] || pi_auth_fail
+
+  mkdir -p "$home/.pi/agent" || pi_auth_fail
+  chmod 700 "$home/.pi" "$home/.pi/agent" || pi_auth_fail
+  pi_tmp_auth="$(mktemp "$home/.pi/agent/.auth.json.safeslop.XXXXXX")" || pi_auth_fail
+  chmod 600 "$pi_tmp_auth" || { rm -f "$pi_tmp_auth"; pi_auth_fail; }
+  if ! cat "$pi_stage_auth" > "$pi_tmp_auth"; then
+    rm -f "$pi_tmp_auth"
+    pi_auth_fail
+  fi
+  if ! mv -f "$pi_tmp_auth" "$home/.pi/agent/auth.json"; then
+    rm -f "$pi_tmp_auth"
+    pi_auth_fail
+  fi
+  chmod 600 "$home/.pi/agent/auth.json" || pi_auth_fail
+  unset pi_tmp_auth
+fi
+
 # specs/0096: copy projected host config (read-only staging under /safeslop/projected/<id>)
 # into the ephemeral home. The TSV is engine-generated (projection.tsv): one line per present
 # file, "<staging>\t</home/agent/target>". We COPY only — never source/. /eval/execute projected
