@@ -222,7 +222,7 @@ one even if a future envelope regressed to carrying it."
 
 (ert-deftest safeslop-test-credentials-repo-picker-saves-and-refreshes-in-place ()
   "The picker confirms a value-free write summary, calls the CLI, and refreshes dashboards."
-  (let (captured confirmation credentials-refreshed profiles-refreshed popped)
+  (let (calls confirmation credentials-refreshed profiles-refreshed popped)
     (let ((profiles-buf (get-buffer-create safeslop-profiles-buffer-name)))
       (unwind-protect
           (progn
@@ -231,8 +231,6 @@ one even if a future envelope regressed to carrying it."
             (with-temp-buffer
               (safeslop-credentials-mode)
               (setq safeslop-credentials--config-path "/ws/safeslop.cue")
-              (setq tabulated-list-entries
-                    '(("app/github/origin" ["app" "github" "origin" "deploy-key ro" "ephemeral"])))
               (cl-letf (((symbol-function 'completing-read)
                          (let ((answers '("app" "github" "explicit repos")))
                            (lambda (&rest _) (pop answers))))
@@ -243,9 +241,13 @@ one even if a future envelope regressed to carrying it."
                          (lambda (prompt) (setq confirmation prompt) t))
                         ((symbol-function 'safeslop--call-json-async)
                          (lambda (args callback &optional _stderr)
-                           (setq captured args)
-                           (funcall callback (safeslop-contract-parse-string
-                                              "{\"schema_version\":1,\"ok\":true,\"data\":{\"credential_scopes\":[]},\"warnings\":[],\"errors\":[]}"))))
+                           (push args calls)
+                           (funcall callback
+                                    (safeslop-contract-parse-string
+                                     (cond
+                                      ((equal (seq-take args 2) '("profile" "list")) safeslop-test-profile-list-json)
+                                      ((equal (seq-take args 2) '("creds" "show")) safeslop-test-creds-show-empty-json)
+                                      (t safeslop-test-mutation-ok-json))))))
                         ((symbol-function 'safeslop-credentials-refresh)
                          (lambda () (setq credentials-refreshed t)))
                         ((symbol-function 'safeslop-profiles-refresh)
@@ -254,28 +256,35 @@ one even if a future envelope regressed to carrying it."
                          (lambda (&rest _) (setq popped t))))
                 (safeslop-credentials-pick-repositories))))
         (kill-buffer profiles-buf)))
-    (should (equal captured '("profile" "credentials" "set" "app" "/ws/safeslop.cue"
-                              "--provider" "github" "--repo" "acme/web"
-                              "--write-repo" "acme/api" "--output" "json")))
+    (should (member '("profile" "credentials" "set" "app" "/ws/safeslop.cue"
+                      "--provider" "github" "--repo" "acme/web"
+                      "--write-repo" "acme/api" "--output" "json") calls))
     (should (string-match-p "WRITE: acme/api" (substring-no-properties confirmation)))
     (should credentials-refreshed)
     (should profiles-refreshed)
     (should-not popped)))
 
 (ert-deftest safeslop-test-credentials-repo-picker-cancel-aborts-before-cli ()
-  (let ((called nil))
+  (let (calls)
     (with-temp-buffer
       (safeslop-credentials-mode)
-      (setq tabulated-list-entries
-            '(("app/github/origin" ["app" "github" "origin" "deploy-key ro" "ephemeral"])))
+      (setq safeslop-credentials--config-path "/ws/safeslop.cue")
       (cl-letf (((symbol-function 'completing-read)
                  (let ((answers '("app" "github" "origin inference")))
                    (lambda (&rest _) (pop answers))))
                 ((symbol-function 'yes-or-no-p) (lambda (&rest _) nil))
                 ((symbol-function 'safeslop--call-json-async)
-                 (lambda (&rest _) (setq called t))))
+                 (lambda (args callback &optional _stderr)
+                   (push args calls)
+                   (funcall callback
+                            (safeslop-contract-parse-string
+                             (if (equal (seq-take args 2) '("profile" "list"))
+                                 safeslop-test-profile-list-json
+                               safeslop-test-creds-show-empty-json))))))
         (safeslop-credentials-pick-repositories)))
-    (should-not called)))
+    (should (member '("profile" "list" "/ws/safeslop.cue" "--output" "json") calls))
+    (should (member '("creds" "show" "app" "/ws/safeslop.cue" "--output" "json") calls))
+    (should-not (seq-some (lambda (args) (equal (seq-take args 3) '("profile" "credentials" "set"))) calls))))
 
 (ert-deftest safeslop-test-credentials-journey-universal-keys-dispatch ()
   "Displayed universal keys resolve to credential tasks in the raw mode map."
@@ -323,13 +332,15 @@ one even if a future envelope regressed to carrying it."
 
 (ert-deftest safeslop-test-credentials-journey-first-run-profile-source ()
   "A valid project profile is selectable even when `creds list' has no rows."
-  (let (calls)
+  (let (calls defaults)
     (with-temp-buffer
       (safeslop-credentials-mode)
       (setq safeslop-credentials--config-path "/ws/safeslop.cue")
       (cl-letf (((symbol-function 'completing-read)
                  (let ((answers '("app" "github" "origin inference")))
-                   (lambda (&rest _) (pop answers))))
+                   (lambda (prompt _collection &optional _predicate _require-match _initial _history default)
+                     (push (cons prompt default) defaults)
+                     (pop answers))))
                 ((symbol-function 'yes-or-no-p) (lambda (&rest _) t))
                 ((symbol-function 'safeslop--call-json-async)
                  (lambda (args callback &optional _stderr)
@@ -337,11 +348,12 @@ one even if a future envelope regressed to carrying it."
                    (funcall callback
                             (safeslop-contract-parse-string
                              (cond
-                              ((equal (car args) "profile") safeslop-test-profile-list-json)
+                              ((equal (seq-take args 2) '("profile" "list")) safeslop-test-profile-list-json)
                               ((equal (seq-take args 2) '("creds" "show")) safeslop-test-creds-show-empty-json)
                               (t safeslop-test-mutation-ok-json))))))
                 ((symbol-function 'safeslop-credentials-refresh) (lambda () nil)))
         (call-interactively (lookup-key safeslop-credentials-mode-map (kbd "R")))))
+    (should (equal (cdr (assoc "Repository mode: " defaults)) "origin inference"))
     (should (equal (nreverse calls)
                    '(("profile" "list" "/ws/safeslop.cue" "--output" "json")
                      ("creds" "show" "app" "/ws/safeslop.cue" "--output" "json")
@@ -369,7 +381,7 @@ one even if a future envelope regressed to carrying it."
                    (funcall callback
                             (safeslop-contract-parse-string
                              (cond
-                              ((equal (car args) "profile") safeslop-test-profile-list-json)
+                              ((equal (seq-take args 2) '("profile" "list")) safeslop-test-profile-list-json)
                               ((equal (seq-take args 2) '("creds" "show")) safeslop-test-creds-show-mixed-json)
                               (t safeslop-test-mutation-ok-json))))))
                 ((symbol-function 'safeslop-credentials-refresh) (lambda () nil)))
@@ -382,7 +394,7 @@ one even if a future envelope regressed to carrying it."
                       "--provider" "github" "--repo" "acme/web"
                       "--write-repo" "acme/api" "--output" "json") calls))))
 
-(ert-deftest safeslop-test-credentials-journey-failed-scope-retains-draft ()
+(ert-deftest safeslop-test-credentials-journey-retry-retains-failed-scope-draft ()
   "A value-free failed scope write retains defaults for R retry."
   (with-temp-buffer
     (safeslop-credentials-mode)
@@ -399,7 +411,7 @@ one even if a future envelope regressed to carrying it."
                  (funcall callback
                           (safeslop-contract-parse-string
                            (cond
-                            ((equal (car args) "profile") safeslop-test-profile-list-json)
+                            ((equal (seq-take args 2) '("profile" "list")) safeslop-test-profile-list-json)
                             ((equal (seq-take args 2) '("creds" "show")) safeslop-test-creds-show-empty-json)
                             (t safeslop-test-mutation-failed-json))))))
               ((symbol-function 'safeslop--show-envelope-buffer) (lambda (&rest _) nil)))

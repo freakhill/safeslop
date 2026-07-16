@@ -38,6 +38,7 @@
 
 (require 'subr-x)
 (require 'cl-lib)
+(require 'seq)
 (require 'tabulated-list)
 (require 'safeslop-contract)
 (require 'safeslop-client)
@@ -63,6 +64,9 @@ without re-probing; nil before the first fetch returns.")
 
 (defvar-local safeslop-credentials--account-status-error nil
   "Last value-free account-link status fetch error, or nil when status is fresh.")
+
+(defvar-local safeslop-credentials--repo-draft nil
+  "Value-free failed repository-scope draft reused as defaults by the next R action.")
 
 ;;; ---- status faces + honest meaning ---------------------------------------
 ;; Colour reinforces the always-present status word (specs/0031): the label is
@@ -659,34 +663,100 @@ values.  CALLBACK receives a contract-shaped envelope."
                     (safeslop-credentials--repeat-flags "--write-repo" write-repos)))
           (list "--output" "json")))
 
-(defun safeslop-credentials--profile-candidates ()
-  "Return profile candidates visible in the credentials table."
-  (delete-dups
-   (delq nil (mapcar (lambda (entry) (safeslop-credentials--row-profile (car entry)))
-                     tabulated-list-entries))))
+(defun safeslop-credentials--profile-list-args ()
+  "Return profile-list argv pinned to the Credentials buffer's policy path."
+  (append '("profile" "list")
+          (when safeslop-credentials--config-path (list safeslop-credentials--config-path))
+          '("--output" "json")))
+
+(defun safeslop-credentials--project-profile-names (envelope)
+  "Return sorted project profile names from a successful profile-list ENVELOPE."
+  (sort (mapcar (lambda (entry) (symbol-name (car entry)))
+                (alist-get 'profiles (safeslop-contract-data envelope)))
+        #'string<))
+
+(defun safeslop-credentials--with-project-profile (continuation)
+  "Fetch project profiles, prompt for one, then call CONTINUATION with source and name."
+  (unless safeslop-credentials--config-path
+    (user-error "No project policy is loaded; press F to create or clone a project profile"))
+  (let* ((source (current-buffer))
+         (args (safeslop-credentials--profile-list-args))
+         (row-default (safeslop-credentials--row-profile (tabulated-list-get-id)))
+         (draft-default (alist-get 'profile safeslop-credentials--repo-draft)))
+    (message "safeslop: loading project profiles…")
+    (safeslop--call-json-async
+     args
+     (lambda (env)
+       (if (not (safeslop-contract-ok-p env))
+           (safeslop--show-envelope-buffer "*safeslop profile list*" args env)
+         (when (buffer-live-p source)
+           (with-current-buffer source
+             (let* ((profiles (safeslop-credentials--project-profile-names env))
+                    (default (cond ((member draft-default profiles) draft-default)
+                                   ((member row-default profiles) row-default)
+                                   (t (car profiles)))))
+               (if (null profiles)
+                   (message "safeslop: no project profiles; press F to create or clone one")
+                 (funcall continuation
+                          source
+                          (completing-read "Profile: " profiles nil t nil nil default)))))))))))
 
 (defun safeslop-credentials--split-repo-list (text)
   "Split comma/space separated repo TEXT into a list, dropping blanks."
-  (split-string (or text "") "[ ,\t\n]+" t))
+  (delete-dups (split-string (or text "") "[ ,\t\n]+" t)))
+
+(defun safeslop-credentials--scope-state (data)
+  "Return value-free current forge scope state parsed from `creds show' DATA."
+  (let* ((rows (alist-get 'credentials data))
+         (forge-rows (seq-filter (lambda (row)
+                                   (member (alist-get 'kind row) '("github" "forgejo")))
+                                 rows))
+         (provider (alist-get 'kind (car forge-rows)))
+         (use-origin (seq-some (lambda (row) (equal (alist-get 'name row) "origin")) forge-rows))
+         read-repos write-repos)
+    (dolist (row forge-rows)
+      (let ((name (alist-get 'name row))
+            (scope (or (alist-get 'scope row) "")))
+        (unless (equal name "origin")
+          (if (string-match-p "\\brw\\b" scope)
+              (push name write-repos)
+            (push name read-repos)))))
+    `((provider . ,provider)
+      (use-origin . ,(and use-origin t))
+      (read-repos . ,(nreverse read-repos))
+      (write-repos . ,(nreverse write-repos)))))
+
+(defun safeslop-credentials--state-line (label state)
+  "Return one value-free LABEL line for forge scope STATE."
+  (let ((provider (alist-get 'provider state))
+        (use-origin (alist-get 'use-origin state))
+        (read-repos (alist-get 'read-repos state))
+        (write-repos (alist-get 'write-repos state)))
+    (format "%s: %s\n" label
+            (cond
+             ((not provider) "none")
+             (use-origin (format "%s — origin inference" provider))
+             (t (format "%s — read %s; WRITE: %s"
+                        provider
+                        (if read-repos (string-join read-repos ", ") "(none)")
+                        (if write-repos (string-join write-repos ", ") "(none)")))))))
 
 (defun safeslop-credentials--profile-credentials-summary
-    (profile provider use-origin read-repos write-repos url ssh-port)
-  "Return the value-free confirmation summary for a profile credential write."
-  (concat
-   (format "Profile: %s\nProvider: %s\n" profile provider)
-   (if use-origin
-       "Repositories: origin inference (resolved at stage time)\n"
-     (concat
-      (format "Read-only repos: %s\n" (if read-repos (string-join read-repos ", ") "(none)"))
-      (if write-repos
-          (propertize (format "WRITE: %s\n" (string-join write-repos ", "))
-                      'face 'safeslop-cred-attention)
-        "WRITE: (none)\n")))
-   (when (equal provider "forgejo")
-     (format "Forgejo URL: %s%s\n" (or url "(origin inferred)")
-             (if (and ssh-port (not (string-empty-p ssh-port)))
-                 (format "  ssh-port=%s" ssh-port)
-               "")))))
+    (profile existing provider use-origin read-repos write-repos url ssh-port)
+  "Return a value-free before/after summary for a profile forge-scope replacement."
+  (let ((result `((provider . ,provider) (use-origin . ,use-origin)
+                  (read-repos . ,read-repos) (write-repos . ,write-repos))))
+    (concat
+     (format "Profile: %s\n" profile)
+     (safeslop-credentials--state-line "Existing" existing)
+     (safeslop-credentials--state-line "Result" result)
+     (propertize "This replaces all existing forge scopes on this profile; choosing another provider clears the current forge.\n"
+                 'face 'safeslop-cred-attention)
+     (when (equal provider "forgejo")
+       (format "Forgejo URL: %s%s\n" (or url "(origin inferred)")
+               (if (and ssh-port (not (string-empty-p ssh-port)))
+                   (format "  ssh-port=%s" ssh-port)
+                 ""))))))
 
 (defun safeslop-credentials--refresh-after-profile-credential-save (source)
   "Refresh Credentials SOURCE and the Profiles buffer, if present."
@@ -698,45 +768,120 @@ values.  CALLBACK receives a contract-shaped envelope."
       (when (derived-mode-p 'safeslop-profiles-mode)
         (safeslop-profiles-refresh)))))
 
-(defun safeslop-credentials-pick-repositories ()
-  "Pick repo scopes for a profile and call `profile credentials set'."
-  (interactive)
-  (let* ((source (current-buffer))
-         (profiles (safeslop-credentials--profile-candidates))
-         (default-profile (safeslop-credentials--row-profile (tabulated-list-get-id)))
-         (profile (completing-read "Profile: " profiles nil nil nil nil default-profile))
-         (provider (completing-read "Forge provider: " '("github" "forgejo") nil t nil nil "github"))
-         (mode (completing-read "Repository mode: " '("origin inference" "explicit repos") nil t nil nil "origin inference"))
+(defun safeslop-credentials--linked-provider-default ()
+  "Return the sole linked forge name, or GitHub when links are absent/ambiguous."
+  (let ((providers (delete-dups (mapcar (lambda (row) (alist-get 'forge row))
+                                         safeslop-credentials--account-links))))
+    (if (= (length providers) 1) (car providers) "github")))
+
+(defun safeslop-credentials--linked-forgejo-defaults ()
+  "Return (URL SSH-PORT) defaults from the first linked Forgejo account."
+  (when-let* ((link (seq-find (lambda (row) (equal (alist-get 'forge row) "forgejo"))
+                              safeslop-credentials--account-links)))
+    (list (format "https://%s" (alist-get 'host link))
+          (let ((port (alist-get 'sshPort link))) (and port (number-to-string port))))))
+
+(defun safeslop-credentials--prompt-repository-scope (source profile data)
+  "Prompt for PROFILE scope using current `creds show' DATA, then mutate asynchronously."
+  (let* ((existing (safeslop-credentials--scope-state data))
+         (draft (and (equal profile (alist-get 'profile safeslop-credentials--repo-draft))
+                     safeslop-credentials--repo-draft))
+         (initial (or draft existing))
+         (provider-default (or (alist-get 'provider initial)
+                               (safeslop-credentials--linked-provider-default)))
+         (provider (completing-read "Forge provider: " '("github" "forgejo") nil t nil nil provider-default))
+         (mode-default (if (or (not (alist-get 'provider initial))
+                               (alist-get 'use-origin initial))
+                           "origin inference"
+                         "explicit repos"))
+         (mode (completing-read "Repository mode: " '("origin inference" "explicit repos") nil t nil nil mode-default))
          (use-origin (equal mode "origin inference"))
-         (read-repos nil)
-         (write-repos nil)
-         (url nil)
-         (ssh-port nil))
+         (read-repos (and (not use-origin) (alist-get 'read-repos initial)))
+         (write-repos (and (not use-origin) (alist-get 'write-repos initial)))
+         (forgejo-defaults (safeslop-credentials--linked-forgejo-defaults))
+         url ssh-port)
     (unless use-origin
-      (setq read-repos (safeslop-credentials--split-repo-list
-                        (read-string "Read-only repos (owner/name, comma-separated): "))
-            write-repos (safeslop-credentials--split-repo-list
-                         (read-string "Write repos (owner/name, comma-separated): ")))
+      (setq read-repos
+            (safeslop-credentials--split-repo-list
+             (read-string "Read-only repos (owner/name, comma-separated): " nil nil
+                          (string-join read-repos ", ")))
+            write-repos
+            (safeslop-credentials--split-repo-list
+             (read-string "Write repos (owner/name, comma-separated): " nil nil
+                          (string-join write-repos ", "))))
       (when (and (null read-repos) (null write-repos))
-        (user-error "At least one read or write repo is required for explicit mode")))
+        (user-error "At least one read or write repo is required for explicit mode"))
+      (when (cl-intersection read-repos write-repos :test #'equal)
+        (user-error "A repository cannot be both read-only and write")))
     (when (and (equal provider "forgejo") (not use-origin))
-      (setq url (safeslop-credentials--nonempty-read-string "Forgejo URL: ")
-            ssh-port (read-string "Forgejo SSH port (blank for default): ")))
-    (let* ((summary (safeslop-credentials--profile-credentials-summary
-                     profile provider use-origin read-repos write-repos url ssh-port))
+      (setq url (safeslop-credentials--nonempty-read-string
+                 "Forgejo URL: " (car forgejo-defaults))
+            ssh-port (read-string "Forgejo SSH port (blank for default): " nil nil
+                                  (cadr forgejo-defaults))))
+    (let* ((draft `((profile . ,profile) (provider . ,provider) (use-origin . ,use-origin)
+                    (read-repos . ,read-repos) (write-repos . ,write-repos)
+                    (url . ,url) (ssh-port . ,ssh-port)))
+           (summary (safeslop-credentials--profile-credentials-summary
+                     profile existing provider use-origin read-repos write-repos url ssh-port))
            (args (safeslop-credentials--profile-credentials-args
                   profile safeslop-credentials--config-path provider use-origin
                   read-repos write-repos url ssh-port)))
-      (if (yes-or-no-p (concat "Save profile credential scopes?\n" summary))
-          (safeslop--call-json-async
-           args
-           (lambda (env)
-             (if (safeslop-contract-ok-p env)
-                 (progn
-                   (message "safeslop: profile credentials updated for %s" profile)
-                   (safeslop-credentials--refresh-after-profile-credential-save source))
-               (safeslop--show-envelope-buffer "*safeslop profile credentials*" args env))))
-        (message "safeslop: profile credential update cancelled")))))
+      (if (not (yes-or-no-p (concat "Save profile credential scopes?\n" summary)))
+          (message "safeslop: profile credential update cancelled")
+        (setq safeslop-credentials--repo-draft draft)
+        (safeslop--call-json-async
+         args
+         (lambda (env)
+           (if (safeslop-contract-ok-p env)
+               (progn
+                 (when (buffer-live-p source)
+                   (with-current-buffer source (setq safeslop-credentials--repo-draft nil)))
+                 (message "safeslop: profile credentials updated for %s — review and re-trust before launch" profile)
+                 (safeslop-credentials--refresh-after-profile-credential-save source))
+             (message "safeslop: update failed; value-free draft retained — return with K, retry with R")
+             (safeslop--show-envelope-buffer "*safeslop profile credentials*" args env))))))))
+
+(defun safeslop-credentials--load-profile-scope (source profile)
+  "Fetch value-free current scope rows for PROFILE, then open the repository prompt."
+  (let ((args (append (list "creds" "show" profile)
+                      (when safeslop-credentials--config-path
+                        (list safeslop-credentials--config-path))
+                      '("--output" "json"))))
+    (safeslop--call-json-async
+     args
+     (lambda (env)
+       (if (not (safeslop-contract-ok-p env))
+           (safeslop--show-envelope-buffer "*safeslop credentials show*" args env)
+         (when (buffer-live-p source)
+           (with-current-buffer source
+             (safeslop-credentials--prompt-repository-scope
+              source profile (safeslop-contract-data env)))))))))
+
+(defun safeslop-credentials-pick-repositories ()
+  "Configure complete GitHub/Forgejo repo scopes for a project profile."
+  (interactive)
+  (safeslop-credentials--with-project-profile #'safeslop-credentials--load-profile-scope))
+
+(defun safeslop-credentials-clear-profile-forge ()
+  "Clear one profile's GitHub/Forgejo scopes without unlinking its host account."
+  (interactive)
+  (safeslop-credentials--with-project-profile
+   (lambda (source profile)
+     (let ((args (append (list "profile" "credentials" "clear" profile)
+                         (when safeslop-credentials--config-path
+                           (list safeslop-credentials--config-path))
+                         '("--output" "json"))))
+       (if (not (yes-or-no-p
+                 (format "Clear profile %s forge scopes? GitHub/Forgejo profile config is removed; account links remain and other credential providers are preserved. " profile)))
+           (message "safeslop: profile forge clear cancelled")
+         (safeslop--call-json-async
+          args
+          (lambda (env)
+            (if (safeslop-contract-ok-p env)
+                (progn
+                  (message "safeslop: profile forge scopes cleared for %s — review and re-trust before launch" profile)
+                  (safeslop-credentials--refresh-after-profile-credential-save source))
+              (safeslop--show-envelope-buffer "*safeslop profile credentials*" args env)))))))))
 
 ;;; ---- mode + entry --------------------------------------------------------
 

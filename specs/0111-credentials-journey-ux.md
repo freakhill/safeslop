@@ -32,7 +32,7 @@ WORKTREE: `.worktrees/0111-credentials-journey-ux/`
   VERIFY:   `make test-emacs-ui-matrix && emacs --batch -L emacs -l ert -l emacs/test/safeslop-test.el -l emacs/test/safeslop-credentials-test.el --eval '(ert-run-tests-batch-and-exit "safeslop-test-credentials-journey-.*\\(key\\|guidance\\|link\\)")'`
   EXPECTED: Every displayed key dispatches its task in raw/Evil/Doom-Evil; first-run instructions are executable; cancel writes nothing; success preserves surface context; failures remain inspectable and value-free.
 
-- [ ] Implement profile-backed scope edit, clear, and retry flows
+- [x] Implement profile-backed scope edit, clear, and retry flows
   FILE:     `emacs/safeslop-credentials.el`, `emacs/test/safeslop-credentials-test.el`
   CHANGE:   Use async existing `profile list` to select every project profile independently of credential rows; fetch existing `creds show` rows; prefill current provider/origin/read/write state; confirm a value-free before/after replacement summary including other-forge clearing; retain failed draft defaults; add `X` calling confirmed `profile credentials clear`; refresh Credentials/Profiles in place on success and state that policy trust must be reviewed.
   VERIFY:   `emacs --batch -L emacs -l ert -l emacs/test/safeslop-test.el -l emacs/test/safeslop-profiles-test.el -l emacs/test/safeslop-credentials-test.el --eval '(ert-run-tests-batch-and-exit "safeslop-test-credentials-journey-.*\\(first-run\\|existing\\|clear\\|retry\\)")'`
