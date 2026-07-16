@@ -1,6 +1,6 @@
 # 0113 — First-class access-only Pi OAuth staging
 
-Status: in progress
+Status: complete
 
 SCOPE: implement the locked access-only Pi OAuth snapshot for exactly `openai-codex/gpt-5.6-luna`: explicit trusted project policy, safe/stable host Pi auth extraction, synthetic non-refreshing auth file in container tmpfs, engine-owned model argv, value-free evaluation/inspection/session failures/scopes, full teardown wipe, and real deny→grant→Luna→revoke acceptance on the 0112 runtime foundation.
 
@@ -46,7 +46,7 @@ Decision notes: `specs/research/2026-07-16-pi-oauth-staging-ayo.md`, `specs/rese
   VERIFY:   `go test ./internal/engine/creds -run 'Inspect.*PiOAuth' -count=1 -v && git diff --check && rg -n 'credentials.*pi|gpt-5.6-luna|access snapshot|provider-default|15 minutes|chatgpt.com' README.md emacs/README.md skills/agent-key-lifecycle/SKILL.md skills/agent-sandbox-ops/SKILL.md`
   EXPECTED: Inspection/docs expose only provider/model/lifetime/readiness and executable workflow; no values/refs/private paths or downscope/revocation overclaim.
 
-- [ ] Run full gates, live Pi acceptance, deploy, and clean up
+- [x] Run full gates, live Pi acceptance, deploy, and clean up
   FILE:     whole repo, `specs/0112-progressive-runtime-readiness.md`, `specs/0113-pi-oauth-staging.md`
   CHANGE:   Run focused suites and 0112 progressive smoke; build the new Pi image; with explicit live opt-in run host Luna marker and trusted project session: deny observation of `chatgpt.com:443`, exact grant, real Luna marker, revoke/deny, stop/remove. Compare host auth bytes before/after without outputting them; prove no test state remains. Then run UI/check/build, mark both specs complete, merge/push both remotes, install matching binary/Emacs files, and remove both worktrees/branches.
   VERIFY:   `git diff --check && make test-progressive-egress-smoke && make test-emacs-ui-matrix && make check && make build`
