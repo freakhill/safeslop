@@ -1,6 +1,6 @@
 # 0114 — Practical-safe shared host path proofs
 
-Status: in progress
+Status: complete
 
 SCOPE: replace the duplicated projection/Pi source walkers with one descriptor-root host-path proof engine; preserve projection behavior exactly; allow Pi's fixed OAuth source through proven same-HOME relative or exact absolute source-path links; and correct Pi ancestry from owner-only to current-user-owned, no-group/other-write semantics so ordinary `0755` layouts work.
 
@@ -40,8 +40,17 @@ Decision notes: `specs/research/2026-07-17-hostpath-policy-ayo.md`, `specs/resea
   VERIFY:   `bash -n ci/hostpath-import-denylist.sh && make check-hostpath-imports && git diff --check && rg -n 'same-HOME|0755|0022|0600|same mount|supersed' README.md emacs/README.md skills/agent-key-lifecycle/SKILL.md skills/agent-sandbox-ops/SKILL.md specs/0113-pi-oauth-staging.md`
   EXPECTED: No generic path capability is exposed; docs make practical acceptance and strict residual boundaries explicit without leaking private topology.
 
-- [ ] Run full gates and real-home Pi acceptance, deploy, and clean up
+- [x] Run full gates and real-home Pi acceptance, deploy, and clean up
   FILE:     whole repo, `specs/0114-practical-safe-hostpath-policy.md`
   CHANGE:   Run focused suites, progressive runtime smoke, UI/check/build. If the live smoke exposes Docker Desktop's bind-file visibility race, make proxy reload retry boundedly while Squid retains its prior fail-closed config. Using the normal real HOME (no copied auth fixture), run host Luna then a disposable trusted Pi OAuth session through deny→observe `chatgpt.com:443`→grant→real Luna marker→revoke→deny; compare host auth bytes without output, stop/remove, and prove stage/container/session/temp/trust cleanup. Mark complete, merge/push both remotes, install matching binary/Emacs files, and remove worktree/branch while leaving the existing user session untouched.
   VERIFY:   `git diff --check && make test-progressive-egress-smoke && make test-emacs-ui-matrix && make check && make build`
   EXPECTED: Hermetic and real-home gates pass; the user's safe linked `~/.pi/agent` works directly; host auth is unchanged; no test state remains; installed version and both remotes match.
+
+Acceptance note (2026-07-17 JST): focused suites, the progressive Docker smoke,
+UI matrix, `make check`, and `make build` passed. The smoke exposed and then
+verified a bounded fail-closed retry for transient bind-file visibility during
+proxy reload. Normal-HOME host Luna and a disposable trusted Pi OAuth session
+passed deny → observe `chatgpt.com:443` → exact grant → isolated Luna marker →
+revoke → deny. Host auth bytes were unchanged; disposable stage, container,
+session, trust, and temp state were removed; the pre-existing user session
+remained running.
