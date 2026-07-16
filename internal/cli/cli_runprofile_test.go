@@ -133,6 +133,63 @@ func TestRunProfileCtxContainerForwardsSupervisorPTY(t *testing.T) {
 	}
 }
 
+func TestRunProfilePiOAuthIsFileOnlyAndWiped(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	agentDir := filepath.Join(home, ".pi", "agent")
+	if err := os.MkdirAll(agentDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(home, ".pi"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const access = "ACCESS_CANARY"
+	auth := fmt.Sprintf(`{"openai-codex":{"type":"oauth","access":%q,"refresh":"REFRESH_SENTINEL","expires":%d}}`, access, time.Now().Add(time.Hour).UnixMilli())
+	hostAuth := filepath.Join(agentDir, "auth.json")
+	if err := os.WriteFile(hostAuth, []byte(auth), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	prof := policy.Profile{Agent: "pi", Environment: "container", Network: "deny", Workspace: ".", Credentials: &policy.Credentials{
+		Pi: &policy.PiCreds{Provider: "openai-codex", Model: "gpt-5.6-luna"},
+	}}
+	argv, err := agentArgv(prof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seenStage string
+	old := containerLaunch
+	containerLaunch = func(_ context.Context, spec engexec.LaunchSpec, _, _ string, _ []string, secretEnv []string, stageDir string, _ []string, _ *policy.Projection, _ ...container.SessionGrant) (int, error) {
+		seenStage = stageDir
+		body, err := os.ReadFile(filepath.Join(stageDir, "pi", "openai-codex", "auth.json"))
+		if err != nil {
+			t.Fatalf("read staged Pi auth at launch: %v", err)
+		}
+		if !strings.Contains(string(body), access) || strings.Contains(string(body), "REFRESH_SENTINEL") {
+			t.Fatalf("launch-stage Pi auth is not access-only: %s", body)
+		}
+		leakSurface := strings.Join(append(append([]string{}, spec.Argv...), secretEnv...), "\n")
+		if strings.Contains(leakSurface, access) || strings.Contains(leakSurface, hostAuth) {
+			t.Fatalf("Pi OAuth leaked to argv/env: %s", leakSurface)
+		}
+		return 0, nil
+	}
+	t.Cleanup(func() { containerLaunch = old })
+
+	if code, err := runProfileCtx(context.Background(), "pi-oauth-file-only", prof, argv, t.TempDir()); err != nil || code != 0 {
+		t.Fatalf("runProfileCtx = %d, %v", code, err)
+	}
+	if seenStage == "" {
+		t.Fatal("container launch did not observe a stage")
+	}
+	if _, err := os.Stat(seenStage); !os.IsNotExist(err) {
+		t.Fatalf("Pi OAuth stage survived run teardown: %v", err)
+	}
+	if body, err := os.ReadFile(hostAuth); err != nil || string(body) != auth {
+		t.Fatalf("host Pi auth changed: %q err=%v", body, err)
+	}
+}
+
 func waitForAgentPID(t *testing.T, path string) int {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)

@@ -84,6 +84,16 @@ func seedSessionStageDirForTest(t *testing.T, sess engsession.Session) string {
 	if err := os.WriteFile(filepath.Join(stageDir, "secrets.env"), []byte("TEST_ONLY=1\n"), 0o600); err != nil {
 		t.Fatalf("seed stage dir: %v", err)
 	}
+	// Keep a nested Pi OAuth-shaped bearer in every lifecycle fixture so stop,
+	// reconcile, remove, and prune prove recursive local wipe rather than only a
+	// flat secrets.env removal.
+	piDir := filepath.Join(stageDir, "pi", "openai-codex")
+	if err := os.MkdirAll(piDir, 0o700); err != nil {
+		t.Fatalf("seed Pi OAuth stage dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(piDir, "auth.json"), []byte(`{"openai-codex":{"type":"api_key","key":"PI_TEARDOWN_SENTINEL"}}`), 0o600); err != nil {
+		t.Fatalf("seed Pi OAuth stage: %v", err)
+	}
 	t.Cleanup(func() { _ = os.RemoveAll(stageDir) })
 	return stageDir
 }

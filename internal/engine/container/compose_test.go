@@ -2,6 +2,7 @@ package container
 
 import (
 	"os"
+	osexec "os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -61,6 +62,73 @@ func TestComposeHardSetsAgentUser(t *testing.T) {
 	if n := strings.Count(string(legacy), "    user: \"1000:1000\"\n"); n != 2 {
 		t.Fatalf("legacy compose must hard-set agent and agent-tools users, got %d:\n%s", n, legacy)
 	}
+}
+
+func TestEntrypointCopiesPiOAuthIntoTmpfsBeforeExec(t *testing.T) {
+	runtimeDir := t.TempDir()
+	providerDir := filepath.Join(runtimeDir, "pi", "openai-codex")
+	if err := os.MkdirAll(providerDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(runtimeDir, "pi"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const auth = `{"openai-codex":{"type":"api_key","key":"ACCESS_CANARY"}}`
+	staged := filepath.Join(providerDir, "auth.json")
+	if err := os.WriteFile(staged, []byte(auth), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	marker := filepath.Join(t.TempDir(), "agent-started")
+	err := runEntrypointForTest(t, runtimeDir, home, `/bin/sh`, `-c`,
+		`test "$(cat "$HOME/.pi/agent/auth.json")" = '`+auth+`' && test "$(stat -c '%a' "$HOME/.pi/agent/auth.json")" = 600 && touch "`+marker+`"`)
+	if err != nil {
+		t.Fatalf("entrypoint Pi OAuth copy: %v", err)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("agent did not start after Pi auth copy: %v", err)
+	}
+	if body, err := os.ReadFile(staged); err != nil || string(body) != auth {
+		t.Fatalf("staged source was changed: %q err=%v", body, err)
+	}
+}
+
+func TestEntrypointRejectsUnsafePiOAuthBeforeExec(t *testing.T) {
+	runtimeDir := t.TempDir()
+	providerDir := filepath.Join(runtimeDir, "pi", "openai-codex")
+	if err := os.MkdirAll(providerDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(runtimeDir, "pi"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(providerDir, "auth.json"), []byte(`{"bad":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(t.TempDir(), "must-not-start")
+	err := runEntrypointForTest(t, runtimeDir, t.TempDir(), `/bin/sh`, `-c`, `touch "`+marker+`"`)
+	if err == nil {
+		t.Fatal("unsafe staged Pi auth must fail closed")
+	}
+	if _, statErr := os.Stat(marker); !os.IsNotExist(statErr) {
+		t.Fatalf("agent started with unsafe Pi auth: %v", statErr)
+	}
+}
+
+func runEntrypointForTest(t *testing.T, runtimeDir, home string, argv ...string) error {
+	t.Helper()
+	body, err := readAsset("entrypoint.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body = []byte(strings.ReplaceAll(string(body), "/safeslop/runtime", runtimeDir))
+	script := filepath.Join(t.TempDir(), "entrypoint.sh")
+	if err := os.WriteFile(script, body, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cmd := osexec.Command("/bin/sh", append([]string{script}, argv...)...)
+	cmd.Env = append(os.Environ(), "HOME="+home)
+	return cmd.Run()
 }
 
 func TestEntrypointPreCreatesAgentStateDirs(t *testing.T) {
