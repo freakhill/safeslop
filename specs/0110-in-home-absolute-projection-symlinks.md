@@ -1,6 +1,6 @@
 # 0110 — Exact in-home absolute projection symlinks
 
-Status: in progress
+Status: complete
 
 SCOPE: allow engine-owned builtin projection source paths to follow exact-spelling absolute symlinks that are proper descendants of the same pinned approved root, by converting only their lexical suffix and restarting descriptor-relative traversal.
 
@@ -32,7 +32,7 @@ WORKTREE: `.worktrees/0110-in-home-absolute-symlinks/`
   VERIFY:   `git diff --check && rg -n 'exact-spelling|relative or absolute|alternate.*spelling|0110' README.md skills/agent-sandbox-ops/SKILL.md specs/0096-contained-hybrid-default-profiles.md specs/0107-safe-symlink-projection-failures.md`
   EXPECTED: Operator and historical-contract docs match the narrow implemented resolver refinement without implying broader host reach.
 
-- [ ] Run repository gates and real builtin Pi smoke
+- [x] Run repository gates and real builtin Pi smoke
   FILE:     whole repo, `specs/0110-in-home-absolute-projection-symlinks.md`
   CHANGE:   Run targeted tests, Emacs UI matrix, full check/build, install the built binary, create and run a fresh default Pi session against the real absolute in-home `~/.pi/agent` link, prove it reaches running/interactive startup with the unchanged builtin hash, then stop/remove test and prior failed records. Mark this spec complete only after all checks and cleanup succeed.
   VERIFY:   `git diff --check && make test-emacs-ui-matrix && make check && make build`
