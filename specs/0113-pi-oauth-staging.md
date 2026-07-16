@@ -28,7 +28,7 @@ Decision notes: `specs/research/2026-07-16-pi-oauth-staging-ayo.md`, `specs/rese
   VERIFY:   `! go test ./internal/engine/creds ./internal/cli -run 'PiOAuth|StagePi' -count=1 -v`
   EXPECTED: Tests fail because no provider-specific safe reader/stager or stageProfile integration exists.
 
-- [ ] Implement stable host extraction and access-only staging
+- [x] Implement stable host extraction and access-only staging
   FILE:     `internal/engine/creds/pi.go`, `internal/engine/creds/pi_test.go`, `internal/cli/cli.go`, `internal/cli/cli_stage_test.go`, `internal/engine/container/runtime_failure.go`
   CHANGE:   Read only default `~/.pi/agent/auth.json` from a retained approved-home root; pre/post reject unsafe parent/file identity/mode/owner/link/size and Pi lock; bounded stable retries; duplicate/trailing JSON rejection; literal provider OAuth access+expiry extraction; >15-minute headroom twice; best-effort buffer zeroing. Atomically write only synthetic `type:api_key` artifact under stageDir and integrate it into `stageProfile`. Return engine-owned fixed `pi_oauth_*` failures without wrapped details.
   VERIFY:   `go test ./internal/engine/creds ./internal/cli -run 'PiOAuth|StagePi' -count=1 -v`

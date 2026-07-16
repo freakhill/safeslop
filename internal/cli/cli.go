@@ -3089,6 +3089,11 @@ func stageProfile(ctx context.Context, prof policy.Profile, stageDir string) (se
 	if err != nil {
 		return nil, nil, err
 	}
+	if prof.Credentials != nil && prof.Credentials.Pi != nil {
+		if _, err := creds.StagePiOAuth(prof.Credentials.Pi, stageDir); err != nil {
+			return nil, nil, err
+		}
+	}
 	pathEnv = append(pathEnv, npmrcEnv...)
 	pathEnv = append(pathEnv, kubeEnv...)
 	pathEnv = append(pathEnv, githubEnv...)
