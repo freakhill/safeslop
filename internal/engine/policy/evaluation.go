@@ -65,6 +65,7 @@ const (
 	CredentialProviderKube    = "kube"
 	CredentialProviderGitHub  = "github"
 	CredentialProviderForgejo = "forgejo"
+	CredentialProviderPiOAuth = "pi-oauth"
 
 	CredentialAccessReadOnly        = "read_only"
 	CredentialAccessReadWrite       = "read_write"
@@ -80,6 +81,7 @@ const (
 	CredentialBasisDeclared         = "declared"
 	CredentialBasisResolvedAtLaunch = "resolved_at_launch"
 	CredentialBasisProviderDefault  = "provider_default"
+	CredentialBasisHostSnapshot     = "host_snapshot"
 )
 
 // Evaluation keeps static authority, exact-policy trust, and point-in-time
@@ -470,6 +472,10 @@ var authorityRuleRegistry = []authorityRule{
 	}),
 	credentialRule("github", 560, "GitHub credential authority", forgeCredentialConsequence("GitHub")),
 	credentialRule("forgejo", 570, "Forgejo credential authority", forgeCredentialConsequence("Forgejo")),
+	credentialRule("pi-oauth", 580, "Pi OAuth access authority", func(c authorityRuleContext) string {
+		phrase, verb := credentialScopePhrase(c.Count, "short-lived Pi OAuth")
+		return fmt.Sprintf("%s %s available as replayable provider-default bearer authority; model selection and egress do not cryptographically downscope it.", phrase, verb)
+	}),
 	{
 		ID: "authority.credentials.absent", Axis: FindingAxisCredentials, Ordinal: 590,
 		Title:       "No credential providers declared",
@@ -834,7 +840,7 @@ func normalizeCredentialAuthority(c *Credentials) ([]CredentialScope, []credenti
 	if c == nil {
 		return []CredentialScope{}, nil
 	}
-	providers := make([]credentialProviderAuthority, 0, 6)
+	providers := make([]credentialProviderAuthority, 0, 7)
 	if len(c.Pnpm) > 0 {
 		providers = append(providers, pnpmCredentialAuthority(c.Pnpm))
 	}
@@ -852,6 +858,9 @@ func normalizeCredentialAuthority(c *Credentials) ([]CredentialScope, []credenti
 	}
 	if c.Forgejo != nil {
 		providers = append(providers, forgejoCredentialAuthority(c.Forgejo))
+	}
+	if c.Pi != nil {
+		providers = append(providers, piOAuthCredentialAuthority(c.Pi))
 	}
 
 	scopes := make([]CredentialScope, 0)
@@ -1112,6 +1121,25 @@ func forgejoCredentialAuthority(forgejo *ForgejoCreds) credentialProviderAuthori
 	return provider
 }
 
+func piOAuthCredentialAuthority(pi *PiCreds) credentialProviderAuthority {
+	target := "declared Pi OAuth provider/model"
+	unknown := true
+	if pi.Provider == "openai-codex" && pi.Model == "gpt-5.6-luna" {
+		target = pi.Provider + "/" + pi.Model
+		unknown = false
+	}
+	return credentialProviderAuthority{
+		Provider: CredentialProviderPiOAuth, HighAuthority: true,
+		Drafts: []credentialScopeDraft{{
+			CredentialScope: CredentialScope{
+				Target: target, Access: CredentialAccessProviderDefault,
+				Lifetime: CredentialLifetimeShortLived, Basis: CredentialBasisHostSnapshot,
+			},
+			Unknown: unknown,
+		}},
+	}
+}
+
 func repositoryCredentialDrafts(repos []RepoCred, providerWrite bool, lifetime, fallback string, forceUnknown bool) []credentialScopeDraft {
 	drafts := make([]credentialScopeDraft, 0, len(repos))
 	for _, repo := range repos {
@@ -1150,7 +1178,7 @@ func credentialWriteAccess(write bool) string {
 var (
 	stableIDPattern     = regexp.MustCompile(`^[a-z0-9]+(?:[.-][a-z0-9]+)*$`)
 	actionIDPattern     = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
-	credentialIDPattern = regexp.MustCompile(`^credential\.(pnpm|aws|gcp|kube|github|forgejo)\.[0-9]{3}$`)
+	credentialIDPattern = regexp.MustCompile(`^credential\.(pnpm|aws|gcp|kube|github|forgejo|pi-oauth)\.[0-9]{3}$`)
 	repositoryPattern   = regexp.MustCompile(`^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$`)
 	registryHostPattern = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$`)
 )
@@ -1402,6 +1430,9 @@ func validateCredentialScope(scope CredentialScope) error {
 	if scope.Provider == CredentialProviderGitHub || scope.Provider == CredentialProviderForgejo {
 		targetSafe = targetSafe || safeRepositoryTarget(scope.Target)
 	}
+	if scope.Provider == CredentialProviderPiOAuth {
+		targetSafe = scope.Target == "openai-codex/gpt-5.6-luna"
+	}
 	if !targetSafe {
 		return fmt.Errorf("target contains missing or forbidden material")
 	}
@@ -1542,6 +1573,8 @@ func credentialProviderOrder(provider string) int {
 		return 4
 	case CredentialProviderForgejo:
 		return 5
+	case CredentialProviderPiOAuth:
+		return 6
 	default:
 		return 99
 	}
@@ -1616,7 +1649,7 @@ func isCredentialLifetime(lifetime string) bool {
 
 func isCredentialBasis(basis string) bool {
 	switch basis {
-	case CredentialBasisDeclared, CredentialBasisResolvedAtLaunch, CredentialBasisProviderDefault:
+	case CredentialBasisDeclared, CredentialBasisResolvedAtLaunch, CredentialBasisProviderDefault, CredentialBasisHostSnapshot:
 		return true
 	default:
 		return false

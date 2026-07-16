@@ -147,6 +147,13 @@ package safeslop
 	ackAccountWide?: bool | *false
 }
 
+// One access-only snapshot from the host Pi OAuth store. MVP is deliberately
+// literal: expanding provider/model support is a new credential-boundary review.
+#PiCreds: {
+	provider: "openai-codex"
+	model:    "gpt-5.6-luna"
+}
+
 // Credential providers a profile uses (SP2: pnpm; SP/0009: aws/gcp; SP/0010: kube; SP/0011: github,
 // specs/0069; specs/0047: forgejo).
 #Credentials: {
@@ -156,6 +163,7 @@ package safeslop
 	kube?:    #KubeCluster
 	github?:  #GithubCreds
 	forgejo?: #ForgejoCreds
+	pi?:      #PiCreds
 }
 
 // A pinned toolchain layered onto any environment (SP5), orthogonal to `environment`.

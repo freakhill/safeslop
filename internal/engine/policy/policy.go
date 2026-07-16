@@ -128,6 +128,13 @@ type ForgejoApi struct {
 	AckAccountWide bool `json:"ackAccountWide,omitempty"`
 }
 
+// PiCreds opts one project profile into an access-only snapshot from the host
+// Pi OAuth store. The narrow literals are intentional MVP capability bounds.
+type PiCreds struct {
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+}
+
 var githubPermissionRE = regexp.MustCompile(`^[a-z][a-z-]*:(read|write)$`)
 
 func validateCredentialTTL(provider, raw string) error {
@@ -168,6 +175,20 @@ func validateGithubAPI(github *GithubCreds) error {
 	return nil
 }
 
+func validatePiCredentials(prof Profile) error {
+	if prof.Credentials == nil || prof.Credentials.Pi == nil {
+		return nil
+	}
+	pi := prof.Credentials.Pi
+	if prof.Agent != "pi" || prof.Environment != "container" || prof.Network != "deny" {
+		return fmt.Errorf("credentials.pi requires agent: \"pi\", environment: \"container\", and network: \"deny\"")
+	}
+	if pi.Provider != "openai-codex" || pi.Model != "gpt-5.6-luna" {
+		return fmt.Errorf("credentials.pi supports only provider \"openai-codex\" with model \"gpt-5.6-luna\"")
+	}
+	return nil
+}
+
 func validateForgejoAPI(forgejo *ForgejoCreds) error {
 	if forgejo == nil || forgejo.Api == nil || !forgejo.Api.Enabled {
 		return nil
@@ -191,6 +212,7 @@ type Credentials struct {
 	Kube    *KubeCluster   `json:"kube,omitempty"`
 	Github  *GithubCreds   `json:"github,omitempty"`
 	Forgejo *ForgejoCreds  `json:"forgejo,omitempty"`
+	Pi      *PiCreds       `json:"pi,omitempty"`
 }
 
 // Toolchain layers a pinned tool environment onto any environment (SP5). When Run is set,
@@ -420,6 +442,9 @@ func LoadBytes(data []byte) (*Config, error) {
 			return nil, fmt.Errorf("profile %q: %w", name, err)
 		}
 		if c := prof.Credentials; c != nil {
+			if err := validatePiCredentials(prof); err != nil {
+				return nil, fmt.Errorf("profile %q: %w", name, err)
+			}
 			if c.Github != nil {
 				if err := validateCredentialTTL("github", c.Github.Ttl); err != nil {
 					return nil, fmt.Errorf("profile %q: %w", name, err)

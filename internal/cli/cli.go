@@ -1143,6 +1143,12 @@ func credentialScopesFromProfile(prof policy.Profile) []engsession.CredentialSco
 	if c.Kube != nil {
 		out = append(out, kubeCredentialScopes(c.Kube)...)
 	}
+	if c.Pi != nil {
+		out = append(out, engsession.CredentialScope{
+			Kind: "pi-oauth", Name: c.Pi.Provider + "/" + c.Pi.Model,
+			Scope: "access snapshot, short-lived",
+		})
+	}
 	return out
 }
 
@@ -3408,6 +3414,9 @@ func agentArgv(p policy.Profile) ([]string, error) {
 	case "claude":
 		return []string{"claude"}, nil
 	case "pi":
+		if p.Credentials != nil && p.Credentials.Pi != nil {
+			return []string{"pi", "--provider", p.Credentials.Pi.Provider, "--model", p.Credentials.Pi.Model}, nil
+		}
 		return []string{"pi"}, nil
 	case "fish":
 		return []string{"fish"}, nil

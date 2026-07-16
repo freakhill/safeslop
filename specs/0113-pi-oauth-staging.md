@@ -16,7 +16,7 @@ Decision notes: `specs/research/2026-07-16-pi-oauth-staging-ayo.md`, `specs/rese
   VERIFY:   `! go test ./internal/engine/policy ./internal/cli -run 'PiOAuth|Pi.*Luna|AgentArgvPi' -count=1 -v`
   EXPECTED: Tests fail on unknown schema fields/missing authority scope/plain `pi` argv/missing session scope, not fixture plumbing.
 
-- [ ] Implement the narrow policy and value-free public contract
+- [x] Implement the narrow policy and value-free public contract
   FILE:     `internal/engine/policy/schema/schema.cue`, `internal/engine/policy/policy.go`, `internal/engine/policy/policy_test.go`, `internal/engine/policy/evaluation.go`, `internal/engine/policy/evaluation_test.go`, `internal/cli/cli.go`, `internal/cli/cli_agentargv_test.go`, `internal/cli/cli_session_test.go`
   CHANGE:   Add `PiCreds` and strict profile validation; keep all builtins unchanged. Add policy/session credential scopes and engine-owned `pi --provider openai-codex --model gpt-5.6-luna`. Reuse existing JSON structs; add no value-bearing or exact-expiry field.
   VERIFY:   `go test ./internal/engine/policy ./internal/cli -run 'PiOAuth|Pi.*Luna|AgentArgvPi' -count=1 -v`
