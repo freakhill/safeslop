@@ -695,9 +695,11 @@ linking. `R` loads all project profiles even when the credential table is empty,
 prefills existing provider/mode/read/write scopes, and confirms a before/after
 full replacement; changing provider clears only the other forge declaration.
 `X` removes profile forge scopes while retaining reusable account links and
-unrelated credential providers. A failed scope write retains its value-free draft:
-return with `K` and press `R` to correct/retry. Successful scope changes alter
-policy bytes, so review and re-trust before launching a new session.
+unrelated credential providers. Failed account/scope writes retain value-free
+drafts: return with `K`, then press `A` or `R` to correct/retry. Successful scope
+changes alter policy bytes, so review and re-trust before launching a new session.
+Unlink warns that unchanged profile scopes will fail staging until relinked or
+cleared with `X`.
 
 The surface is backed by `safeslop creds list [safeslop.cue] --output json`,
 `safeslop creds show <profile> --output json`, `safeslop creds status --output

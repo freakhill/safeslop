@@ -104,7 +104,12 @@ so mode-specific actions may override shared help/quit where needed.")
      ("R"   . safeslop-credentials-pick-repositories)
      ("X"   . safeslop-credentials-clear-profile-forge)
      ("e"   . safeslop-credentials-edit)
-     ("gr"  . safeslop-credentials-refresh)))
+     ("gr"  . safeslop-credentials-refresh))
+    (safeslop-credentials-inspect-mode safeslop-credentials-inspect-mode-map
+     ("RET" . safeslop-credentials-inspect-back)
+     ("e"   . safeslop-credentials-inspect-edit)
+     ("gr"  . safeslop-credentials-inspect-refresh)
+     ("q"   . quit-window)))
   "Per-mode Evil normal-state actions: (MODE MAP-SYMBOL (KEY . COMMAND)...).
 Every listed mode also receives `safeslop-doom--evil-shared-keys'.  Keys that
 would shadow Evil motions (j k g n f a) are deliberately absent (specs/0063

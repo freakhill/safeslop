@@ -95,6 +95,11 @@ one even if a future envelope regressed to carrying it."
       (should (equal (substring-no-properties cell) (car pair)))
       (should (eq (get-text-property 0 'face cell) (cdr pair)))
       (should (get-text-property 0 'help-echo cell)))) ; honest meaning always attached
+  ;; Account-link probe classes carry equally explicit value-free help.
+  (dolist (probe '("ok" "secret-unresolved" "unreachable" "denied" "error"))
+    (let ((cell (safeslop-credentials--account-probe-cell probe)))
+      (should (equal (substring-no-properties cell) probe))
+      (should (get-text-property 0 'help-echo cell))))
   ;; An unknown status degrades gracefully (label kept, no crash).
   (should (equal (substring-no-properties (safeslop-credentials--status-cell "weird")) "weird")))
 
@@ -178,15 +183,16 @@ one even if a future envelope regressed to carrying it."
     (should-not (member "PRIVATE KEY" captured))))
 
 (ert-deftest safeslop-test-credentials-unlink-account-argv ()
-  "The unlink action chooses host/owner from value-free status rows and refreshes."
-  (let (captured refreshed)
+  "The unlink action chooses host/owner, warns about staging, and refreshes."
+  (let (captured refreshed confirmation)
     (with-temp-buffer
       (safeslop-credentials-mode)
       (setq safeslop-credentials--account-links
             '(((forge . "github") (host . "github.com") (owner . "acme")
                (appID . 123) (installationID . 456) (probe . "ok") (ttl . "1h-renewable"))))
       (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "github.com/acme"))
-                ((symbol-function 'yes-or-no-p) (lambda (&rest _) t))
+                ((symbol-function 'yes-or-no-p)
+                 (lambda (prompt) (setq confirmation prompt) t))
                 ((symbol-function 'safeslop-credentials--call-raw-async)
                  (lambda (args callback)
                    (setq captured args)
@@ -196,6 +202,8 @@ one even if a future envelope regressed to carrying it."
                 ((symbol-function 'safeslop-credentials-refresh) (lambda () (setq refreshed t))))
         (safeslop-credentials-unlink-account)))
     (should (equal captured '("creds" "unlink" "github.com/acme")))
+    (should (string-match-p "fail to stage" confirmation))
+    (should (string-match-p "cleared with X" confirmation))
     (should refreshed)))
 
 (ert-deftest safeslop-test-credentials-profile-credentials-args-github-origin ()
@@ -329,6 +337,54 @@ one even if a future envelope regressed to carrying it."
     (should-not (string-match-p "op://" (substring-no-properties confirmation)))
     (should refreshed)
     (should-not popped)))
+
+(ert-deftest safeslop-test-credentials-journey-link-success-next-step-never-dead-ends ()
+  "Link success names F before R without a project, and R directly with one."
+  (with-temp-buffer
+    (safeslop-credentials-mode)
+    (should (string-match-p "F.*then R" (safeslop-credentials--link-success-message "github")))
+    (setq safeslop-credentials--config-path "/ws/safeslop.cue")
+    (should (string-match-p "press R" (safeslop-credentials--link-success-message "github")))
+    (should-not (string-match-p "press F" (safeslop-credentials--link-success-message "github")))))
+
+(ert-deftest safeslop-test-credentials-journey-unlink-failure-guides-retry ()
+  "A failed U keeps context and names the universal return/retry keys."
+  (let (shown feedback)
+    (with-temp-buffer
+      (safeslop-credentials-mode)
+      (setq safeslop-credentials--account-links
+            '(((forge . "github") (host . "github.com") (owner . "acme"))))
+      (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "github.com/acme"))
+                ((symbol-function 'yes-or-no-p) (lambda (&rest _) t))
+                ((symbol-function 'safeslop-credentials--call-raw-async)
+                 (lambda (_args callback)
+                   (funcall callback (safeslop-contract-parse-string safeslop-test-mutation-failed-json))))
+                ((symbol-function 'safeslop--show-envelope-buffer) (lambda (&rest _) (setq shown t)))
+                ((symbol-function 'message) (lambda (format &rest args) (setq feedback (apply #'format format args)))))
+        (call-interactively (lookup-key safeslop-credentials-mode-map (kbd "U")))))
+    (should shown)
+    (should (string-match-p "K.*U" feedback))))
+
+(ert-deftest safeslop-test-credentials-journey-retry-retains-failed-account-link-draft ()
+  "A failed account link keeps value-free ids/refs as A retry defaults."
+  (with-temp-buffer
+    (safeslop-credentials-mode)
+    (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "github"))
+              ((symbol-function 'read-string)
+               (let ((answers '("github.com" "op://vault/app/private-key")))
+                 (lambda (&rest _) (pop answers))))
+              ((symbol-function 'read-number)
+               (let ((answers '(123 456))) (lambda (&rest _) (pop answers))))
+              ((symbol-function 'yes-or-no-p) (lambda (&rest _) t))
+              ((symbol-function 'safeslop-credentials--call-raw-async)
+               (lambda (_args callback)
+                 (funcall callback (safeslop-contract-parse-string safeslop-test-mutation-failed-json))))
+              ((symbol-function 'safeslop--show-envelope-buffer) (lambda (&rest _) nil)))
+      (call-interactively (lookup-key safeslop-credentials-mode-map (kbd "A"))))
+    (should (equal (alist-get 'provider safeslop-credentials--account-link-draft) "github"))
+    (should (= (alist-get 'app-id safeslop-credentials--account-link-draft) 123))
+    (should (equal (alist-get 'key-ref safeslop-credentials--account-link-draft)
+                   "op://vault/app/private-key"))))
 
 (ert-deftest safeslop-test-credentials-journey-first-run-profile-source ()
   "A valid project profile is selectable even when `creds list' has no rows."
@@ -534,6 +590,15 @@ one even if a future envelope regressed to carrying it."
     (should (eq (cdr (assoc "RET" (cddr entry))) 'safeslop-credentials-inspect))
     (should (eq (cdr (assoc "e" (cddr entry))) 'safeslop-credentials-edit))
     (should (eq (cdr (assoc "gr" (cddr entry))) 'safeslop-credentials-refresh))
+    (dolist (pair '(("A" . safeslop-credentials-link-account)
+                    ("U" . safeslop-credentials-unlink-account)
+                    ("R" . safeslop-credentials-pick-repositories)
+                    ("X" . safeslop-credentials-clear-profile-forge)))
+      (should (eq (cdr (assoc (car pair) (cddr entry))) (cdr pair))))
+    (let ((inspect (assq 'safeslop-credentials-inspect-mode safeslop-doom--evil-mode-keys)))
+      (should inspect)
+      (should (eq (cdr (assoc "e" (cddr inspect))) 'safeslop-credentials-inspect-edit))
+      (should (eq (cdr (assoc "gr" (cddr inspect))) 'safeslop-credentials-inspect-refresh)))
     ;; read-only: no launch/create/delete in the Evil table either
     (should-not (assoc "r" (cddr entry)))
     (should-not (assoc "c" (cddr entry)))))

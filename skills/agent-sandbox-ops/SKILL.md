@@ -206,8 +206,9 @@ GitHub App/Forgejo account using refs/ids only, `U` unlinks the reusable account
 clears only that profile's forge scopes (`g` refresh raw, `gr` Evil). Create or
 clone a project profile first; builtins are immutable. `R` works when credential
 rows are empty, preloads existing read/write scopes, confirms full replacement,
-and retains a value-free failed draft for `K → R` retry. `R`/`X` write through
-`profile credentials set|clear`; review and re-trust changed policy bytes. Live
+and retains value-free failed account/scope drafts for `K → A/R` retry. `U`
+warns that profile scopes remain and will fail staging until relinked or cleared.
+`R`/`X` write through `profile credentials set|clear`; review and re-trust changed policy bytes. Live
 repo discovery remains deferred.
 
 `C-c s P` opens the Sessions portal. The tab strip shows each surface's direct

@@ -131,7 +131,11 @@
           (safeslop-ui-probe--assert-key "X" #'safeslop-credentials-clear-profile-forge)
           (safeslop-ui-probe--assert-key "gr" #'safeslop-credentials-refresh)
           (should (string-match-p "gr refresh" (substring-no-properties (safeslop-credentials--header))))
-          (safeslop-ui-probe--assert-key "P" #'safeslop-portal)))
+          (safeslop-ui-probe--assert-key "P" #'safeslop-portal))
+        (safeslop-ui-probe--with-mode #'safeslop-credentials-inspect-mode
+          (safeslop-ui-probe--assert-key "e" #'safeslop-credentials-inspect-edit)
+          (safeslop-ui-probe--assert-key "gr" #'safeslop-credentials-inspect-refresh)
+          (should (string-match-p "gr refresh" (substring-no-properties (safeslop-credentials--inspect-legend))))))
     (safeslop-ui-probe--with-mode #'safeslop-output-mode
       (safeslop-ui-probe--assert-key "g" #'safeslop-output-refresh)
       (safeslop-ui-probe--assert-key "E" #'safeslop-show-last-error)
@@ -153,7 +157,11 @@
       (safeslop-ui-probe--assert-key "X" #'safeslop-credentials-clear-profile-forge)
       (safeslop-ui-probe--assert-key "g" #'safeslop-credentials-refresh)
       (should (string-match-p "g refresh" (substring-no-properties (safeslop-credentials--header))))
-      (safeslop-ui-probe--assert-key "P" #'safeslop-portal))))
+      (safeslop-ui-probe--assert-key "P" #'safeslop-portal))
+    (safeslop-ui-probe--with-mode #'safeslop-credentials-inspect-mode
+      (safeslop-ui-probe--assert-key "e" #'safeslop-credentials-inspect-edit)
+      (safeslop-ui-probe--assert-key "g" #'safeslop-credentials-inspect-refresh)
+      (should (string-match-p "g refresh" (substring-no-properties (safeslop-credentials--inspect-legend)))))))
 
 (ert-deftest safeslop-ui-probe-compose-keys-resolve ()
   "Profiles compose `RET' resolves to checkbox toggle; `SPC' is not used."

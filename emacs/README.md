@@ -205,8 +205,9 @@ the project profile list independently of credential rows, so an empty profile i
 selectable. It writes through `safeslop profile credentials set --output json`;
 `X` uses `profile credentials clear`. Emacs never rewrites CUE itself. Setting one
 forge clears only the opposite forge declaration and preserves other credential
-providers. A failed `R` write keeps its value-free draft; return with `K`, then
-press `R` to correct/retry. Live repo discovery remains deliberately deferred:
+providers. Failed `A`/`R` writes keep value-free drafts; return with `K`, then
+press the same action to correct/retry. `U` warns that unchanged profile scopes
+will fail staging until relinked or cleared with `X`. Live repo discovery remains deliberately deferred:
 GitHub discovery would require a minted installation token and Forgejo discovery
 would use the account-wide token, so the surface accepts origin inference and
 manual `owner/repo` entries only.
