@@ -138,6 +138,137 @@ func TestStagePiOAuthRejectsUnsafeSourcesValueFree(t *testing.T) {
 	}
 }
 
+func TestPiOAuthSymlinkAndAncestryAcceptsPracticalSafeHomeLayouts(t *testing.T) {
+	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
+	valid := validPiOAuthJSON(now.Add(time.Hour), "ACCESS_CANARY")
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, home, auth string)
+	}{
+		{"0755-ancestry", func(t *testing.T, home, _ string) {
+			must(t, os.Chmod(filepath.Join(home, ".pi"), 0o755))
+			must(t, os.Chmod(filepath.Join(home, ".pi", "agent"), 0o755))
+		}},
+		{"relative-pi-link", func(t *testing.T, home, _ string) {
+			real := filepath.Join(home, "dotfiles", "pi")
+			must(t, os.MkdirAll(filepath.Dir(real), 0o755))
+			must(t, os.Rename(filepath.Join(home, ".pi"), real))
+			must(t, os.Symlink("dotfiles/pi", filepath.Join(home, ".pi")))
+		}},
+		{"absolute-pi-link", func(t *testing.T, home, _ string) {
+			real := filepath.Join(home, "dotfiles", "pi")
+			must(t, os.MkdirAll(filepath.Dir(real), 0o755))
+			must(t, os.Rename(filepath.Join(home, ".pi"), real))
+			must(t, os.Symlink(real, filepath.Join(home, ".pi")))
+		}},
+		{"relative-agent-link", func(t *testing.T, home, _ string) {
+			piDir := filepath.Join(home, ".pi")
+			must(t, os.Rename(filepath.Join(piDir, "agent"), filepath.Join(piDir, "real-agent")))
+			must(t, os.Symlink("real-agent", filepath.Join(piDir, "agent")))
+		}},
+		{"absolute-agent-link", func(t *testing.T, home, _ string) {
+			piDir := filepath.Join(home, ".pi")
+			real := filepath.Join(piDir, "real-agent")
+			must(t, os.Rename(filepath.Join(piDir, "agent"), real))
+			must(t, os.Symlink(real, filepath.Join(piDir, "agent")))
+		}},
+		{"relative-auth-link", func(t *testing.T, _, auth string) {
+			real := filepath.Join(filepath.Dir(auth), "real-auth.json")
+			must(t, os.Rename(auth, real))
+			must(t, os.Symlink("real-auth.json", auth))
+		}},
+		{"absolute-auth-link", func(t *testing.T, _, auth string) {
+			real := filepath.Join(filepath.Dir(auth), "real-auth.json")
+			must(t, os.Rename(auth, real))
+			must(t, os.Symlink(real, auth))
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			home, auth := piOAuthFixture(t, now, valid)
+			tc.setup(t, home, auth)
+			stage := t.TempDir()
+			if _, err := StagePiOAuth(piOAuthPolicy, stage); err != nil {
+				t.Fatalf("safe practical HOME layout rejected: %v", err)
+			}
+			body, err := os.ReadFile(stagedPiAuthPath(stage))
+			if err != nil || !strings.Contains(string(body), "ACCESS_CANARY") {
+				t.Fatalf("access-only snapshot missing: body=%q err=%v", body, err)
+			}
+		})
+	}
+}
+
+func TestPiOAuthSymlinkAndAncestryRejectsUnsafeLayoutsValueFree(t *testing.T) {
+	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
+	valid := validPiOAuthJSON(now.Add(time.Hour), "ACCESS_CANARY")
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, home, auth string) []string
+	}{
+		{"group-writable-pi", func(t *testing.T, home, _ string) []string {
+			must(t, os.Chmod(filepath.Join(home, ".pi"), 0o775))
+			return nil
+		}},
+		{"other-writable-agent", func(t *testing.T, home, _ string) []string {
+			must(t, os.Chmod(filepath.Join(home, ".pi", "agent"), 0o757))
+			return nil
+		}},
+		{"outside", func(t *testing.T, _, auth string) []string {
+			outside := filepath.Join(t.TempDir(), "outside-auth")
+			must(t, os.WriteFile(outside, []byte(valid), 0o600))
+			must(t, os.Remove(auth))
+			must(t, os.Symlink(outside, auth))
+			return []string{outside}
+		}},
+		{"prefix-collision", func(t *testing.T, home, auth string) []string {
+			outsideDir := home + "-attacker"
+			must(t, os.MkdirAll(outsideDir, 0o700))
+			outside := filepath.Join(outsideDir, "auth.json")
+			must(t, os.WriteFile(outside, []byte(valid), 0o600))
+			must(t, os.Remove(auth))
+			must(t, os.Symlink(outside, auth))
+			return []string{outsideDir, outside}
+		}},
+		{"ambiguous-dot", func(t *testing.T, home, auth string) []string {
+			realDir := filepath.Join(home, ".pi", "real")
+			must(t, os.Mkdir(realDir, 0o700))
+			real := filepath.Join(realDir, "auth.json")
+			must(t, os.Rename(auth, real))
+			// Build the raw spelling manually: filepath.Join would clean it.
+			target := filepath.Join(home, ".pi") + "/real/./auth.json"
+			must(t, os.Symlink(target, auth))
+			return []string{target}
+		}},
+		{"loop", func(t *testing.T, _, auth string) []string {
+			must(t, os.Remove(auth))
+			must(t, os.Symlink("auth-two", auth))
+			must(t, os.Symlink("auth.json", filepath.Join(filepath.Dir(auth), "auth-two")))
+			return nil
+		}},
+		{"dangling", func(t *testing.T, _, auth string) []string {
+			must(t, os.Remove(auth))
+			must(t, os.Symlink("missing-auth", auth))
+			return nil
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			home, auth := piOAuthFixture(t, now, valid)
+			sentinels := tc.setup(t, home, auth)
+			_, err := StagePiOAuth(piOAuthPolicy, t.TempDir())
+			if err == nil {
+				t.Fatal("unsafe Pi OAuth source was accepted")
+			}
+			for _, sentinel := range append(sentinels, home, auth, "ACCESS_CANARY") {
+				if sentinel != "" && strings.Contains(err.Error(), sentinel) {
+					t.Fatalf("error leaked private source/value %q: %v", sentinel, err)
+				}
+			}
+		})
+	}
+}
+
 func TestStagePiOAuthRejectsParentSymlink(t *testing.T) {
 	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
 	home := t.TempDir()

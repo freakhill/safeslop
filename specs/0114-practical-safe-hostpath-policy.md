@@ -16,7 +16,7 @@ Decision notes: `specs/research/2026-07-17-hostpath-policy-ayo.md`, `specs/resea
   VERIFY:   `git diff --check && rg -n '100 / 100|mode & 0022|same-HOME|no semantic delta|Descriptor' specs/research/2026-07-17-hostpath-policy-*.md`
   EXPECTED: Notes are clean and pin safe practical links/0755 without adding path authority or weakening any projection/Pi leaf/lifecycle law.
 
-- [ ] Add RED Pi practicality and shared-proof characterization tests
+- [x] Add RED Pi practicality and shared-proof characterization tests
   FILE:     `internal/engine/creds/pi_test.go`, `internal/engine/container/projection_test.go`, `internal/engine/hostpath/hostpath_test.go`
   CHANGE:   Reproduce current failure for owner-controlled `0755` ancestry and relative/exact-absolute in-HOME links at `.pi`, `agent`, and final auth leaf. Add outside/prefix/ambiguous/loop/dangling, writable/wrong-owner ancestry, strict leaf, lock, replacement, value-free, and same-device/different-mount cases. Lock projection's current links/exclusions/XDG/tree/glob/snapshot/manifest/failure behavior before extraction; add a test-only shared-proof API seam so RED fails on behavior assertions rather than missing symbols.
   VERIFY:   `! go test ./internal/engine/creds ./internal/engine/container ./internal/engine/hostpath -run 'HostPath|PiOAuth.*(Symlink|Ancestry)|Projection.*Characterization' -count=1 -v`

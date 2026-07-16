@@ -881,6 +881,115 @@ func TestSnapshotProjectionDetectsOpenedFileMutation(t *testing.T) {
 	requireProjectionCode(t, err, ProjectionSnapshotChanged)
 }
 
+func TestProjectionSharedProofCharacterization(t *testing.T) {
+	t.Run("relative-link-private-snapshot-and-manifest", func(t *testing.T) {
+		home := projHome(t, "store/config")
+		mustProjection(t, os.Symlink("store/config", filepath.Join(home, "config-link")))
+		stage := t.TempDir()
+		manifest, err := SnapshotProjection(home, stage, policy.Projection{Items: []policy.ProjectionItem{{
+			Source: "~/config-link", Label: "characterization", Optional: boolPtr(false),
+		}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		mounts := manifest.PresentMounts()
+		if len(mounts) != 1 || mounts[0].Target != "config-link" || mounts[0].Status != projPresent {
+			t.Fatalf("manifest semantic delta: %+v", manifest.Items)
+		}
+		if !strings.HasPrefix(mounts[0].Host, filepath.Join(stage, "projection-snapshots")+string(filepath.Separator)) {
+			t.Fatalf("snapshot escaped private stage: %q", mounts[0].Host)
+		}
+		body, readErr := os.ReadFile(mounts[0].Host)
+		if readErr != nil || string(body) != "x" {
+			t.Fatalf("snapshot bytes = %q err=%v", body, readErr)
+		}
+	})
+
+	t.Run("rewritten-exclusion", func(t *testing.T) {
+		home := projHome(t, ".ssh/config")
+		mustProjection(t, os.Symlink(".ssh/config", filepath.Join(home, "config-link")))
+		_, err := SnapshotProjection(home, t.TempDir(), policy.Projection{Items: []policy.ProjectionItem{{Source: "~/config-link"}}})
+		requireProjectionCode(t, err, ProjectionTargetExcluded)
+	})
+
+	t.Run("external-xdg-lazy-and-used", func(t *testing.T) {
+		home := projHome(t, ".zshrc")
+		external := filepath.Join(t.TempDir(), "xdg")
+		t.Setenv("XDG_CONFIG_HOME", external)
+		if _, err := SnapshotProjection(home, t.TempDir(), policy.Projection{Items: []policy.ProjectionItem{{Source: "~/.zshrc"}}}); err != nil {
+			t.Fatalf("unused external XDG root was opened: %v", err)
+		}
+		mustProjection(t, os.MkdirAll(external, 0o755))
+		mustProjection(t, os.WriteFile(filepath.Join(external, "used.conf"), []byte("xdg"), 0o644))
+		manifest, err := SnapshotProjection(home, t.TempDir(), policy.Projection{Items: []policy.ProjectionItem{{Source: filepath.Join(external, "used.conf")}}})
+		if err != nil || len(manifest.PresentMounts()) != 1 || manifest.PresentMounts()[0].Target != ".config/used.conf" {
+			t.Fatalf("external XDG semantics changed: manifest=%+v err=%v", manifest.Items, err)
+		}
+	})
+
+	t.Run("tree-link-remains-rejected", func(t *testing.T) {
+		home := projHome(t, "tree/file", "outside")
+		mustProjection(t, os.Symlink("../outside", filepath.Join(home, "tree", "linked")))
+		_, err := SnapshotProjection(home, t.TempDir(), policy.Projection{Items: []policy.ProjectionItem{{Source: "~/tree", Kind: "dir"}}})
+		requireProjectionCode(t, err, ProjectionUnsafeDescendant)
+	})
+
+	t.Run("optional-glob-omits-terminal-link", func(t *testing.T) {
+		home := projHome(t, ".config/fish/completions/ok.fish", "outside")
+		dir := filepath.Join(home, ".config/fish/completions")
+		mustProjection(t, os.Symlink(filepath.Join(home, "outside"), filepath.Join(dir, "linked.fish")))
+		manifest, err := SnapshotProjection(home, t.TempDir(), policy.Projection{Items: []policy.ProjectionItem{{
+			Source: "~/.config/fish/completions/*.fish", Kind: "glob", Label: "fish",
+		}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(manifest.PresentMounts()) != 1 || len(manifest.Items) != 2 || manifest.Items[1].Status != projSkippedNonRegular {
+			t.Fatalf("glob/manifest semantics changed: %+v", manifest.Items)
+		}
+	})
+
+	t.Run("same-device-different-mount-rejected-value-free", func(t *testing.T) {
+		home := projHome(t, "tree/cross/file")
+		original := projectionMountID
+		rootID, haveRoot := uint64(0), false
+		projectionMountID = func(file *os.File) (uint64, bool) {
+			id, ok := original(file)
+			if !ok {
+				return 0, false
+			}
+			if !haveRoot {
+				rootID, haveRoot = id, true
+			}
+			if strings.HasSuffix(filepath.ToSlash(filepath.Clean(file.Name())), "/cross") {
+				return rootID + 1, true
+			}
+			return rootID, true
+		}
+		t.Cleanup(func() { projectionMountID = original })
+		_, err := SnapshotProjection(home, t.TempDir(), policy.Projection{Items: []policy.ProjectionItem{{Source: "~/tree", Kind: "dir"}}})
+		requireProjectionCode(t, err, ProjectionUnsafeDescendant)
+		var projectionErr *ProjectionError
+		if !errors.As(err, &projectionErr) {
+			t.Fatal("missing value-free projection failure")
+		}
+		encoded, marshalErr := json.Marshal(projectionErr.Failure())
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
+		}
+		if strings.Contains(string(encoded), home) || strings.Contains(string(encoded), filepath.Join(home, "tree", "cross")) || strings.Contains(string(encoded), "42") {
+			t.Fatalf("failure leaked proof details: %s", encoded)
+		}
+	})
+}
+
+func mustProjection(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestResolveProjectionMarshalsManifest(t *testing.T) {
 	home := projHome(t, ".zshrc") // ~/.zshrc absent here actually; create it
 	_ = os.WriteFile(filepath.Join(home, ".zshrc"), []byte("x"), 0o644)
