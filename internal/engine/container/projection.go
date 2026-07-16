@@ -34,7 +34,7 @@ const (
 )
 
 var projectionFailureText = map[string][2]string{
-	ProjectionTargetOutsideRoot: {"Config projection leaves its approved home root.", "Keep its symlink target inside home."},
+	ProjectionTargetOutsideRoot: {"Config projection target is not safely within its approved root.", "Use an exact in-root relative or absolute symlink target."},
 	ProjectionTargetExcluded:    {"Config projection points to an excluded credential or cache path.", "Remove that link from the projected config path."},
 	ProjectionSymlinkLoop:       {"Config projection contains a symlink loop.", "Repair the symlink chain and retry."},
 	ProjectionUnsafeDescendant:  {"Config projection contains an unsafe nested entry.", "Remove nested links, special files, or mount crossings."},
@@ -665,11 +665,17 @@ func (r *projectionResolver) openPinned(root *os.Root, rootMount uint64, rel str
 					closeRoots(opened)
 					return nil, r.fail(ProjectionSnapshotChanged)
 				}
+				var next string
 				if filepath.IsAbs(target) {
-					closeRoots(opened)
-					return nil, r.fail(ProjectionTargetOutsideRoot)
+					relTarget, ok := strictAbsoluteTarget(root.Name(), target)
+					if !ok {
+						closeRoots(opened)
+						return nil, r.fail(ProjectionTargetOutsideRoot)
+					}
+					next = filepath.Join(relTarget, filepath.Join(parts[i+1:]...))
+				} else {
+					next = filepath.Clean(filepath.Join(filepath.Dir(canonical), target, filepath.Join(parts[i+1:]...)))
 				}
-				next := filepath.Clean(filepath.Join(filepath.Dir(canonical), target, filepath.Join(parts[i+1:]...)))
 				if escapesRoot(next) {
 					closeRoots(opened)
 					return nil, r.fail(ProjectionTargetOutsideRoot)
@@ -805,6 +811,33 @@ func closeRoots(roots []*os.Root) {
 	for i := len(roots) - 1; i >= 0; i-- {
 		_ = roots[i].Close()
 	}
+}
+
+// strictAbsoluteTarget converts only raw POSIX absolute targets that are exact lexical proper
+// descendants of the already-open root. It performs no filesystem access or normalization.
+func strictAbsoluteTarget(root, target string) (string, bool) {
+	if root == "/" || !strings.HasPrefix(root, "/") || strings.HasSuffix(root, "/") {
+		return "", false
+	}
+	for _, part := range strings.Split(root[1:], "/") {
+		if part == "" || part == "." || part == ".." {
+			return "", false
+		}
+	}
+	prefix := root + "/"
+	if !strings.HasPrefix(target, prefix) {
+		return "", false
+	}
+	parts := strings.Split(target[len(prefix):], "/")
+	if len(parts) == 0 {
+		return "", false
+	}
+	for _, part := range parts {
+		if part == "" || part == "." || part == ".." {
+			return "", false
+		}
+	}
+	return strings.Join(parts, "/"), true
 }
 
 func splitRel(rel string) []string {

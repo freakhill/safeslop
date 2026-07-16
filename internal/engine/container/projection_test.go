@@ -474,6 +474,34 @@ func TestSnapshotProjectionFollowsRelativeConfigSymlinkIntoPrivateStage(t *testi
 	}
 }
 
+func TestStrictAbsoluteTarget(t *testing.T) {
+	tests := []struct {
+		name, root, target, want string
+		ok                       bool
+	}{
+		{name: "descendant", root: "/Users/jojo", target: "/Users/jojo/workspace/pi", want: "workspace/pi", ok: true},
+		{name: "root", root: "/Users/jojo", target: "/Users/jojo"},
+		{name: "prefix collision", root: "/Users/jojo", target: "/Users/jojo-attacker/pi"},
+		{name: "outside", root: "/Users/jojo", target: "/tmp/pi"},
+		{name: "dot", root: "/Users/jojo", target: "/Users/jojo/./pi"},
+		{name: "dot dot", root: "/Users/jojo", target: "/Users/jojo/workspace/../pi"},
+		{name: "duplicate separator", root: "/Users/jojo", target: "/Users/jojo//pi"},
+		{name: "trailing separator", root: "/Users/jojo", target: "/Users/jojo/pi/"},
+		{name: "alternate case", root: "/Users/jojo", target: "/users/jojo/pi"},
+		{name: "filesystem root", root: "/", target: "/Users/jojo"},
+		{name: "relative root", root: "Users/jojo", target: "/Users/jojo/pi"},
+		{name: "unclean root", root: "/Users//jojo", target: "/Users//jojo/pi"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := strictAbsoluteTarget(tt.root, tt.target)
+			if ok != tt.ok || got != tt.want {
+				t.Fatalf("strictAbsoluteTarget(%q, %q) = %q, %v; want %q, %v", tt.root, tt.target, got, ok, tt.want, tt.ok)
+			}
+		})
+	}
+}
+
 func TestSnapshotProjectionAcceptsBuiltinAbsoluteInHomeSymlink(t *testing.T) {
 	for _, name := range []string{"pi", "claude"} {
 		t.Run(name, func(t *testing.T) {
@@ -568,7 +596,11 @@ func TestSnapshotProjectionRejectsUnsafeAbsoluteTargetSpellings(t *testing.T) {
 			if !errors.As(err, &projectionErr) {
 				t.Fatal("missing projection failure")
 			}
-			encoded, marshalErr := json.Marshal(projectionErr.Failure())
+			failure := projectionErr.Failure()
+			if failure.Summary != "Config projection target is not safely within its approved root." || failure.Action != "Use an exact in-root relative or absolute symlink target." {
+				t.Fatalf("outside-root guidance = %q / %q", failure.Summary, failure.Action)
+			}
+			encoded, marshalErr := json.Marshal(failure)
 			if marshalErr != nil {
 				t.Fatal(marshalErr)
 			}

@@ -20,7 +20,7 @@ WORKTREE: `.worktrees/0110-in-home-absolute-symlinks/`
   VERIFY:   `go test ./internal/engine/container -run 'Absolute.*Symlink|AbsoluteTarget|PinnedRoot' -count=1 -v`
   EXPECTED: Acceptance tests fail specifically with `projection_target_outside_root`; rejection/race/non-disclosure cases remain closed.
 
-- [ ] Implement exact-root lexical conversion and truthful failure text
+- [x] Implement exact-root lexical conversion and truthful failure text
   FILE:     `internal/engine/container/projection.go`, `internal/engine/container/projection_test.go`
   CHANGE:   Add a private raw POSIX strict-descendant helper; in `openPinned`, after the existing stable readlink proof, accept only exact proper descendants of `root.Name()`, append remaining components, re-run existing laws, and restart from the borrowed root descriptor. Never operate on the absolute target pathname. Update only `projection_target_outside_root` summary/action to the decision text and test it.
   VERIFY:   `go test ./internal/engine/container -run 'Projection|Snapshot|Symlink|AbsoluteTarget|PinnedRoot' -count=1 -v`
