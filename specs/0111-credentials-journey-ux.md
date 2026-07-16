@@ -1,6 +1,6 @@
 # 0111 — Trace-driven Credentials journey repair
 
-Status: in progress
+Status: complete
 
 SCOPE: make first-run and existing-operator credential workflows completable and truthful in raw Emacs and Doom/Evil by replaying actual key dispatch with fake/value-free CLI envelopes, fixing profile discovery, mixed repo access display/edit defaults, profile-scope clearing, confirmations, context continuity, and recovery.
 
@@ -44,7 +44,7 @@ WORKTREE: `.worktrees/0111-credentials-journey-ux/`
   VERIFY:   `git diff --check && rg -n 'A.*link|R.*repo|X.*clear|re-trust|post-fix|5/5|0111' README.md emacs/README.md skills/agent-key-lifecycle/SKILL.md skills/agent-sandbox-ops/SKILL.md specs/0090-credential-connection-repo-picker.md specs/research/2026-07-16-credentials-journey-baseline.md`
   EXPECTED: Docs match tested keys and distinguish account links, profile scopes, values/refs, and session-owned credentials.
 
-- [ ] Run full gates, install, and clean up
+- [x] Run full gates, install, and clean up
   FILE:     whole repo, `specs/0111-credentials-journey-ux.md`
   CHANGE:   Replay focused journeys, run UI matrix/check/build, install final binary/Emacs package, verify installed files, mark this spec complete, then merge/push both remotes and remove the worktree/branch.
   VERIFY:   `git diff --check && make test-emacs-ui-matrix && make check && make build`
