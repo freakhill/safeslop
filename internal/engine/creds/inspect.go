@@ -128,12 +128,12 @@ func inspectProfile(ctx context.Context, profile string, prof policy.Profile, op
 	// kind is "github" (renamed from the legacy "ssh" once T4 dropped GitHub SSH); provider is credentials.github.
 	if s := c.Github; s != nil {
 		if s.Mode == "pat" {
-			for _, name := range repoNames(s.Repos) {
-				row("github", name, "pat "+access(s.Write), s.Pat, probeRef(ctx, s.Pat, op, p))
+			for _, repo := range repoAccesses(s.Repos, s.Write) {
+				row("github", repo.Repo, "pat "+access(repo.Write), s.Pat, probeRef(ctx, s.Pat, op, p))
 			}
 		} else {
-			for _, name := range repoNames(s.Repos) {
-				row("github", name, "app "+access(s.Write)+ttl(s.Ttl), "", StatusEphemeral)
+			for _, repo := range repoAccesses(s.Repos, s.Write) {
+				row("github", repo.Repo, "app "+access(repo.Write)+ttl(s.Ttl), "", StatusEphemeral)
 			}
 		}
 	}
@@ -143,8 +143,8 @@ func inspectProfile(ctx context.Context, profile string, prof policy.Profile, op
 	// per session — like GitHub app mode. inspect reports it value-free as ephemeral; probing the
 	// linked token is `safeslop creds status` (specs/0069 T5/T6).
 	if f := c.Forgejo; f != nil {
-		for _, name := range repoNames(f.Repos) {
-			row("forgejo", name, "deploy-key "+access(f.Write)+ttl(f.Ttl), "", StatusEphemeral)
+		for _, repo := range repoAccesses(f.Repos, f.Write) {
+			row("forgejo", repo.Repo, "deploy-key "+access(repo.Write)+ttl(f.Ttl), "", StatusEphemeral)
 		}
 	}
 
@@ -194,17 +194,13 @@ func probeRef(ctx context.Context, ref string, op OpState, p Prober) RefStatus {
 	}
 }
 
-// repoNames returns the declared repo names, or ["origin"] when none are listed (single-repo mode
-// infers the repo from the cwd origin at stage time — the surface can't know it, so it shows origin).
-func repoNames(repos []policy.RepoCred) []string {
+// repoAccesses returns explicit per-repository access, or one origin row carrying the legacy
+// profile-level write bit when the repository is inferred at stage time.
+func repoAccesses(repos []policy.RepoCred, originWrite bool) []policy.RepoCred {
 	if len(repos) == 0 {
-		return []string{"origin"}
+		return []policy.RepoCred{{Repo: "origin", Write: originWrite}}
 	}
-	names := make([]string, len(repos))
-	for i, r := range repos {
-		names[i] = r.Repo
-	}
-	return names
+	return repos
 }
 
 func access(write bool) string {

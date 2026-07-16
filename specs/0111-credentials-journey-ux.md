@@ -20,7 +20,7 @@ WORKTREE: `.worktrees/0111-credentials-journey-ux/`
   VERIFY:   `go test ./internal/engine/creds -run 'Inspect.*MixedRepoAccess' -count=1 -v; emacs --batch -L emacs -l ert -l emacs/test/safeslop-test.el -l emacs/test/safeslop-credentials-test.el --eval '(ert-run-tests-batch-and-exit "safeslop-test-credentials-journey")'`
   EXPECTED: New tests fail on incorrect mixed access, missing universal keys/profile source/clear path, false guidance, lost defaults/draft, and success-buffer displacement—not on test plumbing.
 
-- [ ] Correct mixed repository access inspection
+- [x] Correct mixed repository access inspection
   FILE:     `internal/engine/creds/inspect.go`, `internal/engine/creds/inspect_test.go`
   CHANGE:   Render each explicit GitHub/Forgejo row from its own `RepoCred.Write`; retain the profile-level write flag only for origin inference. Keep sorting and value-free fields unchanged.
   VERIFY:   `go test ./internal/engine/creds -run 'Inspect.*(Github|Forgejo|MixedRepoAccess)' -count=1 -v`
