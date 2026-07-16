@@ -39,6 +39,15 @@ safeslop: {
 			network: "deny"
 			credentials: {github: {repos: [{repo: "acme/old"}]}}
 		}
+		piandgit: {
+			agent: "pi"
+			environment: "container"
+			network: "deny"
+			credentials: {
+				pi: {provider: "openai-codex", model: "gpt-5.6-luna"}
+				github: {repos: [{repo: "acme/old"}]}
+			}
+		}
 	}
 }
 `
@@ -202,6 +211,19 @@ func TestProfileCredentialsClearPreservesOtherProvidersAndDeletesEmptyCredential
 	}
 	if scopes := credentialScopeStringsForTest(t, env.Data); len(scopes) != 0 {
 		t.Fatalf("clear-only profile should return credential_scopes: [], got %v", scopes)
+	}
+
+	out, err = runRootForTest(t, ws, "profile", "credentials", "clear", "piandgit", "--output", "json")
+	if err != nil {
+		t.Fatalf("profile credentials clear piandgit: %v\nout=%s", err, out)
+	}
+	cfg = loadProfileCredentialsConfig(t, path)
+	piCreds := cfg.Profiles["piandgit"].Credentials
+	if piCreds == nil || piCreds.Pi == nil || piCreds.Github != nil || piCreds.Forgejo != nil {
+		t.Fatalf("clear must preserve Pi OAuth while removing forge creds: %+v", piCreds)
+	}
+	if scopes := credentialScopeStringsForTest(t, parseEnvelopeForTest(t, out).Data); !containsCredentialScope(scopes, "pi-oauth openai-codex/gpt-5.6-luna access snapshot, short-lived") {
+		t.Fatalf("clear response lost Pi OAuth scope: %v", scopes)
 	}
 }
 

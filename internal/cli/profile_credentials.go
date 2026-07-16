@@ -230,7 +230,7 @@ func clearProfileForgeCredentials(prof policy.Profile) policy.Profile {
 }
 
 func profileCredentialsEmpty(c *policy.Credentials) bool {
-	return c == nil || (len(c.Pnpm) == 0 && c.Aws == nil && c.Gcp == nil && c.Kube == nil && c.Github == nil && c.Forgejo == nil)
+	return c == nil || (len(c.Pnpm) == 0 && c.Aws == nil && c.Gcp == nil && c.Kube == nil && c.Github == nil && c.Forgejo == nil && c.Pi == nil)
 }
 
 func saveProfileCredentialMutation(path string, cfg *policy.Config, name string, prof policy.Profile) error {

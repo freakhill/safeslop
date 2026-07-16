@@ -8,10 +8,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
-	"unicode"
 
 	"github.com/freakhill/safeslop/internal/engine/policy"
 	engsession "github.com/freakhill/safeslop/internal/engine/session"
@@ -30,7 +28,9 @@ const (
 	PiOAuthStageFailed         = "pi_oauth_stage_failed"
 
 	piOAuthMaxSourceBytes = 1 << 20
-	piOAuthReadAttempts   = 3
+	piOAuthMaxAccessBytes = 64 << 10
+	piOAuthReadAttempts   = 10
+	piOAuthRetryDelay     = 50 * time.Millisecond
 	piOAuthMinHeadroom    = 15 * time.Minute
 )
 
@@ -155,7 +155,7 @@ func readPiOAuthSource() ([]byte, error) {
 		}
 		if locked {
 			if attempt+1 < piOAuthReadAttempts {
-				piOAuthSleep(time.Duration(attempt+1) * 25 * time.Millisecond)
+				piOAuthSleep(piOAuthRetryDelay)
 				continue
 			}
 			return nil, newPiOAuthError(PiOAuthSourceBusy)
@@ -169,7 +169,7 @@ func readPiOAuthSource() ([]byte, error) {
 			return body, nil
 		}
 		if attempt+1 < piOAuthReadAttempts {
-			piOAuthSleep(time.Duration(attempt+1) * 25 * time.Millisecond)
+			piOAuthSleep(piOAuthRetryDelay)
 		}
 	}
 	return nil, newPiOAuthError(PiOAuthSourceBusy)
@@ -295,7 +295,7 @@ func parsePiOAuthAccess(body []byte, now time.Time) (string, time.Time, error) {
 		return "", time.Time{}, newPiOAuthError(PiOAuthAuthTypeUnsupported)
 	}
 	access, ok := provider["access"].(string)
-	if !ok || access == "" || strings.IndexFunc(access, unicode.IsSpace) >= 0 {
+	if !ok || !safePiOAuthAccess(access) {
 		return "", time.Time{}, newPiOAuthError(PiOAuthSourceMalformed)
 	}
 	expiresNumber, ok := provider["expires"].(json.Number)
@@ -311,6 +311,20 @@ func parsePiOAuthAccess(body []byte, now time.Time) (string, time.Time, error) {
 		return "", time.Time{}, err
 	}
 	return access, expiresAt, nil
+}
+
+func safePiOAuthAccess(access string) bool {
+	if access == "" || len(access) > piOAuthMaxAccessBytes {
+		return false
+	}
+	for i := range len(access) {
+		// The locked MVP accepts bounded printable ASCII only. This excludes all
+		// whitespace, controls (including DEL), and Unicode before staging.
+		if access[i] < 0x21 || access[i] > 0x7e {
+			return false
+		}
+	}
+	return true
 }
 
 func validatePiOAuthExpiry(expiresAt, now time.Time) error {

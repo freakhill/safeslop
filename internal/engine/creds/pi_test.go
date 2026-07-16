@@ -2,6 +2,7 @@ package creds
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -185,6 +186,30 @@ func TestStagePiOAuthLockAndStableRead(t *testing.T) {
 	})
 }
 
+func TestStagePiOAuthUsesLockedTenAttemptRetryBudget(t *testing.T) {
+	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
+	_, auth := piOAuthFixture(t, now, validPiOAuthJSON(now.Add(time.Hour), "ACCESS_000"))
+	reads := 0
+	piOAuthAfterRead = func(attempt int) {
+		reads++
+		must(t, os.WriteFile(auth, []byte(validPiOAuthJSON(now.Add(time.Hour), fmt.Sprintf("ACCESS_%03d", attempt+1))), 0o600))
+	}
+	var sleeps []time.Duration
+	piOAuthSleep = func(d time.Duration) { sleeps = append(sleeps, d) }
+	_, err := StagePiOAuth(piOAuthPolicy, t.TempDir())
+	if PiOAuthErrorCode(err) != PiOAuthSourceBusy {
+		t.Fatalf("unstable source error = %v", err)
+	}
+	if reads != 10 || len(sleeps) != 9 {
+		t.Fatalf("retry budget reads=%d sleeps=%d, want 10/9", reads, len(sleeps))
+	}
+	for i, d := range sleeps {
+		if d != 50*time.Millisecond {
+			t.Fatalf("sleep %d = %s, want 50ms", i, d)
+		}
+	}
+}
+
 func TestStagePiOAuthRejectsMalformedAndExpiryBoundaries(t *testing.T) {
 	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
 	cases := []struct {
@@ -195,6 +220,9 @@ func TestStagePiOAuthRejectsMalformedAndExpiryBoundaries(t *testing.T) {
 		{"duplicate-key", `{"openai-codex":{"type":"oauth","access":"A","access":"B","expires":9999999999999}}`, PiOAuthSourceMalformed},
 		{"trailing", validPiOAuthJSON(now.Add(time.Hour), "ACCESS") + `{}`, PiOAuthSourceMalformed},
 		{"whitespace-access", validPiOAuthJSON(now.Add(time.Hour), "ACCESS BAD"), PiOAuthSourceMalformed},
+		{"control-access", validPiOAuthJSON(now.Add(time.Hour), "ACCESS\x00BAD"), PiOAuthSourceMalformed},
+		{"non-ascii-access", validPiOAuthJSON(now.Add(time.Hour), "ACCESS-é"), PiOAuthSourceMalformed},
+		{"oversize-access", validPiOAuthJSON(now.Add(time.Hour), strings.Repeat("A", 64*1024+1)), PiOAuthSourceMalformed},
 		{"expired", validPiOAuthJSON(now, "ACCESS"), PiOAuthExpired},
 		{"exact-headroom", validPiOAuthJSON(now.Add(15*time.Minute), "ACCESS"), PiOAuthNearExpiry},
 	}
