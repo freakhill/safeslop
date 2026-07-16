@@ -159,6 +159,7 @@ one even if a future envelope regressed to carrying it."
                (let ((answers '(123 456)))
                  (lambda (&rest _)
                    (pop answers))))
+              ((symbol-function 'yes-or-no-p) (lambda (&rest _) t))
               ((symbol-function 'safeslop-credentials--call-raw-async)
                (lambda (args callback)
                  (setq captured args)
@@ -172,7 +173,7 @@ one even if a future envelope regressed to carrying it."
     (should (equal captured '("creds" "link" "github" "--host" "github.com"
                               "--app-id" "123" "--installation-id" "456"
                               "--key-ref" "op://vault/app/private-key")))
-    (should (safeslop-contract-ok-p shown))
+    (should-not shown)
     (should refreshed)
     (should-not (member "PRIVATE KEY" captured))))
 
@@ -314,7 +315,8 @@ one even if a future envelope regressed to carrying it."
                 ((symbol-function 'safeslop--show-envelope-buffer) (lambda (&rest _) (setq popped t))))
         (call-interactively (lookup-key safeslop-credentials-mode-map (kbd "A")))))
     (should called)
-    (should (string-match-p "GitHub.*github.com.*123.*456" (substring-no-properties confirmation)))
+    (dolist (want '("GitHub" "github.com" "123" "456" "reference supplied"))
+      (should (string-match-p want (substring-no-properties confirmation))))
     (should-not (string-match-p "op://" (substring-no-properties confirmation)))
     (should refreshed)
     (should-not popped)))

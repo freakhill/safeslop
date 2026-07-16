@@ -26,7 +26,7 @@ WORKTREE: `.worktrees/0111-credentials-journey-ux/`
   VERIFY:   `go test ./internal/engine/creds -run 'Inspect.*(Github|Forgejo|MixedRepoAccess)' -count=1 -v`
   EXPECTED: Mixed read/write repos report distinct truthful scopes; origin and existing readiness behavior remain unchanged.
 
-- [ ] Implement truthful cross-mode actions and first-run guidance
+- [x] Implement truthful cross-mode actions and first-run guidance
   FILE:     `emacs/safeslop-credentials.el`, `emacs/safeslop-doom.el`, `emacs/test/safeslop-credentials-test.el`, `emacs/test/safeslop-ui-probe.el`
   CHANGE:   Add universal visible `A/U/R/X` actions with raw lowercase compatibility; bind them in Evil normal state; render active `g`/`gr`; make empty/account guidance describe link→scope and project-profile prerequisites; confirm value-free account identity before link; on success stay in Credentials with concise next-step feedback, reserving result buffers for failures.
   VERIFY:   `make test-emacs-ui-matrix && emacs --batch -L emacs -l ert -l emacs/test/safeslop-test.el -l emacs/test/safeslop-credentials-test.el --eval '(ert-run-tests-batch-and-exit "safeslop-test-credentials-journey-.*\\(key\\|guidance\\|link\\)")'`

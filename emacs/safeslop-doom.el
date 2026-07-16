@@ -99,6 +99,10 @@ so mode-specific actions may override shared help/quit where needed.")
     (safeslop-credentials-mode safeslop-credentials-mode-map
      ("RET" . safeslop-credentials-inspect)
      ("i"   . safeslop-credentials-inspect)
+     ("A"   . safeslop-credentials-link-account)
+     ("U"   . safeslop-credentials-unlink-account)
+     ("R"   . safeslop-credentials-pick-repositories)
+     ("X"   . safeslop-credentials-clear-profile-forge)
      ("e"   . safeslop-credentials-edit)
      ("gr"  . safeslop-credentials-refresh)))
   "Per-mode Evil normal-state actions: (MODE MAP-SYMBOL (KEY . COMMAND)...).

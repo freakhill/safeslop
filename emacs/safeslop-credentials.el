@@ -28,10 +28,10 @@
 ;;
 ;; Ergonomics mirror the Profiles surface:
 ;;   - RET / i  inspect: a read-only per-profile detail view (`creds show').
-;;   - a / u    link or unlink host account refs/ids.
-;;   - p        pick GitHub/Forgejo repos/scopes via the CLI mutation contract.
+;;   - A / U    link or unlink host account refs/ids.
+;;   - R / X    configure or clear profile GitHub/Forgejo repo scopes.
 ;;   - e        edit: open the CUE file at the profile's credentials block.
-;;   - g        refresh: re-fetch account status and readiness.
+;;   - g / gr   refresh in raw Emacs / Evil normal state.
 ;;   All slow calls are async (specs/0052 #7) through the shared surface engine.
 
 ;;; Code:
@@ -214,14 +214,19 @@ When OP is nil (before the first fetch) a neutral checking hint is shown."
             "\n"))
    (t
     (concat "account links: none — "
-            (propertize "a" 'face 'help-key-binding) " link account, "
-            (propertize "u" 'face 'help-key-binding) " unlink\n\n"))))
+            (propertize "A" 'face 'help-key-binding) " link account, "
+            (propertize "U" 'face 'help-key-binding) " unlink\n\n"))))
 
-(defconst safeslop-credentials--key-hints
-  '(("RET" . "inspect") ("a" . "link account") ("u" . "unlink account")
-    ("p" . "pick repos") ("e" . "edit") ("g" . "refresh")
-    ("d" . "doctor") ("E" . "error") ("L" . "debug") ("?" . "help") ("q" . "quit"))
-  "Key/action pairs shown in the credentials surface's in-buffer legend.")
+(defun safeslop-credentials--refresh-key ()
+  "Return the active refresh key for the current raw/Evil interaction state."
+  (if (and (boundp 'evil-state) (eq evil-state 'normal)) "gr" "g"))
+
+(defun safeslop-credentials--key-hints ()
+  "Return truthful key/action pairs for the current interaction state."
+  `(("RET" . "inspect") ("A" . "link account") ("U" . "unlink account")
+    ("R" . "repos") ("X" . "clear profile forge") ("e" . "edit")
+    (,(safeslop-credentials--refresh-key) . "refresh")
+    ("d" . "doctor") ("E" . "error") ("L" . "debug") ("?" . "help") ("q" . "quit")))
 
 (defun safeslop-credentials--header ()
   "Return the credentials header block: tab strip, status + op/account legends, shortcuts."
@@ -229,21 +234,23 @@ When OP is nil (before the first fetch) a neutral checking hint is shown."
           (safeslop-credentials--status-legend)
           (safeslop-credentials--op-legend safeslop-credentials--op)
           (safeslop-credentials--account-section)
-          (safeslop-surface--legend safeslop-credentials--key-hints)))
+          (safeslop-surface--legend (safeslop-credentials--key-hints))))
 
 (defun safeslop-credentials--empty-state (&optional config-path)
   "Return persistent guidance for an empty (but successful) credentials listing."
-  (if config-path
-      (concat (propertize (format "No credentials declared in %s"
-                                  (abbreviate-file-name config-path))
-                          'face 'safeslop-surface-hint)
-              " — add `secrets'/`credentials' to a profile ("
-              (propertize "e" 'face 'help-key-binding) " opens the file), or "
-              (propertize "g" 'face 'help-key-binding) " to refresh.\n")
-    (concat (propertize "No safeslop.cue found" 'face 'safeslop-surface-hint)
-            " — open one via the Profiles surface ("
-            (propertize "F" 'face 'help-key-binding) "), or "
-            (propertize "g" 'face 'help-key-binding) " to retry.\n")))
+  (let ((refresh (safeslop-credentials--refresh-key)))
+    (if config-path
+        (concat (propertize (format "No credentials declared in %s. "
+                                    (abbreviate-file-name config-path))
+                            'face 'safeslop-surface-hint)
+                "First run: " (propertize "A" 'face 'help-key-binding) " link account, then "
+                (propertize "R" 'face 'help-key-binding) " repos for a project profile. "
+                (propertize "e" 'face 'help-key-binding) " edits refs manually; "
+                (propertize refresh 'face 'help-key-binding) " refresh.\n")
+      (concat (propertize "No safeslop.cue found" 'face 'safeslop-surface-hint)
+              " — " (propertize "F" 'face 'help-key-binding)
+              " creates or clones a project profile; "
+              (propertize refresh 'face 'help-key-binding) " refresh.\n"))))
 
 ;;; ---- render --------------------------------------------------------------
 
@@ -559,18 +566,30 @@ values.  CALLBACK receives a contract-shaped envelope."
           (when (and ssh-port (not (string-empty-p ssh-port)))
             (list "--ssh-port" ssh-port))))
 
-(defun safeslop-credentials--run-account-mutation (buffer-name args)
-  "Run mutating account ARGS, show a result buffer, and refresh this surface on ok."
+(defun safeslop-credentials--run-account-mutation (buffer-name args success-message)
+  "Run account ARGS; refresh in place on success and show BUFFER-NAME only on failure."
   (let ((source (current-buffer)))
     (safeslop-credentials--call-raw-async
      args
      (lambda (env)
-       (when (safeslop-contract-ok-p env)
-         (if (and (buffer-live-p source)
-                  (with-current-buffer source (derived-mode-p 'safeslop-credentials-mode)))
-             (with-current-buffer source (safeslop-credentials-refresh))
-           (safeslop-credentials-refresh)))
-       (safeslop--show-envelope-buffer buffer-name args env)))))
+       (if (safeslop-contract-ok-p env)
+           (progn
+             (if (and (buffer-live-p source)
+                      (with-current-buffer source (derived-mode-p 'safeslop-credentials-mode)))
+                 (with-current-buffer source (safeslop-credentials-refresh))
+               (safeslop-credentials-refresh))
+             (message "%s" success-message))
+         (safeslop--show-envelope-buffer buffer-name args env))))))
+
+(defun safeslop-credentials--link-confirmation (provider host &optional owner app-id installation-id ssh-port)
+  "Return a value-free confirmation for linking PROVIDER at HOST."
+  (if (equal provider "github")
+      (format "Link GitHub account?\nHost: %s\nApp id: %s\nInstallation id: %s\nPrivate key: reference supplied (value not read)\n"
+              host app-id installation-id)
+    (format "Link Forgejo account?\nHost: %s\nOwner/login: %s%s\nToken: reference supplied (value not read)\n"
+            host owner (if (and ssh-port (not (string-empty-p ssh-port)))
+                           (format "\nSSH port: %s" ssh-port)
+                         ""))))
 
 (defun safeslop-credentials-link-account ()
   "Prompt for non-secret forge link refs/ids and run `safeslop creds link'."
@@ -583,14 +602,24 @@ values.  CALLBACK receives a contract-shaped envelope."
               (installation-id (read-number "GitHub installation id: "))
               (key-ref (safeslop-credentials--nonempty-read-string "App private key ref (op:// or env:): "))
               (args (safeslop-credentials--link-github-args host app-id installation-id key-ref)))
-         (safeslop-credentials--run-account-mutation "*safeslop creds link*" args)))
+         (if (yes-or-no-p (safeslop-credentials--link-confirmation
+                           "github" host nil app-id installation-id))
+             (safeslop-credentials--run-account-mutation
+              "*safeslop creds link*" args
+              "safeslop: GitHub account linked — press R to assign repository scopes")
+           (message "safeslop: account link cancelled"))))
       ("forgejo"
        (let* ((host (safeslop-credentials--nonempty-read-string "Forgejo host: "))
               (owner (safeslop-credentials--nonempty-read-string "Forgejo owner/login: "))
               (token-ref (safeslop-credentials--nonempty-read-string "Forgejo token ref (op:// or env:): "))
               (ssh-port (read-string "Forgejo SSH port (blank for default): "))
               (args (safeslop-credentials--link-forgejo-args host owner token-ref ssh-port)))
-         (safeslop-credentials--run-account-mutation "*safeslop creds link*" args)))
+         (if (yes-or-no-p (safeslop-credentials--link-confirmation
+                           "forgejo" host owner nil nil ssh-port))
+             (safeslop-credentials--run-account-mutation
+              "*safeslop creds link*" args
+              "safeslop: Forgejo account linked — press R to assign repository scopes")
+           (message "safeslop: account link cancelled"))))
       (_ (user-error "Unknown provider %s" provider)))))
 
 (defun safeslop-credentials-unlink-account ()
@@ -604,7 +633,8 @@ values.  CALLBACK receives a contract-shaped envelope."
     (when (yes-or-no-p (format "Unlink %s? " key))
       (safeslop-credentials--run-account-mutation
        "*safeslop creds unlink*"
-       (list "creds" "unlink" key)))))
+       (list "creds" "unlink" key)
+       (format "safeslop: account %s unlinked; profile scopes were not changed" key)))))
 
 ;;; ---- repository/scope picker --------------------------------------------
 
@@ -716,9 +746,15 @@ values.  CALLBACK receives a contract-shaped envelope."
     (define-key map (kbd "i")   #'safeslop-credentials-inspect)
     (define-key map (kbd "e")   #'safeslop-credentials-edit)
     (define-key map (kbd "g")   #'safeslop-credentials-refresh)
+    ;; Lowercase bindings remain raw-Emacs compatibility aliases. Universal uppercase
+    ;; actions are truthful in both raw Emacs and Evil normal state.
     (define-key map (kbd "a")   #'safeslop-credentials-link-account)
     (define-key map (kbd "u")   #'safeslop-credentials-unlink-account)
     (define-key map (kbd "p")   #'safeslop-credentials-pick-repositories)
+    (define-key map (kbd "A")   #'safeslop-credentials-link-account)
+    (define-key map (kbd "U")   #'safeslop-credentials-unlink-account)
+    (define-key map (kbd "R")   #'safeslop-credentials-pick-repositories)
+    (define-key map (kbd "X")   #'safeslop-credentials-clear-profile-forge)
     (set-keymap-parent map safeslop-surface-mode-map)
     map)
   "Keymap for `safeslop-credentials-mode'.")
@@ -741,7 +777,8 @@ values.  CALLBACK receives a contract-shaped envelope."
 For every profile, shows which secrets/keys it stages, from which source ref,
 whether they are ephemeral (minted per session) or ref-backed, and — for the
 ref-backed ones — whether they resolve now.  No secret value is ever shown.
-Keys: RET/i inspect, e edit, g refresh; P/F/K switch surface, [/] cycle."
+Keys: RET/i inspect, A/U account links, R/X profile forge scopes, e edit,
+g (or Evil gr) refresh; P/F/K switch surface, [/] cycle."
   (interactive)
   (let ((buf (get-buffer-create safeslop-credentials-buffer-name)))
     (with-current-buffer buf
