@@ -56,7 +56,7 @@ Project profile names win over builtins so repos can override `pi`/`claude`/`fis
 
 ### Safe host projection contract (validated by T1)
 
-The MVP projection is read-only and allowlist-only. It creates explicit source→container mappings under opaque non-home staging paths (`/safeslop/projected/<id>:ro`) plus a generated `/safeslop/runtime/projection.json` manifest, then **copies** approved files into `/home/agent` tmpfs during entrypoint setup. It must never symlink `/home/agent` back to a live host bind mount. Workspace remains the only read-write host mount. See `specs/research/2026-07-12-safe-home-projection-flo.md`.
+The projection is read-only and allowlist-only. Spec 0107 supersedes the MVP's direct source mounts: on macOS/Linux the engine walks from a pinned approved-root descriptor, accepts only relative symlinks that remain inside that root, verifies exclusions/type/identity/mount identity, and copies bytes into an atomically published private per-session `0700` snapshot. Only snapshot files are mapped at `/safeslop/projected/<id>:ro`, recorded in `/safeslop/runtime/projection.json`, and copied into `/home/agent` tmpfs. The live original/resolved host pathname is never mounted or reopened after validation. Absolute or escaping links, excluded targets, nested links, loops, special files, mount crossings, and concurrent changes fail closed; unsupported platforms have no pathname fallback. Workspace remains the only read-write host mount. See `specs/research/2026-07-12-safe-home-projection-flo.md` and the superseding `specs/research/2026-07-16-symlinked-projection-flo.md`.
 
 Initial allowlist:
 

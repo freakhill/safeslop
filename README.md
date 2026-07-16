@@ -129,13 +129,19 @@ so profile inspection fails closed if a package lacks a reviewed build path.
 
 Builtin host projection is read-only and allowlist-only. Pi/Claude receive pi
 instructions and skills; Fish receives Fish configuration; Zsh receives Zsh and
-Starship configuration. Approved sources are mounted under opaque staging paths
-and copied into the container's ephemeral home; the workspace remains the only
-read-write host mount. All of `$HOME`, raw Git configuration, credential-bearing
-state such as `.ssh`, cloud/Kubernetes/Docker config, npm/cargo credentials,
-browser/keychain data, and safeslop state is never projected. Network authority
-still starts denied and can be expanded only through the explicit session-scoped
-grant commands below.
+Starship configuration. On macOS and Linux, sources are walked from a pinned home
+descriptor and copied into a private per-session `0700` snapshot; Compose mounts
+only those completed snapshots under opaque paths, never the live source. This
+accepts ordinary **relative** in-home layouts such as
+`~/.config -> dotfiles/files/.config`. Absolute links, links escaping home or
+entering an excluded credential/cache root, internal directory links, loops,
+special files, mount crossings, and source changes during copy fail closed. An OS
+without the descriptor and mount-identity guarantees also fails closed; there is
+no pathname-resolution fallback. The workspace remains the only read-write host
+mount. All of `$HOME`, raw Git configuration, `.ssh`, cloud/Kubernetes/Docker
+config, npm/cargo credentials, browser/keychain data, and safeslop state is never
+projected. Network authority still starts denied and can be expanded only through
+the explicit session-scoped grant commands below.
 
 `session create --profile`, `session status`, and `session list` include
 value-free credential scope in the JSON contract as `credential_scopes` for
@@ -247,10 +253,17 @@ where a coupled run bounds them to the buffer's lifetime. `stop
 liveness reconcile plus the stale-resource/stage-dir sweep bound the leak if the
 supervisor dies uncleanly.
 
-An exited session stays listed as `stopped` (with its exit code and last error)
-rather than vanishing, so its outcome is inspectable. `session rm --session-id
-<id>` removes one such record and `session prune` removes every stopped record in
-one call, so the session list does not accumulate dead-session corpses. Both
+An exited session stays listed as `stopped` rather than vanishing. Projection
+preparation failures are persisted atomically as versioned, value-free
+`last_failure` data (stable code, engine-owned summary/action, builtin label, and
+`~`-spelled source), with a bounded `last_error` compatibility summary. Session
+status/list return both. Emacs shows the structured reason directly in failed
+rows, opens a durable summary/action detail view after a fast terminal exit,
+refreshes the portal, and deduplicates the notification; it never displays raw
+resolver paths, OS errors, command output, or secret values. `session rm
+--session-id <id>` removes one stopped record and `session prune` removes every
+stopped record in one call, so the session list does not accumulate dead-session
+corpses. Both
 refuse a still-running session — stop it first — and revoke any still-live staged
 credentials before deleting a record, so a removal can never orphan secrets on
 disk. `rm`/`prune` also wipe the reconstructed host stage dir. `prune` first runs

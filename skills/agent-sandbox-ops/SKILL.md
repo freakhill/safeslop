@@ -137,9 +137,14 @@ The four builtins (`claude`, `fish`, `pi`, `zsh`) start at container + deny and
 resolve the `personal` bundle from pinned image inputs: binary URL/SHA256 per
 architecture and exact Debian-snapshot apt coordinates. Pi/Claude project pi
 instructions and skills, Fish projects Fish config, and Zsh projects Zsh/Starship
-config; the read-only allowlist is copied into the ephemeral container home. Only
-the workspace is a read-write host mount. Never broaden projection to all home,
-raw Git config, or credential-bearing paths.
+config. On macOS/Linux the engine follows only relative links that stay inside the
+pinned home root, copies descriptor-pinned bytes into a private `0700` per-session
+snapshot, and mounts only that snapshot before copying into ephemeral home.
+`~/.config -> dotfiles/files/.config` is supported. Absolute/escaping links,
+excluded credential/cache targets, internal links, loops, special files, mount
+crossings, and concurrent changes fail closed; unsupported OS/filesystem safety
+has no pathname fallback. Only the workspace is a read-write host mount. Never
+broaden projection to all home, raw Git config, or credential-bearing paths.
 A project profile of the same name wins with normal trust/provenance checks, and
 an invalid project policy fails closed rather than falling back. Progressive
 egress remains an explicit operator action on the created session; it does not
@@ -198,8 +203,12 @@ new, `g` refresh, `a` pause/resume auto-refresh. Live buffers opened from the
 portal are named and annotated with profile/project, tier/net, and value-free
 credential scope. Their persistent safety chrome mode-line repeats literal
 environment/network posture plus a value-free credential count; hover help
-expands the honest posture and safe scope names, and the portal Status posture
-tooltip shows the same facts. Each in-place refresh keeps point on the same
+expands the honest posture and safe scope names. A stopped/failed row visibly
+includes its bounded structured failure reason; `i` shows the engine-owned
+summary/action/code. A fast terminal startup failure opens that durable detail,
+refreshes the portal, and emits one deduplicated value-free notification. Legacy
+`last_error` is fallback-only, and raw resolver paths/OS errors/values are never
+rendered. Each in-place refresh keeps point on the same
 session and preserves window scroll, so
 it never jumps the cursor out from under a row action key; session-mutating row
 actions refresh the portal in place instead of popping a JSON result buffer over
