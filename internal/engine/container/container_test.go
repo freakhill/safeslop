@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/freakhill/safeslop/internal/engine/container/runtime"
+	engsession "github.com/freakhill/safeslop/internal/engine/session"
 )
 
 func TestEmbeddedAssetsPresent(t *testing.T) {
@@ -30,7 +31,7 @@ func TestAvailableFalseWithoutDocker(t *testing.T) {
 func TestUpRequiresReadyProxy(t *testing.T) {
 	eng := newFakeEngine(t, nil)
 	composeFile := "/runtime/compose.yml"
-	check := "compose -f " + composeFile + " exec -T proxy squid -k check"
+	check := "compose -f " + composeFile + " exec -T proxy bash -ec squid -k check >/dev/null 2>&1 && exec 3<>/dev/tcp/127.0.0.1/3128"
 	eng.fail(check, 1)
 
 	ctx, cancel := context.WithCancel(t.Context())
@@ -39,6 +40,10 @@ func TestUpRequiresReadyProxy(t *testing.T) {
 	err := Up(ctx, eng, t.TempDir(), composeFile, nil)
 	if err == nil {
 		t.Fatal("Up succeeded even though the proxy readiness check failed")
+	}
+	structured, ok := err.(interface{ Failure() engsession.Failure })
+	if !ok || structured.Failure().Code != "network_proxy_unavailable" {
+		t.Fatalf("Up error = %T %v, want structured network_proxy_unavailable", err, err)
 	}
 	eng.assertRan(t, "compose -f "+composeFile+" up -d proxy")
 	eng.assertRan(t, check)
@@ -52,5 +57,5 @@ func TestUpChecksReadyProxyBeforeSuccess(t *testing.T) {
 	if err := Up(t.Context(), eng, t.TempDir(), composeFile, nil); err != nil {
 		t.Fatalf("Up: %v", err)
 	}
-	eng.assertRan(t, "compose -f "+composeFile+" exec -T proxy squid -k check")
+	eng.assertRan(t, "compose -f "+composeFile+" exec -T proxy bash -ec squid -k check >/dev/null 2>&1 && exec 3<>/dev/tcp/127.0.0.1/3128")
 }

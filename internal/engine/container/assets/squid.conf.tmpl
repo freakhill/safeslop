@@ -2,7 +2,9 @@ http_port 3128
 # Emit only the request destination domain/port for operator egress observations; never log request
 # URIs, paths, queries, headers, or bodies (Squid logformat: https://www.squid-cache.org/Versions/v7/cfgman/logformat.html).
 logformat safeslop_observation %ts.%03tu %Ss/%03>Hs %>rm %>rd %>rP
-access_log stdio:/dev/stdout safeslop_observation
+# The Ubuntu image entrypoint tails this image-owned file to stdout. Squid drops
+# to cache_effective_user=proxy and cannot safely open /dev/stdout itself.
+access_log stdio:/var/log/squid/access.log safeslop_observation
 acl SSL_ports port 443
 acl Safe_ports port 80 443
 acl CONNECT method CONNECT

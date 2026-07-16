@@ -122,11 +122,51 @@ func ensureImage(id string, exists func() bool, build func() error) error {
 	})
 }
 
+const (
+	proxyReadyTimeout   = 10 * time.Second
+	proxyReadyInterval  = 100 * time.Millisecond
+	proxyCleanupTimeout = 5 * time.Second
+	proxyReadyCommand   = "squid -k check >/dev/null 2>&1 && exec 3<>/dev/tcp/127.0.0.1/3128"
+)
+
+// waitForProxy requires both a valid Squid configuration and a live local listener.
+// `compose up -d` only proves that a container start was requested, while `squid -k
+// check` alone can pass before the foreground daemon later fails its privilege drop.
+func waitForProxy(ctx context.Context, eng runtime.Engine, composeFile string) error {
+	readyCtx, cancel := context.WithTimeout(ctx, proxyReadyTimeout)
+	defer cancel()
+	for {
+		if err := eng.Command(readyCtx, "compose", "-f", composeFile, "exec", "-T", "proxy", "bash", "-ec", proxyReadyCommand).Run(); err == nil {
+			return nil
+		}
+		select {
+		case <-readyCtx.Done():
+			return readyCtx.Err()
+		case <-time.After(proxyReadyInterval):
+		}
+	}
+}
+
+func cleanupUnreadyProxy(eng runtime.Engine, composeFile string) {
+	ctx, cancel := context.WithTimeout(context.Background(), proxyCleanupTimeout)
+	defer cancel()
+	_ = runEngine(ctx, eng, "compose", "-f", composeFile, "down", "--remove-orphans")
+}
+
 // Up ensures images are built (for the profile's resolved package set, enabled) and the
-// squid proxy is running for the given compose file.
+// squid proxy is running and ready for the given compose file. A proxy startup failure
+// tears the partial stack down and returns only an engine-owned, value-free failure.
 func Up(ctx context.Context, eng runtime.Engine, dir, composeFile string, enabled []string) error {
 	if err := buildImages(ctx, eng, dir, enabled); err != nil {
 		return err
 	}
-	return runEngine(ctx, eng, "compose", "-f", composeFile, "up", "-d", "proxy")
+	if err := runEngine(ctx, eng, "compose", "-f", composeFile, "up", "-d", "proxy"); err != nil {
+		cleanupUnreadyProxy(eng, composeFile)
+		return newRuntimeFailure(NetworkProxyUnavailable)
+	}
+	if err := waitForProxy(ctx, eng, composeFile); err != nil {
+		cleanupUnreadyProxy(eng, composeFile)
+		return newRuntimeFailure(NetworkProxyUnavailable)
+	}
+	return nil
 }

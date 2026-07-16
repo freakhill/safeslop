@@ -1573,12 +1573,12 @@ var launchSupervisor = func(id string) (int, error) {
 // emits the session envelope. On readiness timeout it kills the half-born
 // supervisor and emits a contract error, leaving the session not-running so no
 // phantom is left for liveness/reconcile or `session stop` (specs/0051 Q1).
-// finishSessionRun persists a value-free structured projection failure in the same atomic session
-// save that records the terminal state. Other failures retain the legacy error path.
+// finishSessionRun persists any engine-owned, value-free structured failure in the same atomic
+// save that records the terminal state. Unstructured failures retain the legacy error path.
 func finishSessionRun(store engsession.Store, id string, code int, runErr error, now time.Time) error {
-	var projectionErr *container.ProjectionError
-	if errors.As(runErr, &projectionErr) {
-		_, err := store.Finish(id, code, "", now, projectionErr.Failure())
+	var structured interface{ Failure() engsession.Failure }
+	if errors.As(runErr, &structured) {
+		_, err := store.Finish(id, code, "", now, structured.Failure())
 		return err
 	}
 	lastErr := ""

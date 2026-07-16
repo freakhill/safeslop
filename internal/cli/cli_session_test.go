@@ -426,7 +426,7 @@ type structuredRuntimeFailureError struct {
 	failure engsession.Failure
 }
 
-func (e structuredRuntimeFailureError) Error() string { return "raw runtime detail must not persist" }
+func (e structuredRuntimeFailureError) Error() string               { return "raw runtime detail must not persist" }
 func (e structuredRuntimeFailureError) Failure() engsession.Failure { return e.failure }
 
 func TestSessionStructuredRuntimeFailurePersistsValueFree(t *testing.T) {
@@ -439,12 +439,12 @@ func TestSessionStructuredRuntimeFailurePersistsValueFree(t *testing.T) {
 		t.Fatal(err)
 	}
 	failure := engsession.Failure{
-		Version: 1,
-		Phase:   "network",
-		Code:    "network_proxy_unavailable",
+		Version:  1,
+		Phase:    "network",
+		Code:     "network_proxy_unavailable",
 		Required: true,
-		Summary: "The required network proxy did not become ready.",
-		Action:  "Check the container runtime, then retry the session.",
+		Summary:  "The required network proxy did not become ready.",
+		Action:   "Check the container runtime, then retry the session.",
 	}
 	if err := finishSessionRun(store, sess.ID, 1, structuredRuntimeFailureError{failure: failure}, nowForTest(t)); err != nil {
 		t.Fatal(err)

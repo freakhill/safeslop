@@ -14,7 +14,7 @@ WORKTREE: `.worktrees/0112-progressive-runtime-readiness/`
   VERIFY:   `! go test ./internal/engine/container ./internal/cli -run 'Proxy|SquidEgressObservationLog|StructuredRuntimeFailure' -count=1 -v`
   EXPECTED: New assertions fail on the stdout log target, absent readiness probe/teardown, and legacy raw-error persistence—not on test plumbing.
 
-- [ ] Fix proxy logging and enforce launch-time readiness
+- [x] Fix proxy logging and enforce launch-time readiness
   FILE:     `internal/engine/container/assets/squid.conf.tmpl`, `internal/engine/container/container.go`, `internal/engine/container/runtime_failure.go`, `internal/engine/container/egress_observation_test.go`, `internal/engine/container/container_test.go`, `internal/cli/cli.go`, `internal/cli/cli_session_test.go`
   CHANGE:   Log the existing value-free observation format to `/var/log/squid/access.log` so the image entrypoint tails it to compose logs. After `compose up -d proxy`, retry `compose exec -T proxy squid -k check` with a bounded context; on failure run compose down/remove-orphans and return an engine-owned `network_proxy_unavailable` structured failure. Generalize session finish to persist any value-free engine failure implementing the existing Failure contract.
   VERIFY:   `go test ./internal/engine/container ./internal/cli -run 'Proxy|SquidEgressObservationLog|StructuredRuntimeFailure' -count=1 -v`
