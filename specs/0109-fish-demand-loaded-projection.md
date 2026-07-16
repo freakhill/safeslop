@@ -1,6 +1,6 @@
 # 0109 — Demand-loaded builtin Fish projection
 
-Status: in progress
+Status: complete
 
 SCOPE: make fresh builtin Fish containers start with normal container-owned Fish configuration by projecting only demand-loaded physical regular functions/completions, never eager host `config.fish` or `conf.d` scripts.
 
@@ -32,7 +32,7 @@ WORKTREE: `.worktrees/0109-fish-demand-loaded-projection/`
   VERIFY:   `git diff --check && rg -n 'demand-loaded|config\.fish|conf\.d|fresh Fish session' README.md skills/agent-sandbox-ops/SKILL.md specs/0096-contained-hybrid-default-profiles.md specs/0108-safe-optional-projection-globs.md`
   EXPECTED: Docs never imply host startup scripts execute in builtin containers.
 
-- [ ] Run isolated real Fish smoke and full gates
+- [x] Run isolated real Fish smoke and full gates
   FILE:     whole repo, `specs/0109-fish-demand-loaded-projection.md`
   CHANGE:   With a temporary HOME, seed eager output/error sentinels, a demand-loaded function/completion, and non-regular candidates; start a fresh builtin Fish Docker session, prove no eager log output, function/completion lookup works, only private snapshots mount, source files stay unchanged, then stop/remove and complete this checklist only after all gates.
   VERIFY:   `git diff --check && make test-emacs-ui-matrix && make check && make build`
