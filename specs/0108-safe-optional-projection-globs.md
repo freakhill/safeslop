@@ -1,6 +1,6 @@
 # 0108 — Safe optional projection glob selection
 
-Status: in progress
+Status: complete
 
 SCOPE: make builtin Fish optional `*.fish` projection globs select physical regular files while safely omitting terminal symlink/special-file candidates, preserving descriptor-pinned snapshots and value-free reporting.
 
@@ -32,7 +32,7 @@ WORKTREE: `.worktrees/0108-safe-optional-projection-globs/`
   VERIFY:   `git diff --check && rg -n 'optional.*glob|skipped-nonregular|physical regular' README.md skills/agent-sandbox-ops/SKILL.md specs/0096-contained-hybrid-default-profiles.md specs/0107-safe-symlink-projection-failures.md specs/research/2026-07-16-symlinked-projection-flo.md`
   EXPECTED: Operator docs match the safe implemented distinction without suggesting outside links are followed.
 
-- [ ] Smoke-test the real Fish topology and run full gates
+- [x] Smoke-test the real Fish topology and run full gates
   FILE:     whole repo, `specs/0108-safe-optional-projection-globs.md`
   CHANGE:   Build the worktree binary, rerun the reproduced stopped Fish session against the real host metadata, verify it reaches running state without exposing or mounting the two outside links, stop it cleanly, then complete the checklist only after all repo gates pass.
   VERIFY:   `git diff --check && make test-emacs-ui-matrix && make check && make build`
