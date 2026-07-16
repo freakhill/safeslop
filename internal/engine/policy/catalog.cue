@@ -351,7 +351,7 @@ catalog: {
 			kind: "npm-registry"
 			url:  "https://registry.npmjs.org/@earendil-works%2fpi-coding-agent"
 		}
-		version: "0.80.2"
+		version: "0.80.7"
 	}, {
 		buildFetch: ["registry.npmjs.org"]
 		kind: "npm"

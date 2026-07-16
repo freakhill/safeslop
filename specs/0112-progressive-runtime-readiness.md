@@ -20,7 +20,7 @@ WORKTREE: `.worktrees/0112-progressive-runtime-readiness/`
   VERIFY:   `go test ./internal/engine/container ./internal/cli -run 'Proxy|SquidEgressObservationLog|StructuredRuntimeFailure' -count=1 -v`
   EXPECTED: Tests prove successful readiness gates agent argv construction; persistent probe failure tears down and yields only fixed summary/action/code; no raw command output or path is serialized.
 
-- [ ] Advance the pinned Pi patch under catalog policy
+- [x] Advance the pinned Pi patch under catalog policy
   FILE:     `internal/engine/policy/catalog.cue`, `internal/engine/policy/catalog.json`, `internal/engine/policy/catalog_test.go`, `specs/research/2026-07-16-progressive-runtime-readiness.md`
   CHANGE:   Use catalog tooling to review `pi` `0.80.2 → 0.80.7`, the smallest same-minor patch containing GPT-5.6 Luna metadata. Record candidate provenance, publication/soak result, transitive npm integrity caveat, and reverse closure. If the normal-lane soak blocks, stop unless the plan note carries the explicitly approved activation-blocker waiver allowed by the locked version policy; never label it security.
   VERIFY:   `go test ./internal/engine/policy -run 'Catalog|Pi' -count=1 -v && make check-catalog-sync`

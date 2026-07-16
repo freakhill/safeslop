@@ -88,6 +88,16 @@ func TestCatalogAccessorsSorted(t *testing.T) {
 	}
 }
 
+func TestPiPinIncludesLunaMetadataRelease(t *testing.T) {
+	p, ok := DefaultCatalog().Lookup("pi")
+	if !ok || p.Kind != KindNpm {
+		t.Fatalf("pi must be an npm catalog package, got %+v", p)
+	}
+	if p.Version != "0.80.7" {
+		t.Fatalf("pi version = %q, want 0.80.7 (first reviewed Luna activation pin)", p.Version)
+	}
+}
+
 func TestDefaultBundle(t *testing.T) {
 	c := DefaultCatalog()
 	cases := map[string]string{

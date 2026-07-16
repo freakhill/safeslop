@@ -47,4 +47,17 @@ No source-tree patch was present during this experiment; the runtime directory w
 
 ## Pi activation pin
 
-The signed catalog currently pins Pi `0.80.2`, whose `--list-models luna` returns no match. Host Pi `0.80.7` lists `openai-codex/gpt-5.6-luna` and answered a no-tools marker prompt. The package move is same-minor patch (`0.80.2 → 0.80.7`) but remains subject to the locked normal-lane soak and npm transitive-integrity caveat. Candidate metadata and waiver outcome must be appended before the pin lands.
+The signed catalog previously pinned Pi `0.80.2`, whose `--list-models luna` returns no match. Host Pi `0.80.7` lists `openai-codex/gpt-5.6-luna` and answered a no-tools marker prompt.
+
+Catalog review for `0.80.7`:
+
+- npm registry source: `@earendil-works/pi-coding-agent`;
+- published: `2026-07-14T16:41:45.925Z`;
+- registry latest at review: `0.80.7`, not deprecated, integrity metadata present;
+- magnitude: same-minor patch (`0.80.2 → 0.80.7`);
+- `catalog propose-version`: newest non-yanked patch, no human-confirm flag;
+- `catalog bump`: default lane, `soakRequired:false`, `soakSatisfied:true`, `self-computed-WEAK`;
+- reverse package-requires closure: leaf `pi` only; affected bundles/images include `pi` and `personal`;
+- npm caveat remains: the top-level version is pinned but transitive dependencies are not locked by a committed integrity map.
+
+The locked policy describes a patch soak as illustrative/tunable while the shipped tool does not require one for this patch. This activation fixes a demonstrated signed-image capability gap and was explicitly approved in the user-directed repair, but it is **not** labeled a security bump and did not use `--security`.
