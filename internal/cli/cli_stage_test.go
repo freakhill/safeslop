@@ -3,10 +3,13 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/freakhill/safeslop/internal/engine/hostexec"
 	"github.com/freakhill/safeslop/internal/engine/policy"
@@ -25,6 +28,41 @@ func TestStageProfileResolvesEnvSecret(t *testing.T) {
 	}
 	if len(pathEnv) != 0 {
 		t.Fatalf("no credentials → pathEnv must be empty: %v", pathEnv)
+	}
+}
+
+func TestStageProfileStagesPiOAuthAccessFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	agentDir := filepath.Join(home, ".pi", "agent")
+	if err := os.MkdirAll(agentDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(home, ".pi"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"openai-codex":{"type":"oauth","access":"ACCESS_CANARY","refresh":"REFRESH_SENTINEL","expires":` +
+		fmt.Sprint(time.Now().Add(time.Hour).UnixMilli()) + `}}`
+	if err := os.WriteFile(filepath.Join(agentDir, "auth.json"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stage := t.TempDir()
+	prof := policy.Profile{Agent: "pi", Environment: "container", Network: "deny", Credentials: &policy.Credentials{
+		Pi: &policy.PiCreds{Provider: "openai-codex", Model: "gpt-5.6-luna"},
+	}}
+	secretEnv, pathEnv, err := stageProfile(context.Background(), prof, stage)
+	if err != nil {
+		t.Fatalf("stageProfile Pi OAuth: %v", err)
+	}
+	if len(secretEnv) != 0 || len(pathEnv) != 0 {
+		t.Fatalf("Pi OAuth must stage as a file only: secret=%v path=%v", secretEnv, pathEnv)
+	}
+	staged, err := os.ReadFile(filepath.Join(stage, "pi", "openai-codex", "auth.json"))
+	if err != nil {
+		t.Fatalf("read staged Pi auth: %v", err)
+	}
+	if !strings.Contains(string(staged), "ACCESS_CANARY") || strings.Contains(string(staged), "REFRESH_SENTINEL") {
+		t.Fatalf("staged Pi auth is not access-only: %s", staged)
 	}
 }
 

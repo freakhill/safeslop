@@ -22,8 +22,8 @@ Decision notes: `specs/research/2026-07-16-pi-oauth-staging-ayo.md`, `specs/rese
   VERIFY:   `go test ./internal/engine/policy ./internal/cli -run 'PiOAuth|Pi.*Luna|AgentArgvPi' -count=1 -v`
   EXPECTED: Valid profile decodes and reports exact value-free authority/session scope/argv; every unsupported boundary fails validation; builtins remain unauthenticated.
 
-- [ ] Add RED safe-source and synthetic-stage tests
-  FILE:     `internal/engine/creds/pi_test.go`, `internal/cli/cli_stage_test.go`
+- [x] Add RED safe-source and synthetic-stage tests
+  FILE:     `internal/engine/creds/pi.go`, `internal/engine/creds/pi_test.go`, `internal/cli/cli_stage_test.go`
   CHANGE:   Specify the provider extractor/stager with temp HOME fixtures and fake clock/sleeper: canonical access-only artifact; 0700/0600 modes; default fixed source; refresh/other-provider sentinels absent; missing/parent-or-file symlink/owner-mode-type-link-size/lock/unstable/duplicate/trailing/wrong-type/expired/15-minute-boundary failures; fixed value-free error classes; no source mutation; stage cleanup on failure.
   VERIFY:   `! go test ./internal/engine/creds ./internal/cli -run 'PiOAuth|StagePi' -count=1 -v`
   EXPECTED: Tests fail because no provider-specific safe reader/stager or stageProfile integration exists.
