@@ -8,7 +8,10 @@ OFF-LIMITS: no project-authored projection; no broad-home/credential/cache proje
 
 WORKTREE: `.worktrees/0107-builtin-projection-symlinks/`
 
-POST-COMPLETION REFINEMENT: spec 0108 supersedes only terminal membership for optional builtin globs: they select physical regular files and aggregate-omit matching links/directories/special files without following or opening them. Direct sources, required globs, recursive directory descendants, and every selected-file proof retain this spec's fail-closed contract.
+POST-COMPLETION REFINEMENTS:
+
+- Spec 0108 supersedes only terminal membership for optional builtin globs: they select physical regular files and aggregate-omit matching links/directories/special files without following or opening them. Direct sources, required globs, recursive directory descendants, and every selected-file proof retain this spec's fail-closed contract.
+- Spec 0110 supersedes only this spec's blanket absolute-target rejection. Engine-owned source-path links may use an exact-spelling absolute target that is a proper descendant of the same approved root; the raw suffix is converted to components and traversal restarts from the retained descriptor. Outside-root, alternate-spelling, ambiguous-component, excluded, internal-tree, race, mount, identity, snapshot, unsupported-platform, and value-free failure laws remain unchanged. Builtin CUE bytes and policy hashes do not change.
 
 - [x] Surface existing startup failures immediately in Emacs
   FILE: `emacs/safeslop-session.el`, `emacs/test/safeslop-test.el`

@@ -137,16 +137,21 @@ this builtin contract update; exact-byte hash fidelity rejects old created recor
 instead of silently changing them. On macOS and Linux, sources are walked from a
 pinned home descriptor and copied into a private per-session `0700` snapshot;
 Compose mounts only those completed snapshots under opaque paths, never the live
-source. This accepts ordinary **relative** in-home layouts such as
-`~/.config -> dotfiles/files/.config`. Fish's retained optional `*.fish` globs
-select only physical regular files: terminal symlinks, directories, and
-special-file matches are never followed or opened and produce one aggregate
+source. This accepts ordinary relative in-home layouts such as
+`~/.config -> dotfiles/files/.config` and exact-spelling absolute source links
+whose raw target is a proper descendant of the same approved root. The absolute
+target is converted to components and walked only from the pinned root descriptor;
+it is never canonicalized or reopened as a pathname. Fish's retained optional
+`*.fish` globs select only physical regular files: terminal symlinks, directories,
+and special-file matches are never followed or opened and produce one aggregate
 `skipped-nonregular` manifest status while safe siblings continue. This is
-selection, not new read authority. Configured/direct links that are absolute,
-escape home, or enter an excluded credential/cache root still fail closed, as do
-internal recursive-tree links, required-glob non-regular matches, loops, mount
-crossings, source races, and unsupported descriptor/mount-identity platforms;
-there is no pathname fallback. The workspace remains the only read-write host
+selection, not new read authority. Links that leave the approved root, use an
+alternate case/Unicode/alias spelling or ambiguous dot/empty components, or enter
+an excluded credential/cache root still fail closed, as do internal recursive-tree
+links, required-glob non-regular matches, loops, mount crossings, source races,
+and unsupported descriptor/mount-identity platforms; there is no pathname
+fallback. This resolver-only refinement does not change builtin CUE bytes or
+policy hashes. The workspace remains the only read-write host
 mount. All of `$HOME`, raw Git configuration, `.ssh`, cloud/Kubernetes/Docker
 config, npm/cargo credentials, browser/keychain data, and safeslop state is never
 projected. Network authority still starts denied and can be expanded only through

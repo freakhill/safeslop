@@ -141,16 +141,21 @@ instructions and skills, Fish projects only demand-loaded `functions/*.fish` and
 copies or auto-executes host `config.fish`/`conf.d`; normal container-owned Fish
 startup is authoritative. Create a fresh Fish session after this contract update,
 because exact-byte builtin hash fidelity rejects old records. On macOS/Linux the
-engine follows only relative source-path links that stay inside the pinned home
-root, copies descriptor-pinned bytes into a private `0700` per-session snapshot,
-and mounts only that snapshot before copying into ephemeral home.
+engine follows relative source-path links that stay inside the pinned home root
+and exact-spelling absolute links whose raw target is a proper descendant of that
+same root. Absolute targets are converted to components and walked from the
+retained root descriptor; they are never canonicalized or reopened as pathnames.
+The engine copies descriptor-pinned bytes into a private `0700` per-session
+snapshot and mounts only that snapshot before copying into ephemeral home.
 `~/.config -> dotfiles/files/.config` is supported. Retained optional Fish globs
 select physical regular matches; terminal links/directories/special files are
 never followed or opened and yield one aggregate `skipped-nonregular` status while
 eligible siblings continue. Direct/configured links, required globs, and recursive
-trees remain fail-closed for absolute/escaping links, excluded targets, internal
-links, loops, special files, mount crossings, or concurrent changes; unsupported
-OS/filesystem safety has no pathname fallback. Only the workspace is a read-write
+trees remain fail-closed for outside-root or alternate-spelling absolute targets,
+relative escapes, excluded targets, internal links, loops, special files, mount
+crossings, or concurrent changes; unsupported OS/filesystem safety has no pathname
+fallback. This spec 0110 resolver refinement leaves builtin CUE bytes and hashes
+unchanged. Only the workspace is a read-write
 host mount. Never broaden projection to all home, raw Git config, or
 credential-bearing paths.
 A project profile of the same name wins with normal trust/provenance checks, and

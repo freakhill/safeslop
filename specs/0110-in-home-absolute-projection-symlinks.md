@@ -26,7 +26,7 @@ WORKTREE: `.worktrees/0110-in-home-absolute-symlinks/`
   VERIFY:   `go test ./internal/engine/container -run 'Projection|Snapshot|Symlink|AbsoluteTarget|PinnedRoot' -count=1 -v`
   EXPECTED: Exact in-root absolute Pi/Claude links snapshot correctly; malformed/outside/excluded/replaced targets and every existing safety proof remain fail-closed and value-free.
 
-- [ ] Synchronize projection documentation
+- [x] Synchronize projection documentation
   FILE:     `README.md`, `skills/agent-sandbox-ops/SKILL.md`, `specs/0096-contained-hybrid-default-profiles.md`, `specs/0107-safe-symlink-projection-failures.md`, `specs/0110-in-home-absolute-projection-symlinks.md`
   CHANGE:   Replace relative-only wording with exact-spelling in-approved-root relative-or-absolute source-link behavior; retain rejection of alternate spellings, outside/excluded targets, internal links, races, and unsupported platforms; note that builtin CUE hashes do not change.
   VERIFY:   `git diff --check && rg -n 'exact-spelling|relative or absolute|alternate.*spelling|0110' README.md skills/agent-sandbox-ops/SKILL.md specs/0096-contained-hybrid-default-profiles.md specs/0107-safe-symlink-projection-failures.md`
