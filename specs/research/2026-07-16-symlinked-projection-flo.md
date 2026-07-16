@@ -3,6 +3,8 @@
 Status: decision landed
 Score: **91.5 / 100** (C1 9.0×35%, C2 10.0×30%, C3 7.5×20%, C4 8.5×15%; all deterministic laws pass)
 
+Superseding refinement: `specs/research/2026-07-16-optional-projection-globs-flo.md` changes only optional glob terminal membership. Such globs select physical regular files and aggregate-omit matching non-regular candidates without readlink/follow/open; direct sources, required globs, recursive directory descendants, and selected-file proofs remain fail-closed under this decision.
+
 ## Verdict
 
 Permit **only engine-owned builtin projection sources** to traverse symlink components when the resolver can prove containment with pinned descriptor-relative operations. Resolve each allowed source from a pinned approved root; validate both lexical and resolved locations against allowed roots and exclusions; snapshot bytes into a private per-session engine directory; and bind-mount only that snapshot. Never bind-mount, reopen, or copy from the original or resolved host pathname after validation.

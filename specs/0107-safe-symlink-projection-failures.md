@@ -8,6 +8,8 @@ OFF-LIMITS: no project-authored projection; no broad-home/credential/cache proje
 
 WORKTREE: `.worktrees/0107-builtin-projection-symlinks/`
 
+POST-COMPLETION REFINEMENT: spec 0108 supersedes only terminal membership for optional builtin globs: they select physical regular files and aggregate-omit matching links/directories/special files without following or opening them. Direct sources, required globs, recursive directory descendants, and every selected-file proof retain this spec's fail-closed contract.
+
 - [x] Surface existing startup failures immediately in Emacs
   FILE: `emacs/safeslop-session.el`, `emacs/test/safeslop-test.el`
   CHANGE: on terminal process exit, fetch its session record once; when its existing non-empty `last_error` is present, display the faced session detail and a minibuffer reason instead of leaving the terminal's fast exit unexplained. Preserve the PTY fallback path and never render stdout/stderr as a diagnostic.

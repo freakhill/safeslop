@@ -133,15 +133,19 @@ Starship configuration. On macOS and Linux, sources are walked from a pinned hom
 descriptor and copied into a private per-session `0700` snapshot; Compose mounts
 only those completed snapshots under opaque paths, never the live source. This
 accepts ordinary **relative** in-home layouts such as
-`~/.config -> dotfiles/files/.config`. Absolute links, links escaping home or
-entering an excluded credential/cache root, internal directory links, loops,
-special files, mount crossings, and source changes during copy fail closed. An OS
-without the descriptor and mount-identity guarantees also fails closed; there is
-no pathname-resolution fallback. The workspace remains the only read-write host
-mount. All of `$HOME`, raw Git configuration, `.ssh`, cloud/Kubernetes/Docker
-config, npm/cargo credentials, browser/keychain data, and safeslop state is never
-projected. Network authority still starts denied and can be expanded only through
-the explicit session-scoped grant commands below.
+`~/.config -> dotfiles/files/.config`. Fish's optional `*.fish` globs select only
+physical regular files: terminal symlinks, directories, and special-file matches
+are never followed or opened and produce one aggregate `skipped-nonregular`
+manifest status while safe siblings continue. This is selection, not new read
+authority. Configured/direct links that are absolute, escape home, or enter an
+excluded credential/cache root still fail closed, as do internal recursive-tree
+links, required-glob non-regular matches, loops, mount crossings, source races,
+and unsupported descriptor/mount-identity platforms; there is no pathname
+fallback. The workspace remains the only read-write host mount. All of `$HOME`,
+raw Git configuration, `.ssh`, cloud/Kubernetes/Docker config, npm/cargo
+credentials, browser/keychain data, and safeslop state is never projected.
+Network authority still starts denied and can be expanded only through the
+explicit session-scoped grant commands below.
 
 `session create --profile`, `session status`, and `session list` include
 value-free credential scope in the JSON contract as `credential_scopes` for

@@ -26,10 +26,10 @@ WORKTREE: `.worktrees/0108-safe-optional-projection-globs/`
   VERIFY:   `go test ./internal/engine/container -run 'Projection|Snapshot|Symlink|OptionalGlob|RequiredGlob' -count=1 -v`
   EXPECTED: Mixed/all-nonregular optional globs pass without reading unsafe links; replacement and required/direct/directory cases fail closed with stable codes.
 
-- [ ] Document the narrowed optional-glob contract
-  FILE:     `README.md`, `skills/agent-sandbox-ops/SKILL.md`, `specs/0107-safe-symlink-projection-failures.md`, `specs/0108-safe-optional-projection-globs.md`
+- [x] Document the narrowed optional-glob contract
+  FILE:     `README.md`, `skills/agent-sandbox-ops/SKILL.md`, `specs/0096-contained-hybrid-default-profiles.md`, `specs/0107-safe-symlink-projection-failures.md`, `specs/research/2026-07-16-symlinked-projection-flo.md`, `specs/0108-safe-optional-projection-globs.md`
   CHANGE:   Explain that optional builtin globs copy physical regular matches and aggregate-omit terminal links/non-regular candidates, while direct/required/tree/proof failures remain fatal; mark 0107's internal-link law as superseded only for optional terminal glob membership.
-  VERIFY:   `git diff --check && rg -n 'optional.*glob|skipped-nonregular|physical regular' README.md skills/agent-sandbox-ops/SKILL.md specs/0107-safe-symlink-projection-failures.md`
+  VERIFY:   `git diff --check && rg -n 'optional.*glob|skipped-nonregular|physical regular' README.md skills/agent-sandbox-ops/SKILL.md specs/0096-contained-hybrid-default-profiles.md specs/0107-safe-symlink-projection-failures.md specs/research/2026-07-16-symlinked-projection-flo.md`
   EXPECTED: Operator docs match the safe implemented distinction without suggesting outside links are followed.
 
 - [ ] Smoke-test the real Fish topology and run full gates
