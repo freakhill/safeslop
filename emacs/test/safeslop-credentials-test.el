@@ -8,6 +8,26 @@
 (require 'safeslop-doom)
 (require 'safeslop-contract)
 
+(defconst safeslop-test-profile-list-json
+  "{\"schema_version\":1,\"ok\":true,\"data\":{\"path\":\"/ws/safeslop.cue\",\"profiles\":{\"app\":{\"agent\":\"pi\",\"environment\":\"container\",\"network\":\"deny\"}},\"builtins\":[]},\"warnings\":[],\"errors\":[]}"
+  "A project profile list used by value-free Credentials journey tests.")
+
+(defconst safeslop-test-creds-show-empty-json
+  "{\"schema_version\":1,\"ok\":true,\"data\":{\"config\":\"/ws/safeslop.cue\",\"profile\":\"app\",\"op\":{\"available\":false,\"signedIn\":false},\"credentials\":[]},\"warnings\":[],\"errors\":[]}"
+  "An empty profile credential posture used by first-run journey tests.")
+
+(defconst safeslop-test-creds-show-mixed-json
+  "{\"schema_version\":1,\"ok\":true,\"data\":{\"config\":\"/ws/safeslop.cue\",\"profile\":\"app\",\"op\":{\"available\":false,\"signedIn\":false},\"credentials\":[{\"profile\":\"app\",\"kind\":\"github\",\"name\":\"acme/web\",\"scope\":\"app ro\",\"ref\":\"\",\"status\":\"ephemeral\"},{\"profile\":\"app\",\"kind\":\"github\",\"name\":\"acme/api\",\"scope\":\"app rw\",\"ref\":\"\",\"status\":\"ephemeral\"}]},\"warnings\":[],\"errors\":[]}"
+  "Mixed read/write GitHub posture used to prove safe edit defaults.")
+
+(defconst safeslop-test-mutation-ok-json
+  "{\"schema_version\":1,\"ok\":true,\"data\":{\"credential_scopes\":[]},\"warnings\":[],\"errors\":[]}"
+  "A value-free successful profile mutation response.")
+
+(defconst safeslop-test-mutation-failed-json
+  "{\"schema_version\":1,\"ok\":false,\"data\":{},\"warnings\":[],\"errors\":[{\"code\":\"INVALID_ARGUMENT\",\"message\":\"repo conflict\",\"details\":{},\"retryable\":false}]}"
+  "A value-free failed profile mutation response.")
+
 (defconst safeslop-test-creds-list-json
   (concat "{\"schema_version\":1,\"ok\":true,\"data\":{"
           "\"config\":\"/ws/safeslop.cue\","
@@ -255,6 +275,157 @@ one even if a future envelope regressed to carrying it."
                  (lambda (&rest _) (setq called t))))
         (safeslop-credentials-pick-repositories)))
     (should-not called)))
+
+(ert-deftest safeslop-test-credentials-journey-universal-keys-dispatch ()
+  "Displayed universal keys resolve to credential tasks in the raw mode map."
+  (dolist (pair '(("A" . safeslop-credentials-link-account)
+                  ("U" . safeslop-credentials-unlink-account)
+                  ("R" . safeslop-credentials-pick-repositories)
+                  ("X" . safeslop-credentials-clear-profile-forge)))
+    (should (eq (lookup-key safeslop-credentials-mode-map (kbd (car pair))) (cdr pair)))))
+
+(ert-deftest safeslop-test-credentials-journey-guidance-is-executable ()
+  "Empty and header guidance advertise universal setup actions and the active refresh key."
+  (with-temp-buffer
+    (safeslop-credentials-mode)
+    (let ((empty (substring-no-properties (safeslop-credentials--empty-state "/ws/safeslop.cue")))
+          (header (substring-no-properties (safeslop-credentials--header))))
+      (dolist (want '("A link" "R repos" "project profile" "g refresh"))
+        (should (string-match-p (regexp-quote want) (concat empty "\n" header)))))))
+
+(ert-deftest safeslop-test-credentials-journey-link-confirms-and-stays-in-surface ()
+  "Actual A dispatch reviews identity and keeps successful setup in Credentials."
+  (let (confirmation called refreshed popped)
+    (with-temp-buffer
+      (safeslop-credentials-mode)
+      (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "github"))
+                ((symbol-function 'read-string)
+                 (let ((answers '("github.com" "op://vault/app/private-key")))
+                   (lambda (&rest _) (pop answers))))
+                ((symbol-function 'read-number)
+                 (let ((answers '(123 456))) (lambda (&rest _) (pop answers))))
+                ((symbol-function 'yes-or-no-p)
+                 (lambda (prompt) (setq confirmation prompt) t))
+                ((symbol-function 'safeslop-credentials--call-raw-async)
+                 (lambda (args callback)
+                   (setq called args)
+                   (funcall callback (safeslop-contract-parse-string safeslop-test-mutation-ok-json))))
+                ((symbol-function 'safeslop-credentials-refresh) (lambda () (setq refreshed t)))
+                ((symbol-function 'safeslop--show-envelope-buffer) (lambda (&rest _) (setq popped t))))
+        (call-interactively (lookup-key safeslop-credentials-mode-map (kbd "A")))))
+    (should called)
+    (should (string-match-p "GitHub.*github.com.*123.*456" (substring-no-properties confirmation)))
+    (should-not (string-match-p "op://" (substring-no-properties confirmation)))
+    (should refreshed)
+    (should-not popped)))
+
+(ert-deftest safeslop-test-credentials-journey-first-run-profile-source ()
+  "A valid project profile is selectable even when `creds list' has no rows."
+  (let (calls)
+    (with-temp-buffer
+      (safeslop-credentials-mode)
+      (setq safeslop-credentials--config-path "/ws/safeslop.cue")
+      (cl-letf (((symbol-function 'completing-read)
+                 (let ((answers '("app" "github" "origin inference")))
+                   (lambda (&rest _) (pop answers))))
+                ((symbol-function 'yes-or-no-p) (lambda (&rest _) t))
+                ((symbol-function 'safeslop--call-json-async)
+                 (lambda (args callback &optional _stderr)
+                   (push args calls)
+                   (funcall callback
+                            (safeslop-contract-parse-string
+                             (cond
+                              ((equal (car args) "profile") safeslop-test-profile-list-json)
+                              ((equal (seq-take args 2) '("creds" "show")) safeslop-test-creds-show-empty-json)
+                              (t safeslop-test-mutation-ok-json))))))
+                ((symbol-function 'safeslop-credentials-refresh) (lambda () nil)))
+        (call-interactively (lookup-key safeslop-credentials-mode-map (kbd "R")))))
+    (should (equal (nreverse calls)
+                   '(("profile" "list" "/ws/safeslop.cue" "--output" "json")
+                     ("creds" "show" "app" "/ws/safeslop.cue" "--output" "json")
+                     ("profile" "credentials" "set" "app" "/ws/safeslop.cue"
+                      "--provider" "github" "--use-origin" "--output" "json"))))))
+
+(ert-deftest safeslop-test-credentials-journey-existing-scopes-prefill-and-warn ()
+  "Existing mixed scopes seed defaults and the full replacement is explicit."
+  (let (calls defaults confirmation)
+    (with-temp-buffer
+      (safeslop-credentials-mode)
+      (setq safeslop-credentials--config-path "/ws/safeslop.cue")
+      (cl-letf (((symbol-function 'completing-read)
+                 (let ((answers '("app" "github" "explicit repos")))
+                   (lambda (&rest _) (pop answers))))
+                ((symbol-function 'read-string)
+                 (lambda (prompt &optional _initial _history default)
+                   (push (cons prompt default) defaults)
+                   (or default "")))
+                ((symbol-function 'yes-or-no-p)
+                 (lambda (prompt) (setq confirmation prompt) t))
+                ((symbol-function 'safeslop--call-json-async)
+                 (lambda (args callback &optional _stderr)
+                   (push args calls)
+                   (funcall callback
+                            (safeslop-contract-parse-string
+                             (cond
+                              ((equal (car args) "profile") safeslop-test-profile-list-json)
+                              ((equal (seq-take args 2) '("creds" "show")) safeslop-test-creds-show-mixed-json)
+                              (t safeslop-test-mutation-ok-json))))))
+                ((symbol-function 'safeslop-credentials-refresh) (lambda () nil)))
+        (safeslop-credentials-pick-repositories)))
+    (should (equal (cdr (assoc "Read-only repos (owner/name, comma-separated): " defaults)) "acme/web"))
+    (should (equal (cdr (assoc "Write repos (owner/name, comma-separated): " defaults)) "acme/api"))
+    (should (string-match-p "Existing:.*acme/web.*acme/api" (substring-no-properties confirmation)))
+    (should (string-match-p "replaces all.*forge" (downcase (substring-no-properties confirmation))))
+    (should (member '("profile" "credentials" "set" "app" "/ws/safeslop.cue"
+                      "--provider" "github" "--repo" "acme/web"
+                      "--write-repo" "acme/api" "--output" "json") calls))))
+
+(ert-deftest safeslop-test-credentials-journey-failed-scope-retains-draft ()
+  "A value-free failed scope write retains defaults for R retry."
+  (with-temp-buffer
+    (safeslop-credentials-mode)
+    (setq safeslop-credentials--config-path "/ws/safeslop.cue")
+    (cl-letf (((symbol-function 'completing-read)
+               (let ((answers '("app" "github" "explicit repos")))
+                 (lambda (&rest _) (pop answers))))
+              ((symbol-function 'read-string)
+               (let ((answers '("acme/web" "acme/api")))
+                 (lambda (&rest _) (pop answers))))
+              ((symbol-function 'yes-or-no-p) (lambda (&rest _) t))
+              ((symbol-function 'safeslop--call-json-async)
+               (lambda (args callback &optional _stderr)
+                 (funcall callback
+                          (safeslop-contract-parse-string
+                           (cond
+                            ((equal (car args) "profile") safeslop-test-profile-list-json)
+                            ((equal (seq-take args 2) '("creds" "show")) safeslop-test-creds-show-empty-json)
+                            (t safeslop-test-mutation-failed-json))))))
+              ((symbol-function 'safeslop--show-envelope-buffer) (lambda (&rest _) nil)))
+      (safeslop-credentials-pick-repositories))
+    (should (equal (alist-get 'profile safeslop-credentials--repo-draft) "app"))
+    (should (equal (alist-get 'read-repos safeslop-credentials--repo-draft) '("acme/web")))
+    (should (equal (alist-get 'write-repos safeslop-credentials--repo-draft) '("acme/api")))))
+
+(ert-deftest safeslop-test-credentials-journey-clear-profile-not-account ()
+  "X confirms and calls profile forge clear, never account unlink."
+  (let (calls confirmation)
+    (with-temp-buffer
+      (safeslop-credentials-mode)
+      (setq safeslop-credentials--config-path "/ws/safeslop.cue")
+      (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "app"))
+                ((symbol-function 'yes-or-no-p) (lambda (prompt) (setq confirmation prompt) t))
+                ((symbol-function 'safeslop--call-json-async)
+                 (lambda (args callback &optional _stderr)
+                   (push args calls)
+                   (funcall callback (safeslop-contract-parse-string
+                                      (if (equal (car args) "profile")
+                                          (if (equal (cadr args) "list") safeslop-test-profile-list-json safeslop-test-mutation-ok-json)
+                                        safeslop-test-mutation-ok-json)))))
+                ((symbol-function 'safeslop-credentials-refresh) (lambda () nil)))
+        (call-interactively (lookup-key safeslop-credentials-mode-map (kbd "X")))))
+    (should (string-match-p "profile.*forge.*account link.*remain" (downcase (substring-no-properties confirmation))))
+    (should (member '("profile" "credentials" "clear" "app" "/ws/safeslop.cue" "--output" "json") calls))
+    (should-not (seq-some (lambda (args) (equal (seq-take args 2) '("creds" "unlink"))) calls))))
 
 (ert-deftest safeslop-test-credentials-op-legend ()
   "The op legend names each 1Password state, faced, and stays value-free."

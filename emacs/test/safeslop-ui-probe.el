@@ -125,7 +125,12 @@
           (safeslop-ui-probe--assert-key "K" #'safeslop-credentials))
         (safeslop-ui-probe--with-mode #'safeslop-credentials-mode
           (safeslop-ui-probe--assert-key "RET" #'safeslop-credentials-inspect)
+          (safeslop-ui-probe--assert-key "A" #'safeslop-credentials-link-account)
+          (safeslop-ui-probe--assert-key "U" #'safeslop-credentials-unlink-account)
+          (safeslop-ui-probe--assert-key "R" #'safeslop-credentials-pick-repositories)
+          (safeslop-ui-probe--assert-key "X" #'safeslop-credentials-clear-profile-forge)
           (safeslop-ui-probe--assert-key "gr" #'safeslop-credentials-refresh)
+          (should (string-match-p "gr refresh" (substring-no-properties (safeslop-credentials--header))))
           (safeslop-ui-probe--assert-key "P" #'safeslop-portal)))
     (safeslop-ui-probe--with-mode #'safeslop-output-mode
       (safeslop-ui-probe--assert-key "g" #'safeslop-output-refresh)
@@ -142,7 +147,12 @@
       (safeslop-ui-probe--assert-key "K" #'safeslop-credentials))
     (safeslop-ui-probe--with-mode #'safeslop-credentials-mode
       (safeslop-ui-probe--assert-key "RET" #'safeslop-credentials-inspect)
+      (safeslop-ui-probe--assert-key "A" #'safeslop-credentials-link-account)
+      (safeslop-ui-probe--assert-key "U" #'safeslop-credentials-unlink-account)
+      (safeslop-ui-probe--assert-key "R" #'safeslop-credentials-pick-repositories)
+      (safeslop-ui-probe--assert-key "X" #'safeslop-credentials-clear-profile-forge)
       (safeslop-ui-probe--assert-key "g" #'safeslop-credentials-refresh)
+      (should (string-match-p "g refresh" (substring-no-properties (safeslop-credentials--header))))
       (safeslop-ui-probe--assert-key "P" #'safeslop-portal))))
 
 (ert-deftest safeslop-ui-probe-compose-keys-resolve ()

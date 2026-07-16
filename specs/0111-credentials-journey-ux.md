@@ -14,7 +14,7 @@ WORKTREE: `.worktrees/0111-credentials-journey-ux/`
   VERIFY:   `git diff --check && rg -n 'empty-profile-candidates|evil-link-account|Blocker|Chosen repair|0/5' specs/research/2026-07-16-credentials-journey-baseline.md`
   EXPECTED: The persistent report contains reproducible key traces, task scores, functional/ergonomic defects, safety limits, chosen repair, and rejected alternatives.
 
-- [ ] Add RED journey and mixed-access tests
+- [x] Add RED journey and mixed-access tests
   FILE:     `internal/engine/creds/inspect_test.go`, `emacs/test/safeslop-credentials-test.el`, `emacs/test/safeslop-ui-probe.el`
   CHANGE:   Add hermetic tests for mixed per-repo read/write inspection; actual displayed-key dispatch in raw/Evil slots; empty-profile first-run using fake `profile list` and `creds show`; truthful empty/refresh legends; account confirmation/context; existing-scope prefill/replacement warning/draft retention; and confirmed profile forge clear. Tests must use refs only and never call a live CLI/provider.
   VERIFY:   `go test ./internal/engine/creds -run 'Inspect.*MixedRepoAccess' -count=1 -v; emacs --batch -L emacs -l ert -l emacs/test/safeslop-test.el -l emacs/test/safeslop-credentials-test.el --eval '(ert-run-tests-batch-and-exit "safeslop-test-credentials-journey")'`

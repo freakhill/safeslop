@@ -148,6 +148,45 @@ func TestInspectForgejoEphemeral(t *testing.T) {
 	}
 }
 
+func TestInspectMixedRepoAccess(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		creds *policy.Credentials
+		kind  string
+		mode  string
+	}{
+		{
+			name: "github",
+			creds: &policy.Credentials{Github: &policy.GithubCreds{Repos: []policy.RepoCred{
+				{Repo: "acme/web"}, {Repo: "acme/api", Write: true},
+			}}},
+			kind: "github", mode: "app",
+		},
+		{
+			name: "forgejo",
+			creds: &policy.Credentials{Forgejo: &policy.ForgejoCreds{Repos: []policy.RepoCred{
+				{Repo: "acme/web"}, {Repo: "acme/api", Write: true},
+			}}},
+			kind: "forgejo", mode: "deploy-key",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rep := Inspect(context.Background(), cfgWith(policy.Profile{Credentials: tc.creds}), fakeProber(nil, false, false, nil, nil))
+			read, ok := rowFor(rep.Rows, tc.kind, "acme/web")
+			if !ok {
+				t.Fatalf("missing read-only row: %+v", rep.Rows)
+			}
+			write, ok := rowFor(rep.Rows, tc.kind, "acme/api")
+			if !ok {
+				t.Fatalf("missing write row: %+v", rep.Rows)
+			}
+			if read.Scope != tc.mode+" ro" || write.Scope != tc.mode+" rw" {
+				t.Fatalf("mixed access scopes = %q / %q, want %q / %q", read.Scope, write.Scope, tc.mode+" ro", tc.mode+" rw")
+			}
+		})
+	}
+}
+
 func TestInspectCloudAmbient(t *testing.T) {
 	cfg := cfgWith(policy.Profile{Credentials: &policy.Credentials{
 		Aws:  &policy.AwsSso{Profile: "acme"},
