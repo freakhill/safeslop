@@ -300,10 +300,10 @@ echoing the error and inserting the persistent in-buffer banner."
       (< ra rb))))
 
 (defun safeslop-portal--rows (sessions)
-  "Build `tabulated-list-entries' from SESSIONS (a list of alists), lifecycle-ordered.
-Running and created rows come first (specs/0063 F3) so the actionable sessions
-are where point lands.  Pure: SESSIONS is already-fetched data, so the row
-builder never blocks on I/O."
+  "Build `tabulated-list-entries' from SESSIONS (a list of alists),
+lifecycle-ordered. Running and created rows come first (specs/0063 F3)
+so the actionable sessions are where point lands.  Pure: SESSIONS is
+already-fetched data, so the row builder never blocks on I/O."
   (mapcar
    (lambda (sess)
      (let ((id (safeslop-portal--field sess 'session_id)))
@@ -514,9 +514,10 @@ staged credentials before deleting, so a removal never orphans secrets."
 
 (defun safeslop-portal-prune ()
   "Remove ALL stopped sessions at once (clear every dead-session corpse).
-Running and created sessions are left untouched; crashed sessions (marked running
-but whose process is gone) are reconciled to stopped and pruned in the same pass.
-Credentials are revoked before each record is deleted."
+Running and created sessions are left untouched; crashed sessions
+(marked running but whose process is gone) are reconciled to stopped and
+pruned in the same pass. Credentials are revoked before each record is
+deleted."
   (interactive)
   (when (y-or-n-p "Remove all stopped sessions from the list? ")
     (safeslop-session-prune
@@ -543,7 +544,8 @@ Credentials are revoked before each record is deleted."
   (safeslop-surface--legend safeslop-portal--key-hints))
 
 (defun safeslop-portal--auto-status-line ()
-  "Return visible auto-refresh state, explicitly distinguishing UI polling from agent action."
+  "Return visible auto-refresh state, explicitly distinguishing UI polling
+from agent action."
   (let ((text (cond
                ((not (and (numberp safeslop-portal-refresh-interval)
                           (> safeslop-portal-refresh-interval 0)))
@@ -559,7 +561,8 @@ Credentials are revoked before each record is deleted."
                 'help-echo "Polling only runs `safeslop session list`; it never runs, resumes, or advances an agent.")))
 
 (defun safeslop-portal--header ()
-  "Return the portal header block: surface tab strip, legends, auto status, shortcuts."
+  "Return the portal header block: surface tab strip, legends, auto status,
+shortcuts."
   (concat (safeslop-surface--tab-strip 'sessions)
           (safeslop-surface--tier-legend)
           (safeslop-portal--status-legend)
@@ -616,14 +619,15 @@ once — the create is async, so a plain refresh would race it."
 
 (defun safeslop-portal--auto-refresh ()
   "Timer callback: refresh the portal when it is live, shown, and idle.
-Self-cancels once the portal buffer is gone.  Skips a tick while any minibuffer
-is active (so it never fights a `k'-stop confirmation or other prompt), while the
-operator has keystrokes pending (`input-pending-p', so an automatic redraw can't
-land mid-keypress and move point out from under an action key), or while a prior
-async fetch for this buffer has not returned (the engine's
-`safeslop-surface--refresh-in-flight', so slow `session list' calls can't stack
-up).  These are the same idle guards slopmaxx's console adopted to stop refreshes
-fighting operator input."
+Self-cancels once the portal buffer is gone.  Skips a tick while any
+minibuffer is active (so it never fights a `k'-stop confirmation or
+other prompt), while the operator has keystrokes pending
+(`input-pending-p', so an automatic redraw can't land mid-keypress and
+move point out from under an action key), or while a prior async fetch
+for this buffer has not returned (the engine's
+`safeslop-surface--refresh-in-flight', so slow `session list' calls
+can't stack up).  These are the same idle guards slopmaxx's console
+adopted to stop refreshes fighting operator input."
   (let ((buf (get-buffer safeslop-portal-buffer-name)))
     (cond
      ((not (buffer-live-p buf)) (safeslop-portal--cancel-timer))

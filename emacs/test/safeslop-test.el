@@ -5,6 +5,20 @@
 (require 'safeslop)
 (require 'safeslop-doom)
 
+(ert-deftest safeslop-test-decomposed-features-load-through-fronts ()
+  "Focused implementations load through the unchanged profile/session fronts."
+  (dolist (feature '(safeslop-profile-evaluation
+                     safeslop-profile-compose
+                     safeslop-session-terminal
+                     safeslop-egress))
+    (should (featurep feature)))
+  (dolist (entry '((safeslop-profiles--evaluation-text . "safeslop-profile-evaluation.el")
+                   (safeslop-profiles-compose-toggle . "safeslop-profile-compose.el")
+                   (safeslop-session--launch-term . "safeslop-session-terminal.el")
+                   (safeslop-session--profile-egress-review . "safeslop-egress.el")))
+    (should (equal (file-name-nondirectory (symbol-file (car entry) 'defun))
+                   (cdr entry)))))
+
 (ert-deftest safeslop-test-loads-core-commands ()
   (dolist (fn '(safeslop-doctor
                 safeslop-policy-check-file

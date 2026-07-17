@@ -21,11 +21,22 @@ scroll/cursor preservation from specs/0061 lives in exactly one place:
 | `safeslop-client.el` | CLI subprocess substrate + redacted debug log |
 | `safeslop-surface.el` | shared dashboard chrome, tier/net cells, render engine |
 | `safeslop-output.el` | read-only envelope output buffers (`safeslop-output-mode`) |
-| `safeslop-session.el` | session commands, terminal attach, detail view |
+| `safeslop-session-terminal.el` | session shard: PTY launch, JSONL monitor, failure/safety chrome |
+| `safeslop-egress.el` | session shard: progressive egress command construction + passive review UI |
+| `safeslop-session.el` | session front: commands, terminal attach, detail view (owns the `safeslop-session--*` internals split across the two shards above) |
 | `safeslop-portal.el` | Sessions dashboard |
-| `safeslop-profiles.el` | Profiles dashboard + CUE-backed CRUD |
+| `safeslop-profile-evaluation.el` | profile shard: versioned safety-evaluation validate/render |
+| `safeslop-profile-compose.el` | profile shard: interactive profile composition UI |
+| `safeslop-profiles.el` | profile front: Profiles dashboard + CUE-backed CRUD |
+| `safeslop-credentials.el` | Credentials surface: value-free posture + account-link status |
 | `safeslop.el` | entry point: top-level commands + `C-c s` command map |
 | `safeslop-doom.el` | optional Doom/Evil shim (data-driven binding tables) |
+
+The session and profile fronts are decomposed into private feature shards: each
+shard keeps the unchanged `safeslop-session--*` / `safeslop-profiles--*` internal
+symbols and is required only by its front, which is the single public entry.  The
+require graph stays one-directional, so no shard reaches upward into a layer that
+requires it.
 
 ## Operator UI navigation
 

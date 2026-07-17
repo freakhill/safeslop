@@ -110,8 +110,9 @@ Ends with a blank line separating it from the buffer's own shortcut legend."
 ;; the operator.
 
 (defun safeslop-surface--capture-views ()
-  "Snapshot (WINDOW POINT START) for every window showing the current buffer.
-Pass the result to `safeslop-surface--restore-views' after an in-place re-render."
+  "Snapshot (WINDOW POINT START) for every window showing the current
+buffer. Pass the result to `safeslop-surface--restore-views' after an
+in-place re-render."
   (mapcar (lambda (win) (list win (window-point win) (window-start win)))
           (get-buffer-window-list (current-buffer) nil t)))
 
@@ -136,11 +137,13 @@ leaves a first-row point stranded on the header — part of the cursor-jump fix)
     (forward-line 1)))
 
 (defun safeslop-surface--restore-views (views &optional point)
-  "Restore scroll and cursor for VIEWS captured by `safeslop-surface--capture-views'.
-POINT, when non-nil, is the buffer position every window's cursor is synced to
-(e.g. the row `tabulated-list-print' just restored); otherwise each window keeps
-its own captured point.  Positions are clamped so a now-shorter buffer cannot
-error, and `set-window-start' is non-forcing so the cursor stays visible."
+  "Restore scroll and cursor for VIEWS captured by
+`safeslop-surface--capture-views'. POINT, when non-nil, is the buffer
+position every window's cursor is synced to (e.g. the row
+`tabulated-list-print' just restored); otherwise each window keeps its
+own captured point.  Positions are clamped so a now-shorter buffer
+cannot error, and `set-window-start' is non-forcing so the cursor stays
+visible."
   (dolist (view views)
     (let ((win (nth 0 view)) (old-point (nth 1 view)) (start (nth 2 view)))
       (when (window-live-p win)
@@ -221,9 +224,10 @@ error, and `set-window-start' is non-forcing so the cursor stays visible."
       'default))
 
 (defun safeslop-surface--env-cell (env)
-  "Return ENV as a tier-coloured tabulated-list cell with its honest note as help-echo.
-The text label is always present, so colour is a redundant reinforcement, not the
-sole signal (specs/0031).  An unknown env renders plainly."
+  "Return ENV as a tier-coloured tabulated-list cell with its honest note
+as help-echo. The text label is always present, so colour is a redundant
+reinforcement, not the sole signal (specs/0031).  An unknown env renders
+plainly."
   (let* ((row (assoc env safeslop-surface--env-tiers)))
     (if row
         (propertize env
@@ -232,7 +236,8 @@ sole signal (specs/0031).  An unknown env renders plainly."
       env)))
 
 (defun safeslop-surface--tier-legend ()
-  "Return a one-line isolation-tier ramp legend (host most dangerous -> container safest)."
+  "Return a one-line isolation-tier ramp legend (host most dangerous ->
+container safest)."
   (concat
    "tiers: "
    (mapconcat (lambda (row)
@@ -286,7 +291,8 @@ Keys are faced as bindings; ends with a blank separator line."
           (propertize "L" 'face 'help-key-binding) " debug\n"))
 
 (defun safeslop-surface--empty-state (noun new-key)
-  "Return persistent empty-state guidance for NOUN, advertising NEW-KEY when non-nil."
+  "Return persistent empty-state guidance for NOUN, advertising NEW-KEY
+when non-nil."
   (concat (propertize (format "No %s yet" noun) 'face 'safeslop-surface-hint)
           (if new-key
               (format " — press %s to create one, or %s to refresh.\n"
@@ -340,27 +346,29 @@ returned yet — the slow-CLI pile-up that made refreshes fight input.")
 
 (cl-defun safeslop-surface-render
     (&key argv label noun entries-fn header-fn empty-fn keep-point then)
-  "Fetch ARGV asynchronously, then re-render the current dashboard in place.
-The one render engine behind the Sessions/Profiles surfaces: the fetch
-runs in a subprocess and the redraw happens in its callback, so neither a manual
-\\`g' nor an auto-refresh timer ever freezes Emacs (specs/0052 #7).
+  "Fetch ARGV asynchronously, then re-render the current dashboard in
+place. The one render engine behind the Sessions/Profiles surfaces: the
+fetch runs in a subprocess and the redraw happens in its callback, so
+neither a manual \\`g' nor an auto-refresh timer ever freezes Emacs
+(specs/0052 #7).
 
-ENTRIES-FN is called in the surface buffer with the parsed envelope and must
-return the new `tabulated-list-entries', doing any surface-specific bookkeeping
-(caching rows by id, remembering the config path) as it goes.  HEADER-FN returns
-the header block inserted above the rows.  On a failed envelope the engine echoes
-and inserts a persistent `safeslop-surface--error-banner' for LABEL (the
-human-readable name of the fetch, e.g. \"session list\"); on an empty result it
-inserts EMPTY-FN's guidance instead, so an empty table is never mysterious.
-NOUN (plural, e.g. \"sessions\") drives the loading hint painted immediately
+ENTRIES-FN is called in the surface buffer with the parsed envelope and
+must return the new `tabulated-list-entries', doing any surface-specific
+bookkeeping (caching rows by id, remembering the config path) as it
+goes.  HEADER-FN returns the header block inserted above the rows.  On a
+failed envelope the engine echoes and inserts a persistent
+`safeslop-surface--error-banner' for LABEL (the human-readable name of
+the fetch, e.g. \"session list\"); on an empty result it inserts
+EMPTY-FN's guidance instead, so an empty table is never mysterious. NOUN
+(plural, e.g. \"sessions\") drives the loading hint painted immediately
 into a still-empty buffer on first open.
 
 With KEEP-POINT non-nil, the engine snapshots every showing window's
-scroll+cursor BEFORE the reprint, re-finds the operator's row AFTER the header
-is re-inserted, and restores each view — the specs/0061 cursor-jump fix.  THEN,
-when given, is called with point in the redrawn buffer and controls point
-instead (used to reveal a just-created row); otherwise a plain render lands on
-the first row."
+scroll+cursor BEFORE the reprint, re-finds the operator's row AFTER the
+header is re-inserted, and restores each view — the specs/0061
+cursor-jump fix.  THEN, when given, is called with point in the redrawn
+buffer and controls point instead (used to reveal a just-created row);
+otherwise a plain render lands on the first row."
   (let ((buf (current-buffer)))
     ;; First open: paint the header + loading hint at once so the operator never
     ;; faces a blank buffer while the first fetch is in flight.

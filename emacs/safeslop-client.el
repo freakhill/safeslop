@@ -155,12 +155,13 @@ the real reason (specs/0063 F9) is not lost behind \"exit status N\"."
   "Debug event label for the next safeslop CLI call (`call' or UI `poll').")
 
 (defun safeslop--call-json (args)
-  "Run safeslop with ARGS synchronously and parse stdout as a contract envelope.
-ARGS is passed to `call-process' as an argv list; no shell is used.  This BLOCKS
-Emacs until the subprocess exits — prefer `safeslop--call-json-async' for anything
-user-facing so a slow command (credential staging, `doctor' probing the toolchain,
-a boundary launch) never freezes the editor.  Kept for the parse-path tests and
-any genuinely fast, must-be-synchronous caller.  Degrades gracefully via
+  "Run safeslop with ARGS synchronously and parse stdout as a contract
+envelope. ARGS is passed to `call-process' as an argv list; no shell is
+used.  This BLOCKS Emacs until the subprocess exits — prefer
+`safeslop--call-json-async' for anything user-facing so a slow command
+(credential staging, `doctor' probing the toolchain, a boundary launch)
+never freezes the editor.  Kept for the parse-path tests and any
+genuinely fast, must-be-synchronous caller.  Degrades gracefully via
 `safeslop--finish-envelope'."
   (safeslop--debug :event safeslop--debug-call-event :argv (string-join args " "))
   (with-temp-buffer
@@ -173,16 +174,18 @@ any genuinely fast, must-be-synchronous caller.  Degrades gracefully via
       (safeslop--finish-envelope (buffer-string) status))))
 
 (defun safeslop--call-json-async (args callback &optional stderr)
-  "Run safeslop with ARGS asynchronously; call CALLBACK with the parsed envelope.
-ARGS is the argv list (no shell).  CALLBACK receives one argument — the contract
-envelope (a real one, or a CLIENT_* error envelope on a missing program / non-JSON
-output) — and runs in the process sentinel once the subprocess exits, so a slow
-command never blocks Emacs's main thread.  STDERR, when non-nil, is a buffer that
-receives the process's stderr (used for user-visible progress, e.g. lazy image
-builds); when nil, a private stderr sink is attached instead (specs/0063 F9), so
-stderr noise can never corrupt the stdout envelope parse, and its first line is
-folded into the failure diagnostics.  Returns the process, or nil when it could
-not be spawned (CALLBACK is still invoked, with a client error envelope)."
+  "Run safeslop with ARGS asynchronously; call CALLBACK with the parsed
+envelope. ARGS is the argv list (no shell).  CALLBACK receives one
+argument — the contract envelope (a real one, or a CLIENT_* error
+envelope on a missing program / non-JSON output) — and runs in the
+process sentinel once the subprocess exits, so a slow command never
+blocks Emacs's main thread.  STDERR, when non-nil, is a buffer that
+receives the process's stderr (used for user-visible progress, e.g. lazy
+image builds); when nil, a private stderr sink is attached instead
+(specs/0063 F9), so stderr noise can never corrupt the stdout envelope
+parse, and its first line is folded into the failure diagnostics.
+Returns the process, or nil when it could not be spawned (CALLBACK is
+still invoked, with a client error envelope)."
   (safeslop--debug :event safeslop--debug-call-event :argv (string-join args " "))
   (let* ((buf (generate-new-buffer " *safeslop-call*"))
          (owns-stderr (null stderr))

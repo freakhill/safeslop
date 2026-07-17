@@ -24,26 +24,21 @@
 (require 'safeslop-client)
 (require 'safeslop-surface)
 (require 'safeslop-output)
+(require 'safeslop-session-terminal)
+(require 'safeslop-egress)
 
 ;; The portal sits above this layer (it requires safeslop-session); the reveal
 ;; hook is called `fboundp'-guarded and the command only from keymaps, so these
 ;; upward references stay late-bound.
 (declare-function safeslop-portal--reveal-session "safeslop-portal" (id))
 (declare-function safeslop-portal "safeslop-portal" ())
-;; Optional eat terminal API — loaded lazily in `safeslop-session--make-terminal'
-;; only when eat is installed; declared here so the byte-compiler stays quiet.
-(declare-function eat-mode "eat" ())
-(declare-function eat-exec "eat" (buffer name command startfile switches))
-(defvar eat-term-name)
-;; Defined once `compilation-mode' runs in the JSONL status fallback buffer.
-(defvar compilation-mode-map)
-
 (defun safeslop-session--create-args (agent workspace &optional environment network trust-host)
-  "Return exact argv for creating an ad-hoc session with AGENT in WORKSPACE.
-ENVIRONMENT (host|container) and NETWORK (deny|allow) default to container/deny
-when nil, because the engine requires an explicit environment (specs/0053).  An
-explicit empty string omits that flag for legacy/test callers that need to assert
-raw argv shape.  TRUST-HOST appends `--trust-host' only for ad-hoc host sessions."
+  "Return exact argv for creating an ad-hoc session with AGENT in
+WORKSPACE. ENVIRONMENT (host|container) and NETWORK (deny|allow) default
+to container/deny when nil, because the engine requires an explicit
+environment (specs/0053).  An explicit empty string omits that flag for
+legacy/test callers that need to assert raw argv shape.  TRUST-HOST
+appends `--trust-host' only for ad-hoc host sessions."
   (let ((environment (if (null environment) "container" environment))
         (network (if (null network) "deny" network)))
     (append
@@ -127,14 +122,15 @@ status line so the reason is readable where the operator is already looking."
                             (if msg (concat " — " msg) "")))))))))
 
 (defun safeslop-session--call-json-async-with-progress (args callback)
-  "Run safeslop ARGS asynchronously with stderr mirrored to a progress buffer.
-Stdout stays reserved for the final JSON contract envelope; stderr is user-visible
-progress for slow lazy profile image builds.  A thin wrapper over
-`safeslop--call-json-async' (which owns spawn/parse/degrade): this only displays
-the progress buffer up front and appends the outcome — success, CLI failure, or a
-spawn failure — once the call resolves, reading `safeslop--last-call-status' in
-the callback (stable there; sentinels run one at a time).  CALLBACK receives the
-parsed envelope, exactly like `safeslop--call-json-async'."
+  "Run safeslop ARGS asynchronously with stderr mirrored to a progress
+buffer. Stdout stays reserved for the final JSON contract envelope;
+stderr is user-visible progress for slow lazy profile image builds.  A
+thin wrapper over `safeslop--call-json-async' (which owns
+spawn/parse/degrade): this only displays the progress buffer up front
+and appends the outcome — success, CLI failure, or a spawn failure —
+once the call resolves, reading `safeslop--last-call-status' in the
+callback (stable there; sentinels run one at a time).  CALLBACK receives
+the parsed envelope, exactly like `safeslop--call-json-async'."
   (let ((progress-buf (safeslop-session--progress-buffer args)))
     (safeslop--call-json-async
      args
@@ -146,8 +142,8 @@ parsed envelope, exactly like `safeslop--call-json-async'."
 
 (defun safeslop-session--create-async (args progress-p callback)
   "Run session-create ARGS and pass the resulting envelope to CALLBACK.
-PROGRESS-P enables the visible progress buffer path because container sessions may
-need a slow lazy first image build."
+PROGRESS-P enables the visible progress buffer path because container
+sessions may need a slow lazy first image build."
   (if progress-p
       (safeslop-session--call-json-async-with-progress args callback)
     (safeslop--call-json-async args callback)))
@@ -176,15 +172,16 @@ need a slow lazy first image build."
 
 ;;;###autoload
 (defun safeslop-session-new (&optional agent workspace callback environment network profile trust-host)
-  "Create a safeslop session and show the JSON envelope.
-Interactively, first offer an existing PROFILE from `safeslop profile list'; if a
-profile is chosen, `session create --profile' creates the session from the stored
-policy.  Choosing `<ad hoc>' falls back to AGENT/WORKSPACE/ENVIRONMENT/NETWORK
-prompts.  Interactive ad-hoc host creation asks for explicit TRUST-HOST
-acknowledgement before passing `--trust-host'.  Noninteractive callers can pass
-AGENT/WORKSPACE as before; nil ENVIRONMENT/NETWORK default to container/deny,
-while explicit empty strings omit those flags for compatibility tests.  CALLBACK,
-when given, receives the envelope."
+  "Create a safeslop session and show the JSON envelope. Interactively,
+first offer an existing PROFILE from `safeslop profile list'; if a
+profile is chosen, `session create --profile' creates the session from
+the stored policy.  Choosing `<ad hoc>' falls back to
+AGENT/WORKSPACE/ENVIRONMENT/NETWORK prompts.  Interactive ad-hoc host
+creation asks for explicit TRUST-HOST acknowledgement before passing
+`--trust-host'.  Noninteractive callers can pass AGENT/WORKSPACE as
+before; nil ENVIRONMENT/NETWORK default to container/deny, while
+explicit empty strings omit those flags for compatibility tests.
+CALLBACK, when given, receives the envelope."
   (interactive
    (let ((profile (safeslop-session--read-profile-choice)))
      (if profile
@@ -234,9 +231,10 @@ This is the noninteractive/testable profile-picker bridge used by
   (list "trust" path))
 
 (defun safeslop-session--create-progress-p (args)
-  "Return non-nil when a create with ARGS resolves/pulls an image (spinner-worthy).
-Profile and container ad-hoc creates do; host ad-hoc creates do not.  Derived from
-ARGS so a trust-retry re-dispatches with the same progress behaviour as the first try."
+  "Return non-nil when a create with ARGS resolves/pulls an image
+(spinner-worthy). Profile and container ad-hoc creates do; host ad-hoc
+creates do not.  Derived from ARGS so a trust-retry re-dispatches with
+the same progress behaviour as the first try."
   (or (and (member "--profile" args) t)
       (let ((env (cadr (member "--environment" args))))
         (or (null env) (equal env "container")))))
@@ -274,9 +272,9 @@ ARGS so a trust-retry re-dispatches with the same progress behaviour as the firs
       (append args '("--trust-host")))))
 
 (defun safeslop-session--maybe-offer-host-trust-retry (args callback envelope)
-  "Offer one `--trust-host' retry for ad-hoc host TRUST_REQUIRED without a path.
-This is separate from policy trust: it never calls `safeslop trust' and only runs
-for interactive creates (CALLBACK nil)."
+  "Offer one `--trust-host' retry for ad-hoc host TRUST_REQUIRED without a
+path. This is separate from policy trust: it never calls `safeslop
+trust' and only runs for interactive creates (CALLBACK nil)."
   (when (and (null callback)
              (equal (safeslop-contract-first-error-code envelope) "TRUST_REQUIRED")
              (safeslop-session--ad-hoc-host-create-args-p args)
@@ -290,11 +288,12 @@ for interactive creates (CALLBACK nil)."
         t))))
 
 (defun safeslop-session--maybe-offer-trust (args callback envelope)
-  "Offer to approve the policy and retry when ENVELOPE is a TRUST_REQUIRED refusal.
-`session create --profile' is gated on a host-recorded approval of the safeslop.cue
-bytes (specs/0072 F1); the client offers `safeslop trust <path>' then re-dispatches
-the create with ARGS.  Interactive only (CALLBACK nil), so tests see the raw refusal.
-Returns non-nil when a retry was launched."
+  "Offer to approve the policy and retry when ENVELOPE is a TRUST_REQUIRED
+refusal. `session create --profile' is gated on a host-recorded approval
+of the safeslop.cue bytes (specs/0072 F1); the client offers `safeslop
+trust <path>' then re-dispatches the create with ARGS.  Interactive only
+(CALLBACK nil), so tests see the raw refusal. Returns non-nil when a
+retry was launched."
   (when (and (null callback)
              (equal (safeslop-contract-first-error-code envelope) "TRUST_REQUIRED"))
     (let ((path (safeslop-session--trust-required-path envelope)))
@@ -363,446 +362,6 @@ forward-compat), agent, status, and workspace so the pick is informed."
                     "")))))
     (completing-read prompt (mapcar #'car by-id) nil nil)))
 
-(defvar-local safeslop-session--run-output nil
-  "Raw stdout accumulated from the `session run' process for this buffer.
-Captured before term-mode renders it, so PTY_UNAVAILABLE detection is immune to
-terminal line wrapping and term's trailing status line.")
-
-(defvar-local safeslop-session--fallback-done nil
-  "Non-nil once this run buffer has switched to the JSONL status fallback.
-Guards against the run process's filter and sentinel both triggering the switch.")
-
-(defun safeslop-session--pty-unavailable-p (output)
-  "Return non-nil if OUTPUT carries the PTY_UNAVAILABLE contract error code.
-A token match on the stable error code, not a strict JSON parse: the run process
-is interactive, so its stdout may carry agent banner text around the envelope and
-a PTY translates newlines, either of which can defeat a whole-buffer parse."
-  (and (stringp output)
-       (string-match-p "\"PTY_UNAVAILABLE\"" output)))
-
-(defun safeslop-session--maybe-status-fallback (buf session-id)
-  "Switch BUF to the JSONL status fallback if its run reported PTY_UNAVAILABLE.
-Idempotent per buffer via `safeslop-session--fallback-done'."
-  (when (buffer-live-p buf)
-    (with-current-buffer buf
-      (when (and (not safeslop-session--fallback-done)
-                 (safeslop-session--pty-unavailable-p safeslop-session--run-output))
-        (setq safeslop-session--fallback-done t)
-        (safeslop-session-status-fallback session-id)))))
-
-(defconst safeslop-session--failure-text-width 160
-  "Maximum displayed width of one structured failure summary or action.")
-
-(defconst safeslop-session--failure-unsafe-patterns
-  '("op://" "begin .*key" "seeded-secret" "\\btoken\\b"
-    "/Users/" "/home/" "/tmp/" "\\.ssh/" "\\.aws/" "\\.kube/")
-  "Case-insensitive patterns suppressed from failure UI as a defensive backstop.")
-
-(defun safeslop-session--failure-safe-text (value)
-  "Return bounded one-line VALUE when display-safe, otherwise nil."
-  (when (and (stringp value) (not (string-empty-p value)))
-    (let* ((one-line (string-trim
-                      (replace-regexp-in-string "[[:cntrl:]]+" " " value)))
-           (case-fold-search t))
-      (unless (or (string-empty-p one-line)
-                  (cl-some (lambda (re) (string-match-p re one-line))
-                           safeslop-session--failure-unsafe-patterns))
-        (truncate-string-to-width one-line safeslop-session--failure-text-width
-                                  nil nil "…")))))
-
-(defun safeslop-session--structured-failure (data)
-  "Return DATA's validated, value-free v1 `last_failure' alist, or nil."
-  (let* ((raw (and (listp data) (alist-get 'last_failure data)))
-         (version (and (listp raw) (alist-get 'version raw)))
-         (code (and (listp raw) (alist-get 'code raw)))
-         (summary (and (listp raw)
-                       (safeslop-session--failure-safe-text
-                        (alist-get 'summary raw))))
-         (action (and (listp raw)
-                      (safeslop-session--failure-safe-text
-                       (alist-get 'action raw)))))
-    (when (and (equal version 1) (stringp code)
-               (string-match-p "\\`[a-z0-9_]+\\'" code)
-               summary action)
-      `((version . ,version) (code . ,code)
-        (summary . ,summary) (action . ,action)))))
-
-(defun safeslop-session--failure-summary (data)
-  "Return structured failure summary from DATA, with safe legacy fallback."
-  (or (alist-get 'summary (safeslop-session--structured-failure data))
-      (safeslop-session--failure-safe-text (alist-get 'last_error data))))
-
-(defvar safeslop-session--reported-failures (make-hash-table :test #'equal)
-  "Failure notification keys already shown during this Emacs process.")
-
-(defun safeslop-session--report-terminal-failure (session-id)
-  "Show SESSION-ID's stored failure once and refresh a live portal."
-  (when-let* ((data (safeslop-session--fetch-data session-id))
-              (reason (safeslop-session--failure-summary data)))
-    (let* ((failure (safeslop-session--structured-failure data))
-           (action (alist-get 'action failure))
-           (key (if failure
-                    (list session-id (alist-get 'version failure)
-                          (alist-get 'code failure))
-                  (list session-id 'legacy reason))))
-      (unless (gethash key safeslop-session--reported-failures)
-        (puthash key t safeslop-session--reported-failures)
-        (message "safeslop session failed: %s%s"
-                 reason (if action (concat " " action) ""))
-        (safeslop-session-detail session-id data)
-        (when (fboundp 'safeslop-portal--reveal-session)
-          (safeslop-portal--reveal-session session-id))))))
-
-;;; Self-describing live buffers (specs/0086 T3) -----------------------------
-;; A live agent buffer used to be named by opaque session id (`*safeslop-<id>*'),
-;; so an operator with several sessions could not answer "which buffer, which
-;; project, which credentials?" without opening details one by one (specs/0071 rec
-;; #3).  These pure builders derive a value-free, self-describing buffer label and
-;; header line from a `session status' record; the buffer keys on a buffer-local
-;; id so the portal still finds it after the name becomes descriptive.
-
-(defvar-local safeslop-session-id nil
-  "The safeslop session id this terminal buffer is running, or nil.
-Set after terminal creation so the portal can find a live buffer by id even
-after its displayed name becomes descriptive (specs/0086 T3).  The id is the
-sole addressing handle; the buffer name is a pure, renamable label.")
-
-(defvar-local safeslop-session-safety-chrome nil
-  "Buffer-local mode-line safety posture for a live safeslop session.
-The symbol itself is installed in `mode-line-format', so refreshing this value
-updates the segment without replacing terminal-mode or user entries.")
-
-(defun safeslop-session--cell-help (cell)
-  "Return CELL's help text, or nil when it has none."
-  (and (stringp cell) (get-text-property 0 'help-echo cell)))
-
-(defun safeslop-session--posture-help (data)
-  "Return value-free expanded safety posture help for session DATA.
-Environment and network descriptions come from the same shared cells used by
-the dashboards.  Credential text uses the defensive 0086 scope formatter."
-  (let* ((env (or (safeslop-session--safe-display-field
-                   (safeslop-session--field data 'environment))
-                  "unknown"))
-         (net (or (safeslop-session--safe-display-field
-                   (safeslop-session--field data 'network))
-                  "unknown"))
-         (env-help (safeslop-session--cell-help
-                    (safeslop-surface--env-cell env)))
-         (net-help (safeslop-session--cell-help
-                    (safeslop-surface--net-cell net))))
-    (string-join
-     (list (if env-help
-               (format "environment=%s (%s)" env env-help)
-             (format "environment=%s" env))
-           (or net-help (format "network=%s" net))
-           (format "credentials: %s" (safeslop-session--creds-summary data)))
-     " · ")))
-
-(defun safeslop-session--safety-chrome (data)
-  "Return a persistent, color-redundant mode-line segment for session DATA.
-Literal environment/network words remain readable without color; the existing
-shared faces reinforce them.  Help text expands the same value-free posture."
-  (let* ((env (or (safeslop-session--safe-display-field
-                   (safeslop-session--field data 'environment))
-                  "unknown"))
-         (net (or (safeslop-session--safe-display-field
-                   (safeslop-session--field data 'network))
-                  "unknown"))
-         (count (safeslop-session--credential-count data))
-         (chrome (concat "safeslop["
-                         (safeslop-surface--env-cell env) "/"
-                         (safeslop-surface--net-cell net)
-                         " creds:" (if (> count 0) (number-to-string count) "none")
-                         "]")))
-    (add-text-properties 0 (length chrome)
-                         (list 'help-echo (safeslop-session--posture-help data))
-                         chrome)
-    chrome))
-
-(defun safeslop-session--install-safety-chrome (data)
-  "Install DATA's safety segment locally without replacing the current mode line.
-Installation is idempotent: the buffer-local segment symbol appears once and a
-copy of the terminal mode's existing format remains after it."
-  (setq-local safeslop-session-safety-chrome
-              (safeslop-session--safety-chrome data))
-  (let ((format (cond ((listp mode-line-format) (copy-sequence mode-line-format))
-                      ((null mode-line-format) nil)
-                      (t (list mode-line-format)))))
-    (unless (memq 'safeslop-session-safety-chrome format)
-      (setq-local mode-line-format
-                  (cons 'safeslop-session-safety-chrome format)))))
-
-(defconst safeslop-session--creds-unsafe-patterns
-  '("op://" "\\benv:" "private[-_ ]?key" "begin .*key" "\\btoken\\b" "\\`[~/]")
-  "Case-insensitive patterns never rendered from credential scope fields.
-Mirrors `safeslop-portal--creds-unsafe-patterns' (specs/0086 T2): the header
-is a second credential-scope surface, so it keeps the same defensive
-value-free floor even if a future JSON envelope regresses and carries a
-ref/value/path.")
-
-(defun safeslop-session--field (data key)
-  "Return DATA's KEY as a trimmed display string, or nil when empty/absent."
-  (let ((v (alist-get key data)))
-    (when (and (stringp v) (not (string-empty-p v))) v)))
-
-(defun safeslop-session--safe-display-field (value)
-  "Return VALUE when it is non-empty and safe to render, else nil.
-Refs, token markers, staged paths, and key refs are suppressed defensively so
-a buffer name/header never renders them even if the JSON regresses
-(specs/0086 T3)."
-  (when (and (stringp value) (not (string-empty-p value)))
-    (let ((case-fold-search t))
-      (unless (cl-some (lambda (re) (string-match-p re value))
-                       safeslop-session--creds-unsafe-patterns)
-        value))))
-
-(defun safeslop-session--creds-safe-field (value)
-  "Return VALUE when it is a safe credential-scope display field."
-  (safeslop-session--safe-display-field value))
-
-(defun safeslop-session--creds-scope-string (scope)
-  "Return one credential SCOPE alist as a compact \"kind name scope\" string.
-Only the engine's non-secret kind/name/scope fields are used; empty or unsafe
-fields are dropped so nothing but value-free text reaches the header."
-  (string-join
-   (delq nil
-         (mapcar (lambda (key)
-                   (safeslop-session--creds-safe-field (alist-get key scope)))
-                 '(kind name scope)))
-   " "))
-
-(defun safeslop-session--credential-scope-strings (data)
-  "Return DATA's non-empty, defensively value-free credential scope strings."
-  (let ((scopes (let ((v (alist-get 'credential_scopes data)))
-                  (if (vectorp v) (append v nil) v))))
-    (delq nil
-          (mapcar (lambda (scope)
-                    (let ((str (safeslop-session--creds-scope-string scope)))
-                      (unless (string-empty-p str) str)))
-                  scopes))))
-
-(defun safeslop-session--credential-count (data)
-  "Return the count of display-safe credential scopes in session DATA."
-  (length (safeslop-session--credential-scope-strings data)))
-
-(defun safeslop-session--creds-summary (data)
-  "Return DATA's value-free credential-scope summary, or an em dash when none.
-Comma-joins every scope as \"kind name scope\"; old records without
-`credential_scopes' (and empty/blank arrays) yield an em dash (specs/0086 T3)."
-  (let ((rendered (safeslop-session--credential-scope-strings data)))
-    (if rendered (string-join rendered ", ") "\u2014")))
-
-(defun safeslop-session--project (data)
-  "Return DATA's safe workspace basename, value-free, or nil.
-Only the final path component is used so a private parent path never leaks
-into a buffer name or header (specs/0086 value-free invariant).  The basename
-is still filtered because workspace names are host-controlled text."
-  (when-let* ((ws (safeslop-session--field data 'workspace)))
-    (safeslop-session--safe-display-field
-     (file-name-nondirectory (directory-file-name (expand-file-name ws))))))
-
-(defun safeslop-session--buffer-label (session-id data)
-  "Return a self-describing, value-free buffer label for SESSION-ID from DATA.
-Shape follows specs/0071 rec #3:
-`safeslop:<profile-or-name> <project> [env/net]'.  The profile wins over the
-display name; the project is the workspace basename; tier/net is
-`[environment/network]'.  With no legible identity/project data it falls back
-to the legacy `safeslop-<id>' name so the buffer is still created and the
-portal legacy lookup still finds it (specs/0086 T3)."
-  (let* ((who (or (safeslop-session--safe-display-field
-                   (safeslop-session--field data 'profile))
-                  (safeslop-session--safe-display-field
-                   (safeslop-session--field data 'name))))
-         (project (safeslop-session--project data))
-         (env (safeslop-session--safe-display-field
-               (safeslop-session--field data 'environment)))
-         (net (safeslop-session--safe-display-field
-               (safeslop-session--field data 'network)))
-         (tier (and env net (format "[%s/%s]" env net)))
-         (parts (delq nil (list (and who (concat "safeslop:" who))
-                                (and (null who) project (concat "safeslop:" project))
-                                (and who project project)
-                                (and (or who project) tier)))))
-    (if parts
-        (string-join parts " ")
-      (concat "safeslop-"
-              (or (safeslop-session--safe-display-field session-id) "unknown")))))
-
-(defun safeslop-session--header-line (data)
-  "Return the value-free header-line summary string for session DATA.
-Restates profile/project/tier/net (the buffer label shape) and appends the
-value-free credential-scope list as `creds: ...'
-(or `creds: \u2014' for old records
-and credential-less sessions).  Never includes token values, secret refs,
-staged paths, or key refs (specs/0086 T3)."
-  (let ((label (safeslop-session--buffer-label
-                (or (safeslop-session--field data 'session_id) "") data)))
-    (format "%s  creds: %s" label (safeslop-session--creds-summary data))))
-
-(defun safeslop-session--fetch-data (session-id)
-  "Return SESSION-ID's `session status' data alist, best effort, or nil.
-Synchronous but best-effort: a failed or slow status must never block launching
-the terminal, so any non-ok envelope simply yields nil and the caller falls back
-to the legacy buffer name (specs/0086 T3)."
-  (let ((env (safeslop--call-json
-              (list "session" "status" "--session-id" session-id "--output" "json"))))
-    (when (safeslop-contract-ok-p env)
-      (safeslop-contract-data env))))
-
-(defconst safeslop-session--doctor-args '("doctor" "--json")
-  "Exact argv for the runtime-helper preflight doctor probe.")
-
-(defun safeslop-session--doctor-tool-row (envelope tool)
-  "Return TOOL's `doctor --json' row from ENVELOPE, or nil.
-This is intentionally tolerant: failed doctor calls and old JSON without a
-`data.tools' object carry no preflight signal, so launch continues and the CLI
-remains authoritative."
-  (when (and (safeslop-contract-ok-p envelope) (stringp tool))
-    (let* ((data (safeslop-contract-data envelope))
-           (tools (and (listp data) (alist-get 'tools data)))
-           (row (and (listp tools) (alist-get (intern tool) tools))))
-      (and (listp row) row))))
-
-(defun safeslop-session--doctor-string-list (value)
-  "Return VALUE's string elements as a list, ignoring malformed entries."
-  (let ((items (cond
-                ((vectorp value) (append value nil))
-                ((listp value) value)
-                (t nil))))
-    (seq-filter #'stringp items)))
-
-(defun safeslop-session--doctor-shadowed-docker (envelope)
-  "Return docker shadow info from a doctor ENVELOPE, or nil when clean/old.
-The returned alist has `path' for the selected helper and `shadowed_paths' for
-lower-priority docker helpers reported by `tools.docker.shadowed_paths'."
-  (when-let* ((row (safeslop-session--doctor-tool-row envelope "docker"))
-              (shadowed (safeslop-session--doctor-string-list
-                         (alist-get 'shadowed_paths row))))
-    (let ((path (alist-get 'path row)))
-      (list (cons 'path (and (stringp path) path))
-            (cons 'shadowed_paths shadowed)))))
-
-(defun safeslop-session--message-path (path)
-  "Return PATH for a one-line diagnostic, suppressing control characters."
-  (if (and (stringp path) (not (string-empty-p path)))
-      (replace-regexp-in-string "[[:cntrl:]]+" "?" path)
-    "<unknown>"))
-
-(defun safeslop-session--docker-shadow-message (shadow)
-  "Return an actionable, value-free user message for docker SHADOW info."
-  (let* ((selected (safeslop-session--message-path (alist-get 'path shadow)))
-         (shadowed (mapcar #'safeslop-session--message-path
-                           (alist-get 'shadowed_paths shadow))))
-    (format (concat "safeslop: docker helper is shadowed; selected path: %s; "
-                    "shadowed paths: %s. Remove or reorder the shadowed docker "
-                    "entries on PATH, then retry.")
-            selected (string-join shadowed ", "))))
-
-(defun safeslop-session--container-session-data-p (data)
-  "Return non-nil when status DATA identifies a container session."
-  (and (listp data)
-       (equal (alist-get 'environment data) "container")))
-
-(defun safeslop-session--run-runtime-preflight (data)
-  "Run best-effort runtime preflight for container session DATA.
-Only a positive `doctor --json' signal that docker has `shadowed_paths' aborts;
-failed doctor calls and old JSON are pass-through UI misses, leaving the CLI to
-enforce the authoritative launch policy."
-  (when (safeslop-session--container-session-data-p data)
-    (when-let* ((shadow (safeslop-session--doctor-shadowed-docker
-                         (safeslop--call-json safeslop-session--doctor-args))))
-      (user-error "%s" (safeslop-session--docker-shadow-message shadow))))
-  data)
-
-(defun safeslop-session--fetch-data-and-runtime-preflight (session-id)
-  "Fetch SESSION-ID status, preflight container runtime shadows, and return data."
-  (let ((data (safeslop-session--fetch-data session-id)))
-    (safeslop-session--run-runtime-preflight data)
-    data))
-
-(defun safeslop-session--fetch-data-for-terminal (session-id preflight-runtime)
-  "Fetch SESSION-ID status for terminal naming.
-When PREFLIGHT-RUNTIME is non-nil, also preflight container runtime shadows.
-Socket reattach does not need a runtime helper, so it passes nil and leaves any
-attach failure to the CLI/socket path."
-  (let ((data (safeslop-session--fetch-data session-id)))
-    (when preflight-runtime
-      (safeslop-session--run-runtime-preflight data))
-    data))
-
-(defun safeslop-session--make-terminal (name program argv)
-  "Create terminal buffer *NAME* running PROGRAM with ARGV; return the buffer.
-Prefer the eat terminal (pure-elisp, 24-bit color) when it can be loaded,
-advertising TERM=xterm-256color; otherwise fall back to the built-in term-mode.
-eat is an OPTIONAL dependency: with it absent (e.g. CI) the agent still runs under
-term-mode, so every caller and test of the term path is unaffected."
-  (if (and (require 'eat nil t) (fboundp 'eat-exec))
-      (let ((buf (get-buffer-create (concat "*" name "*"))))
-        (with-current-buffer buf
-          (eat-mode)
-          ;; Bind dynamically so eat advertises a universally-understood truecolor
-          ;; terminal even if the user never set `eat-term-name' themselves.
-          (let ((eat-term-name "xterm-256color"))
-            (eat-exec buf name program nil argv)))
-        buf)
-    (let ((buf (apply #'make-term name program nil argv)))
-      (with-current-buffer buf
-        (term-mode)
-        (term-char-mode))
-      buf)))
-
-(defun safeslop-session--launch-term (session-id argv &optional preflight-runtime)
-  "Launch ARGV for SESSION-ID under a terminal PTY; return the buffer.
-Uses the eat terminal (24-bit truecolor) when available, else the built-in
-term-mode (see `safeslop-session--make-terminal').  If PREFLIGHT-RUNTIME is
-non-nil, preflight a known container record for shadowed docker before the
-terminal subprocess starts.  If the process reports the PTY_UNAVAILABLE contract
-error (no usable controlling terminal), switch to the read-only JSONL status
-fallback (`safeslop-session-status-fallback')."
-  ;; Fetch the session record best-effort BEFORE naming so the buffer is
-  ;; self-describing from the first frame (specs/0086 T3).  Coupled run preflights
-  ;; known container records before spawning; socket reattach deliberately does
-  ;; not, because it rejoins an existing supervisor and does not execute docker.
-  ;; A status miss yields nil and falls back to the legacy `safeslop-<id>' name;
-  ;; failed/old doctor JSON also passes through so the CLI stays authoritative.
-  (let* ((data (safeslop-session--fetch-data-for-terminal session-id preflight-runtime))
-         (buf (safeslop-session--make-terminal
-               (safeslop-session--buffer-label session-id data)
-               safeslop-program argv)))
-    ;; Set the buffer-local id AFTER terminal creation: the terminal major mode
-    ;; runs `kill-all-local-variables', which would wipe an id set beforehand.
-    ;; The header rides only on real record data, so a fallback-named legacy
-    ;; launch (no data) stays header-less.
-    (with-current-buffer buf
-      (setq-local safeslop-session-id session-id)
-      (when data
-        (setq header-line-format (safeslop-session--header-line data))
-        (safeslop-session--install-safety-chrome data)))
-    (let ((proc (get-buffer-process buf)))
-      (when proc
-        ;; Capture raw stdout ahead of term's renderer, then key on it when the
-        ;; process exits.  add-function (not set-process-*) preserves term's own
-        ;; filter/sentinel so the PTY keeps working on the happy path.
-        (add-function :before (process-filter proc)
-                      (lambda (_p string)
-                        (when (buffer-live-p buf)
-                          (with-current-buffer buf
-                            (setq safeslop-session--run-output
-                                  (concat (or safeslop-session--run-output "") string))))))
-        (add-function :after (process-sentinel proc)
-                      (lambda (p _event)
-                        (unless (process-live-p p)
-                          (unless (or (safeslop-session--maybe-status-fallback buf session-id)
-                                      (zerop (process-exit-status p)))
-                            (safeslop-session--report-terminal-failure session-id))))))
-        ;; Backstop for a process that already exited before the sentinel was wired.
-        (when (and proc (not (process-live-p proc)))
-          (unless (or (safeslop-session--maybe-status-fallback buf session-id)
-                      (zerop (process-exit-status proc)))
-            (safeslop-session--report-terminal-failure session-id))))
-    (pop-to-buffer buf)
-    buf))
-
 ;;;###autoload
 (defun safeslop-session-attach (&optional session-id)
   "Attach to SESSION-ID by running its agent under a built-in term-mode PTY.
@@ -813,11 +372,11 @@ JSONL status fallback (`safeslop-session-status-fallback')."
 
 ;;;###autoload
 (defun safeslop-session-run-detached (&optional session-id callback quiet)
-  "Start SESSION-ID under a detached supervisor, asynchronously.
-Container sessions are preflighted for a shadowed docker helper before spawning
-the supervisor.  When QUIET is non-nil, do not pop the JSON envelope buffer; this
-is used by the portal so row actions refresh in place instead of stealing the
-operator window."
+  "Start SESSION-ID under a detached supervisor, asynchronously. Container
+sessions are preflighted for a shadowed docker helper before spawning
+the supervisor.  When QUIET is non-nil, do not pop the JSON envelope
+buffer; this is used by the portal so row actions refresh in place
+instead of stealing the operator window."
   (interactive (list (safeslop-session--read-id "Run detached: ") nil nil))
   (safeslop-session--fetch-data-and-runtime-preflight session-id)
   (let ((args (safeslop-session--run-detached-args session-id)))
@@ -833,8 +392,8 @@ operator window."
 
 ;;;###autoload
 (defun safeslop-session-list (&optional callback)
-  "List safeslop sessions via the JSON contract, asynchronously.
-CALLBACK, when given, is called with the envelope once it arrives (used by tests)."
+  "List safeslop sessions via the JSON contract, asynchronously. CALLBACK,
+when given, is called with the envelope once it arrives (used by tests)."
   (interactive)
   (let ((args '("session" "list" "--output" "json")))
     (safeslop--call-json-async
@@ -845,8 +404,8 @@ CALLBACK, when given, is called with the envelope once it arrives (used by tests
 
 ;;;###autoload
 (defun safeslop-session-status (&optional session-id callback)
-  "Show SESSION-ID status via the JSON contract, asynchronously.
-CALLBACK, when given, is called with the envelope once it arrives (used by tests)."
+  "Show SESSION-ID status via the JSON contract, asynchronously. CALLBACK,
+when given, is called with the envelope once it arrives (used by tests)."
   (interactive (list (safeslop-session--read-id "Session status: ")))
   (let ((args (list "session" "status" "--session-id" session-id "--output" "json")))
     (safeslop--call-json-async
@@ -857,11 +416,12 @@ CALLBACK, when given, is called with the envelope once it arrives (used by tests
 
 ;;;###autoload
 (defun safeslop-session-stop (&optional session-id callback quiet)
-  "Stop SESSION-ID, revoking credentials, asynchronously, and show the envelope.
-Credential revocation can take a moment, so the call is async and never blocks
-Emacs.  CALLBACK, when given, is called with the envelope once it arrives (tests).
-When QUIET is non-nil, do not pop the JSON envelope buffer; this is used by the
-portal so row actions refresh in place instead of stealing the operator window."
+  "Stop SESSION-ID, revoking credentials, asynchronously, and show the
+envelope. Credential revocation can take a moment, so the call is async
+and never blocks Emacs.  CALLBACK, when given, is called with the
+envelope once it arrives (tests). When QUIET is non-nil, do not pop the
+JSON envelope buffer; this is used by the portal so row actions refresh
+in place instead of stealing the operator window."
   (interactive
    (let ((id (safeslop-session--read-id "Stop session: ")))
      (unless (yes-or-no-p (format "Stop %s? This revokes staged credentials and tears down the boundary. " id))
@@ -889,53 +449,6 @@ Name is a pure label (specs/0065 D1): the id stays the sole addressing
 handle, so this only ever carries --session-id, never a name-as-selector."
   (list "session" "rename" "--session-id" session-id "--name" name
         "--output" "json"))
-
-;; specs/0097: Egress observation is strictly read-only.  The three mutation
-;; functions below are explicit operator commands; no agent/proxy event calls
-;; them, and none edits safeslop.cue or profile egress policy.
-(defun safeslop-session--egress-observations-args (session-id)
-  "Return exact argv for SESSION-ID's value-free denied observations."
-  (list "session" "egress" "observations" "--session-id" session-id "--output" "json"))
-
-(defun safeslop-session--egress-grants-args (session-id)
-  "Return exact argv for SESSION-ID's active session-scoped grants."
-  (list "session" "egress" "grants" "--session-id" session-id "--output" "json"))
-
-(defun safeslop-session--egress-grant-args (session-id host port)
-  "Return exact argv to grant HOST:PORT for SESSION-ID."
-  (list "session" "egress" "grant" "--session-id" session-id "--host" host
-        "--port" (number-to-string port) "--output" "json"))
-
-(defun safeslop-session--egress-revoke-args (session-id grant-id)
-  "Return exact argv to revoke GRANT-ID from SESSION-ID."
-  (list "session" "egress" "revoke" "--session-id" session-id "--grant-id" grant-id
-        "--output" "json"))
-
-(defun safeslop-session--egress-dismiss-args (session-id host port)
-  "Return exact argv to keep HOST:PORT denied for SESSION-ID."
-  (list "session" "egress" "dismiss" "--session-id" session-id "--host" host
-        "--port" (number-to-string port) "--output" "json"))
-
-(defun safeslop-session--profile-egress-args (operation profile policy-path host port policy-hash)
-  "Return exact argv for explicit durable OPERATION on PROFILE's typed rule.
-POLICY-HASH is always supplied from the session snapshot so a changed policy
-fails closed instead of silently editing newer reviewed bytes."
-  (append (list "profile" "egress" operation profile)
-          (when (and (stringp policy-path) (not (string-prefix-p "builtin:" policy-path)))
-            (list policy-path))
-          (list "--host" host "--port" (number-to-string port)
-                "--expected-policy-hash" policy-hash "--output" "json")))
-
-(defun safeslop-session--egress-dispatch (args buffer-name callback quiet)
-  "Dispatch egress ARGS asynchronously, rendering BUFFER-NAME unless QUIET.
-CALLBACK receives the JSON envelope.  This is deliberately a thin explicit CLI
-bridge: it never consults or writes a profile policy."
-  (safeslop--call-json-async
-   args
-   (lambda (envelope)
-     (unless quiet
-       (safeslop--show-envelope-buffer buffer-name args envelope))
-     (when callback (funcall callback envelope)))))
 
 ;;;###autoload
 (defun safeslop-session-egress-observations (&optional session-id callback quiet)
@@ -990,122 +503,6 @@ edits a profile policy."
    (safeslop-session--egress-dismiss-args session-id host port)
    "*safeslop session egress dismiss*" callback quiet))
 
-(defun safeslop-session--review-observation-at-point ()
-  "Return the value-free review observation at point, or signal clearly."
-  (or (get-text-property (point) 'safeslop-egress-observation)
-      (user-error "Move point to a denied destination")))
-
-(defun safeslop-session--open-review-buffer (name title loading)
-  "Open operator-requested NAME once, then return it for an async update.
-LOADING is rendered before dispatch so a later proxy response cannot focus or pop
-any window."
-  (let ((buf (get-buffer-create name)))
-    (with-current-buffer buf
-      (safeslop-output-mode)
-      ;; Review keys carry session-specific closures; isolate them from the
-      ;; shared output-mode map used by unrelated read-only surfaces.
-      (use-local-map (copy-keymap (current-local-map)))
-      (let ((inhibit-read-only t))
-        (erase-buffer)
-        (insert title "\n" loading "\n")))
-    (pop-to-buffer buf)
-    buf))
-
-(defun safeslop-session--review-render (session-id session-data envelope &optional buffer)
-  "Render a value-free operator review into BUFFER without selecting it."
-  (let ((buf (or buffer (get-buffer-create "*safeslop egress review*")))
-        (observations (alist-get 'observations (safeslop-contract-data envelope))))
-    (when (buffer-live-p buf)
-      (with-current-buffer buf
-        (let ((inhibit-read-only t))
-          (erase-buffer)
-          (insert (format "Progressive egress review — session %s\n" session-id))
-          (insert "Passive observations are denied traffic, not prompts or authority.\n")
-          (insert "Keys: a Allow now, k Keep denied, A Always allow, g refresh, q quit\n\n")
-          (if (not (safeslop-contract-ok-p envelope))
-              (insert "Could not read observations; retry with g.\n")
-            (if (null observations)
-                (insert "No pending denied destinations.\n")
-              (dolist (obs observations)
-                (let ((start (point))
-                      (host (safeslop-session--safe-display-field (alist-get 'host obs)))
-                      (port (alist-get 'port obs)))
-                  ;; Deliberately render no request URI, header, or payload.
-                  (insert (format "%s:%s  count=%s  last=%s  %s\n"
-                                  (or host "[redacted]") (or port "?")
-                                  (or (alist-get 'count obs) 0)
-                                  (or (alist-get 'last_seen obs) "?")
-                                  (if (eq (alist-get 'grantable obs) t) "grantable" "keep denied")))
-                  (put-text-property start (point) 'safeslop-egress-observation obs)))))
-          (local-set-key (kbd "a")
-                         (lambda () (interactive)
-                           (let ((o (safeslop-session--review-observation-at-point)))
-                             (safeslop-session-egress-grant session-id (alist-get 'host o) (alist-get 'port o) nil t))))
-          (local-set-key (kbd "k")
-                         (lambda () (interactive)
-                           (let ((o (safeslop-session--review-observation-at-point)))
-                             (safeslop-session-egress-dismiss session-id (alist-get 'host o) (alist-get 'port o) nil t))))
-          (local-set-key (kbd "A")
-                         (lambda () (interactive)
-                           (safeslop-session--profile-egress-review
-                            session-data (safeslop-session--review-observation-at-point))))
-          (local-set-key (kbd "g") (lambda () (interactive) (safeslop-session-egress-review session-id session-data)))
-          (goto-char (point-min)))))))
-
-(defun safeslop-session--profile-egress-render (session-data observation envelope buffer)
-  "Render the hash-checked persistent-rule review into BUFFER, never focusing it."
-  (when (buffer-live-p buffer)
-    (with-current-buffer buffer
-      (let ((inhibit-read-only t)
-            (data (safeslop-contract-data envelope)))
-        (erase-buffer)
-        (if (not (safeslop-contract-ok-p envelope))
-            (progn
-              ;; A stale snapshot is a hard stop: add is deliberately unbound.
-              (insert "Policy changed; no persistent rule was written. Re-open review to inspect current policy.\n")
-              (local-set-key (kbd "a") nil))
-          (insert "Persistent egress review — future sessions only\n")
-          (insert (format "Profile: %s\n" (or (alist-get 'profile data) "[redacted]")))
-          (insert (format "Current policy hash: %s\n" (or (alist-get 'current_policy_hash data) "[redacted]")))
-          (insert (format "Candidate policy hash: %s\n" (or (alist-get 'candidate_policy_hash data) "[redacted]")))
-          (insert (format "Delta: + persistentEgress: {%s, %s}\n"
-                          (or (safeslop-session--safe-display-field (alist-get 'host observation)) "[redacted]")
-                          (or (alist-get 'port observation) "?")))
-          (insert "Source/lifetime: profile-persistent / future sessions\n")
-          (insert "\nPress a to add this exact rule, changing policy bytes; then review and re-trust before a new session can use it.\n")
-          (local-set-key
-           (kbd "a")
-           (lambda () (interactive)
-             (safeslop-session--egress-dispatch
-              (safeslop-session--profile-egress-args
-               "add" (alist-get 'profile session-data) (alist-get 'policy_path session-data)
-               (alist-get 'host observation) (alist-get 'port observation)
-               (alist-get 'policy_hash session-data))
-              "*safeslop profile egress add*"
-              (lambda (result)
-                (if (safeslop-contract-ok-p result)
-                    (message "safeslop: persistent rule written; review and re-trust before creating a new session")
-                  (safeslop-session--profile-egress-render session-data observation result buffer)))
-              t))))
-        (goto-char (point-min))))))
-
-(defun safeslop-session--profile-egress-review (session-data observation)
-  "Preview OBSERVATION as a durable rule; only a later explicit key writes it."
-  (let ((profile (alist-get 'profile session-data))
-        (hash (alist-get 'policy_hash session-data))
-        (path (alist-get 'policy_path session-data)))
-    (unless (and (stringp profile) (stringp hash)
-                 (not (string-prefix-p "builtin:" (or path ""))))
-      (user-error "Always allow requires a project profile snapshot"))
-    (let ((buf (safeslop-session--open-review-buffer
-                "*safeslop profile egress review*" "Persistent egress review"
-                "Loading hash-checked policy delta; no policy is being changed.")))
-      (safeslop-session--egress-dispatch
-       (safeslop-session--profile-egress-args "preview" profile path
-                                             (alist-get 'host observation) (alist-get 'port observation) hash)
-       "*safeslop profile egress preview*"
-       (lambda (envelope) (safeslop-session--profile-egress-render session-data observation envelope buf)) t))))
-
 ;;;###autoload
 (defun safeslop-session-egress-review (&optional session-id session-data)
   "Open a passive review buffer only on explicit operator invocation.
@@ -1119,31 +516,16 @@ The observation query is asynchronous and never steals focus when it completes."
      (lambda (envelope) (safeslop-session--review-render session-id session-data envelope buf))
      t)))
 
-(defun safeslop-session--egress-grants-summary (data)
-  "Return DATA's value-free session grants as a compact detail string."
-  (let ((grants (alist-get 'egress_grants data))
-        (revision (or (alist-get 'egress_grant_revision data) 0)))
-    (if (null grants)
-        (format "none (revision %s)" revision)
-      (format "%s (revision %s)"
-              (mapconcat
-               (lambda (grant)
-                 (format "%s:%s (%s)"
-                         (or (alist-get 'host grant) "?")
-                         (or (alist-get 'port grant) "?")
-                         (or (alist-get 'id grant) "?")))
-               grants ", ")
-              revision))))
-
 ;;;###autoload
 (defun safeslop-session-remove (&optional session-id callback quiet)
-  "Remove SESSION-ID's record, asynchronously, and show the envelope.
-This clears a stopped/created session out of the list (the portal exposes it as
-`x').  The CLI refuses a running session and revokes any still-live staged
-credentials before deleting the record.  CALLBACK, when given, receives the
-envelope once it arrives (used by the portal to refresh, and by tests).  When
-QUIET is non-nil, do not pop the JSON envelope buffer; this is used by the portal
-so row actions refresh in place instead of stealing the operator window."
+  "Remove SESSION-ID's record, asynchronously, and show the envelope. This
+clears a stopped/created session out of the list (the portal exposes it
+as `x').  The CLI refuses a running session and revokes any still-live
+staged credentials before deleting the record.  CALLBACK, when given,
+receives the envelope once it arrives (used by the portal to refresh,
+and by tests).  When QUIET is non-nil, do not pop the JSON envelope
+buffer; this is used by the portal so row actions refresh in place
+instead of stealing the operator window."
   (interactive (list (safeslop-session--read-id "Remove session: ") nil nil))
   (let ((args (safeslop-session--remove-args session-id)))
     (safeslop--call-json-async
@@ -1155,13 +537,14 @@ so row actions refresh in place instead of stealing the operator window."
 
 ;;;###autoload
 (defun safeslop-session-prune (&optional callback quiet)
-  "Remove all stopped session records, asynchronously, and show the envelope.
-Running and created sessions are left untouched; a crashed session (marked
-running but whose process is gone) is reconciled to stopped and pruned in the
-same pass.  CALLBACK, when given, receives the envelope once it arrives (used by
-the portal to refresh, and by tests).  When QUIET is non-nil, do not pop the JSON
-envelope buffer; this is used by the portal so row actions refresh in place
-instead of stealing the operator window."
+  "Remove all stopped session records, asynchronously, and show the
+envelope. Running and created sessions are left untouched; a crashed
+session (marked running but whose process is gone) is reconciled to
+stopped and pruned in the same pass.  CALLBACK, when given, receives the
+envelope once it arrives (used by the portal to refresh, and by tests).
+When QUIET is non-nil, do not pop the JSON envelope buffer; this is used
+by the portal so row actions refresh in place instead of stealing the
+operator window."
   (interactive)
   (let ((args (safeslop-session--prune-args)))
     (safeslop--call-json-async
@@ -1265,29 +648,6 @@ the portal so row actions refresh in place instead of stealing the window."
                      (_ "Next: c new session · P portal"))))
        "\n"))))
 
-(defun safeslop-session--detail-pending-render (buffer envelope)
-  "Replace BUFFER's passive egress-count line without selecting its window."
-  (when (buffer-live-p buffer)
-    (with-current-buffer buffer
-      (let ((inhibit-read-only t)
-            (count (alist-get 'pending_count (safeslop-contract-data envelope))))
-        (save-excursion
-          (goto-char (point-min))
-          (when (re-search-forward "^Egress review:.*$" nil t)
-            (replace-match
-             (if (and (safeslop-contract-ok-p envelope) (integerp count))
-                 (format "Egress review: %d pending denied destination%s (v to review)"
-                         count (if (= count 1) "" "s"))
-               "Egress review: unavailable; press v to retry"))))))))
-
-(defun safeslop-session--detail-request-pending-count (session-id data buffer)
-  "Asynchronously discover the passive count for a container-deny detail view."
-  (when (and (equal (alist-get 'environment data) "container")
-             (equal (alist-get 'network data) "deny"))
-    (safeslop-session-egress-observations
-     session-id
-     (lambda (envelope) (safeslop-session--detail-pending-render buffer envelope)) t)))
-
 ;;;###autoload
 (defun safeslop-session-detail (&optional session-id data)
   "Show a read-only detail buffer for SESSION-ID using DATA or `session status'."
@@ -1327,35 +687,6 @@ the portal so row actions refresh in place instead of stealing the window."
         (safeslop-session--detail-request-pending-count session-id data buf)
         buf)
     (safeslop-session-status session-id)))
-
-(defvar safeslop-session-status-fallback-mode-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "P") #'safeslop-portal)
-    (define-key map (kbd "L") #'safeslop-debug-log)
-    (define-key map (kbd "q") #'quit-window)
-    map)
-  "Keymap for JSONL session status fallback buffers.")
-
-(defun safeslop-session-status-fallback (&optional session-id)
-  "Open a read-only compilation buffer for SESSION-ID JSONL status fallback.
-The monitor process is started with an exact argv list; no shell is used."
-  (interactive (list (safeslop-session--read-id "Session id: ")))
-  (let* ((buf (get-buffer-create "*safeslop session status jsonl*"))
-         (argv (list safeslop-program "session" "status"
-                     "--session-id" session-id "--output" "jsonl")))
-    (with-current-buffer buf
-      (let ((inhibit-read-only t))
-        (erase-buffer)
-        (compilation-mode)
-        (use-local-map (make-composed-keymap safeslop-session-status-fallback-mode-map
-                                             compilation-mode-map))))
-    (make-process :name "safeslop-status-jsonl"
-                  :buffer buf
-                  :command argv
-                  :connection-type 'pipe
-                  :noquery t)
-    (pop-to-buffer buf)
-    buf))
 
 (provide 'safeslop-session)
 ;;; safeslop-session.el ends here

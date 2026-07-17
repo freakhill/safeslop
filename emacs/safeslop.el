@@ -15,15 +15,26 @@
 ;;
 ;; Module map (specs/0062; each layer only requires the ones above it):
 ;;
-;;   safeslop-contract.el  versioned JSON envelope parse/validate
-;;   safeslop-client.el    CLI subprocess substrate + redacted debug log
-;;   safeslop-surface.el   shared dashboard chrome + the render engine
-;;   safeslop-output.el    read-only envelope output buffers
-;;   safeslop-session.el   session commands, terminal attach, detail view
-;;   safeslop-portal.el       Sessions dashboard
-;;   safeslop-profiles.el     Profiles dashboard + CUE-backed CRUD
-;;   safeslop-credentials.el  Credentials posture (value-free readiness)
-;;   safeslop.el              this file: top-level commands + `C-c s' command map
+;;   safeslop-contract.el          versioned JSON envelope parse/validate
+;;   safeslop-client.el            CLI subprocess substrate + redacted debug log
+;;   safeslop-surface.el           shared dashboard chrome + the render engine
+;;   safeslop-output.el            read-only envelope output buffers
+;;   safeslop-session-terminal.el  session PTY launch, monitor, failure chrome
+;;   safeslop-egress.el            progressive session egress command + review UI
+;;   safeslop-session.el           session front: commands, attach, detail view
+;;   safeslop-portal.el            Sessions dashboard
+;;   safeslop-profile-evaluation.el  profile safety evaluation validate/render
+;;   safeslop-profile-compose.el     interactive profile composition UI
+;;   safeslop-profiles.el          Profiles front: dashboard + CUE-backed CRUD
+;;   safeslop-credentials.el       Credentials posture (value-free readiness)
+;;   safeslop.el                   this file: top-level commands + `C-c s' map
+;;
+;; safeslop-egress.el and safeslop-session-terminal.el are private feature shards
+;; of the session front: they own `safeslop-session--*' internals and are
+;; required by safeslop-session.el, which is the only public entry to them.
+;; safeslop-profile-evaluation.el and safeslop-profile-compose.el are the private
+;; shards of the profile front (safeslop-profiles.el).  Doom/Evil integration
+;; stays optional in safeslop-doom.el, which requires only this entry file.
 
 ;;; Code:
 
@@ -38,10 +49,10 @@
 
 ;;;###autoload
 (defun safeslop-doctor (&optional callback)
-  "Run `safeslop doctor --json' asynchronously and show the contract envelope.
-`doctor' probes the whole toolchain, so it can take a while; the call is async so
-Emacs stays responsive.  CALLBACK, when given, is called with the envelope once it
-arrives (used by tests)."
+  "Run `safeslop doctor --json' asynchronously and show the contract
+envelope. `doctor' probes the whole toolchain, so it can take a while;
+the call is async so Emacs stays responsive.  CALLBACK, when given, is
+called with the envelope once it arrives (used by tests)."
   (interactive)
   (let ((args '("doctor" "--json")))
     (safeslop--call-json-async
@@ -52,8 +63,9 @@ arrives (used by tests)."
 
 ;;;###autoload
 (defun safeslop-policy-check-file (file &optional callback)
-  "Validate safeslop policy FILE asynchronously and show the contract envelope.
-CALLBACK, when given, is called with the envelope once it arrives (used by tests)."
+  "Validate safeslop policy FILE asynchronously and show the contract
+envelope. CALLBACK, when given, is called with the envelope once it
+arrives (used by tests)."
   (interactive (list (read-file-name "Policy file: " nil nil t "safeslop.cue")))
   (let ((args (list "validate" (expand-file-name file) "--json")))
     (safeslop--call-json-async

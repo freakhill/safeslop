@@ -75,7 +75,7 @@ Frozen acceptance laws:
   VERIFY:   `go test ./internal/cli -shuffle=on -count=2 && go test -race ./internal/cli -count=1 && test "$(wc -l < internal/cli/cli.go)" -lt 1200 && gofmt -w internal/cli && git diff --check`
   EXPECTED: Existing CLI behavior/goldens remain byte-compatible, mutable seam sharing is materially reduced, shuffled/race runs pass, and the front is navigable.
 
-- [ ] Decompose Emacs profile/session features and enforce strict compilation
+- [x] Decompose Emacs profile/session features and enforce strict compilation
   FILE:     `emacs/safeslop-profiles.el`, `emacs/safeslop-session.el`, new focused evaluation/profile-compose/session-terminal/egress feature files, `emacs/safeslop.el`, Doom autoloads if needed, ERT files, `Makefile`
   CHANGE:   Move cohesive implementations behind unchanged interactive/internal symbols and `provide`/`require` fronts; preserve mode maps, buffer-local state, callbacks, output envelopes, and autoload behavior. Fix all remaining docstring-width warnings for Emacs 29/30/32, then make strict byte compilation part of `make check`. Do not mix UX changes into the move.
   VERIFY:   `SAFESLOP_ELISP_WERROR=1 make test-emacs && make test-emacs-ui-matrix && test "$(wc -l < emacs/safeslop-profiles.el)" -lt 1200 && test "$(wc -l < emacs/safeslop-session.el)" -lt 1000 && git diff --check`
