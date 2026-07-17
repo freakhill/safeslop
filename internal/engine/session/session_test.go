@@ -136,6 +136,74 @@ func TestStopIgnoresUnsafeLegacySocketCandidate(t *testing.T) {
 	}
 }
 
+func TestMarkRunningIsAtomicSingleOwnerClaim(t *testing.T) {
+	store := NewStore(t.TempDir())
+	sess, err := store.Create("fish", "host", t.TempDir(), testNow())
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for _, pid := range []int{4242, 5252} {
+		go func(pid int) {
+			<-start
+			_, err := store.MarkRunning(sess.ID, pid, testNow())
+			results <- err
+		}(pid)
+	}
+	close(start)
+	successes, conflicts := 0, 0
+	for range 2 {
+		switch err := <-results; {
+		case err == nil:
+			successes++
+		case errors.Is(err, ErrSessionRunning):
+			conflicts++
+		default:
+			t.Fatalf("launch claim error = %v", err)
+		}
+	}
+	if successes != 1 || conflicts != 1 {
+		t.Fatalf("claim results = %d success, %d conflict", successes, conflicts)
+	}
+	got, err := store.Get(sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PID != 4242 && got.PID != 5252 {
+		t.Fatalf("winning PID = %d", got.PID)
+	}
+}
+
+func TestDetachedHandoffRequiresExactLiveParentClaim(t *testing.T) {
+	store := NewStore(t.TempDir())
+	sess, err := store.Create("fish", "host", t.TempDir(), testNow())
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentPID := os.Getpid()
+	if _, err := store.MarkRunning(sess.ID, parentPID, testNow()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.HandoffRunningDetached(sess.ID, parentPID+1, parentPID, testNow()); !errors.Is(err, ErrStaleRecord) {
+		t.Fatalf("wrong-parent handoff = %v, want stale refusal", err)
+	}
+	claimed, err := store.Get(sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimed.PID != parentPID || claimed.Detached {
+		t.Fatalf("wrong-parent handoff changed claim: %+v", claimed)
+	}
+	handedOff, err := store.HandoffRunningDetached(sess.ID, parentPID, parentPID, testNow())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !handedOff.Detached || handedOff.PID != parentPID || handedOff.ProcessToken == "" {
+		t.Fatalf("handoff = %+v", handedOff)
+	}
+}
+
 func TestStopSignalsSupervisorGroupAndRemovesSocket(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore(dir)

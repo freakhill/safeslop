@@ -1070,6 +1070,12 @@ func cmdSessionRunWithDeps(d *dependencies) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			switch sess.Status {
+			case engsession.StatusRunning:
+				return emitSessionLaunchStateError(engsession.ErrSessionRunning, id)
+			case engsession.StatusStopped:
+				return emitSessionLaunchStateError(engsession.ErrSessionStopped, id)
+			}
 			// Re-verify the profile's policy is still host-approved before launch (specs/0072
 			// F1): session run rebuilds the profile from the record, so a create-time approval
 			// that was later revoked or edited must not still launch. Fail-closed here in the
@@ -1116,12 +1122,12 @@ func cmdSessionRunWithDeps(d *dependencies) *cobra.Command {
 				// D1, PR3).
 				return runDetachWithDeps(d, store, id)
 			}
-			if _, err := store.MarkRunning(id, os.Getpid(), d.now()); err != nil {
-				return err
-			}
 			stageKey, err := sessionStageKey(sess)
 			if err != nil {
 				return err
+			}
+			if _, err := store.MarkRunning(id, os.Getpid(), d.now()); err != nil {
+				return emitSessionLaunchStateError(err, id)
 			}
 			code, runErr := runProfileWithStageKeyAndEngineAndDeps(d, selectedEngine, "session-"+id, prof, argv, sess.Workspace, stageKey)
 			if err := finishSessionRun(store, id, code, runErr, d.now()); err != nil {
@@ -1209,15 +1215,31 @@ func runDetach(store engsession.Store, id string) error {
 	return runDetachWithDeps(defaultDependencies(), store, id)
 }
 
+func emitSessionLaunchStateError(err error, id string) error {
+	switch {
+	case errors.Is(err, engsession.ErrSessionRunning):
+		return emitContractError(jsoncontract.CodeSessionAlreadyRunning, "session is already running", map[string]any{"session_id": id})
+	case errors.Is(err, engsession.ErrSessionStopped):
+		return emitContractError(jsoncontract.CodeSessionStopped, "session is stopped; create a new session to run again", map[string]any{"session_id": id})
+	default:
+		return err
+	}
+}
+
 func runDetachWithDeps(d *dependencies, store engsession.Store, id string) error {
 	if sess, err := store.Get(id); err == nil {
 		if _, err := recordSessionBackendWithDeps(d, store, sess); err != nil {
 			return err
 		}
 	}
+	claimPID := os.Getpid()
+	if _, err := store.MarkRunning(id, claimPID, d.now()); err != nil {
+		return emitSessionLaunchStateError(err, id)
+	}
 	launched, err := d.launchSupervisor(id)
 	if err != nil {
-		return emitContractError(jsoncontract.CodeIOError, "launch session supervisor", map[string]any{"error": err.Error()})
+		_, releaseErr := store.ReleaseRunningClaim(id, claimPID, d.now())
+		return emitContractError(jsoncontract.CodeIOError, "launch session supervisor", map[string]any{"error": errors.Join(err, releaseErr).Error()})
 	}
 	pid := launched.PID
 	sockPath := store.SocketPath(id)

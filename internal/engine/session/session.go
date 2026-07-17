@@ -30,11 +30,13 @@ const (
 
 var ErrNotFound = errors.New("session not found")
 
-// ErrSessionRunning is returned by Remove when the target session is still
-// running. A running session must be stopped first (which tears down the
-// boundary and can revoke credentials); removing its record out from under a
-// live boundary would orphan the process and its staged credentials.
+// ErrSessionRunning rejects any operation that would replace or remove a live
+// session owner. The existing boundary must be stopped first.
 var ErrSessionRunning = errors.New("session is running")
+
+// ErrSessionStopped rejects reuse of a terminal one-shot session record. A new
+// run needs a new random session identity rather than reviving old ownership.
+var ErrSessionStopped = errors.New("session is stopped")
 
 // ResolvedMetadata snapshots the non-secret package resolution that selected a
 // profile-backed session's image. It is stored with the session so status/list can
@@ -189,9 +191,16 @@ func (s Store) MarkRunningDetached(id string, pid int, now time.Time) (Session, 
 }
 
 func (s Store) markRunning(id string, pid int, detached bool, now time.Time) (Session, error) {
+	if pid <= 0 {
+		return Session{}, errors.New("session process identity is invalid")
+	}
 	return s.Update(id, func(sess Session) (Session, error) {
-		if sess.Status == StatusStopped {
-			return Session{}, fmt.Errorf("session stopped")
+		switch sess.Status {
+		case StatusCreated:
+		case StatusRunning:
+			return Session{}, ErrSessionRunning
+		default:
+			return Session{}, ErrSessionStopped
 		}
 		sess.Status = StatusRunning
 		sess.PID = pid
@@ -201,6 +210,44 @@ func (s Store) markRunning(id string, pid int, detached bool, now time.Time) (Se
 		}
 		sess.Detached = detached
 		sess.StartedAt = now.UTC()
+		sess.UpdatedAt = now.UTC()
+		return sess, nil
+	})
+}
+
+// HandoffRunningDetached atomically replaces the issuing wrapper claim with the
+// child supervisor identity. It cannot adopt an unrelated/stale running record.
+func (s Store) HandoffRunningDetached(id string, parentPID, supervisorPID int, now time.Time) (Session, error) {
+	if parentPID <= 0 || supervisorPID <= 0 {
+		return Session{}, errors.New("session process identity is invalid")
+	}
+	return s.Update(id, func(sess Session) (Session, error) {
+		if sess.Status != StatusRunning || sess.Detached || sess.PID != parentPID || !ProcessAliveSession(sess) {
+			return Session{}, ErrStaleRecord
+		}
+		sess.PID = supervisorPID
+		sess.ProcessToken = ""
+		if token, ok := ProcessStartToken(supervisorPID); ok {
+			sess.ProcessToken = token
+		}
+		sess.Detached = true
+		sess.UpdatedAt = now.UTC()
+		return sess, nil
+	})
+}
+
+// ReleaseRunningClaim returns a failed pre-supervisor claim to created only
+// when it still belongs to this exact live issuing process.
+func (s Store) ReleaseRunningClaim(id string, pid int, now time.Time) (Session, error) {
+	return s.Update(id, func(sess Session) (Session, error) {
+		if sess.Status != StatusRunning || sess.Detached || sess.PID != pid || !ProcessAliveSession(sess) {
+			return Session{}, ErrStaleRecord
+		}
+		sess.Status = StatusCreated
+		sess.PID = 0
+		sess.ProcessToken = ""
+		sess.Detached = false
+		sess.StartedAt = time.Time{}
 		sess.UpdatedAt = now.UTC()
 		return sess, nil
 	})

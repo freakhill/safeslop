@@ -45,6 +45,11 @@ func newSupervisedStubSessionIn(t *testing.T, script, stateDir, env string) (eng
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
+	// Supervise is the child side of a detached launch handoff. Seed the exact
+	// live parent claim that production runDetach creates before spawning it.
+	if _, err := store.MarkRunning(sess.ID, os.Getppid(), nowForTest(t)); err != nil {
+		t.Fatalf("claim session launch: %v", err)
+	}
 	return store, sess.ID, ws
 }
 
@@ -218,6 +223,40 @@ func TestSuperviseSessionProjectionFailurePersists(t *testing.T) {
 	}
 }
 
+func TestSuperviseWithoutLaunchClaimCannotReplaceSocket(t *testing.T) {
+	stateDir := shortStateDir(t)
+	t.Setenv("SAFESLOP_STATE_DIR", stateDir)
+	ws := t.TempDir()
+	stub := filepath.Join(ws, "agent")
+	if err := os.WriteFile(stub, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SHELL", stub)
+	store := sessionStore()
+	sess, err := store.Create("shell", "host", ws, nowForTest(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("unix", store.SocketPath(sess.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	if err := os.Chmod(store.SocketPath(sess.ID), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	d := defaultDependencies()
+	d.store = store
+	code, err := superviseWithDeps(d, context.Background(), store, sess.ID, time.Now)
+	if code != 1 || !errors.Is(err, engsession.ErrStaleRecord) {
+		t.Fatalf("unclaimed supervise = (%d, %v), want stale-claim refusal", code, err)
+	}
+	if !safeAttachSocket(store.SocketPath(sess.ID)) {
+		t.Fatal("unclaimed supervisor replaced or removed the existing socket")
+	}
+}
+
 func TestSuperviseRejectsOccupiedNonSocketPath(t *testing.T) {
 	store, id, _ := newSupervisedStubSession(t, "#!/bin/sh\nexit 0\n")
 	path := store.SocketPath(id)
@@ -255,8 +294,8 @@ func TestSuperviseFailsClosedWhenSocketPermissionsCannotBeSecured(t *testing.T) 
 	if getErr != nil {
 		t.Fatal(getErr)
 	}
-	if sess.Status != engsession.StatusCreated {
-		t.Fatalf("session status = %q, want created before supervisor publication", sess.Status)
+	if sess.Status != engsession.StatusStopped {
+		t.Fatalf("session status = %q, want stopped after failed supervisor setup", sess.Status)
 	}
 }
 
@@ -287,7 +326,7 @@ func TestSuperviseRecordsSupervisorPIDAlive(t *testing.T) {
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		s, err := store.Get(id)
-		if err == nil && s.Status == engsession.StatusRunning && s.PID != 0 {
+		if err == nil && s.Status == engsession.StatusRunning && s.Detached && s.PID == os.Getpid() {
 			sess = s
 			break
 		}

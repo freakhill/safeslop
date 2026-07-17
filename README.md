@@ -250,12 +250,15 @@ and stage wipe. A tokenless legacy record gets the full `SIGTERM` grace but neve
 an unverified `SIGKILL` escalation. Interactive `Ctrl-C`
 (`SIGINT`) is left for the agent and does not tear the session down.
 
-`session run` is an interactive attach and needs a controlling terminal — Emacs
-supplies one via `make-term`. Invoked without a usable TTY (a pipe, cron, a
-headless shell), it emits the `PTY_UNAVAILABLE` contract error
-(`details.fallback = "status-jsonl"`) and exits non-zero **without** marking the
-session running, so nothing is left as a phantom. The Emacs client switches to a
-read-only `--output jsonl` status monitor on that code.
+`session run` is a one-shot interactive attach and needs a controlling terminal —
+Emacs supplies one via `make-term`. Each created record has one atomic launch
+claim: a second launch while it runs is rejected with `SESSION_ALREADY_RUNNING`,
+and a terminal record is rejected with `SESSION_STOPPED` (create a new session to
+run again). Invoked without a usable TTY (a pipe, cron, a headless shell), it
+emits the `PTY_UNAVAILABLE` contract error (`details.fallback = "status-jsonl"`)
+and exits non-zero **without** marking the session running, so nothing is left as
+a phantom. The Emacs client switches to a read-only `--output jsonl` status
+monitor on that code.
 
 Before Emacs starts a coupled or detached container session, it performs a
 best-effort runtime preflight with `safeslop doctor --json`. Same-file Docker

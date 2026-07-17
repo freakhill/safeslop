@@ -62,7 +62,7 @@ func Supervise(ctx context.Context, store engsession.Store, id string, now func(
 	return superviseWithDeps(d, ctx, store, id, now)
 }
 
-func superviseWithDeps(d *dependencies, ctx context.Context, store engsession.Store, id string, now func() time.Time) (int, error) {
+func superviseWithDeps(d *dependencies, ctx context.Context, store engsession.Store, id string, now func() time.Time) (code int, retErr error) {
 	sess, err := store.Get(id)
 	if err != nil {
 		return 1, err
@@ -89,6 +89,20 @@ func superviseWithDeps(d *dependencies, ctx context.Context, store engsession.St
 	if err != nil {
 		return 1, err
 	}
+	// The issuing process atomically claimed this created record before spawn.
+	// Replace only that exact live parent claim before touching PTYs, sockets,
+	// stages, or runtime resources; a second supervisor cannot displace it.
+	sess, err = store.HandoffRunningDetached(id, os.Getppid(), os.Getpid(), now())
+	if err != nil {
+		return 1, err
+	}
+	agentStarted := false
+	defer func() {
+		if !agentStarted && retErr != nil {
+			_, finishErr := store.Finish(id, code, "session supervisor setup failed", now())
+			retErr = errors.Join(retErr, finishErr)
+		}
+	}()
 
 	if err := os.MkdirAll(store.Dir, 0o700); err != nil {
 		return 1, err
@@ -143,14 +157,6 @@ func superviseWithDeps(d *dependencies, ctx context.Context, store engsession.St
 		return 1, errors.Join(err, closeErr, removeErr)
 	}
 
-	if _, err := store.MarkRunningDetached(id, os.Getpid(), now()); err != nil {
-		closeErr := ln.Close()
-		removeErr := removeSocketWithDeps(d, sockPath)
-		_ = ptmx.Close()
-		_ = pts.Close()
-		return 1, errors.Join(err, closeErr, removeErr)
-	}
-
 	// Best-effort JSONL event log; format is provisional, byte-capped (specs/0051 Q3).
 	jsonl, _ := os.OpenFile(filepath.Join(store.Dir, id+".jsonl"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 
@@ -159,6 +165,7 @@ func superviseWithDeps(d *dependencies, ctx context.Context, store engsession.St
 	// Launch the agent on the PTY slave. runProfileCtx blocks for the agent's
 	// whole life and runs the inherited teardown on return.
 	exitCh := make(chan agentExit, 1)
+	agentStarted = true
 	go func() {
 		code, runErr := runProfileCtxWithEngineAndDeps(d, ctx, selectedEngine, "session-"+id, prof, argv, sess.Workspace, stageKey,
 			runIO{Stdin: pts, Stdout: pts, Stderr: pts})

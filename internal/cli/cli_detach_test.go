@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	engsession "github.com/freakhill/safeslop/internal/engine/session"
+	"github.com/freakhill/safeslop/internal/jsoncontract"
 )
 
 // TestRunDetachRecordsSupervisorPIDAndReturns proves `session run --detach`
@@ -47,7 +48,7 @@ func TestRunDetachRecordsSupervisorPIDAndReturns(t *testing.T) {
 		if err := os.Chmod(store.SocketPath(sid), 0o600); err != nil {
 			return launchedSupervisor{}, err
 		}
-		if _, err := store.MarkRunningDetached(sid, supervisorPID, d.now()); err != nil {
+		if _, err := store.HandoffRunningDetached(sid, os.Getpid(), supervisorPID, d.now()); err != nil {
 			return launchedSupervisor{}, err
 		}
 		return launchedSupervisor{PID: supervisorPID, ProcessToken: supervisorToken}, nil
@@ -80,6 +81,157 @@ func TestRunDetachRecordsSupervisorPIDAndReturns(t *testing.T) {
 	}
 	if got.ProcessToken != supervisorToken {
 		t.Fatalf("recorded process token = %q, want captured supervisor token", got.ProcessToken)
+	}
+}
+
+func TestRunDetachRejectsExistingRunningOwnerBeforeSpawn(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", shortStateDir(t))
+	store := sessionStore()
+	sess, err := store.Create("claude", "host", ws, nowForTest(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.MarkRunning(sess.ID, os.Getpid(), nowForTest(t)); err != nil {
+		t.Fatal(err)
+	}
+	d := defaultDependencies()
+	d.store = store
+	acceptHostConsentForTest(t, d)
+	launches := 0
+	d.launchSupervisor = func(string) (launchedSupervisor, error) {
+		launches++
+		return launchedSupervisor{}, errors.New("must not spawn")
+	}
+
+	out, err := runRootForTestWithDeps(t, ws, d, "session", "run", "--session-id", sess.ID, "--detach")
+	if !errors.Is(err, errOutputEmitted) {
+		t.Fatalf("repeated detached run = %v, want emitted conflict; out=%s", err, out)
+	}
+	env := parseEnvelopeForTest(t, out)
+	if env.OK || len(env.Errors) != 1 || env.Errors[0].Code != jsoncontract.CodeSessionAlreadyRunning {
+		t.Fatalf("repeated run envelope = %+v", env)
+	}
+	if launches != 0 {
+		t.Fatalf("repeated run spawned %d supervisors", launches)
+	}
+	got, err := store.Get(sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PID != os.Getpid() || got.Status != engsession.StatusRunning {
+		t.Fatalf("existing owner was overwritten: %+v", got)
+	}
+}
+
+func TestCoupledSessionRunRefusesRunningAndStoppedRecords(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		stop bool
+		code jsoncontract.ErrorCode
+	}{
+		{name: "existing owner", code: jsoncontract.CodeSessionAlreadyRunning},
+		{name: "terminal record", stop: true, code: jsoncontract.CodeSessionStopped},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ws := t.TempDir()
+			t.Setenv("SAFESLOP_STATE_DIR", shortStateDir(t))
+			store := sessionStore()
+			sess, err := store.Create("claude", "host", ws, nowForTest(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.stop {
+				_, err = store.Finish(sess.ID, 0, "", nowForTest(t))
+			} else {
+				_, err = store.MarkRunning(sess.ID, os.Getpid(), nowForTest(t))
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			d := defaultDependencies()
+			d.store = store
+
+			out, err := runRootForTestWithDeps(t, ws, d, "session", "run", "--session-id", sess.ID)
+			if !errors.Is(err, errOutputEmitted) {
+				t.Fatalf("repeated coupled run = %v, want emitted refusal; out=%s", err, out)
+			}
+			env := parseEnvelopeForTest(t, out)
+			if env.OK || len(env.Errors) != 1 || env.Errors[0].Code != tc.code {
+				t.Fatalf("repeated coupled run envelope = %+v, want %s", env, tc.code)
+			}
+		})
+	}
+}
+
+func TestConcurrentRunDetachSpawnsOnlyClaimWinner(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", shortStateDir(t))
+	store := sessionStore()
+	sess, err := store.Create("claude", "host", ws, nowForTest(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := defaultDependencies()
+	d.store = store
+	spawned := make(chan struct{})
+	release := make(chan struct{})
+	launches := 0
+	d.launchSupervisor = func(string) (launchedSupervisor, error) {
+		launches++
+		close(spawned)
+		<-release
+		return launchedSupervisor{}, errors.New("winner spawn failed after claim test")
+	}
+	firstDone := make(chan error, 1)
+	go func() { firstDone <- runDetachWithDeps(d, store, sess.ID) }()
+	<-spawned
+
+	secondErr := runDetachWithDeps(d, store, sess.ID)
+	if !errors.Is(secondErr, errOutputEmitted) {
+		t.Fatalf("losing concurrent run = %v, want emitted running conflict", secondErr)
+	}
+	if launches != 1 {
+		t.Fatalf("concurrent runs spawned %d supervisors, want one", launches)
+	}
+	close(release)
+	if firstErr := <-firstDone; !errors.Is(firstErr, errOutputEmitted) {
+		t.Fatalf("winning launch failure = %v, want emitted failure", firstErr)
+	}
+	got, err := store.Get(sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != engsession.StatusCreated {
+		t.Fatalf("failed winner did not release claim: %+v", got)
+	}
+}
+
+func TestRunDetachLaunchFailureReleasesParentClaim(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", shortStateDir(t))
+	store := sessionStore()
+	sess, err := store.Create("claude", "host", ws, nowForTest(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := defaultDependencies()
+	d.store = store
+	acceptHostConsentForTest(t, d)
+	d.launchSupervisor = func(string) (launchedSupervisor, error) {
+		return launchedSupervisor{}, errors.New("injected spawn failure")
+	}
+
+	out, err := runRootForTestWithDeps(t, ws, d, "session", "run", "--session-id", sess.ID, "--detach")
+	if !errors.Is(err, errOutputEmitted) {
+		t.Fatalf("spawn failure = %v, want emitted error; out=%s", err, out)
+	}
+	got, getErr := store.Get(sess.ID)
+	if getErr != nil {
+		t.Fatal(getErr)
+	}
+	if got.Status != engsession.StatusCreated || got.PID != 0 || got.ProcessToken != "" {
+		t.Fatalf("failed spawn left launch claim: %+v", got)
 	}
 }
 
