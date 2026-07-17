@@ -392,8 +392,10 @@ rely on broad host mounts.
 ## Verification
 
 ```bash
-go test ./internal/engine/container/ ./internal/engine/vm/ -v
+go test ./internal/engine/container/ -v
 make check
+# Opt-in host-Docker gate for shell, Claude, Pi, and pnpm image selections:
+make test-container-images
 ```
 
 For Emacs surface, Doom, or Evil binding changes, also run the local UI matrix:

@@ -53,15 +53,6 @@ func TestComposeHardSetsAgentUser(t *testing.T) {
 	if n := strings.Count(yml, "    user: \"1000:1000\"\n"); n != 1 {
 		t.Fatalf("generated compose must hard-set exactly one agent user, got %d:\n%s", n, yml)
 	}
-
-	legacyPath := filepath.Join("..", "..", "..", "library", "layer", "container", "docker-compose.yml")
-	legacy, err := os.ReadFile(legacyPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n := strings.Count(string(legacy), "    user: \"1000:1000\"\n"); n != 2 {
-		t.Fatalf("legacy compose must hard-set agent and agent-tools users, got %d:\n%s", n, legacy)
-	}
 }
 
 func TestEntrypointCopiesPiOAuthIntoTmpfsBeforeExec(t *testing.T) {

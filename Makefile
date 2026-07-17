@@ -14,7 +14,7 @@ CONTAINER_SRC := library/layer/container
 CONTAINER_DST := internal/engine/container/assets
 SYNCED        := allowlist.domains Dockerfile.agent Dockerfile.agent.tools proxy-image.lock.json proxy-image.index.json
 
-.PHONY: build test test-emacs test-emacs-ui-matrix test-progressive-egress-smoke vet fmt fmtcheck check check-assets check-npm-locks check-proxy-image-lock check-catalog-sync check-pivot-denylist check-host-helper-exec check-hostpath-imports sync-container-assets render-catalog install install-emacs install-mcp dist clean
+.PHONY: build test test-emacs test-emacs-ui-matrix test-container-images test-progressive-egress-smoke vet fmt fmtcheck check check-assets check-npm-locks check-proxy-image-lock check-active-surface-drift check-catalog-sync check-pivot-denylist check-host-helper-exec check-hostpath-imports sync-container-assets render-catalog install install-emacs install-mcp dist clean
 
 ## Build the local binary (static — no cgo, immune to the WARP/uv install path).
 build:
@@ -38,6 +38,9 @@ test-emacs:
 
 test-emacs-ui-matrix:
 	EMACS="$(EMACS)" ci/emacs-ui-matrix.sh
+
+test-container-images:
+	SAFESLOP_TEST_CONTAINER_IMAGES=1 go test ./internal/engine/container -run '^TestContainerImages$$' -count=1 -v
 
 test-progressive-egress-smoke: build
 	SAFESLOP_BIN="$(CURDIR)/$(BINARY)" ci/progressive-egress-smoke.sh
@@ -76,6 +79,9 @@ check-npm-locks:
 check-proxy-image-lock:
 	ci/proxy-image-lock-check.sh
 
+check-active-surface-drift:
+	ci/active-surface-drift.sh
+
 ## Render the authored catalog.cue into the embedded catalog.json (specs/0059 W2).
 ## In-process cuelang (no external `cue` binary); validates against schema/catalog.cue.
 render-catalog:
@@ -99,7 +105,7 @@ check-host-helper-exec:
 check-hostpath-imports:
 	ci/hostpath-import-denylist.sh
 
-check: check-assets check-npm-locks check-proxy-image-lock check-catalog-sync check-pivot-denylist check-host-helper-exec check-hostpath-imports vet fmtcheck test test-emacs
+check: check-assets check-npm-locks check-proxy-image-lock check-active-surface-drift check-catalog-sync check-pivot-denylist check-host-helper-exec check-hostpath-imports vet fmtcheck test test-emacs
 
 install-emacs:
 	mkdir -p "$(HOME)/.local/share/safeslop/emacs"

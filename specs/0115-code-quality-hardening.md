@@ -47,7 +47,7 @@ Frozen acceptance laws:
   VERIFY:   `make check-assets check-npm-locks check-proxy-image-lock && go test ./internal/engine/container -run 'Proxy|NPM|Tool|Recipe|Identity|BuildContext' -count=1 -v`
   EXPECTED: A moving proxy tag or unlocked/unselected npm artifact cannot enter a recipe; package selection stays minimal; proxy restrictions are explicit and unit gates are network-free.
 
-- [ ] Repair executable CI surfaces and add drift gates
+- [x] Repair executable CI surfaces and add drift gates
   FILE:     delete `.woodpecker/integration.yml`; replace/rename `.github/workflows/sandbox-images-check.yml` and `.woodpecker/sandbox-images.yml`; `.github/workflows/go.yml`, `.woodpecker/go.yml`, `ci/*drift*.sh`, `Makefile`
   CHANGE:   Remove the nonexistent Tart integration target and stale sandbox-exec comments. Replace obsolete agent-sandbox/CREWAI/Pydantic/AG2 image commands with one current container-image target that supplies the actual base/recipe/lock context and builds representative shell, Claude, Pi, and pnpm selections. Add a deterministic active-doc/workflow denylist for removed VM commands/paths and obsolete image/build arguments; exclude historical `specs/` evidence.
   VERIFY:   `bash -n ci/*.sh && make check-active-surface-drift && rg -n 'test-container-images|check-npm-locks|check-proxy-image-lock' .github/workflows .woodpecker Makefile && ! rg -n 'test-integration|internal/engine/vm|agent-sandbox-tools|ENABLE_(CREWAI|PYDANTIC|AG2)' .github/workflows .woodpecker CONTRIBUTING.md skills README.md`

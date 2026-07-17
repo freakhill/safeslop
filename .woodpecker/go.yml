@@ -1,6 +1,5 @@
-# Go engine: vet, gofmt, build, test — on the native darwin/arm64 agent so the
-# sandbox-exec launch tests actually run (safeslop is a macOS tool). This mirrors
-# the local `make check` / `make build` exactly.
+# Go engine: vet, format, build, and test on the supported native darwin/arm64
+# agent. This mirrors the local `make check` / `make build` exactly.
 #
 # Runs on Woodpecker's local backend (commands execute on the agent host), so the
 # host must have the Go toolchain + make on PATH. (If your Woodpecker predates the
@@ -14,5 +13,5 @@ labels:
 steps:
   - name: check
     commands:
-      - make check   # go vet + gofmt + go test ./... (incl. the darwin sandbox-exec tests)
+      - make check   # complete local static/unit/Emacs contract gate
       - make build   # static CGO_ENABLED=0 binary
