@@ -89,11 +89,18 @@ Frozen acceptance laws:
 
 ## Wave 9 — authoritative verification
 
-- [ ] Run hermetic, race, strict, image, and real-runtime gates
+- [x] Run hermetic, race, strict, image, and real-runtime gates
   FILE:     whole repo; `specs/0115-code-quality-hardening.md` acceptance note
   CHANGE:   Run format/diff, focused suites, shuffled tests, full internal race tests, asset/catalog/path/drift/npm/proxy gates, strict Emacs and UI matrix, build, representative locked npm images, hostile-path Compose config, simultaneous direct invocations, disposable legacy-layout cleanup/bootstrap, proxy grant→revoke with old-tunnel termination, and every injected uncertainty teardown. Use only disposable state; do not mutate or stop the pre-existing user session. Record exact supported-runtime evidence without raw credentials/paths/output.
   VERIFY:   `git diff --check && go test -shuffle=on ./... && go test -race ./internal/... && SAFESLOP_ELISP_WERROR=1 make test-emacs && make test-emacs-ui-matrix && make check && make build && make test-container-images && make test-progressive-egress-smoke`
   EXPECTED: All authoritative commands exit 0; real runs prove deny→grant→revoke and cleanup; host credential bytes remain unchanged; no disposable session/stage/container/trust/temp state remains.
+
+  ACCEPTANCE (2026-07-18, `b97d826`, macOS/arm64, Docker via OrbStack):
+  - The exact VERIFY chain exited 0. Shuffled Go and full internal race suites passed; strict Emacs compilation and the raw/Doom/Evil UI matrix passed; the signed Go binary built; and representative shell, Claude, Pi, and pnpm images built only from the reviewed locks.
+  - The progressive-egress smoke proved deny → acknowledged grant → proxy replacement → revoke → old-tunnel termination → deny. Focused fault-injection suites passed for record commit uncertainty, generation/hash mismatch, teardown-before-compensation, persisted uncertainty, and blocked retry.
+  - A live hostile-path probe (spaces, colon, quotes, Unicode, and literal Compose interpolation syntax) decoded to exactly one canonical RW workspace bind. Two overlapping direct runs had distinct random owners, remained live together, and cleaned only their own resources. That probe supplied the RED reproduction for the concurrent auto-removal race; `TestReapByInvocationAcceptsConcurrentAutoRemoval`, the container/network sweep variants, and fail-closed negative cases now guard `b97d826` and pass under the race detector.
+  - A disposable record with legacy layout/runtime fields omitted launched under its reconstructable legacy owner, bootstrapped generation/hash authority on first grant without migration-on-read, revoked, stopped, and removed its stage/boundary.
+  - Every real probe created an ad-hoc fish profile/session with no credential configuration, so safeslop's selected host-credential source set was empty and no host credential bytes entered a staging or mutation path. Cleanup assertions queried each exact random/legacy owner label and computed stage path; those owners, stages, isolated state, disposable trust entries, and temporary roots were absent afterward. No broad down/prune command or pre-existing-owner selector was used.
 
 ## Wave 10 — independent final review and deployment
 
