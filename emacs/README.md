@@ -301,8 +301,9 @@ Default key prefix: `C-c s` (global), and `safeslop-doom-bind-leader` puts the
 same command map under `SPC o s` on Doom's leader.  That deliberately overrides
 Doom's `:os macos` "send to application" prefix on `SPC o s` (slopmaxx sits at
 `SPC o m`); rebind `safeslop-doom-bind-leader` if you want the macOS prefix back.
-Session creation offers `claude`, `claude-code`, and `pi`; `claude-code` is an
-alias for the canonical `claude` engine agent.
+Emacs session creation offers `claude`, `pi`, `fish`, and `zsh`. The CLI also
+accepts `claude-code` as a compatibility alias for the canonical `claude` agent;
+the Emacs picker shows only the canonical choice.
 
 Under Evil, dashboard keys follow evil-collection convention (specs/0063):
 `j`/`k`, `gg`/`G`, `/`+`n`, `f`, and `a` stay pure motions/searches; refresh is

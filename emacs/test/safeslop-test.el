@@ -419,6 +419,10 @@ mysterious bare table."
 (ert-deftest safeslop-test-output-safe-rerun-predicate ()
   (should (safeslop--safe-rerun-p '("validate" "safeslop.cue" "--json")))
   (should (safeslop--safe-rerun-p '("session" "status" "--session-id" "sess-x" "--output" "json")))
+  (should (safeslop--safe-rerun-p '("session" "egress" "observations" "--session-id" "sess-x" "--output" "json")))
+  (should (safeslop--safe-rerun-p '("session" "egress" "grants" "--session-id" "sess-x" "--output" "json")))
+  (should (safeslop--safe-rerun-p '("profile" "egress" "preview" "app" "--output" "json")))
+  (should-not (safeslop--safe-rerun-p '("session" "egress" "grant" "--session-id" "sess-x" "--host" "example.com" "--port" "443" "--output" "json")))
   (should-not (safeslop--safe-rerun-p '("profile" "create" "--output" "json"))))
 
 (ert-deftest safeslop-test-surface-order-has-three ()
