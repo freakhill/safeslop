@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/freakhill/safeslop/internal/engine/hostexec"
 )
@@ -62,7 +63,9 @@ exit 99
 	if !OpAvailable() {
 		t.Fatal("OpAvailable=false, want true through hostexec")
 	}
-	if !OpSignedIn(context.Background()) {
+	// This test proves resolver/argv routing, not the production doctor latency
+	// budget. Package-parallel race CI can starve a subprocess for several seconds.
+	if !opSignedIn(context.Background(), 30*time.Second) {
 		t.Fatal("OpSignedIn=false, want true through hostexec command")
 	}
 	got, err := Resolve(context.Background(), "op://vault/item/field")
