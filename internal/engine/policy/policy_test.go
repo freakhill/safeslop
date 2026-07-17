@@ -161,6 +161,27 @@ safeslop: profiles: luna: {
 	}
 }
 
+func TestLoadRejectsWorkspaceControlCharacters(t *testing.T) {
+	for name, value := range map[string]string{
+		"newline": `"safe\n- /:/host:rw"`,
+		"tab":     `"safe\tpath"`,
+		"nul":     `"safe\u0000path"`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			src := "package safeslop\nsafeslop: {version: 1, profiles: {dev: {agent: \"fish\", environment: \"container\", workspace: " + value + "}}}"
+			if _, err := LoadBytes([]byte(src)); err == nil {
+				t.Fatalf("workspace control value %s was accepted", value)
+			}
+		})
+	}
+	valid := `package safeslop
+safeslop: {version: 1, profiles: {dev: {agent: "fish", environment: "container", workspace: "space: $ ${LITERAL} quoted 雪"}}}
+`
+	if _, err := LoadBytes([]byte(valid)); err != nil {
+		t.Fatalf("valid hostile workspace scalar rejected: %v", err)
+	}
+}
+
 func TestBuiltinProfilesNeverCarryPiOAuth(t *testing.T) {
 	for _, builtin := range BuiltinProfiles() {
 		wire, err := json.Marshal(builtin.Profile.Credentials)

@@ -123,7 +123,11 @@ func TestProfileCreateDryRunIncludesRiskAndDoesNotWrite(t *testing.T) {
 	if !ok {
 		t.Fatalf("data.profile missing: %#v", env.Data["profile"])
 	}
-	if profile["agent"] != "claude" || profile["environment"] != "container" || profile["workspace"] != "." || profile["network"] != "deny" {
+	canonicalDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile["agent"] != "claude" || profile["environment"] != "container" || profile["workspace"] != canonicalDir || profile["network"] != "deny" {
 		t.Fatalf("profile args not echoed under data.profile: %#v", profile)
 	}
 	if !stringSliceAnyContains(profile["bundles"].([]any), "pi") || !stringSliceAnyContains(profile["packages"].([]any), "pnpm") {

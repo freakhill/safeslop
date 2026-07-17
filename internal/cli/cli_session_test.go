@@ -154,8 +154,12 @@ func TestSessionCreateEmitsContractAndPersistsSafeDefaults(t *testing.T) {
 	if got := env.Data["agent"]; got != "claude" {
 		t.Fatalf("agent = %#v", got)
 	}
-	if got := env.Data["workspace"]; got != ws {
-		t.Fatalf("workspace = %#v, want %q", got, ws)
+	canonicalWS, err := filepath.EvalSymlinks(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := env.Data["workspace"]; got != canonicalWS {
+		t.Fatalf("workspace = %#v, want %q", got, canonicalWS)
 	}
 	if got := env.Data["network"]; got != "deny" {
 		t.Fatalf("network default = %#v, want deny", got)

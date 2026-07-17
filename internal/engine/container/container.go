@@ -2,6 +2,7 @@ package container
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -122,6 +123,8 @@ func ensureImage(id string, exists func() bool, build func() error) error {
 	})
 }
 
+var ErrComposeSafetyUnsupported = errors.New("container runtime does not support required safe bind mounts")
+
 const (
 	proxyReadyTimeout   = 10 * time.Second
 	proxyReadyInterval  = 100 * time.Millisecond
@@ -135,8 +138,12 @@ const (
 func waitForProxy(ctx context.Context, eng runtime.Engine, composeFile string) error {
 	readyCtx, cancel := context.WithTimeout(ctx, proxyReadyTimeout)
 	defer cancel()
+	args, err := composeProjectArgs(composeFile, "exec", "-T", "proxy", "bash", "-ec", proxyReadyCommand)
+	if err != nil {
+		return err
+	}
 	for {
-		if err := eng.Command(readyCtx, "compose", "-f", composeFile, "exec", "-T", "proxy", "bash", "-ec", proxyReadyCommand).Run(); err == nil {
+		if err := eng.Command(readyCtx, args...).Run(); err == nil {
 			return nil
 		}
 		select {
@@ -150,17 +157,32 @@ func waitForProxy(ctx context.Context, eng runtime.Engine, composeFile string) e
 func cleanupUnreadyProxy(eng runtime.Engine, composeFile string) {
 	ctx, cancel := context.WithTimeout(context.Background(), proxyCleanupTimeout)
 	defer cancel()
-	_ = runEngine(ctx, eng, "compose", "-f", composeFile, "down", "--remove-orphans")
+	args, err := composeProjectArgs(composeFile, "down", "--remove-orphans")
+	if err != nil {
+		return
+	}
+	_ = runEngine(ctx, eng, args...)
 }
 
 // Up ensures images are built (for the profile's resolved package set, enabled) and the
 // squid proxy is running and ready for the given compose file. A proxy startup failure
 // tears the partial stack down and returns only an engine-owned, value-free failure.
 func Up(ctx context.Context, eng runtime.Engine, dir, composeFile string, enabled []string) error {
+	configArgs, err := composeProjectArgs(composeFile, "config")
+	if err != nil {
+		return ErrComposeSafetyUnsupported
+	}
+	if err := eng.Command(ctx, configArgs...).Run(); err != nil {
+		return ErrComposeSafetyUnsupported
+	}
 	if err := buildImages(ctx, eng, dir, enabled); err != nil {
 		return err
 	}
-	if err := runEngine(ctx, eng, "compose", "-f", composeFile, "up", "-d", "proxy"); err != nil {
+	args, err := composeProjectArgs(composeFile, "up", "-d", "proxy")
+	if err != nil {
+		return err
+	}
+	if err := runEngine(ctx, eng, args...); err != nil {
 		cleanupUnreadyProxy(eng, composeFile)
 		return newRuntimeFailure(NetworkProxyUnavailable)
 	}

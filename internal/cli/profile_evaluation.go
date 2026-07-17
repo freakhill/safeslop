@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -16,6 +15,7 @@ import (
 	"github.com/freakhill/safeslop/internal/engine/toolchain"
 	"github.com/freakhill/safeslop/internal/engine/trust"
 	"github.com/freakhill/safeslop/internal/engine/userconfig"
+	workspaceboundary "github.com/freakhill/safeslop/internal/engine/workspace"
 )
 
 type profileEvaluationSource string
@@ -98,6 +98,9 @@ var (
 		}
 		if !info.IsDir() {
 			return profilePrerequisiteCheck{State: profilePrerequisiteFail, Problem: profileProblemMissing}
+		}
+		if err := validateWorkspaceStageRoot(path); err != nil {
+			return profilePrerequisiteCheck{State: profilePrerequisiteFail, Problem: profileProblemResolution}
 		}
 		return profilePrerequisiteCheck{State: profilePrerequisitePass}
 	}
@@ -421,22 +424,22 @@ func evaluateProfileReadiness(input profileEvaluationInput, authority policy.Aut
 }
 
 func profileWorkspacePath(input profileEvaluationInput) (string, bool) {
-	workspace := input.Profile.Workspace
-	if workspace == "" {
-		cwd, err := os.Getwd()
-		return cwd, err == nil
-	}
-	if filepath.IsAbs(workspace) {
-		return workspace, true
-	}
-	base, err := os.Getwd()
+	invocationDir, err := os.Getwd()
 	if err != nil {
 		return "", false
 	}
-	if input.Source != profileEvaluationSourceBuiltin && input.PolicyPath != "" {
-		base = filepath.Dir(input.PolicyPath)
+	policyPath := ""
+	if input.Source != profileEvaluationSourceBuiltin {
+		policyPath = input.PolicyPath
 	}
-	return filepath.Join(base, workspace), true
+	candidate, err := workspaceboundary.Candidate(input.Profile.Workspace, policyPath, invocationDir)
+	if err != nil {
+		return "", false
+	}
+	if resolved, err := workspaceboundary.Resolve(input.Profile.Workspace, policyPath, invocationDir); err == nil {
+		return resolved, true
+	}
+	return candidate, true
 }
 
 func workspaceFinding(check profilePrerequisiteCheck) policy.Finding {

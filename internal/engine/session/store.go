@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+
+	workspaceboundary "github.com/freakhill/safeslop/internal/engine/workspace"
 )
 
 // Store errors are intentionally fixed and value-free: callers can map them to
@@ -215,11 +217,15 @@ func (s Store) Save(candidate Session) error {
 }
 
 // Create installs a complete random-id record with no-replace semantics.
-func (s Store) Create(agent, environment, workspace string, now time.Time) (Session, error) {
+func (s Store) Create(agent, environment, workspacePath string, now time.Time) (Session, error) {
 	if err := s.ensureDir(); err != nil {
 		return Session{}, err
 	}
-	abs, err := filepath.Abs(workspace)
+	invocationDir, err := os.Getwd()
+	if err != nil {
+		return Session{}, workspaceboundary.ErrUnavailable
+	}
+	resolvedWorkspace, err := workspaceboundary.Resolve(workspacePath, "", invocationDir)
 	if err != nil {
 		return Session{}, err
 	}
@@ -229,7 +235,7 @@ func (s Store) Create(agent, environment, workspace string, now time.Time) (Sess
 			return Session{}, err
 		}
 		sess := Session{
-			ID: id, Agent: agent, Workspace: abs, Environment: environment,
+			ID: id, Agent: agent, Workspace: resolvedWorkspace, Environment: environment,
 			Network: "deny", Backend: "", Status: StatusCreated,
 			CreatedAt: now.UTC(), UpdatedAt: now.UTC(),
 		}

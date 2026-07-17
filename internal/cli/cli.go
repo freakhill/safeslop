@@ -42,6 +42,7 @@ import (
 	"github.com/freakhill/safeslop/internal/engine/toolchain"
 	"github.com/freakhill/safeslop/internal/engine/trust"
 	"github.com/freakhill/safeslop/internal/engine/userconfig"
+	workspaceboundary "github.com/freakhill/safeslop/internal/engine/workspace"
 	"github.com/freakhill/safeslop/internal/jsoncontract"
 )
 
@@ -242,6 +243,20 @@ func cmdRun() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			invocationDir, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("resolve invocation directory: %w", err)
+			}
+			ws, err := workspaceboundary.Resolve(prof.Workspace, loaded.trustPath, invocationDir)
+			if err != nil {
+				return fmt.Errorf("resolve profile workspace: %w", err)
+			}
+			prof.Workspace = ws
+			if prof.Environment == "container" {
+				if err := validateWorkspaceStageRoot(ws); err != nil {
+					return fmt.Errorf("workspace boundary: %w", err)
+				}
+			}
 			if !jsonOut {
 				printWarnings(policy.Lint(&policy.Config{Profiles: map[string]policy.Profile{name: prof}}))
 			}
@@ -251,10 +266,6 @@ func cmdRun() *cobra.Command {
 			}
 			if prof.Toolchain != nil && toolchain.Wraps(prof.Toolchain.Kind) {
 				argv = toolchain.Wrap(prof.Toolchain.Kind, prof.Toolchain.Run, argv) // wrap before env switch (SP5)
-			}
-			ws := prof.Workspace
-			if ws == "" {
-				ws, _ = os.Getwd()
 			}
 
 			tier, tierNote := policy.EnvTier(prof.Environment)
@@ -455,12 +466,27 @@ var sessionWipeStageDir = func(sess engsession.Session) error {
 // path under $HOME and its 0700 ancestry are part of the boundary, and match what Lima/
 // Colima already share rw). The path is deterministic, so the revoke/wipe paths
 // reconstruct it without persisting anything.
-func stageDirFor(name, ws string) (string, error) {
+func stageRootPath() (string, error) {
 	cache, err := os.UserCacheDir()
 	if err != nil {
 		return "", fmt.Errorf("resolve user cache dir for credential staging: %w", err)
 	}
-	base := filepath.Join(cache, "safeslop", "runtime")
+	return filepath.Join(cache, "safeslop", "runtime"), nil
+}
+
+func validateWorkspaceStageRoot(ws string) error {
+	root, err := stageRootPath()
+	if err != nil {
+		return err
+	}
+	return workspaceboundary.RequireDisjointPaths(ws, root)
+}
+
+func stageDirFor(name, ws string) (string, error) {
+	base, err := stageRootPath()
+	if err != nil {
+		return "", err
+	}
 	if err := os.MkdirAll(base, 0o700); err != nil {
 		return "", fmt.Errorf("create credential staging root: %w", err)
 	}
@@ -889,11 +915,20 @@ func cmdSessionCreate() *cobra.Command {
 			if workspace == "" {
 				return emitContractError(jsoncontract.CodeInvalidArgument, "--workspace is required", nil)
 			}
-			if fi, err := os.Stat(workspace); err != nil || !fi.IsDir() {
-				return emitContractError(jsoncontract.CodeInvalidArgument, "--workspace must name an existing directory", map[string]any{"workspace": workspace})
+			invocationDir, err := os.Getwd()
+			if err != nil {
+				return emitContractError(jsoncontract.CodeIOError, "resolve invocation directory", nil)
+			}
+			rawWorkspace := workspace
+			workspace, err = workspaceboundary.Resolve(rawWorkspace, "", invocationDir)
+			if err != nil {
+				return emitContractError(jsoncontract.CodeInvalidArgument, "--workspace must name a valid existing directory", map[string]any{"workspace": rawWorkspace})
 			}
 			switch environment {
 			case "container":
+				if err := validateWorkspaceStageRoot(workspace); err != nil {
+					return emitContractError(jsoncontract.CodeInvalidArgument, "workspace overlaps the private runtime stage", nil)
+				}
 			case "host":
 				// An ad-hoc host launch has no safeslop.cue to approve, yet it runs the agent
 				// unconfined with your real host credentials. Require an explicit ack so the
@@ -1035,14 +1070,19 @@ func createSessionFromProfile(store engsession.Store, profile string) (engsessio
 	if err != nil {
 		return engsession.Session{}, emitContractError(jsoncontract.CodeInvalidArgument, "resolve profile image recipe", map[string]any{"profile": profile, "error": err.Error()})
 	}
-	workspace := prof.Workspace
-	if workspace == "" {
-		workspace, _ = os.Getwd()
-	} else if !filepath.IsAbs(workspace) {
-		workspace = filepath.Join(filepath.Dir(path), workspace)
+	invocationDir, err := os.Getwd()
+	if err != nil {
+		return engsession.Session{}, emitContractError(jsoncontract.CodeIOError, "resolve invocation directory", nil)
 	}
-	if fi, err := os.Stat(workspace); err != nil || !fi.IsDir() {
-		return engsession.Session{}, emitContractError(jsoncontract.CodeInvalidArgument, "profile workspace must name an existing directory", map[string]any{"profile": profile, "workspace": workspace})
+	workspace, err := workspaceboundary.Resolve(prof.Workspace, loaded.trustPath, invocationDir)
+	if err != nil {
+		return engsession.Session{}, emitContractError(jsoncontract.CodeInvalidArgument, "profile workspace must name a valid existing directory", map[string]any{"profile": profile})
+	}
+	prof.Workspace = workspace
+	if prof.Environment == "container" {
+		if err := validateWorkspaceStageRoot(workspace); err != nil {
+			return engsession.Session{}, emitContractError(jsoncontract.CodeInvalidArgument, "profile workspace overlaps the private runtime stage", map[string]any{"profile": profile})
+		}
 	}
 	agent := policy.NormalizeAgent(prof.Agent)
 	if !policy.IsLaunchableAgent(agent) && agent != "shell" {
@@ -1114,9 +1154,19 @@ func createBuiltinSession(store engsession.Store, name string) (engsession.Sessi
 	if err != nil {
 		return engsession.Session{}, emitContractError(jsoncontract.CodeInvalidArgument, "resolve profile image recipe", map[string]any{"profile": name, "error": err.Error()})
 	}
-	workspace, err := os.Getwd()
+	invocationDir, err := os.Getwd()
 	if err != nil {
-		return engsession.Session{}, emitContractError(jsoncontract.CodeIOError, "get workspace", map[string]any{"error": err.Error()})
+		return engsession.Session{}, emitContractError(jsoncontract.CodeIOError, "get workspace", nil)
+	}
+	workspace, err := workspaceboundary.Resolve("", "", invocationDir)
+	if err != nil {
+		return engsession.Session{}, emitContractError(jsoncontract.CodeInvalidArgument, "workspace must name a valid existing directory", nil)
+	}
+	prof.Workspace = workspace
+	if prof.Environment == "container" {
+		if err := validateWorkspaceStageRoot(workspace); err != nil {
+			return engsession.Session{}, emitContractError(jsoncontract.CodeInvalidArgument, "workspace overlaps the private runtime stage", map[string]any{"profile": name})
+		}
 	}
 	sess, err := store.Create(policy.NormalizeAgent(prof.Agent), prof.Environment, workspace, time.Now())
 	if err != nil {
@@ -2851,6 +2901,17 @@ func profileResolvedData(path, name string, prof policy.Profile, contexts ...pro
 		evaluationInput.PolicyPath = path
 		evaluationInput.Profile = prof
 	}
+	invocationDir, cwdErr := os.Getwd()
+	policyPath := ""
+	if evaluationInput.Source != profileEvaluationSourceBuiltin {
+		policyPath = evaluationInput.PolicyPath
+	}
+	if cwdErr == nil {
+		if canonical, err := workspaceboundary.Resolve(prof.Workspace, policyPath, invocationDir); err == nil {
+			prof.Workspace = canonical
+			evaluationInput.Profile = prof
+		}
+	}
 	return map[string]any{
 		"path":       path,
 		"name":       name,
@@ -3250,9 +3311,23 @@ func runProfileCtx(ctx context.Context, name string, prof policy.Profile, argv [
 	if len(stdio) > 0 {
 		rio = stdio[0]
 	}
+	invocationDir, err := os.Getwd()
+	if err != nil {
+		return 1, fmt.Errorf("resolve invocation directory: %w", err)
+	}
+	ws, err = workspaceboundary.Resolve(ws, "", invocationDir)
+	if err != nil {
+		return 1, fmt.Errorf("resolve workspace boundary: %w", err)
+	}
+	prof.Workspace = ws
 	stageDir, err := stageDirFor(name, ws)
 	if err != nil {
 		return 1, err
+	}
+	if prof.Environment == "container" {
+		if err := workspaceboundary.RequireDisjointPaths(ws, stageDir); err != nil {
+			return 1, err
+		}
 	}
 	// A crashed wrapper can leave a stage directory for this exact run identity. Never reuse it:
 	// retired tokens and stale canonical files must be removed before any new mint/stage action.

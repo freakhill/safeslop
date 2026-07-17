@@ -72,7 +72,8 @@ func TestSquidEgressObservationLogFormatExcludesRequestURIs(t *testing.T) {
 func TestReadDeniedEgressObservationsFailureReturnsNoObservations(t *testing.T) {
 	eng := newFakeEngine(t, nil)
 	composeFile := "/runtime/compose.yml"
-	eng.fail("compose -f "+composeFile+" logs --no-log-prefix proxy", 17)
+	key := composeCommandKey(t, composeFile, "logs", "--no-log-prefix", "proxy")
+	eng.fail(key, 17)
 
 	got, err := ReadDeniedEgressObservations(context.Background(), eng, composeFile)
 	if err == nil {
@@ -81,5 +82,5 @@ func TestReadDeniedEgressObservationsFailureReturnsNoObservations(t *testing.T) 
 	if len(got) != 0 {
 		t.Fatalf("observation failure must return no observations, got %#v", got)
 	}
-	eng.assertRan(t, "compose -f "+composeFile+" logs --no-log-prefix proxy")
+	eng.assertRan(t, key)
 }

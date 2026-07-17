@@ -2,17 +2,20 @@ services:
   proxy:
     image: ubuntu/squid:5.2-22.04_beta
     labels:
-      safeslop.session: "{{.SessionID}}"
+      safeslop.session: {{yaml .SessionID}}
       safeslop.managed: "true"
     volumes:
-      - {{.RuntimeDir}}/squid.conf:/etc/squid/squid.conf:ro
-      - {{.RuntimeDir}}/allowlist.domains:/etc/squid/allowlist.domains:ro
-      - {{.RuntimeDir}}/session-grants.conf:/etc/squid/session-grants.conf:ro
-    networks: [internal, egress]
+{{range .ProxyMounts}}      - type: bind
+        source: {{yaml .Source}}
+        target: {{yaml .Target}}
+        read_only: {{.ReadOnly}}
+        bind:
+          create_host_path: false
+{{end}}    networks: [internal, egress]
   agent:
-    image: {{.AgentImage}}
+    image: {{yaml .AgentImage}}
     labels:
-      safeslop.session: "{{.SessionID}}"
+      safeslop.session: {{yaml .SessionID}}
       safeslop.managed: "true"
     working_dir: /workspace
     # Dockerfile.agent already uses USER 1000; hard-set the launch user too so
@@ -25,7 +28,7 @@ services:
       NO_PROXY: localhost,127.0.0.1,proxy
 {{if .NpmConfig}}      NPM_CONFIG_USERCONFIG: /safeslop/runtime/.npmrc
 {{end}}{{if .Kubeconfig}}      KUBECONFIG: /safeslop/runtime/kubeconfig
-{{end}}{{if .GitConfig}}      GIT_CONFIG_GLOBAL: {{.GitConfigPath}}
+{{end}}{{if .GitConfig}}      GIT_CONFIG_GLOBAL: {{yaml .GitConfigPath}}
       GIT_TERMINAL_PROMPT: 0
 {{end}}{{if .GitSSHConfig}}      GIT_SSH_COMMAND: ssh -F /safeslop/runtime/.ssh/config.container
 {{end}}      TERM: xterm-256color
@@ -35,11 +38,12 @@ services:
     dns:
       - 127.0.0.1
 {{end}}    volumes:
-      - {{.Workspace}}:/workspace:rw
-      - {{.StageDir}}:/safeslop/runtime:ro
-{{range present .Projection}}      # specs/0096: read-only host config projection (opaque staging path; copied into
-      # /home/agent tmpfs by the entrypoint, never symlinked back to a live host bind).
-      - {{.Host}}:{{.Container}}:ro
+{{range .AgentMounts}}      - type: bind
+        source: {{yaml .Source}}
+        target: {{yaml .Target}}
+        read_only: {{.ReadOnly}}
+        bind:
+          create_host_path: false
 {{end}}    read_only: true
     tmpfs:
       - /tmp
@@ -59,25 +63,20 @@ services:
       - "no-new-privileges:true"
     # internal-only by default: the squid proxy is the ONLY egress, so the allowlist is
     # enforced, external DNS is loopback-pinned, and there is no direct route (deny tier).
-    # In open-egress mode the agent
-    # also joins the egress bridge so it has a real route + working DNS (ping, ssh, direct
-    # resolution) — "network: allow" means actually-open, not just HTTP(S)-via-proxy.
+    # In open-egress mode the agent also joins the egress bridge so it has a real route +
+    # working DNS — "network: allow" means actually-open, not HTTP(S)-via-proxy only.
     networks: [internal{{if .OpenEgress}}, egress{{end}}]
 networks:
   internal:
-{{if .InternalNet}}    # Pre-created out of band with the engine's `network create --internal` so the agent gets
-    # NO default route. Required for the lima/rootless-nerdctl backend: compose's own inline no-egress
-    # form is NOT honored there (the bridge keeps its gateway and RootlessKit/slirp NATs it out, so the
-    # agent would reach the internet directly, bypassing squid — validated 2026-06-22). Rootful docker
-    # does honor the inline form, so the host backend keeps it below.
+{{if .InternalNet}}    # Pre-created out of band with the engine's `network create --internal`.
     external: true
-    name: {{.InternalNet}}
+    name: {{yaml .InternalNet}}
 {{else}}    internal: true
     labels:
-      safeslop.session: "{{.SessionID}}"
+      safeslop.session: {{yaml .SessionID}}
       safeslop.managed: "true"
 {{end}}  egress:
     labels:
-      safeslop.session: "{{.SessionID}}"
+      safeslop.session: {{yaml .SessionID}}
       safeslop.managed: "true"
     driver: bridge

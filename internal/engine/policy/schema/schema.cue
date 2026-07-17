@@ -218,7 +218,7 @@ package safeslop
 	environment: #Environment
 	// Directory the boundary confines file access to. Empty (default) means the
 	// directory safeslop was invoked from.
-	workspace?: string
+	workspace?: string & !~"[\u0000-\u001f\u007f]"
 	network: #Network | *"deny"
 	// Extra egress domains for environment:container with network:deny — unioned with the
 	// base allowlist + the agent's built-in providers (specs/0046). A leading dot

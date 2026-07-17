@@ -51,7 +51,7 @@ func TestComposeAllowlistUnionsAndDedupes(t *testing.T) {
 // reach pi's providers (only the shared base).
 func TestMaterializeRunScopesEgressPerAgent(t *testing.T) {
 	piDir := t.TempDir()
-	if _, err := materializeRun(composeParams{RuntimeDir: piDir, StageDir: piDir, Workspace: "/", Egress: policy.AgentEgress("pi")}, false); err != nil {
+	if _, err := materializeRun(composeParams{RuntimeDir: piDir, StageDir: piDir, Workspace: t.TempDir(), Egress: policy.AgentEgress("pi")}, false); err != nil {
 		t.Fatal(err)
 	}
 	pi, err := os.ReadFile(filepath.Join(piDir, "allowlist.domains"))
@@ -65,7 +65,7 @@ func TestMaterializeRunScopesEgressPerAgent(t *testing.T) {
 	}
 
 	clDir := t.TempDir()
-	if _, err := materializeRun(composeParams{RuntimeDir: clDir, StageDir: clDir, Workspace: "/", Egress: policy.AgentEgress("claude")}, false); err != nil {
+	if _, err := materializeRun(composeParams{RuntimeDir: clDir, StageDir: clDir, Workspace: t.TempDir(), Egress: policy.AgentEgress("claude")}, false); err != nil {
 		t.Fatal(err)
 	}
 	cl, err := os.ReadFile(filepath.Join(clDir, "allowlist.domains"))
@@ -93,7 +93,7 @@ func TestMaterializeRunPiOAuthSentinelStaysInAuthFile(t *testing.T) {
 	if err := os.WriteFile(authPath, []byte(`{"openai-codex":{"type":"api_key","key":"`+access+`"}}`+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := materializeRun(composeParams{RuntimeDir: stage, StageDir: stage, Workspace: "/workspace"}, false); err != nil {
+	if _, err := materializeRun(composeParams{RuntimeDir: stage, StageDir: stage, Workspace: t.TempDir()}, false); err != nil {
 		t.Fatal(err)
 	}
 	forbidden := []string{access, "REFRESH_SENTINEL", "OTHER_PROVIDER_SENTINEL", "/home/private/.pi/agent/auth.json"}
@@ -138,10 +138,14 @@ func TestProvisionThreadsProjectionIntoCompose(t *testing.T) {
 		t.Fatal(err)
 	}
 	snapshot := filepath.Join(stageDir, "projection-snapshots", "000000")
-	if !strings.Contains(string(yml), snapshot+":/safeslop/projected/0:ro") {
+	canonicalSnapshot, err := filepath.EvalSymlinks(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(yml), `source: "`+canonicalSnapshot+`"`) || !strings.Contains(string(yml), `target: "/safeslop/projected/0"`) {
 		t.Errorf("provision must mount the private snapshot read-only:\n%s", yml)
 	}
-	if strings.Contains(string(yml), filepath.Join(home, ".zshrc")+":/safeslop/projected/") {
+	if strings.Contains(string(yml), filepath.Join(home, ".zshrc")) {
 		t.Errorf("provision mounted the live host source:\n%s", yml)
 	}
 	if got, err := os.ReadFile(snapshot); err != nil || string(got) != "# zsh" {

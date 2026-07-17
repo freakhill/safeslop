@@ -12,6 +12,7 @@ import (
 	"github.com/freakhill/safeslop/internal/engine/container/runtime"
 	"github.com/freakhill/safeslop/internal/engine/exec"
 	"github.com/freakhill/safeslop/internal/engine/policy"
+	workspaceboundary "github.com/freakhill/safeslop/internal/engine/workspace"
 )
 
 // detectRuntime is a test seam. Production uses runtime.Detect; unit tests must not invoke an
@@ -41,10 +42,6 @@ func materializeRun(p composeParams, open bool) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	yml, err := renderCompose(p)
-	if err != nil {
-		return "", err
-	}
 	if err := writeEntrypoint(dir); err != nil {
 		return "", err
 	}
@@ -52,13 +49,19 @@ func materializeRun(p composeParams, open bool) (string, error) {
 		"squid.conf":          []byte(squid),
 		"allowlist.domains":   composeAllowlist(allow, p.Egress),
 		"session-grants.conf": []byte(RenderSessionGrants(p.SessionGrants)),
-		"compose.yml":         []byte(yml),
 		".safeslop-stage":     nil,
 	}
 	for name, content := range files {
 		if werr := os.WriteFile(filepath.Join(dir, name), content, 0o600); werr != nil {
 			return "", werr
 		}
+	}
+	yml, err := renderComposeWithSourceCheck(p, true)
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "compose.yml"), []byte(yml), 0o600); err != nil {
+		return "", err
 	}
 	// specs/0096: write the projection manifest (JSON, provenance of record) + a shell-friendly
 	// TSV the entrypoint reads to copy each staged file into the ephemeral home. Both are
@@ -159,10 +162,19 @@ func provision(ctx context.Context, sessionID string, agentArgv []string, worksp
 	if err := os.MkdirAll(stageDir, 0o700); err != nil {
 		return nil, "", nil, err
 	}
-	_ = withRepoLock(workspace, func() error { return Reconcile(ctx, workspace, time.Hour) })
-	if real, err := filepath.EvalSymlinks(workspace); err == nil {
-		workspace = real
+	resolvedWorkspace, err := workspaceboundary.ResolveAbsolute(workspace)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("workspace boundary: %w", err)
 	}
+	resolvedStage, err := workspaceboundary.ResolveAbsolute(stageDir)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("runtime stage boundary: %w", err)
+	}
+	if err := workspaceboundary.RequireDisjoint(resolvedWorkspace, resolvedStage); err != nil {
+		return nil, "", nil, err
+	}
+	workspace, stageDir = resolvedWorkspace, resolvedStage
+	_ = withRepoLock(workspace, func() error { return Reconcile(ctx, workspace, time.Hour) })
 
 	// Detect the ambient container runtime (docker → podman → lima) and drive it; safeslop never
 	// provisions one (specs/0066 D3). The deny-tier fail-closed egress gate lives inside Detect, so a
@@ -229,7 +241,11 @@ func provision(ctx context.Context, sessionID string, agentArgv []string, worksp
 	if err := Up(ctx, eng, stageDir, composeFile, enabled); err != nil {
 		return nil, "", nil, err
 	}
-	return composeRunArgv(eng, composeFile, agentArgv), composeFile, eng, nil
+	runArgv, err := composeRunArgv(eng, composeFile, agentArgv)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	return runArgv, composeFile, eng, nil
 }
 
 // Launch runs spec.Argv in the agent container. secretEnv (the resolved profile secrets) is

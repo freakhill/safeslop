@@ -22,7 +22,7 @@ func TestSessionGrantApplyWritesOverlayAndReloadsProxy(t *testing.T) {
 	if err := ApplySessionGrants(context.Background(), eng, composeFile, dir, []SessionGrant{{Host: "example.com", Port: 443}}); err != nil {
 		t.Fatalf("ApplySessionGrants: %v", err)
 	}
-	eng.assertRan(t, "compose -f "+composeFile+" exec -T proxy squid -k reconfigure")
+	eng.assertRan(t, composeCommandKey(t, composeFile, "exec", "-T", "proxy", "squid", "-k", "reconfigure"))
 	b, err := os.ReadFile(filepath.Join(dir, "session-grants.conf"))
 	if err != nil {
 		t.Fatal(err)
@@ -43,7 +43,7 @@ func TestSessionGrantApplyRetriesTransientReloadBeforeRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 	eng := newFakeEngine(t, nil)
-	key := "compose -f " + composeFile + " exec -T proxy squid -k reconfigure"
+	key := composeCommandKey(t, composeFile, "exec", "-T", "proxy", "squid", "-k", "reconfigure")
 	eng.fail(key, 42)
 	calls := 0
 	eng.runHook(key, func() {
@@ -80,7 +80,7 @@ func TestSessionGrantApplyFailClosedRestoresPreviousOverlay(t *testing.T) {
 		t.Fatal(err)
 	}
 	eng := newFakeEngine(t, nil)
-	eng.fail("compose -f "+composeFile+" exec -T proxy squid -k reconfigure", 42)
+	eng.fail(composeCommandKey(t, composeFile, "exec", "-T", "proxy", "squid", "-k", "reconfigure"), 42)
 
 	err := ApplySessionGrants(context.Background(), eng, composeFile, dir, []SessionGrant{{Host: "new.example.com", Port: 443}})
 	if err == nil || !strings.Contains(err.Error(), "reconfigure proxy") {
@@ -110,7 +110,7 @@ func TestSessionGrantApplyWriteFailureDoesNotReloadOrReplace(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "write session grants overlay") {
 		t.Fatalf("ApplySessionGrants error = %v, want write failure", err)
 	}
-	eng.assertNotRan(t, "compose -f "+composeFile+" exec -T proxy squid -k reconfigure")
+	eng.assertNotRan(t, composeCommandKey(t, composeFile, "exec", "-T", "proxy", "squid", "-k", "reconfigure"))
 	b, err := os.ReadFile(filepath.Join(dir, "session-grants.conf"))
 	if err != nil {
 		t.Fatal(err)

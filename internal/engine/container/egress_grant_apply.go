@@ -92,9 +92,13 @@ func writeOverlayCandidate(path string, content []byte, hook func(string) error)
 }
 
 func reconfigureProxy(ctx context.Context, eng runtime.Engine, composeFile string) error {
+	args, err := composeProjectArgs(composeFile, "exec", "-T", "proxy", "squid", "-k", "reconfigure")
+	if err != nil {
+		return err
+	}
 	var lastErr error
 	for attempt := 0; attempt < proxyReconfigureAttempts; attempt++ {
-		cmd := eng.Command(ctx, "compose", "-f", composeFile, "exec", "-T", "proxy", "squid", "-k", "reconfigure")
+		cmd := eng.Command(ctx, args...)
 		if err := cmd.Run(); err == nil {
 			return nil
 		} else {
