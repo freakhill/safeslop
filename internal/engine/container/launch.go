@@ -173,7 +173,21 @@ func composeAllowlist(base []byte, extra []string) []byte {
 // interactive argv that runs the agent (`docker compose run --rm agent <argv>`) plus the compose
 // file path (for teardown).
 // secretEnv is written to secrets.env and sourced by the entrypoint.
-func provision(ctx context.Context, sessionID string, agentArgv []string, workspace, network string, egress []string, secretEnv []string, stageDir string, enabled []string, proj *policy.Projection, grants ...SessionGrant) (argv []string, composeFile string, eng runtime.Engine, err error) {
+func provision(ctx context.Context, sessionID string, agentArgv []string, workspace, network string, egress []string, secretEnv []string, stageDir string, enabled []string, proj *policy.Projection, grants ...SessionGrant) ([]string, string, runtime.Engine, error) {
+	eng, err := detectRuntime(policyFromNetwork(network))
+	if err != nil {
+		return nil, "", nil, err
+	}
+	return provisionWithEngine(ctx, eng, sessionID, agentArgv, workspace, network, egress, secretEnv, stageDir, enabled, proj, grants...)
+}
+
+// provisionWithEngine materializes and starts a boundary on the caller-selected
+// runtime. It deliberately never detects: detection is an approval decision that
+// must not drift between session persistence, launch, and cleanup.
+func provisionWithEngine(ctx context.Context, eng runtime.Engine, sessionID string, agentArgv []string, workspace, network string, egress []string, secretEnv []string, stageDir string, enabled []string, proj *policy.Projection, grants ...SessionGrant) (argv []string, composeFile string, selected runtime.Engine, err error) {
+	if eng == nil {
+		return nil, "", nil, fmt.Errorf("container runtime is unavailable")
+	}
 	if len(agentArgv) == 0 {
 		return nil, "", nil, exec.ErrNoArgv
 	}
@@ -197,14 +211,6 @@ func provision(ctx context.Context, sessionID string, agentArgv []string, worksp
 	workspace, stageDir = resolvedWorkspace, resolvedStage
 	_ = withRepoLock(workspace, func() error { return Reconcile(ctx, workspace, time.Hour) })
 
-	// Detect the ambient container runtime (docker → podman → lima) and drive it; safeslop never
-	// provisions one (specs/0066 D3). The deny-tier fail-closed egress gate lives inside Detect, so a
-	// network:deny profile cannot launch on an egress-unverified rootless runtime (podman/lima) without an
-	// explicit opt-in — Detect returns an actionable error instead.
-	eng, err = detectRuntime(policyFromNetwork(network))
-	if err != nil {
-		return nil, "", nil, err
-	}
 	// Egress isolation: the agent's no-egress network. Host docker honours compose's inline internal:true;
 	// lima/rootless-nerdctl does NOT, so the engine names a `--internal` network we pre-create here (before
 	// compose up) and the compose references it as external (validated 2026-06-22).
@@ -282,7 +288,20 @@ func provision(ctx context.Context, sessionID string, agentArgv []string, worksp
 // enabled is the profile's resolved package identity set (specs/0058): it selects the agent
 // image (ENABLE_<pkg> build args) so a profile gets exactly the tools it declared.
 func Launch(ctx context.Context, spec exec.LaunchSpec, workspace, network string, egress []string, secretEnv []string, stageDir string, enabled []string, proj *policy.Projection, grants ...SessionGrant) (int, error) {
-	argv, _, _, err := provision(ctx, SessionIDFromStageDir(stageDir), spec.Argv, workspace, network, egress, secretEnv, stageDir, enabled, proj, grants...)
+	return LaunchWithEngine(ctx, nil, spec, workspace, network, egress, secretEnv, stageDir, enabled, proj, grants...)
+}
+
+// LaunchWithEngine launches through eng when supplied. Callers that already selected a
+// runtime must retain that selection through provisioning rather than falling back.
+func LaunchWithEngine(ctx context.Context, eng runtime.Engine, spec exec.LaunchSpec, workspace, network string, egress []string, secretEnv []string, stageDir string, enabled []string, proj *policy.Projection, grants ...SessionGrant) (int, error) {
+	if eng == nil {
+		var err error
+		eng, err = detectRuntime(policyFromNetwork(network))
+		if err != nil {
+			return 1, err
+		}
+	}
+	argv, _, _, err := provisionWithEngine(ctx, eng, SessionIDFromStageDir(stageDir), spec.Argv, workspace, network, egress, secretEnv, stageDir, enabled, proj, grants...)
 	if err != nil {
 		return 1, err
 	}

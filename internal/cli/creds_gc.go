@@ -24,9 +24,6 @@ var forgejoGCComponentRE = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 const forgejoGCPageSize = 1
 const forgejoGCMaxPages = 10000
 
-var forgejoGCBaseForHost = func(host string) string { return "https://" + host }
-var newForgejoGCClient = creds.NewForgejoHTTP
-
 type forgejoGCResult struct {
 	Host       string `json:"host"`
 	Repository string `json:"repository"`
@@ -53,6 +50,10 @@ type forgejoGCTarget struct {
 // considers keys whose title is exactly the title safeslop itself creates, and --yes is required
 // before it sends a DELETE request.
 func cmdCredsGC() *cobra.Command {
+	return cmdCredsGCWithDeps(defaultDependencies())
+}
+
+func cmdCredsGCWithDeps(d *dependencies) *cobra.Command {
 	var host string
 	var repos []string
 	var yes bool
@@ -78,7 +79,7 @@ func cmdCredsGC() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			report, runErr := runCredsGC(cmd.Context(), accountsPath, host, repos, yes, !yes, forgejoGCBaseForHost)
+			report, runErr := runCredsGCWithClient(cmd.Context(), accountsPath, host, repos, yes, !yes, d.forgejoGCBaseForHost, d.newForgejoGCClient())
 			out, formatErr := formatCredsGCOutput(report, output)
 			if formatErr != nil {
 				return formatErr
@@ -99,6 +100,10 @@ func cmdCredsGC() *cobra.Command {
 // listed again and must retain its exact expected title before deletion, so a concurrent key change
 // cannot expand the requested scope. The report contains only value-free operator metadata.
 func runCredsGC(ctx context.Context, accountsPath, host string, repos []string, confirmed, dryRun bool, baseForHost func(string) string) (forgejoGCReport, error) {
+	return runCredsGCWithClient(ctx, accountsPath, host, repos, confirmed, dryRun, baseForHost, creds.NewForgejoHTTP())
+}
+
+func runCredsGCWithClient(ctx context.Context, accountsPath, host string, repos []string, confirmed, dryRun bool, baseForHost func(string) string, client creds.ForgejoHTTP) (forgejoGCReport, error) {
 	report := forgejoGCReport{Results: []forgejoGCResult{}}
 	if confirmed == dryRun {
 		return report, fmt.Errorf("creds gc requires exactly one of dry-run or confirmed deletion")
@@ -114,8 +119,6 @@ func runCredsGC(ctx context.Context, accountsPath, host string, repos []string, 
 	if base == "" {
 		return report, fmt.Errorf("invalid Forgejo API base")
 	}
-	client := newForgejoGCClient()
-
 	type candidate struct {
 		target forgejoGCTarget
 		key    forgejoGCKey

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/freakhill/safeslop/internal/engine/container"
+	runtimepkg "github.com/freakhill/safeslop/internal/engine/container/runtime"
 	engexec "github.com/freakhill/safeslop/internal/engine/exec"
 	"github.com/freakhill/safeslop/internal/engine/policy"
 	engsession "github.com/freakhill/safeslop/internal/engine/session"
@@ -18,21 +19,19 @@ func installEgressSeams(t *testing.T,
 	apply func(context.Context, engsession.Session, []container.SessionGrant) error,
 	inspect func(context.Context, engsession.Session) (container.EgressGeneration, error),
 	teardown func(engsession.Session) error,
-) {
+) *dependencies {
 	t.Helper()
-	oldApply, oldInspect, oldTeardown := applySessionGrantOverlay, inspectSessionEgressGeneration, egressAuthorityTeardown
+	d := defaultDependencies()
 	if apply != nil {
-		applySessionGrantOverlay = apply
+		d.applyEgressOverlay = apply
 	}
 	if inspect != nil {
-		inspectSessionEgressGeneration = inspect
+		d.inspectEgress = inspect
 	}
 	if teardown != nil {
-		egressAuthorityTeardown = teardown
+		d.teardownEgress = teardown
 	}
-	t.Cleanup(func() {
-		applySessionGrantOverlay, inspectSessionEgressGeneration, egressAuthorityTeardown = oldApply, oldInspect, oldTeardown
-	})
+	return d
 }
 
 type scriptedEgressRecordTx struct {
@@ -66,12 +65,12 @@ func TestFailClosedEgressRetriesFailureStateCommit(t *testing.T) {
 		{name: "teardown proven", wantStatus: engsession.StatusStopped},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			installEgressSeams(t, nil, nil, func(engsession.Session) error { return tc.teardownErr })
+			d := installEgressSeams(t, nil, nil, func(engsession.Session) error { return tc.teardownErr })
 			tx := &scriptedEgressRecordTx{
 				current: engsession.Session{ID: "sess-test", Status: engsession.StatusRunning},
 				errors:  []error{errors.New("transient record write"), nil},
 			}
-			if err := failClosedEgress(tx, nil); !errors.Is(err, ErrEgressAuthorityUncertain) {
+			if err := failClosedEgressWithDeps(d, tx, nil); !errors.Is(err, ErrEgressAuthorityUncertain) {
 				t.Fatalf("failClosedEgress error = %v", err)
 			}
 			if tx.commits != 2 || tx.current.Status != tc.wantStatus || tx.current.LastFailure == nil || tx.current.LastFailure.Code != "network_authority_uncertain" {
@@ -111,7 +110,7 @@ func TestSessionGrantWidenPersistsUpperBoundBeforeRuntimeAck(t *testing.T) {
 	}
 	_, runtimeGeneration := seedAppliedRunningSession(t, store, sess)
 	applyCalls := 0
-	installEgressSeams(t,
+	d := installEgressSeams(t,
 		func(_ context.Context, candidate engsession.Session, desired []container.SessionGrant) error {
 			applyCalls++
 			if len(desired) != 1 || desired[0].Host != "example.com" {
@@ -134,7 +133,7 @@ func TestSessionGrantWidenPersistsUpperBoundBeforeRuntimeAck(t *testing.T) {
 		func(engsession.Session) error { t.Fatal("successful widen tore down the session"); return nil },
 	)
 
-	updated, _, err := grantSessionEgress(context.Background(), store, sess.ID, "example.com", 443, nowForTest(t))
+	updated, _, err := grantSessionEgressWithDeps(d, context.Background(), store, sess.ID, "example.com", 443, nowForTest(t))
 	if err != nil {
 		t.Fatalf("grantSessionEgress: %v", err)
 	}
@@ -159,7 +158,7 @@ func TestSessionGrantUncertainApplyTearsDownBeforeCompensating(t *testing.T) {
 	}
 	_, runtimeGeneration := seedAppliedRunningSession(t, store, sess)
 	teardowns := 0
-	installEgressSeams(t,
+	d := installEgressSeams(t,
 		func(context.Context, engsession.Session, []container.SessionGrant) error {
 			return container.ErrEgressGenerationUncertain
 		},
@@ -175,7 +174,7 @@ func TestSessionGrantUncertainApplyTearsDownBeforeCompensating(t *testing.T) {
 			return nil
 		},
 	)
-	if _, _, err := grantSessionEgress(context.Background(), store, sess.ID, "example.com", 443, nowForTest(t)); !errors.Is(err, ErrEgressAuthorityUncertain) {
+	if _, _, err := grantSessionEgressWithDeps(d, context.Background(), store, sess.ID, "example.com", 443, nowForTest(t)); !errors.Is(err, ErrEgressAuthorityUncertain) {
 		t.Fatalf("grant error = %v, want ErrEgressAuthorityUncertain", err)
 	}
 	stored, err := store.Get(sess.ID)
@@ -197,7 +196,7 @@ func TestSessionGrantTeardownFailurePersistsRunningUncertaintyMarker(t *testing.
 		t.Fatal(err)
 	}
 	_, runtimeGeneration := seedAppliedRunningSession(t, store, sess)
-	installEgressSeams(t,
+	d := installEgressSeams(t,
 		func(context.Context, engsession.Session, []container.SessionGrant) error {
 			return container.ErrEgressGenerationUncertain
 		},
@@ -206,7 +205,7 @@ func TestSessionGrantTeardownFailurePersistsRunningUncertaintyMarker(t *testing.
 		},
 		func(engsession.Session) error { return errors.New("teardown incomplete") },
 	)
-	if _, _, err := grantSessionEgress(context.Background(), store, sess.ID, "example.com", 443, nowForTest(t)); !errors.Is(err, ErrEgressAuthorityUncertain) {
+	if _, _, err := grantSessionEgressWithDeps(d, context.Background(), store, sess.ID, "example.com", 443, nowForTest(t)); !errors.Is(err, ErrEgressAuthorityUncertain) {
 		t.Fatalf("grant error = %v", err)
 	}
 	stored, err := store.Get(sess.ID)
@@ -226,7 +225,7 @@ func TestSessionEgressUncertaintyMarkerBlocksRecoveryUntilTeardown(t *testing.T)
 	}
 	_, runtimeGeneration := seedAppliedRunningSession(t, store, sess)
 	applyCalls, teardowns := 0, 0
-	installEgressSeams(t,
+	d := installEgressSeams(t,
 		func(_ context.Context, candidate engsession.Session, _ []container.SessionGrant) error {
 			applyCalls++
 			var generationErr error
@@ -244,10 +243,10 @@ func TestSessionEgressUncertaintyMarkerBlocksRecoveryUntilTeardown(t *testing.T)
 			return errors.New("teardown incomplete")
 		},
 	)
-	if _, _, err := grantSessionEgress(context.Background(), store, sess.ID, "example.com", 443, nowForTest(t)); !errors.Is(err, ErrEgressAuthorityUncertain) {
+	if _, _, err := grantSessionEgressWithDeps(d, context.Background(), store, sess.ID, "example.com", 443, nowForTest(t)); !errors.Is(err, ErrEgressAuthorityUncertain) {
 		t.Fatalf("first grant error = %v", err)
 	}
-	if _, _, err := grantSessionEgress(context.Background(), store, sess.ID, "example.com", 443, nowForTest(t)); !errors.Is(err, ErrEgressAuthorityUncertain) {
+	if _, _, err := grantSessionEgressWithDeps(d, context.Background(), store, sess.ID, "example.com", 443, nowForTest(t)); !errors.Is(err, ErrEgressAuthorityUncertain) {
 		t.Fatalf("recovery grant error = %v, want terminal uncertainty", err)
 	}
 	stored, err := store.Get(sess.ID)
@@ -270,7 +269,7 @@ func TestSessionRevokeNarrowsRuntimeBeforeDurableAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, runtimeGeneration := seedAppliedRunningSession(t, store, sess)
-	installEgressSeams(t,
+	d := installEgressSeams(t,
 		func(_ context.Context, candidate engsession.Session, desired []container.SessionGrant) error {
 			if len(desired) != 0 {
 				t.Fatalf("narrow candidate = %+v, want no session grants", desired)
@@ -291,7 +290,7 @@ func TestSessionRevokeNarrowsRuntimeBeforeDurableAuthority(t *testing.T) {
 		},
 		nil,
 	)
-	updated, err := revokeSessionEgress(context.Background(), store, sess.ID, grant.ID, nowForTest(t))
+	updated, err := revokeSessionEgressWithDeps(d, context.Background(), store, sess.ID, grant.ID, nowForTest(t))
 	if err != nil {
 		t.Fatalf("revokeSessionEgress: %v", err)
 	}
@@ -313,7 +312,7 @@ func TestSessionRevokeApplyFailureRestoresOldDurableGeneration(t *testing.T) {
 	}
 	_, runtimeGeneration := seedAppliedRunningSession(t, store, sess)
 	calls := 0
-	installEgressSeams(t,
+	d := installEgressSeams(t,
 		func(_ context.Context, candidate engsession.Session, _ []container.SessionGrant) error {
 			calls++
 			if calls == 1 {
@@ -328,7 +327,7 @@ func TestSessionRevokeApplyFailureRestoresOldDurableGeneration(t *testing.T) {
 		},
 		func(engsession.Session) error { t.Fatal("proved restore should not tear down"); return nil },
 	)
-	if _, err := revokeSessionEgress(context.Background(), store, sess.ID, grant.ID, nowForTest(t)); err == nil {
+	if _, err := revokeSessionEgressWithDeps(d, context.Background(), store, sess.ID, grant.ID, nowForTest(t)); err == nil {
 		t.Fatal("revoke unexpectedly succeeded after candidate apply failure")
 	}
 	stored, err := store.Get(sess.ID)
@@ -367,7 +366,7 @@ func TestRecoverInterruptedWidenReappliesDurableCandidate(t *testing.T) {
 		t.Fatal(err)
 	}
 	runtimeGeneration := oldGeneration
-	installEgressSeams(t,
+	d := installEgressSeams(t,
 		func(_ context.Context, candidate engsession.Session, _ []container.SessionGrant) error {
 			var err error
 			runtimeGeneration, err = sessionGeneration(candidate)
@@ -377,7 +376,9 @@ func TestRecoverInterruptedWidenReappliesDurableCandidate(t *testing.T) {
 			return runtimeGeneration, nil
 		}, nil,
 	)
-	if _, err := store.WithLocked(sess.ID, func(tx *engsession.RecordTx) error { return recoverRunningSessionEgress(context.Background(), tx) }); err != nil {
+	if _, err := store.WithLocked(sess.ID, func(tx *engsession.RecordTx) error {
+		return recoverRunningSessionEgressWithDeps(d, context.Background(), tx)
+	}); err != nil {
 		t.Fatalf("recover widen: %v", err)
 	}
 	stored, err := store.Get(sess.ID)
@@ -418,7 +419,7 @@ func TestRecoverInterruptedNarrowCommitsAcknowledgedCandidate(t *testing.T) {
 		t.Fatal(err)
 	}
 	runtimeGeneration := candidateGeneration
-	installEgressSeams(t,
+	d := installEgressSeams(t,
 		func(context.Context, engsession.Session, []container.SessionGrant) error {
 			t.Fatal("an exactly acknowledged narrow candidate must not be widened again")
 			return nil
@@ -427,7 +428,9 @@ func TestRecoverInterruptedNarrowCommitsAcknowledgedCandidate(t *testing.T) {
 			return runtimeGeneration, nil
 		}, nil,
 	)
-	if _, err := store.WithLocked(sess.ID, func(tx *engsession.RecordTx) error { return recoverRunningSessionEgress(context.Background(), tx) }); err != nil {
+	if _, err := store.WithLocked(sess.ID, func(tx *engsession.RecordTx) error {
+		return recoverRunningSessionEgressWithDeps(d, context.Background(), tx)
+	}); err != nil {
 		t.Fatalf("recover narrow: %v", err)
 	}
 	stored, err := store.Get(sess.ID)
@@ -451,7 +454,7 @@ func TestLegacyRunningSessionBootstrapsSameAuthorityBeforeGrant(t *testing.T) {
 	}
 	var applies []container.EgressGeneration
 	runtimeGeneration := container.EgressGeneration{}
-	installEgressSeams(t,
+	d := installEgressSeams(t,
 		func(_ context.Context, candidate engsession.Session, _ []container.SessionGrant) error {
 			generation, err := sessionGeneration(candidate)
 			if err == nil {
@@ -464,7 +467,7 @@ func TestLegacyRunningSessionBootstrapsSameAuthorityBeforeGrant(t *testing.T) {
 			return runtimeGeneration, errors.New("legacy proxy has no generation")
 		}, nil,
 	)
-	if _, _, err := grantSessionEgress(context.Background(), store, sess.ID, "example.com", 443, nowForTest(t)); err != nil {
+	if _, _, err := grantSessionEgressWithDeps(d, context.Background(), store, sess.ID, "example.com", 443, nowForTest(t)); err != nil {
 		t.Fatalf("grant after bootstrap: %v", err)
 	}
 	if len(applies) != 2 || applies[0].Revision != 0 || applies[1].Revision != 1 {
@@ -481,7 +484,7 @@ func TestSessionGrantApplyPreservesPersistentSnapshotOnGrantAndRevoke(t *testing
 	sess.PersistentEgress = []policy.PersistentEgressRule{{FQDN: "always.example.com", Port: 443}}
 	_, runtimeGeneration := seedAppliedRunningSession(t, store, sess)
 	var applies [][]container.SessionGrant
-	installEgressSeams(t,
+	d := installEgressSeams(t,
 		func(_ context.Context, candidate engsession.Session, desired []container.SessionGrant) error {
 			applies = append(applies, append([]container.SessionGrant(nil), desired...))
 			var err error
@@ -492,11 +495,11 @@ func TestSessionGrantApplyPreservesPersistentSnapshotOnGrantAndRevoke(t *testing
 			return runtimeGeneration, nil
 		}, nil,
 	)
-	updated, grant, err := grantSessionEgress(context.Background(), store, sess.ID, "now.example.com", 443, nowForTest(t))
+	updated, grant, err := grantSessionEgressWithDeps(d, context.Background(), store, sess.ID, "now.example.com", 443, nowForTest(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := revokeSessionEgress(context.Background(), store, updated.ID, grant.ID, nowForTest(t)); err != nil {
+	if _, err := revokeSessionEgressWithDeps(d, context.Background(), store, updated.ID, grant.ID, nowForTest(t)); err != nil {
 		t.Fatal(err)
 	}
 	if len(applies) != 2 || len(applies[0]) != 2 || len(applies[1]) != 1 || applies[0][0].Host != "always.example.com" || applies[1][0].Host != "always.example.com" {
@@ -526,13 +529,14 @@ func TestSessionGrantApplyLaunchThreadsStoredGrants(t *testing.T) {
 		t.Fatal(err)
 	}
 	var got []container.SessionGrant
-	oldLaunch := containerLaunch
-	containerLaunch = func(_ context.Context, _ engexec.LaunchSpec, _, _ string, _, _ []string, _ string, _ []string, _ *policy.Projection, grants ...container.SessionGrant) (int, error) {
+	d := defaultDependencies()
+	d.store = store
+	d.detectRuntime = func(runtimepkg.NetworkPolicy) (runtimepkg.Engine, error) { return runtimepkg.HostDockerEngine{}, nil }
+	d.launchContainer = func(_ context.Context, _ runtimepkg.Engine, _ engexec.LaunchSpec, _, _ string, _, _ []string, _ string, _ []string, _ *policy.Projection, grants ...container.SessionGrant) (int, error) {
 		got = append([]container.SessionGrant(nil), grants...)
 		return 0, nil
 	}
-	t.Cleanup(func() { containerLaunch = oldLaunch })
-	if _, err := runProfileCtx(context.Background(), "session-"+sess.ID, prof, argv, ws); err != nil {
+	if _, err := runProfileCtxWithDeps(d, context.Background(), "session-"+sess.ID, prof, argv, ws, ""); err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 2 || got[0].Host != "always.example.com" || got[1].Host != "example.com" {
@@ -546,11 +550,11 @@ func TestSessionGrantCreatedSessionSavesWithoutProxyReplacement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	installEgressSeams(t, func(context.Context, engsession.Session, []container.SessionGrant) error {
+	d := installEgressSeams(t, func(context.Context, engsession.Session, []container.SessionGrant) error {
 		t.Fatal("created session must not replace a proxy")
 		return nil
 	}, nil, nil)
-	if _, _, err := grantSessionEgress(context.Background(), store, sess.ID, "example.com", 443, nowForTest(t)); err != nil {
+	if _, _, err := grantSessionEgressWithDeps(d, context.Background(), store, sess.ID, "example.com", 443, nowForTest(t)); err != nil {
 		t.Fatal(err)
 	}
 	stored, err := store.Get(sess.ID)
@@ -569,11 +573,11 @@ func TestSessionGrantRejectsNetworkAllowBeforeApply(t *testing.T) {
 	if err := store.Save(sess); err != nil {
 		t.Fatal(err)
 	}
-	installEgressSeams(t, func(context.Context, engsession.Session, []container.SessionGrant) error {
+	d := installEgressSeams(t, func(context.Context, engsession.Session, []container.SessionGrant) error {
 		t.Fatal("network allow must be rejected before proxy replacement")
 		return nil
 	}, nil, nil)
-	if _, _, err := grantSessionEgress(context.Background(), store, sess.ID, "example.com", 443, nowForTest(t)); err != engsession.ErrSessionNotGrantable {
+	if _, _, err := grantSessionEgressWithDeps(d, context.Background(), store, sess.ID, "example.com", 443, nowForTest(t)); err != engsession.ErrSessionNotGrantable {
 		t.Fatalf("grant error = %v", err)
 	}
 }

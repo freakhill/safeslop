@@ -45,11 +45,10 @@ func TestCredsGCCommandDefaultsToDryRun(t *testing.T) {
 		_, _ = w.Write([]byte(`[]`))
 	}))
 	defer srv.Close()
-	previousBase := forgejoGCBaseForHost
-	forgejoGCBaseForHost = func(string) string { return srv.URL }
-	t.Cleanup(func() { forgejoGCBaseForHost = previousBase })
+	d := defaultDependencies()
+	d.forgejoGCBaseForHost = func(string) string { return srv.URL }
 
-	out, err := runRootForTest(t, t.TempDir(), "creds", "gc", "--host", "forge.example", "--repo", "acme/web", "--output", "json")
+	out, err := runRootForTestWithDeps(t, t.TempDir(), d, "creds", "gc", "--host", "forge.example", "--repo", "acme/web", "--output", "json")
 	if err != nil {
 		t.Fatalf("creds gc default dry run: %v\nout=%s", err, out)
 	}

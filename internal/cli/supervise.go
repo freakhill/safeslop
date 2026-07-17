@@ -48,6 +48,13 @@ func sessionLogMaxBytes() int64 {
 // cmdSessionRun os.Exit-on-success gotcha. The re-exec entry point calls this in
 // its own process; tests call it in-process in a goroutine (the D1 test seam).
 func Supervise(ctx context.Context, store engsession.Store, id string, now func() time.Time) (int, error) {
+	d := defaultDependencies()
+	d.store = store
+	d.now = now
+	return superviseWithDeps(d, ctx, store, id, now)
+}
+
+func superviseWithDeps(d *dependencies, ctx context.Context, store engsession.Store, id string, now func() time.Time) (int, error) {
 	sess, err := store.Get(id)
 	if err != nil {
 		return 1, err
@@ -56,6 +63,10 @@ func Supervise(ctx context.Context, store engsession.Store, id string, now func(
 	// supervisor is re-exec'd, so it must independently confirm the policy is still trusted
 	// rather than rely on the issuing process's earlier check.
 	if err := verifySessionTrust(sess); err != nil {
+		return 1, err
+	}
+	sess, selectedEngine, err := prepareSessionBackendWithDeps(d, store, sess)
+	if err != nil {
 		return 1, err
 	}
 	prof, err := sessionProfile(sess)
@@ -114,7 +125,7 @@ func Supervise(ctx context.Context, store engsession.Store, id string, now func(
 	// whole life and runs the inherited teardown on return.
 	exitCh := make(chan agentExit, 1)
 	go func() {
-		code, runErr := runProfileCtxWithStageKey(ctx, "session-"+id, prof, argv, sess.Workspace, stageKey,
+		code, runErr := runProfileCtxWithEngineAndDeps(d, ctx, selectedEngine, "session-"+id, prof, argv, sess.Workspace, stageKey,
 			runIO{Stdin: pts, Stdout: pts, Stderr: pts})
 		_ = pts.Close() // last writer to the slave -> the PTY reader below now hits EOF
 		exitCh <- agentExit{code, runErr}

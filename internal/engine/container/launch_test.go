@@ -13,6 +13,25 @@ import (
 	"github.com/freakhill/safeslop/internal/engine/policy"
 )
 
+type noProbeLaunchEngine struct{ *fakeEngine }
+
+func (noProbeLaunchEngine) Argv(...string) []string { return []string{"/usr/bin/true"} }
+
+func TestLaunchWithEngineDoesNotProbeAgain(t *testing.T) {
+	orig := detectRuntime
+	t.Cleanup(func() { detectRuntime = orig })
+	detectRuntime = func(runtime.NetworkPolicy) (runtime.Engine, error) {
+		t.Fatal("LaunchWithEngine must not probe a second runtime")
+		return nil, errors.New("second runtime probe")
+	}
+
+	stageDir, ws := t.TempDir(), t.TempDir()
+	eng := noProbeLaunchEngine{newFakeEngine(t, nil)}
+	if _, err := LaunchWithEngine(context.Background(), eng, exec.LaunchSpec{Argv: []string{"fish"}}, ws, "deny", nil, nil, stageDir, nil, nil); err != nil {
+		t.Fatalf("LaunchWithEngine: %v", err)
+	}
+}
+
 func TestLaunchRejectsWhenUnavailable(t *testing.T) {
 	orig := detectRuntime
 	t.Cleanup(func() { detectRuntime = orig })

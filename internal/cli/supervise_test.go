@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/freakhill/safeslop/internal/engine/container"
+	runtimepkg "github.com/freakhill/safeslop/internal/engine/container/runtime"
 	engexec "github.com/freakhill/safeslop/internal/engine/exec"
 	"github.com/freakhill/safeslop/internal/engine/policy"
 	engsession "github.com/freakhill/safeslop/internal/engine/session"
@@ -190,13 +191,14 @@ func TestSuperviseExitRunsTeardownAndRemovesSocket(t *testing.T) {
 func TestSuperviseSessionProjectionFailurePersists(t *testing.T) {
 	store, id, _ := newSupervisedStubSessionIn(t, "#!/bin/sh\nexit 0\n", shortStateDir(t), "container")
 	projectionErr := projectionFailureForTest(t)
-	oldLaunch := containerLaunch
-	containerLaunch = func(context.Context, engexec.LaunchSpec, string, string, []string, []string, string, []string, *policy.Projection, ...container.SessionGrant) (int, error) {
+	d := defaultDependencies()
+	d.store = store
+	d.detectRuntime = func(runtimepkg.NetworkPolicy) (runtimepkg.Engine, error) { return runtimepkg.HostDockerEngine{}, nil }
+	d.launchContainer = func(context.Context, runtimepkg.Engine, engexec.LaunchSpec, string, string, []string, []string, string, []string, *policy.Projection, ...container.SessionGrant) (int, error) {
 		return 1, projectionErr
 	}
-	t.Cleanup(func() { containerLaunch = oldLaunch })
 
-	code, err := Supervise(context.Background(), store, id, time.Now)
+	code, err := superviseWithDeps(d, context.Background(), store, id, time.Now)
 	if err != nil {
 		t.Fatal(err)
 	}

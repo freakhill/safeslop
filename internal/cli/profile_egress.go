@@ -17,12 +17,20 @@ import (
 // bytes and therefore requires the normal trust review before a future session
 // can use the rule (specs/0103).
 func cmdProfileEgress() *cobra.Command {
+	return cmdProfileEgressWithDeps(defaultDependencies())
+}
+
+func cmdProfileEgressWithDeps(d *dependencies) *cobra.Command {
 	c := &cobra.Command{Use: "egress", Short: "Review and edit persistent exact egress rules"}
-	c.AddCommand(cmdProfileEgressMutation("preview"), cmdProfileEgressMutation("add"), cmdProfileEgressMutation("remove"))
+	c.AddCommand(cmdProfileEgressMutationWithDeps(d, "preview"), cmdProfileEgressMutationWithDeps(d, "add"), cmdProfileEgressMutationWithDeps(d, "remove"))
 	return c
 }
 
 func cmdProfileEgressMutation(operation string) *cobra.Command {
+	return cmdProfileEgressMutationWithDeps(defaultDependencies(), operation)
+}
+
+func cmdProfileEgressMutationWithDeps(d *dependencies, operation string) *cobra.Command {
 	var host, expectedHash, output string
 	var port int
 	c := &cobra.Command{
@@ -67,7 +75,7 @@ func cmdProfileEgressMutation(operation string) *cobra.Command {
 			}
 			candidateHash := trust.Hash(rendered)
 			if operation != "preview" {
-				if err := writePolicyAtomically(path, rendered); err != nil {
+				if err := d.writePolicyAtomically(path, rendered); err != nil {
 					return emitContractError(jsoncontract.CodeIOError, "write safeslop.cue", map[string]any{"path": path})
 				}
 			}

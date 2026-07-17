@@ -23,12 +23,13 @@ func TestRunDetachRecordsSupervisorPIDAndReturns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
-	acceptHostConsentForTest(t)
+	d := defaultDependencies()
+	d.store = store
+	acceptHostConsentForTest(t, d)
 	id := sess.ID
 
 	const supervisorPID = 4242
-	old := launchSupervisor
-	launchSupervisor = func(sid string) (int, error) {
+	d.launchSupervisor = func(sid string) (int, error) {
 		// Simulate the detached supervisor becoming ready by binding its socket.
 		f, ferr := os.Create(sessionStore().SocketPath(sid))
 		if ferr == nil {
@@ -36,9 +37,8 @@ func TestRunDetachRecordsSupervisorPIDAndReturns(t *testing.T) {
 		}
 		return supervisorPID, nil
 	}
-	defer func() { launchSupervisor = old }()
 
-	out, err := runRootForTest(t, ws, "session", "run", "--session-id", id, "--detach")
+	out, err := runRootForTestWithDeps(t, ws, d, "session", "run", "--session-id", id, "--detach")
 	if err != nil {
 		t.Fatalf("run --detach: %v\nout=%s", err, out)
 	}
@@ -74,19 +74,17 @@ func TestRunDetachWaitsForSocketBeforeSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
-	acceptHostConsentForTest(t)
+	d := defaultDependencies()
+	d.store = store
+	acceptHostConsentForTest(t, d)
 	id := sess.ID
 
-	oldLaunch, oldTimeout, oldKill := launchSupervisor, detachReadyTimeout, sessionKillProcess
-	launchSupervisor = func(string) (int, error) { return 4242, nil } // never binds a socket
-	detachReadyTimeout = 200 * time.Millisecond
+	d.launchSupervisor = func(string) (int, error) { return 4242, nil } // never binds a socket
+	d.detachReadyTimeout = 200 * time.Millisecond
 	killed := 0
-	sessionKillProcess = func(pid int) error { killed = pid; return nil }
-	defer func() {
-		launchSupervisor, detachReadyTimeout, sessionKillProcess = oldLaunch, oldTimeout, oldKill
-	}()
+	d.killProcess = func(pid int) error { killed = pid; return nil }
 
-	out, err := runRootForTest(t, ws, "session", "run", "--session-id", id, "--detach")
+	out, err := runRootForTestWithDeps(t, ws, d, "session", "run", "--session-id", id, "--detach")
 	if !errors.Is(err, errOutputEmitted) {
 		t.Fatalf("readiness timeout: err = %v, want errOutputEmitted; out=%s", err, out)
 	}

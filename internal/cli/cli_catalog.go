@@ -18,10 +18,6 @@ import (
 
 const defaultCatalogDir = "internal/engine/policy"
 
-// catalogFetcher is the specs/0059 D2 seam: production uses net/http, tests swap in
-// fixtures so CLI coverage never reaches live registries or release hosts.
-var catalogFetcher policy.Fetcher = newHTTPFetcher()
-
 type httpFetcher struct {
 	client *http.Client
 }
@@ -47,8 +43,12 @@ func (h httpFetcher) Get(url string) ([]byte, error) {
 }
 
 func cmdCatalog() *cobra.Command {
+	return cmdCatalogWithDeps(defaultDependencies())
+}
+
+func cmdCatalogWithDeps(d *dependencies) *cobra.Command {
 	c := &cobra.Command{Use: "catalog", Short: "Inspect and maintain the curated package catalog"}
-	c.AddCommand(cmdCatalogList(), cmdCatalogBump(), cmdCatalogProposeVersion(), cmdCatalogAdd(), cmdCatalogAudit())
+	c.AddCommand(cmdCatalogList(), cmdCatalogBumpWithDeps(d), cmdCatalogProposeVersionWithDeps(d), cmdCatalogAdd(), cmdCatalogAuditWithDeps(d))
 	return c
 }
 
@@ -78,6 +78,10 @@ func cmdCatalogList() *cobra.Command {
 }
 
 func cmdCatalogBump() *cobra.Command {
+	return cmdCatalogBumpWithDeps(defaultDependencies())
+}
+
+func cmdCatalogBumpWithDeps(d *dependencies) *cobra.Command {
 	var target, catalogDir, output string
 	var security bool
 	c := &cobra.Command{
@@ -103,7 +107,7 @@ func cmdCatalogBump() *cobra.Command {
 			if security {
 				lane = "security"
 			}
-			next, sheet, err := policy.Bump(cat, args[0], target, lane, catalogFetcher)
+			next, sheet, err := policy.Bump(cat, args[0], target, lane, d.catalogFetcher)
 			if err != nil {
 				return catalogMaybeContractError(output, err)
 			}
@@ -132,6 +136,10 @@ func cmdCatalogBump() *cobra.Command {
 }
 
 func cmdCatalogProposeVersion() *cobra.Command {
+	return cmdCatalogProposeVersionWithDeps(defaultDependencies())
+}
+
+func cmdCatalogProposeVersionWithDeps(d *dependencies) *cobra.Command {
 	var catalogDir, output string
 	c := &cobra.Command{
 		Use:   "propose-version <pkg> [--catalog-dir DIR] [--output json]",
@@ -148,7 +156,7 @@ func cmdCatalogProposeVersion() *cobra.Command {
 			if err != nil {
 				return catalogMaybeContractError(output, err)
 			}
-			candidates, err := policy.ProposeVersions(cat, args[0], catalogFetcher)
+			candidates, err := policy.ProposeVersions(cat, args[0], d.catalogFetcher)
 			if err != nil {
 				return catalogMaybeContractError(output, err)
 			}
@@ -228,6 +236,10 @@ func cmdCatalogAdd() *cobra.Command {
 }
 
 func cmdCatalogAudit() *cobra.Command {
+	return cmdCatalogAuditWithDeps(defaultDependencies())
+}
+
+func cmdCatalogAuditWithDeps(d *dependencies) *cobra.Command {
 	var catalogDir, output string
 	c := &cobra.Command{
 		Use:   "audit [--catalog-dir DIR] [--output json]",
@@ -244,7 +256,7 @@ func cmdCatalogAudit() *cobra.Command {
 			if err != nil {
 				return catalogMaybeContractError(output, err)
 			}
-			report, err := policy.Audit(cat, catalogFetcher)
+			report, err := policy.Audit(cat, d.catalogFetcher)
 			if err != nil {
 				return catalogMaybeContractError(output, err)
 			}
@@ -262,6 +274,10 @@ func cmdCatalogAudit() *cobra.Command {
 }
 
 func cmdBundle() *cobra.Command {
+	return cmdBundleWithDeps(defaultDependencies())
+}
+
+func cmdBundleWithDeps(_ *dependencies) *cobra.Command {
 	c := &cobra.Command{Use: "bundle", Short: "Manage curated package bundles"}
 	c.AddCommand(cmdBundleAdd(), cmdBundleRemove(), cmdBundleList())
 	return c

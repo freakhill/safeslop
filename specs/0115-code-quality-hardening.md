@@ -69,7 +69,7 @@ Frozen acceptance laws:
 
 ## Wave 8 — behavior-preserving maintainability and synchronization
 
-- [ ] Decompose the Go CLI and replace mutable CLI seams with instance dependencies
+- [x] Decompose the Go CLI and replace mutable CLI seams with instance dependencies
   FILE:     split `internal/cli/cli.go` into focused root/run/profile/session/runtime/output files; new per-root dependency bundle; affected CLI tests
   CHANGE:   Only after safety behavior is green, move cohesive declarations without renaming package/API/commands/flags/envelopes. Give each root execution an owned dependency bundle for clock, store, runtime detector, launcher, overlay transaction, process/liveness, socket, host-exec, and policy mutation seams; migrate mutable test globals in small slices. Immutable registries/compiled regexes may remain package globals. Add parallelism only to tests with isolated environment/files/dependencies. Keep `cli.go` as a readable root/front rather than a 3,480-line implementation.
   VERIFY:   `go test ./internal/cli -shuffle=on -count=2 && go test -race ./internal/cli -count=1 && test "$(wc -l < internal/cli/cli.go)" -lt 1200 && gofmt -w internal/cli && git diff --check`

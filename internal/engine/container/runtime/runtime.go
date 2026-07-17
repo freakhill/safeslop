@@ -64,8 +64,31 @@ type detector struct {
 // Detect runs the ambient-runtime selection (specs/0066 D3/D4/D6) with production seams and returns a
 // ready, zero-config Engine or a fail-closed error. policy gates the deny tier (see NetworkPolicy).
 func Detect(policy NetworkPolicy) (Engine, error) {
+	return detect(defaultDetector(), policy)
+}
+
+// Resolve selects exactly the named ambient runtime. It is for operations on an
+// existing session: choosing a newly preferred runtime there could leave the
+// recorded session boundary live on its original backend.
+func Resolve(name string, policy NetworkPolicy) (Engine, error) {
+	eng, ok := engineByName(name)
+	if !ok {
+		return nil, fmt.Errorf("unknown container runtime %q", name)
+	}
+	d := defaultDetector()
+	resolved, available, err := d.available(eng)
+	if err != nil {
+		return nil, err
+	}
+	if !available {
+		return nil, fmt.Errorf("container runtime %q is unavailable", name)
+	}
+	return d.gate(resolved, policy)
+}
+
+func defaultDetector() detector {
 	resolver := hostexec.Default()
-	return detect(detector{
+	return detector{
 		resolveRuntime: func(name string) (string, error) {
 			res, err := resolver.Resolve(hostexec.RuntimeSpec(name, "container runtime"))
 			if err != nil {
@@ -75,7 +98,7 @@ func Detect(policy NetworkPolicy) (Engine, error) {
 		},
 		run:    defaultRunner,
 		getenv: os.Getenv,
-	}, policy)
+	}
 }
 
 // candidates is the fixed auto-detect precedence: docker → podman → lima (D3). docker wins when present

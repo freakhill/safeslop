@@ -148,9 +148,9 @@ func TestProfileCreateDryRunIncludesRiskAndDoesNotWrite(t *testing.T) {
 }
 
 func TestProfileCreateDryRunAddsEvaluation(t *testing.T) {
-	fixed := withProfileEvaluationLocalPass(t)
+	d, fixed := withProfileEvaluationLocalPass(t)
 	dir := t.TempDir()
-	out, err := runRootForTest(t, dir,
+	out, err := runRootForTestWithDeps(t, dir, d,
 		"profile", "create", "--dry-run",
 		"--name", "preview",
 		"--agent", "fish",
