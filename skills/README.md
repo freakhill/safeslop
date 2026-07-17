@@ -12,7 +12,11 @@ Before using a skill, read:
 Current skills:
 
 - `agent-key-lifecycle` — ephemeral GitHub/Forgejo credential staging and cleanup.
-- `agent-sandbox-ops` — safe operation of host/container/VM isolation profiles.
+- `agent-sandbox-ops` — safe operation of host/container isolation profiles,
+  canonical workspace boundaries, progressive egress, and pinned container builds.
 
-When command behavior changes, update the affected skill, `README.md`, and Go
-tests in the same change.
+When command behavior changes, update the affected skill, `README.md`,
+`emacs/README.md` when UI behavior is visible, and Go/Elisp tests in the same
+change. Active skills must not revive removed VM commands or obsolete legacy
+image surfaces; historical specs may retain that context only when clearly
+labelled as historical.
