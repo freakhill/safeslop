@@ -3,11 +3,14 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -16,6 +19,109 @@ import (
 	engexec "github.com/freakhill/safeslop/internal/engine/exec"
 	"github.com/freakhill/safeslop/internal/engine/policy"
 )
+
+func TestInvocationIdentityIsRandom128BitKey(t *testing.T) {
+	seen := map[string]bool{}
+	pattern := regexp.MustCompile(`^run-[0-9a-f]{32}$`)
+	for range 128 {
+		id, err := newInvocationID()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !pattern.MatchString(id) {
+			t.Fatalf("invocation id = %q", id)
+		}
+		if seen[id] {
+			t.Fatalf("duplicate invocation id %q", id)
+		}
+		seen[id] = true
+	}
+}
+
+func TestConcurrentDirectRunInvocationStagesAreDistinct(t *testing.T) {
+	ws := t.TempDir()
+	prof := policy.Profile{Agent: "shell", Environment: "container", Network: "deny", Workspace: ws}
+	argv, err := agentArgv(prof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old, oldReap := containerLaunch, directInvocationReap
+	reaped := make(chan string, 2)
+	directInvocationReap = func(id string) error { reaped <- id; return nil }
+	entered := make(chan string, 2)
+	release := make(chan struct{})
+	containerLaunch = func(_ context.Context, _ engexec.LaunchSpec, _, _ string, _, _ []string, stageDir string, _ []string, _ *policy.Projection, _ ...container.SessionGrant) (int, error) {
+		entered <- stageDir
+		<-release
+		return 0, nil
+	}
+	t.Cleanup(func() { containerLaunch, directInvocationReap = old, oldReap })
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	wg.Add(2)
+	for range 2 {
+		go func() {
+			defer wg.Done()
+			_, err := runDirectProfile("direct-concurrent-fixture", prof, argv, ws)
+			errs <- err
+		}()
+	}
+	first, second := <-entered, <-entered
+	close(release)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("direct run: %v", err)
+		}
+	}
+	if first == second {
+		t.Fatalf("concurrent direct runs shared stage %q", first)
+	}
+	close(reaped)
+	wantReaped := map[string]bool{filepath.Base(first): true, filepath.Base(second): true}
+	for id := range reaped {
+		if !wantReaped[id] {
+			t.Fatalf("cleanup used invocation %q outside stages %v", id, wantReaped)
+		}
+		delete(wantReaped, id)
+	}
+	if len(wantReaped) != 0 {
+		t.Fatalf("direct invocation cleanup missing: %v", wantReaped)
+	}
+}
+
+func TestDirectInvocationReapFailureRetainsOnlyCleanupMarker(t *testing.T) {
+	ws := t.TempDir()
+	prof := policy.Profile{Agent: "shell", Environment: "container", Network: "deny", Workspace: ws}
+	argv, err := agentArgv(prof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old, oldReap := containerLaunch, directInvocationReap
+	var stage string
+	containerLaunch = func(_ context.Context, _ engexec.LaunchSpec, _, _ string, _, _ []string, stageDir string, _ []string, _ *policy.Projection, _ ...container.SessionGrant) (int, error) {
+		stage = stageDir
+		return 0, nil
+	}
+	directInvocationReap = func(string) error { return errors.New("injected reap failure") }
+	t.Cleanup(func() {
+		containerLaunch, directInvocationReap = old, oldReap
+		_ = os.RemoveAll(stage)
+	})
+
+	if _, err := runDirectProfile("direct-reap-failure", prof, argv, ws); err == nil {
+		t.Fatal("direct run succeeded despite unproven boundary cleanup")
+	}
+	entries, err := os.ReadDir(stage)
+	if err != nil {
+		t.Fatalf("read retained stage: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != ".safeslop-stage" {
+		t.Fatalf("reap failure retained bearer/config files: %v", entries)
+	}
+}
 
 // TestRunProfileCtxTeardownOnCancel proves that cancelling the run context (what
 // the SIGTERM handler in runProfile does, and what `session stop` triggers)

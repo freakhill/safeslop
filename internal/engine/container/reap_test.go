@@ -2,12 +2,14 @@ package container
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/freakhill/safeslop/internal/engine/policy"
+	engsession "github.com/freakhill/safeslop/internal/engine/session"
 )
 
 func TestReapBySessionRemovesContainersAndNetworksByLabel(t *testing.T) {
@@ -22,6 +24,122 @@ func TestReapBySessionRemovesContainersAndNetworksByLabel(t *testing.T) {
 
 	eng.assertRan(t, "rm -f ctr-one ctr-two")
 	eng.assertRan(t, "network rm net-one net-two")
+}
+
+func TestReapByInvocationUsesOnlyExactRandomOwnershipLabel(t *testing.T) {
+	const id = "run-0123456789abcdef0123456789abcdef"
+	eng := newFakeEngine(t, map[string]string{
+		"ps -aq --filter label=safeslop.invocation=" + id:        "ctr-direct\n",
+		"network ls -q --filter label=safeslop.invocation=" + id: "net-direct\n",
+	})
+	if err := ReapByInvocation(context.Background(), eng, id); err != nil {
+		t.Fatalf("ReapByInvocation: %v", err)
+	}
+	eng.assertRan(t, "rm -f ctr-direct")
+	eng.assertRan(t, "network rm net-direct")
+	if err := ReapByInvocation(context.Background(), eng, "profile-name"); err == nil {
+		t.Fatal("profile name accepted as direct cleanup authority")
+	}
+}
+
+func TestSweepDeadInvocationsKeepsLiveAndMalformedMarkers(t *testing.T) {
+	root := t.TempDir()
+	const dead = "run-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	const live = "run-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	const malformed = "run-cccccccccccccccccccccccccccccccc"
+	for _, id := range []string{dead, live, malformed} {
+		if err := os.Mkdir(filepath.Join(root, id), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := WriteInvocationMarker(filepath.Join(root, dead), dead, os.Getpid(), "definitely-not-the-current-process-token"); err != nil {
+		t.Fatal(err)
+	}
+	liveToken, _ := engsession.ProcessStartToken(os.Getpid())
+	if err := WriteInvocationMarker(filepath.Join(root, live), live, os.Getpid(), liveToken); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, malformed, ".safeslop-stage"), []byte("{broken\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	eng := newFakeEngine(t, map[string]string{
+		"ps -aq --filter label=safeslop.invocation=" + dead:        "ctr-dead\n",
+		"network ls -q --filter label=safeslop.invocation=" + dead: "net-dead\n",
+	})
+	if err := SweepDeadInvocations(context.Background(), eng, root); err != nil {
+		t.Fatalf("SweepDeadInvocations: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, dead)); !os.IsNotExist(err) {
+		t.Fatalf("dead invocation stage remains: %v", err)
+	}
+	for _, id := range []string{live, malformed} {
+		if _, err := os.Stat(filepath.Join(root, id)); err != nil {
+			t.Fatalf("unproven invocation %s was removed: %v", id, err)
+		}
+	}
+	eng.assertRan(t, "rm -f ctr-dead")
+	eng.assertRan(t, "network rm net-dead")
+	eng.assertNotRan(t, "label=safeslop.invocation="+live)
+}
+
+func TestInvocationMarkerIsValueFree(t *testing.T) {
+	const id = "run-dddddddddddddddddddddddddddddddd"
+	stage := filepath.Join(t.TempDir(), id)
+	if err := WriteInvocationMarker(stage, id, os.Getpid(), "process-token"); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(stage, ".safeslop-stage"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(body, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if len(fields) != 4 || fields["invocation_id"] != id || fields["pid"] == nil || fields["process_token"] == nil {
+		t.Fatalf("marker fields = %#v", fields)
+	}
+	for _, forbidden := range []string{"workspace", "credential", "secret", "profile"} {
+		if _, exists := fields[forbidden]; exists {
+			t.Fatalf("marker contains forbidden field %q: %s", forbidden, body)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(stage, "secrets.env"), []byte("SECRET_CANARY"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := RetainInvocationMarker(stage); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(stage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != ".safeslop-stage" {
+		t.Fatalf("marker retention kept staged bearer files: %v", entries)
+	}
+}
+
+func TestMaterializeRunPreservesInvocationMarker(t *testing.T) {
+	const id = "run-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+	stage := filepath.Join(t.TempDir(), id)
+	if err := WriteInvocationMarker(stage, id, os.Getpid(), "process-token"); err != nil {
+		t.Fatal(err)
+	}
+	markerPath := filepath.Join(stage, ".safeslop-stage")
+	before, err := os.ReadFile(markerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := materializeRun(composeParams{RuntimeDir: stage, StageDir: stage, Workspace: t.TempDir(), InvocationID: id, AgentImage: "local/test:fixture"}, false); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(markerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("materializeRun replaced invocation marker:\nbefore=%s\nafter=%s", before, after)
+	}
 }
 
 func TestReapBySessionNoopsWhenNothingMatches(t *testing.T) {
@@ -62,6 +180,63 @@ func TestSweepManagedOrphansSkipsLiveSessions(t *testing.T) {
 	eng.assertRan(t, "network rm net-dead")
 	eng.assertRan(t, "network rm net-dead-only")
 	eng.assertNotRan(t, "rm -f ctr-live")
+}
+
+func TestLiveSessionsProtectsLegacyHashSuffixedOwnershipLabel(t *testing.T) {
+	dir := t.TempDir()
+	const id = "sess-live-legacy"
+	const workspace = "/tmp/legacy-workspace"
+	writeFile(t, filepath.Join(dir, id+".json"), `{
+  "session_id": "sess-live-legacy",
+  "agent": "fish",
+  "workspace": "/tmp/legacy-workspace",
+  "environment": "container",
+  "network": "deny",
+  "status": "running",
+  "created_at": "2026-06-26T00:00:00Z",
+  "updated_at": "2026-06-26T00:00:00Z"
+}
+`)
+	live, err := LiveSessions(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyLabel := LegacySessionReapLabel(id, workspace)
+	if !live[id] || !live[legacyLabel] {
+		t.Fatalf("live labels = %#v, want bare %q and deployed %q", live, id, legacyLabel)
+	}
+}
+
+func TestSweepManagedOrphansDoesNotReapLiveLegacyLayout(t *testing.T) {
+	dir := t.TempDir()
+	const id = "sess-live-legacy"
+	const workspace = "/tmp/legacy-workspace"
+	writeFile(t, filepath.Join(dir, id+".json"), `{
+  "session_id": "sess-live-legacy",
+  "agent": "fish",
+  "workspace": "/tmp/legacy-workspace",
+  "environment": "container",
+  "network": "deny",
+  "status": "running",
+  "created_at": "2026-06-26T00:00:00Z",
+  "updated_at": "2026-06-26T00:00:00Z"
+}
+`)
+	label := LegacySessionReapLabel(id, workspace)
+	eng := newFakeEngine(t, map[string]string{
+		"ps -aq --filter label=safeslop.managed=true":                         "ctr-live\n",
+		"inspect -f {{ index .Config.Labels \"safeslop.session\" }} ctr-live": label + "\n",
+		"network ls -q --filter label=safeslop.managed=true":                  "\n",
+	})
+	live, err := LiveSessions(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SweepManagedOrphans(context.Background(), eng, live); err != nil {
+		t.Fatal(err)
+	}
+	eng.assertNotRan(t, "rm -f ctr-live")
+	eng.assertNotRan(t, "ps -aq --filter label=safeslop.session="+label)
 }
 
 func TestGCImagesKeepsProfileLockAndLiveSessionReferences(t *testing.T) {

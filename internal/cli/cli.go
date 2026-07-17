@@ -6,6 +6,8 @@ package cli
 import (
 	"bufio"
 	"context"
+	cryptorand "crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -319,7 +321,7 @@ func cmdRun() *cobra.Command {
 					return err
 				}
 			}
-			code, err := runProfile(name, prof, argv, ws)
+			code, err := runDirectProfile(name, prof, argv, ws)
 			if err != nil {
 				// Surface the failure reason. runProfile returns code=1 on setup
 				// errors, so the old `&& code == 0` guard silently dropped them — a
@@ -430,7 +432,29 @@ var errOutputEmitted = errors.New("machine-readable error already emitted")
 // so teardown paths (credential revoke, boundary reap) address the exact same tree — and the
 // exact safeslop.session label — the launch path used (mirrors runProfileCtx's
 // stageDirFor("session-"+id, ws); specs/0074).
+func sessionStageKey(sess engsession.Session) (string, error) {
+	runtimeID, layout := sess.RuntimeIdentity()
+	switch layout {
+	case engsession.StageLayoutLegacy:
+		return "", nil
+	case engsession.StageLayoutSessionID:
+		if runtimeID != sess.ID {
+			return "", fmt.Errorf("session runtime identity is invalid")
+		}
+		return "session-" + runtimeID, nil
+	default:
+		return "", fmt.Errorf("session stage layout is unsupported")
+	}
+}
+
 func sessionStageDir(sess engsession.Session) (string, error) {
+	key, err := sessionStageKey(sess)
+	if err != nil {
+		return "", err
+	}
+	if key != "" {
+		return stageDirForRuntime(key)
+	}
 	return stageDirFor("session-"+sess.ID, sess.Workspace)
 }
 
@@ -480,6 +504,22 @@ func validateWorkspaceStageRoot(ws string) error {
 		return err
 	}
 	return workspaceboundary.RequireDisjointPaths(ws, root)
+}
+
+var runtimeStageKeyPattern = regexp.MustCompile(`^(?:run-[0-9a-f]{32}|session-sess-[a-zA-Z0-9_-]+)$`)
+
+func stageDirForRuntime(runtimeID string) (string, error) {
+	if !runtimeStageKeyPattern.MatchString(runtimeID) {
+		return "", fmt.Errorf("runtime identity is invalid")
+	}
+	base, err := stageRootPath()
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(base, 0o700); err != nil {
+		return "", fmt.Errorf("create credential staging root: %w", err)
+	}
+	return filepath.Join(base, runtimeID), nil
 }
 
 func stageDirFor(name, ws string) (string, error) {
@@ -612,7 +652,10 @@ func engineForSession(_ engsession.Session) runtimepkg.Engine {
 
 // detectRuntimeForSweep is a test seam: runtime discovery deliberately uses the reconstructed host
 // environment, so mutating process PATH cannot hermetically model an unavailable runtime.
-var detectRuntimeForSweep = runtimepkg.Detect
+var (
+	detectRuntimeForSweep   = runtimepkg.Detect
+	directStageRootForSweep = stageRootPath
+)
 
 // sweepManagedOrphans reaps labelled boundaries whose session record is gone, before a new container run.
 // It detects the ambient runtime with PolicyAllow (teardown is never gated); with no runtime present
@@ -626,7 +669,14 @@ func sweepManagedOrphans(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return container.SweepManagedOrphans(ctx, eng, live)
+	if err := container.SweepManagedOrphans(ctx, eng, live); err != nil {
+		return err
+	}
+	stageRoot, err := directStageRootForSweep()
+	if err != nil {
+		return err
+	}
+	return container.SweepDeadInvocations(ctx, eng, stageRoot)
 }
 
 func cmdSession() *cobra.Command {
@@ -1403,7 +1453,7 @@ func cmdSessionStatus() *cobra.Command {
 			// Surface the GitHub App-token TTL ceiling so the operator can see how long a
 			// session's ephemeral HTTPS access has left (specs/0069 T8). Additive + best
 			// effort: unlinked sessions have no manifest and simply omit the block.
-			if stageDir, derr := stageDirFor("session-"+sess.ID, sess.Workspace); derr == nil {
+			if stageDir, derr := sessionStageDir(sess); derr == nil {
 				if exp, ok, _ := creds.GithubCredsExpiry(stageDir); ok {
 					block := map[string]any{"min_expires_at": exp.UTC().Format(time.RFC3339)}
 					if remaining := time.Until(exp); remaining > 0 {
@@ -1602,7 +1652,11 @@ func cmdSessionRun() *cobra.Command {
 			if _, err := store.MarkRunning(id, os.Getpid(), time.Now()); err != nil {
 				return err
 			}
-			code, runErr := runProfile("session-"+id, prof, argv, sess.Workspace)
+			stageKey, err := sessionStageKey(sess)
+			if err != nil {
+				return err
+			}
+			code, runErr := runProfileWithStageKey("session-"+id, prof, argv, sess.Workspace, stageKey)
 			if err := finishSessionRun(store, id, code, runErr, time.Now()); err != nil {
 				return err
 			}
@@ -3194,10 +3248,33 @@ func stageProfile(ctx context.Context, prof policy.Profile, stageDir string) (se
 	return secretEnv, pathEnv, nil
 }
 
+func newInvocationID() (string, error) {
+	var random [16]byte
+	if _, err := cryptorand.Read(random[:]); err != nil {
+		return "", fmt.Errorf("create direct invocation identity: %w", err)
+	}
+	return "run-" + hex.EncodeToString(random[:]), nil
+}
+
+// runDirectProfile is the direct-run front. Its random stage key is generated
+// after trust/consent in cmdRun, so a reusable profile name is never ownership.
+func runDirectProfile(name string, prof policy.Profile, argv []string, ws string) (int, error) {
+	invocationID, err := newInvocationID()
+	if err != nil {
+		return 1, err
+	}
+	return runProfileWithStageKey(name, prof, argv, ws, invocationID)
+}
+
 // runProfile stages secrets + credentials into an ephemeral dir under the
 // workspace, launches the agent under its environment, and wipes the stage on
-// exit. Returns the child's exit code.
+// exit. Returns the child's exit code. Legacy callers omit a stage key so their
+// deployed workspace-hashed session layout remains reconstructable.
 func runProfile(name string, prof policy.Profile, argv []string, ws string) (int, error) {
+	return runProfileWithStageKey(name, prof, argv, ws, "")
+}
+
+func runProfileWithStageKey(name string, prof policy.Profile, argv []string, ws, stageKey string) (int, error) {
 	// SIGTERM (what `session stop` sends to this wrapper) and SIGHUP (terminal /
 	// Emacs-buffer close) cancel the run so the boundary is torn down and staged
 	// secrets are wiped via the deferred teardown in runProfileCtx, instead of
@@ -3210,7 +3287,7 @@ func runProfile(name string, prof policy.Profile, argv []string, ws string) (int
 	// reconcile is the backstop for a wrapper that dies without cleaning up.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
-	return runProfileCtx(ctx, name, prof, argv, ws)
+	return runProfileCtxWithStageKey(ctx, name, prof, argv, ws, stageKey)
 }
 
 // runIO optionally rebinds an agent's stdio. The zero value is the coupled path:
@@ -3229,6 +3306,14 @@ type runIO struct {
 // production, swappable in tests to assert the detached supervisor's PTY is
 // forwarded without standing up docker.
 var containerLaunch = container.Launch
+
+var directInvocationReap = func(invocationID string) error {
+	eng, err := runtimepkg.Detect(runtimepkg.PolicyAllow)
+	if err != nil {
+		return errors.New("direct invocation cleanup runtime is unavailable")
+	}
+	return container.ReapByInvocation(context.Background(), eng, invocationID)
+}
 
 var applySessionGrantOverlay = func(ctx context.Context, sess engsession.Session, desired []container.SessionGrant) error {
 	stageDir, err := sessionStageDir(sess)
@@ -3307,6 +3392,10 @@ func (m *credentialManager) Stop() {
 }
 
 func runProfileCtx(ctx context.Context, name string, prof policy.Profile, argv []string, ws string, stdio ...runIO) (int, error) {
+	return runProfileCtxWithStageKey(ctx, name, prof, argv, ws, "", stdio...)
+}
+
+func runProfileCtxWithStageKey(ctx context.Context, name string, prof policy.Profile, argv []string, ws, stageKey string, stdio ...runIO) (int, error) {
 	var rio runIO
 	if len(stdio) > 0 {
 		rio = stdio[0]
@@ -3320,7 +3409,12 @@ func runProfileCtx(ctx context.Context, name string, prof policy.Profile, argv [
 		return 1, fmt.Errorf("resolve workspace boundary: %w", err)
 	}
 	prof.Workspace = ws
-	stageDir, err := stageDirFor(name, ws)
+	var stageDir string
+	if stageKey != "" {
+		stageDir, err = stageDirForRuntime(stageKey)
+	} else {
+		stageDir, err = stageDirFor(name, ws)
+	}
 	if err != nil {
 		return 1, err
 	}
@@ -3334,7 +3428,20 @@ func runProfileCtx(ctx context.Context, name string, prof policy.Profile, argv [
 	if err := os.RemoveAll(stageDir); err != nil {
 		return 1, fmt.Errorf("remove abandoned credential stage: %w", err)
 	}
-	defer os.RemoveAll(stageDir) // wipe staged secrets/.npmrc regardless of outcome
+	retainInvocationMarker := false
+	defer func() {
+		if retainInvocationMarker {
+			_ = container.RetainInvocationMarker(stageDir)
+			return
+		}
+		_ = os.RemoveAll(stageDir)
+	}()
+	if strings.HasPrefix(stageKey, "run-") {
+		processToken, _ := engsession.ProcessStartToken(os.Getpid())
+		if err := container.WriteInvocationMarker(stageDir, stageKey, os.Getpid(), processToken); err != nil {
+			return 1, err
+		}
+	}
 
 	// kube/ssh creds are staged as files in stageDir and delivered via the /safeslop/runtime bind
 	// mount (container). GIT_SSH_COMMAND/KUBECONFIG are exported inside the boundary.
@@ -3395,7 +3502,16 @@ func runProfileCtx(ctx context.Context, name string, prof policy.Profile, argv [
 		// A detached supervisor passes a PTY slave it owns (rio set); forward it so the
 		// container's tty bridges to the supervisor's PTY for attach. Coupled (rio zero)
 		// leaves stdio nil and container.Launch runs the user's terminal (specs/0051).
-		return containerLaunch(ctx, engexec.LaunchSpec{Argv: argv, Stdin: rio.Stdin, Stdout: rio.Stdout, Stderr: rio.Stderr}, ws, prof.Network, egress, secretEnv, stageDir, resolved.IdentitySet, prof.Projection, sessionGrantViewsFromRunName(name)...)
+		code, launchErr := containerLaunch(ctx, engexec.LaunchSpec{Argv: argv, Stdin: rio.Stdin, Stdout: rio.Stdout, Stderr: rio.Stderr}, ws, prof.Network, egress, secretEnv, stageDir, resolved.IdentitySet, prof.Projection, sessionGrantViewsFromRunName(name)...)
+		if strings.HasPrefix(stageKey, "run-") {
+			if reapErr := directInvocationReap(stageKey); reapErr != nil {
+				retainInvocationMarker = true
+				if launchErr == nil {
+					return code, reapErr
+				}
+			}
+		}
+		return code, launchErr
 	default:
 		return 1, fmt.Errorf("unknown environment %q", prof.Environment)
 	}

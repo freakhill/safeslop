@@ -23,6 +23,9 @@ const (
 	StatusCreated = "created"
 	StatusRunning = "running"
 	StatusStopped = "stopped"
+
+	StageLayoutLegacy    = 0
+	StageLayoutSessionID = 2
 )
 
 var ErrNotFound = errors.New("session not found")
@@ -158,11 +161,18 @@ type Session struct {
 	// (specs/0051 D4). Internal routing state; not surfaced in the JSON envelope.
 	Detached bool `json:"detached,omitempty"`
 
-	// recordRevision is persisted only by diskRecord. Keeping it unexported
+	// These fields are persisted only by diskRecord. Keeping them unexported
 	// ensures direct Session JSON and the v1 client envelope never gain internal
-	// concurrency state.
+	// concurrency or runtime-routing state.
 	recordRevision uint64
+	runtimeID      string
+	stageLayout    int
 }
+
+// RuntimeIdentity returns the internal exact ownership id and stage layout.
+// Legacy records return ("", StageLayoutLegacy) and keep their historical
+// workspace-hashed reconstruction.
+func (s Session) RuntimeIdentity() (string, int) { return s.runtimeID, s.stageLayout }
 
 func (s Store) MarkRunning(id string, pid int, now time.Time) (Session, error) {
 	return s.markRunning(id, pid, false, now)

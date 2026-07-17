@@ -162,6 +162,7 @@ func TestStoreRejectsWrongIdentityStatusAndSymlinkAsCorruption(t *testing.T) {
 	cases := map[string]string{
 		"sess-wrong-id":   `{"session_id":"sess-other","status":"created"}`,
 		"sess-bad-status": `{"session_id":"sess-bad-status","status":"mystery"}`,
+		"sess-bad-layout": `{"session_id":"sess-bad-layout","status":"created","runtime_id":"sess-other","stage_layout":2}`,
 	}
 	for id, body := range cases {
 		if err := os.WriteFile(filepath.Join(store.Dir, id+".json"), []byte(body+"\n"), 0o600); err != nil {
@@ -183,6 +184,33 @@ func TestStoreRejectsWrongIdentityStatusAndSymlinkAsCorruption(t *testing.T) {
 	}
 }
 
+func TestStoreCreateUsesInternalSessionIDStageLayout(t *testing.T) {
+	store := NewStore(t.TempDir())
+	created, err := store.Create("fish", "container", t.TempDir(), testNow())
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if runtimeID, layout := created.RuntimeIdentity(); runtimeID != created.ID || layout != StageLayoutSessionID {
+		t.Fatalf("RuntimeIdentity = (%q,%d), want (%q,%d)", runtimeID, layout, created.ID, StageLayoutSessionID)
+	}
+	onDisk, err := os.ReadFile(filepath.Join(store.Dir, created.ID+".json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"runtime_id": "` + created.ID + `"`, `"stage_layout": 2`} {
+		if !strings.Contains(string(onDisk), want) {
+			t.Fatalf("new record missing %s: %s", want, onDisk)
+		}
+	}
+	public, err := json.Marshal(created)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(public), "runtime_id") || strings.Contains(string(public), "stage_layout") {
+		t.Fatalf("runtime routing leaked into Session JSON: %s", public)
+	}
+}
+
 func TestStoreLegacyRecordGainsRevisionOnlyOnMutation(t *testing.T) {
 	store := NewStore(t.TempDir())
 	legacy := `{"session_id":"sess-legacy","agent":"fish","workspace":"/tmp","environment":"host","network":"deny","backend":"","status":"created","created_at":"2026-06-26T00:00:00Z","updated_at":"2026-06-26T00:00:00Z","credentials_revoked":false}`
@@ -192,6 +220,9 @@ func TestStoreLegacyRecordGainsRevisionOnlyOnMutation(t *testing.T) {
 	got, err := store.Get("sess-legacy")
 	if err != nil {
 		t.Fatalf("Get legacy: %v", err)
+	}
+	if runtimeID, layout := got.RuntimeIdentity(); runtimeID != "" || layout != StageLayoutLegacy {
+		t.Fatalf("legacy RuntimeIdentity = (%q,%d), want empty legacy layout", runtimeID, layout)
 	}
 	before, err := os.ReadFile(filepath.Join(store.Dir, "sess-legacy.json"))
 	if err != nil {
@@ -210,6 +241,9 @@ func TestStoreLegacyRecordGainsRevisionOnlyOnMutation(t *testing.T) {
 	}
 	if !strings.Contains(string(after), `"record_revision": 1`) {
 		t.Fatalf("legacy mutation did not add revision 1: %s", after)
+	}
+	if strings.Contains(string(after), "runtime_id") || strings.Contains(string(after), "stage_layout") {
+		t.Fatalf("legacy mutation silently changed stage layout: %s", after)
 	}
 }
 

@@ -55,7 +55,7 @@ Frozen acceptance laws:
 
 ## Wave 7 — dependent runtime identity and authority
 
-- [ ] Give every direct run a random single-owner runtime identity
+- [x] Give every direct run a random single-owner runtime identity
   FILE:     `internal/cli/cli.go`, focused run/stage/session tests, `internal/engine/container/reap.go` and tests, additive internal session stage-layout fields where needed
   CHANGE:   First reproduce same-profile concurrent stage destruction and targeted deterministic ownership collision. Generate `run-<32 lowercase hex>` from 128 bits of `crypto/rand` after approval and before staging; use it consistently for stage, Compose project, exact ownership label, marker, cleanup, and dead-invocation reap. New sessions may use layout 2 keyed directly by random session ID. Legacy records without layout/runtime fields keep exact existing `stageDirFor("session-"+id, workspace)` and label reconstruction for status/stop/reconcile/rm/prune/revoke; do not rewrite on read. Markers remain value-free (ID/PID/process-start token only), and no cleanup signals an unverified PID.
   VERIFY:   `go test ./internal/cli ./internal/engine/container ./internal/engine/session -run 'Invocation|Concurrent.*Run|Stage|Reap|Legacy|Layout|Session.*Cleanup' -count=1 -v && go test -race ./internal/cli ./internal/engine/container -run 'Invocation|Concurrent.*Run|Stage|Reap' -count=1`

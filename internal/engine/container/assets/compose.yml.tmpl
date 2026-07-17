@@ -2,8 +2,9 @@ services:
   proxy:
     image: ubuntu/squid:5.2-22.04_beta
     labels:
-      safeslop.session: {{yaml .SessionID}}
-      safeslop.managed: "true"
+{{if .SessionID}}      safeslop.session: {{yaml .SessionID}}
+{{end}}{{if .InvocationID}}      safeslop.invocation: {{yaml .InvocationID}}
+{{end}}      safeslop.managed: "true"
     volumes:
 {{range .ProxyMounts}}      - type: bind
         source: {{yaml .Source}}
@@ -15,8 +16,9 @@ services:
   agent:
     image: {{yaml .AgentImage}}
     labels:
-      safeslop.session: {{yaml .SessionID}}
-      safeslop.managed: "true"
+{{if .SessionID}}      safeslop.session: {{yaml .SessionID}}
+{{end}}{{if .InvocationID}}      safeslop.invocation: {{yaml .InvocationID}}
+{{end}}      safeslop.managed: "true"
     working_dir: /workspace
     # Dockerfile.agent already uses USER 1000; hard-set the launch user too so
     # future image drift cannot run the agent as root or mismatch the tmpfs home.
@@ -73,10 +75,12 @@ networks:
     name: {{yaml .InternalNet}}
 {{else}}    internal: true
     labels:
-      safeslop.session: {{yaml .SessionID}}
-      safeslop.managed: "true"
+{{if .SessionID}}      safeslop.session: {{yaml .SessionID}}
+{{end}}{{if .InvocationID}}      safeslop.invocation: {{yaml .InvocationID}}
+{{end}}      safeslop.managed: "true"
 {{end}}  egress:
     labels:
-      safeslop.session: {{yaml .SessionID}}
-      safeslop.managed: "true"
+{{if .SessionID}}      safeslop.session: {{yaml .SessionID}}
+{{end}}{{if .InvocationID}}      safeslop.invocation: {{yaml .InvocationID}}
+{{end}}      safeslop.managed: "true"
     driver: bridge

@@ -66,6 +66,10 @@ func Supervise(ctx context.Context, store engsession.Store, id string, now func(
 	if err != nil {
 		return 1, err
 	}
+	stageKey, err := sessionStageKey(sess)
+	if err != nil {
+		return 1, err
+	}
 
 	if err := os.MkdirAll(store.Dir, 0o700); err != nil {
 		return 1, err
@@ -110,7 +114,7 @@ func Supervise(ctx context.Context, store engsession.Store, id string, now func(
 	// whole life and runs the inherited teardown on return.
 	exitCh := make(chan agentExit, 1)
 	go func() {
-		code, runErr := runProfileCtx(ctx, "session-"+id, prof, argv, sess.Workspace,
+		code, runErr := runProfileCtxWithStageKey(ctx, "session-"+id, prof, argv, sess.Workspace, stageKey,
 			runIO{Stdin: pts, Stdout: pts, Stderr: pts})
 		_ = pts.Close() // last writer to the slave -> the PTY reader below now hits EOF
 		exitCh <- agentExit{code, runErr}

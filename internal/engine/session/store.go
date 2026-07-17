@@ -30,10 +30,12 @@ func NewStore(dir string) Store { return Store{Dir: dir} }
 type diskRecord struct {
 	Session
 	RecordRevision uint64 `json:"record_revision,omitempty"`
+	RuntimeID      string `json:"runtime_id,omitempty"`
+	StageLayout    int    `json:"stage_layout,omitempty"`
 }
 
 func encodeRecord(sess Session) ([]byte, error) {
-	record := diskRecord{Session: sess, RecordRevision: sess.recordRevision}
+	record := diskRecord{Session: sess, RecordRevision: sess.recordRevision, RuntimeID: sess.runtimeID, StageLayout: sess.stageLayout}
 	b, err := json.MarshalIndent(record, "", "  ")
 	if err != nil {
 		return nil, err
@@ -47,13 +49,16 @@ func decodeRecord(id string, b []byte) (Session, error) {
 		return Session{}, ErrCorruptRecord
 	}
 	sess := record.Session
-	sess.recordRevision = record.RecordRevision
+	sess.recordRevision, sess.runtimeID, sess.stageLayout = record.RecordRevision, record.RuntimeID, record.StageLayout
 	if sess.ID != id || !validID(sess.ID) {
 		return Session{}, ErrCorruptRecord
 	}
 	switch sess.Status {
 	case StatusCreated, StatusRunning, StatusStopped:
 	default:
+		return Session{}, ErrCorruptRecord
+	}
+	if !validRuntimeIdentity(sess) {
 		return Session{}, ErrCorruptRecord
 	}
 	// A legacy on-disk "backend":"system" predates the ambient
@@ -65,7 +70,7 @@ func decodeRecord(id string, b []byte) (Session, error) {
 }
 
 func validateRecord(sess Session) error {
-	if sess.ID == "" || !validID(sess.ID) {
+	if sess.ID == "" || !validID(sess.ID) || !validRuntimeIdentity(sess) {
 		return ErrCorruptRecord
 	}
 	switch sess.Status {
@@ -73,6 +78,17 @@ func validateRecord(sess Session) error {
 		return nil
 	default:
 		return ErrCorruptRecord
+	}
+}
+
+func validRuntimeIdentity(sess Session) bool {
+	switch sess.stageLayout {
+	case StageLayoutLegacy:
+		return sess.runtimeID == ""
+	case StageLayoutSessionID:
+		return sess.runtimeID == sess.ID
+	default:
+		return false
 	}
 }
 
@@ -238,6 +254,7 @@ func (s Store) Create(agent, environment, workspacePath string, now time.Time) (
 			ID: id, Agent: agent, Workspace: resolvedWorkspace, Environment: environment,
 			Network: "deny", Backend: "", Status: StatusCreated,
 			CreatedAt: now.UTC(), UpdatedAt: now.UTC(),
+			runtimeID: id, stageLayout: StageLayoutSessionID,
 		}
 		var committed Session
 		err = s.withRecordLock(id, func() error {

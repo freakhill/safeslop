@@ -49,12 +49,19 @@ func materializeRun(p composeParams, open bool) (string, error) {
 		"squid.conf":          []byte(squid),
 		"allowlist.domains":   composeAllowlist(allow, p.Egress),
 		"session-grants.conf": []byte(RenderSessionGrants(p.SessionGrants)),
-		".safeslop-stage":     nil,
 	}
 	for name, content := range files {
 		if werr := os.WriteFile(filepath.Join(dir, name), content, 0o600); werr != nil {
 			return "", werr
 		}
+	}
+	markerPath := filepath.Join(dir, ".safeslop-stage")
+	if _, err := os.Lstat(markerPath); os.IsNotExist(err) {
+		if err := os.WriteFile(markerPath, nil, 0o600); err != nil {
+			return "", err
+		}
+	} else if err != nil {
+		return "", err
 	}
 	yml, err := renderComposeWithSourceCheck(p, true)
 	if err != nil {
@@ -217,11 +224,16 @@ func provision(ctx context.Context, sessionID string, agentArgv []string, worksp
 		}
 		projectionManifest = &manifest
 	}
+	sessionOwner, invocationOwner := sessionID, ""
+	if strings.HasPrefix(sessionID, "run-") {
+		sessionOwner, invocationOwner = "", sessionID
+	}
 	p := composeParams{
 		RuntimeDir:    stageDir,
 		Workspace:     workspace,
 		StageDir:      stageDir,
-		SessionID:     sessionID,
+		SessionID:     sessionOwner,
+		InvocationID:  invocationOwner,
 		AgentImage:    toolsImg,
 		NpmConfig:     npmErr == nil,
 		Kubeconfig:    kubeErr == nil,

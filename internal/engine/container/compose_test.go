@@ -423,6 +423,20 @@ func TestComposeLabelsServicesForRecordIndependentReap(t *testing.T) {
 	}
 }
 
+func TestComposeLabelsDirectRunsByInvocationNotProfileOrSession(t *testing.T) {
+	const id = "run-0123456789abcdef0123456789abcdef"
+	yml, err := renderCompose(composeParams{RuntimeDir: "/r", Workspace: "/w", StageDir: "/r", InvocationID: id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(yml, `safeslop.invocation: "`+id+`"`); n != 4 {
+		t.Fatalf("direct services/networks invocation label count = %d, want 4:\n%s", n, yml)
+	}
+	if strings.Contains(yml, "safeslop.session:") {
+		t.Fatalf("direct invocation gained a session/profile ownership label:\n%s", yml)
+	}
+}
+
 func TestComposeForcesTruecolorTerm(t *testing.T) {
 	yml, err := renderCompose(composeParams{RuntimeDir: "/r", Workspace: "/w", StageDir: "/r"})
 	if err != nil {
