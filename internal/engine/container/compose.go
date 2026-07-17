@@ -24,6 +24,7 @@ type composeParams struct {
 	SessionID     string // exact session ownership label; empty for direct invocations
 	InvocationID  string // exact random direct-run ownership label; empty for sessions
 	AgentImage    string // content-addressed agent image tag (local/safeslop-tools:<id>) -> compose image:
+	ProxyImage    string // validated OCI-index digest reference loaded from proxy-image.lock.json
 	GitConfig     bool   // true when staged .gitconfig exists (GIT_CONFIG_GLOBAL -> bind-mount path)
 	GitConfigPath string // path to the in-boundary gitconfig, usually /safeslop/runtime/.gitconfig
 	GitSSHConfig  bool   // true when staged .ssh/config.container exists (GIT_SSH_COMMAND -> bind-mount path)
@@ -60,6 +61,11 @@ func renderCompose(p composeParams) (string, error) {
 }
 
 func renderComposeWithSourceCheck(p composeParams, requireSources bool) (string, error) {
+	proxyImage, err := proxyImageReference()
+	if err != nil {
+		return "", err
+	}
+	p.ProxyImage = proxyImage
 	plan, err := buildComposeMountPlan(p, requireSources)
 	if err != nil {
 		return "", err

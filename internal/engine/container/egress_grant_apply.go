@@ -92,7 +92,10 @@ func InspectEgressGeneration(ctx context.Context, eng runtime.Engine, composeFil
 
 func installEgressGeneration(runtimeDir string, generation EgressGeneration, body []byte, options overlayOptions) (string, error) {
 	overlayDir := filepath.Join(runtimeDir, "proxy-overlay")
-	if err := os.MkdirAll(overlayDir, 0o700); err != nil {
+	if err := os.MkdirAll(overlayDir, 0o755); err != nil {
+		return "", err
+	}
+	if err := os.Chmod(overlayDir, 0o755); err != nil {
 		return "", err
 	}
 	overlayPath := filepath.Join(overlayDir, "session-grants.conf")
@@ -101,7 +104,7 @@ func installEgressGeneration(runtimeDir string, generation EgressGeneration, bod
 			return "", fmt.Errorf("write session grants overlay: %w", err)
 		}
 	}
-	if err := replaceSyncedFile(overlayPath, body, 0o600); err != nil {
+	if err := replaceSyncedFile(overlayPath, body, 0o644); err != nil {
 		return "", fmt.Errorf("write session grants overlay: %w", err)
 	}
 	if err := installOverlaySquidInclude(runtimeDir); err != nil {
@@ -134,7 +137,7 @@ func installOverlaySquidInclude(runtimeDir string) error {
 		return fmt.Errorf("proxy configuration has no reviewed session overlay include")
 	}
 	text = strings.Replace(text, oldInclude, newInclude, 1)
-	return replaceSyncedFile(path, []byte(text), 0o600)
+	return replaceSyncedFile(path, []byte(text), 0o644)
 }
 
 func renderEgressOverride(overlayDir string, generation EgressGeneration) (string, error) {

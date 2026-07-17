@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "image": "docker.io/ubuntu/squid",
+  "tag": "5.2-22.04_beta",
+  "indexDigest": "sha256:723891b5bc74fe86d271589927c36c6b205fafca48b2bbe4932e3110c7d6bcc7",
+  "indexFile": "proxy-image.index.json",
+  "manifests": {
+    "linux/amd64": "sha256:f47b90bc9f43e02229fc9451ea041f59ac09d51ac884fe5eafbfb46c008489ed",
+    "linux/arm64": "sha256:2e069e3ea708f107cc5d5f18ff129370774ebac25873004143d367ab4caf7334"
+  }
+}

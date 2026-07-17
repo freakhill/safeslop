@@ -12,9 +12,9 @@ EMACS_MIN ?= 32.0
 
 CONTAINER_SRC := library/layer/container
 CONTAINER_DST := internal/engine/container/assets
-SYNCED        := allowlist.domains Dockerfile.agent Dockerfile.agent.tools
+SYNCED        := allowlist.domains Dockerfile.agent Dockerfile.agent.tools proxy-image.lock.json proxy-image.index.json
 
-.PHONY: build test test-emacs test-emacs-ui-matrix test-progressive-egress-smoke vet fmt fmtcheck check check-assets check-catalog-sync check-pivot-denylist check-host-helper-exec check-hostpath-imports sync-container-assets render-catalog install install-emacs install-mcp dist clean
+.PHONY: build test test-emacs test-emacs-ui-matrix test-progressive-egress-smoke vet fmt fmtcheck check check-assets check-npm-locks check-proxy-image-lock check-catalog-sync check-pivot-denylist check-host-helper-exec check-hostpath-imports sync-container-assets render-catalog install install-emacs install-mcp dist clean
 
 ## Build the local binary (static — no cgo, immune to the WARP/uv install path).
 build:
@@ -56,7 +56,9 @@ fmtcheck:
 sync-container-assets:
 	@for f in $(SYNCED); do cp $(CONTAINER_SRC)/$$f $(CONTAINER_DST)/$$f; done
 	@cp $(CONTAINER_SRC)/agent-tools.env.example $(CONTAINER_DST)/agent-tools.env
-	@echo "synced $(SYNCED) agent-tools.env -> $(CONTAINER_DST)"
+	@rm -rf $(CONTAINER_DST)/npm-locks
+	@cp -R $(CONTAINER_SRC)/npm-locks $(CONTAINER_DST)/npm-locks
+	@echo "synced $(SYNCED) agent-tools.env npm-locks -> $(CONTAINER_DST)"
 
 check-assets:
 	@for f in $(SYNCED); do \
@@ -65,6 +67,14 @@ check-assets:
 	done
 	@diff -q $(CONTAINER_SRC)/agent-tools.env.example $(CONTAINER_DST)/agent-tools.env >/dev/null || { \
 	  echo "drift: agent-tools.env (run 'make sync-container-assets')"; exit 1; }
+	@diff -qr $(CONTAINER_SRC)/npm-locks $(CONTAINER_DST)/npm-locks >/dev/null || { \
+	  echo "drift: npm-locks (run 'make sync-container-assets')"; exit 1; }
+
+check-npm-locks:
+	ci/npm-locks-check.sh
+
+check-proxy-image-lock:
+	ci/proxy-image-lock-check.sh
 
 ## Render the authored catalog.cue into the embedded catalog.json (specs/0059 W2).
 ## In-process cuelang (no external `cue` binary); validates against schema/catalog.cue.
@@ -89,7 +99,7 @@ check-host-helper-exec:
 check-hostpath-imports:
 	ci/hostpath-import-denylist.sh
 
-check: check-assets check-catalog-sync check-pivot-denylist check-host-helper-exec check-hostpath-imports vet fmtcheck test test-emacs
+check: check-assets check-npm-locks check-proxy-image-lock check-catalog-sync check-pivot-denylist check-host-helper-exec check-hostpath-imports vet fmtcheck test test-emacs
 
 install-emacs:
 	mkdir -p "$(HOME)/.local/share/safeslop/emacs"

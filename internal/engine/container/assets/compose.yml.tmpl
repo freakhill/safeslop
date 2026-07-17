@@ -1,6 +1,16 @@
 services:
   proxy:
-    image: ubuntu/squid:5.2-22.04_beta
+    image: {{yaml .ProxyImage}}
+    user: "13:13"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - "no-new-privileges:true"
+    pids_limit: 128
+    tmpfs:
+      - "/run:rw,nosuid,nodev,noexec,size=16m,uid=13,gid=13,mode=0750"
+      - "/var/log/squid:rw,nosuid,nodev,noexec,size=16m,uid=13,gid=13,mode=0750"
+      - "/var/spool/squid:rw,nosuid,nodev,noexec,size=16m,uid=13,gid=13,mode=0750"
     labels:
 {{if .SessionID}}      safeslop.session: {{yaml .SessionID}}
 {{end}}{{if .InvocationID}}      safeslop.invocation: {{yaml .InvocationID}}
