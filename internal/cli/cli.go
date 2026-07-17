@@ -540,34 +540,37 @@ func recordSessionBackend(store engsession.Store, sess engsession.Session) (engs
 	if sess.Environment != "container" {
 		return sess, nil
 	}
-	changed := false
-	if backend := detectEngineName(); backend != "" && sess.Backend != backend {
-		sess.Backend = backend
-		changed = true
-	}
-	if sess.Image == "" || sess.RecipeID == "" {
-		prof, err := sessionProfile(sess)
-		if err != nil {
-			return engsession.Session{}, err
+	return store.WithLocked(sess.ID, func(tx *engsession.RecordTx) error {
+		current := tx.Session()
+		changed := false
+		if backend := detectEngineName(); backend != "" && current.Backend != backend {
+			current.Backend = backend
+			changed = true
 		}
-		resolved, err := policy.Resolve(prof)
-		if err != nil {
-			return engsession.Session{}, err
+		if current.Image == "" || current.RecipeID == "" {
+			prof, err := sessionProfile(current)
+			if err != nil {
+				return err
+			}
+			resolved, err := policy.Resolve(prof)
+			if err != nil {
+				return err
+			}
+			recipe, err := container.ResolveRecipe(resolved.IdentitySet)
+			if err != nil {
+				return err
+			}
+			current.RecipeID = recipe.RecipeID
+			current.Image = recipe.AgentImage
+			current.Resolved = resolvedMetadata(resolved)
+			changed = true
 		}
-		recipe, err := container.ResolveRecipe(resolved.IdentitySet)
-		if err != nil {
-			return engsession.Session{}, err
+		if !changed {
+			return nil
 		}
-		sess.RecipeID = recipe.RecipeID
-		sess.Image = recipe.AgentImage
-		sess.Resolved = resolvedMetadata(resolved)
-		changed = true
-	}
-	if !changed {
-		return sess, nil
-	}
-	sess.UpdatedAt = time.Now().UTC()
-	return sess, store.Save(sess)
+		current.UpdatedAt = time.Now().UTC()
+		return tx.Commit(current)
+	})
 }
 
 // engineForSession returns the container engine to reap a session's boundary through. Teardown/reap must
@@ -868,8 +871,11 @@ func cmdSessionCreate() *cobra.Command {
 					return err
 				}
 				if validName != "" {
-					sess.Name = validName
-					if err := store.Save(sess); err != nil {
+					sess, err = store.Update(sess.ID, func(current engsession.Session) (engsession.Session, error) {
+						current.Name = validName
+						return current, nil
+					})
+					if err != nil {
 						return emitContractError(jsoncontract.CodeIOError, "save session", map[string]any{"error": err.Error()})
 					}
 				}
@@ -922,13 +928,16 @@ func cmdSessionCreate() *cobra.Command {
 			// Persist post-create mutations (network override and display name) in a
 			// single Save so the record is written exactly once (specs/0065 S2).
 			if network != "" || validName != "" {
-				if network != "" {
-					sess.Network = network
-				}
-				if validName != "" {
-					sess.Name = validName
-				}
-				if err := store.Save(sess); err != nil {
+				sess, err = store.Update(sess.ID, func(current engsession.Session) (engsession.Session, error) {
+					if network != "" {
+						current.Network = network
+					}
+					if validName != "" {
+						current.Name = validName
+					}
+					return current, nil
+				})
+				if err != nil {
 					return emitContractError(jsoncontract.CodeIOError, "save session", map[string]any{"error": err.Error()})
 				}
 			}
@@ -1059,10 +1068,23 @@ func createSessionFromProfile(store engsession.Store, profile string) (engsessio
 	// profile only for trust verification, never to widen this session after a
 	// policy edit (specs/0103).
 	sess.PersistentEgress = append([]policy.PersistentEgressRule(nil), prof.PersistentEgress...)
-	if err := store.Save(sess); err != nil {
+	committed, err := store.Update(sess.ID, func(current engsession.Session) (engsession.Session, error) {
+		current.Profile = sess.Profile
+		current.ProfileSource = sess.ProfileSource
+		current.Network = sess.Network
+		current.RecipeID = sess.RecipeID
+		current.Image = sess.Image
+		current.Resolved = sess.Resolved
+		current.PolicyPath = sess.PolicyPath
+		current.PolicyHash = sess.PolicyHash
+		current.CredentialScopes = sess.CredentialScopes
+		current.PersistentEgress = sess.PersistentEgress
+		return current, nil
+	})
+	if err != nil {
 		return engsession.Session{}, emitContractError(jsoncontract.CodeIOError, "save session", map[string]any{"error": err.Error()})
 	}
-	return sess, nil
+	return committed, nil
 }
 
 // credentialScopesFromProfile derives the value-free credential legibility rows for
@@ -1105,10 +1127,18 @@ func createBuiltinSession(store engsession.Store, name string) (engsession.Sessi
 	sess.RecipeID, sess.Image, sess.Resolved = recipe.RecipeID, recipe.AgentImage, resolvedMetadata(resolved)
 	sess.CredentialScopes = credentialScopesFromProfile(prof)
 	sess.PersistentEgress = append([]policy.PersistentEgressRule(nil), prof.PersistentEgress...)
-	if err := store.Save(sess); err != nil {
+	committed, err := store.Update(sess.ID, func(current engsession.Session) (engsession.Session, error) {
+		current.Profile, current.ProfileSource, current.Network = sess.Profile, sess.ProfileSource, sess.Network
+		current.PolicyPath, current.PolicyHash = sess.PolicyPath, sess.PolicyHash
+		current.RecipeID, current.Image, current.Resolved = sess.RecipeID, sess.Image, sess.Resolved
+		current.CredentialScopes = sess.CredentialScopes
+		current.PersistentEgress = sess.PersistentEgress
+		return current, nil
+	})
+	if err != nil {
 		return engsession.Session{}, emitContractError(jsoncontract.CodeIOError, "save session", map[string]any{"error": err.Error()})
 	}
-	return sess, nil
+	return committed, nil
 }
 
 func credentialScopesFromProfile(prof policy.Profile) []engsession.CredentialScope {
@@ -1782,67 +1812,69 @@ func sessionStore() engsession.Store {
 }
 
 func grantSessionEgress(ctx context.Context, store engsession.Store, id, host string, port int, now time.Time) (engsession.Session, engsession.EgressGrant, error) {
-	sess, err := store.Get(id)
-	if err != nil {
-		return engsession.Session{}, engsession.EgressGrant{}, err
-	}
-	if sess.Status == engsession.StatusStopped {
-		return engsession.Session{}, engsession.EgressGrant{}, fmt.Errorf("session stopped")
-	}
-	next, grant, err := engsession.AppendGrant(sess, host, port, now)
-	if err != nil {
-		return engsession.Session{}, engsession.EgressGrant{}, err
-	}
-	if sess.Status == engsession.StatusRunning {
-		if err := applySessionGrantOverlay(ctx, sess, sessionEgressViews(next)); err != nil {
-			return engsession.Session{}, engsession.EgressGrant{}, err
+	var grant engsession.EgressGrant
+	committed, err := store.WithLocked(id, func(tx *engsession.RecordTx) error {
+		sess := tx.Session()
+		if sess.Status == engsession.StatusStopped {
+			return fmt.Errorf("session stopped")
 		}
-	}
-	if err := store.Save(next); err != nil {
+		next, nextGrant, err := engsession.AppendGrant(sess, host, port, now)
+		if err != nil {
+			return err
+		}
+		if sess.Status == engsession.StatusRunning {
+			if err := applySessionGrantOverlay(ctx, sess, sessionEgressViews(next)); err != nil {
+				return err
+			}
+		}
+		if err := tx.Commit(next); err != nil {
+			return err
+		}
+		grant = nextGrant
+		return nil
+	})
+	if err != nil {
 		return engsession.Session{}, engsession.EgressGrant{}, err
 	}
-	return next, grant, nil
+	return committed, grant, nil
 }
 
 func dismissSessionEgress(store engsession.Store, id, host string, port int, now time.Time) (engsession.Session, engsession.EgressAcknowledgement, error) {
-	sess, err := store.Get(id)
+	var acknowledgement engsession.EgressAcknowledgement
+	committed, err := store.Update(id, func(sess engsession.Session) (engsession.Session, error) {
+		if sess.Status == engsession.StatusStopped {
+			return engsession.Session{}, fmt.Errorf("session stopped")
+		}
+		next, nextAcknowledgement, err := engsession.DismissEgress(sess, host, port, now)
+		if err != nil {
+			return engsession.Session{}, err
+		}
+		acknowledgement = nextAcknowledgement
+		return next, nil
+	})
 	if err != nil {
 		return engsession.Session{}, engsession.EgressAcknowledgement{}, err
 	}
-	if sess.Status == engsession.StatusStopped {
-		return engsession.Session{}, engsession.EgressAcknowledgement{}, fmt.Errorf("session stopped")
-	}
-	next, acknowledgement, err := engsession.DismissEgress(sess, host, port, now)
-	if err != nil {
-		return engsession.Session{}, engsession.EgressAcknowledgement{}, err
-	}
-	if err := store.Save(next); err != nil {
-		return engsession.Session{}, engsession.EgressAcknowledgement{}, err
-	}
-	return next, acknowledgement, nil
+	return committed, acknowledgement, nil
 }
 
 func revokeSessionEgress(ctx context.Context, store engsession.Store, id, grantID string, now time.Time) (engsession.Session, error) {
-	sess, err := store.Get(id)
-	if err != nil {
-		return engsession.Session{}, err
-	}
-	if sess.Status == engsession.StatusStopped {
-		return engsession.Session{}, fmt.Errorf("session stopped")
-	}
-	next, err := engsession.RevokeGrant(sess, grantID, now)
-	if err != nil {
-		return engsession.Session{}, err
-	}
-	if sess.Status == engsession.StatusRunning {
-		if err := applySessionGrantOverlay(ctx, sess, sessionEgressViews(next)); err != nil {
-			return engsession.Session{}, err
+	return store.WithLocked(id, func(tx *engsession.RecordTx) error {
+		sess := tx.Session()
+		if sess.Status == engsession.StatusStopped {
+			return fmt.Errorf("session stopped")
 		}
-	}
-	if err := store.Save(next); err != nil {
-		return engsession.Session{}, err
-	}
-	return next, nil
+		next, err := engsession.RevokeGrant(sess, grantID, now)
+		if err != nil {
+			return err
+		}
+		if sess.Status == engsession.StatusRunning {
+			if err := applySessionGrantOverlay(ctx, sess, sessionEgressViews(next)); err != nil {
+				return err
+			}
+		}
+		return tx.Commit(next)
+	})
 }
 
 func sessionGrantViews(grants []engsession.EgressGrant) []container.SessionGrant {
@@ -3192,17 +3224,15 @@ func persistLeaseSnapshot(runName, stageDir string, snapshot creds.LeaseSnapshot
 		return
 	}
 	store := sessionStore()
-	sess, err := store.Get(id)
-	if err != nil {
-		return
-	}
-	partitions, _ := creds.GithubCredsPartitionCount(stageDir)
-	lease := &engsession.CredentialLease{Provider: "github", State: string(snapshot.State), Reason: snapshot.Reason, CurrentExpiresAt: snapshot.CurrentExpiresAt.UTC(), GithubMinExpiresAt: snapshot.CurrentExpiresAt.UTC(), GithubPartitions: partitions}
-	if snapshot.Horizon != nil {
-		lease.Horizon = snapshot.Horizon.UTC()
-	}
-	sess.CredentialLease = lease
-	_ = store.Save(sess)
+	_, _ = store.Update(id, func(sess engsession.Session) (engsession.Session, error) {
+		partitions, _ := creds.GithubCredsPartitionCount(stageDir)
+		lease := &engsession.CredentialLease{Provider: "github", State: string(snapshot.State), Reason: snapshot.Reason, CurrentExpiresAt: snapshot.CurrentExpiresAt.UTC(), GithubMinExpiresAt: snapshot.CurrentExpiresAt.UTC(), GithubPartitions: partitions}
+		if snapshot.Horizon != nil {
+			lease.Horizon = snapshot.Horizon.UTC()
+		}
+		sess.CredentialLease = lease
+		return sess, nil
+	})
 }
 
 func (m *credentialManager) Stop() {

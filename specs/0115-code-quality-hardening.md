@@ -29,7 +29,7 @@ Frozen acceptance laws:
 
 ## Wave 6 — independent foundations (serialized where files overlap)
 
-- [ ] Add crash-durable, interprocess-safe session transactions
+- [x] Add crash-durable, interprocess-safe session transactions
   FILE:     `internal/engine/session/session.go`, new `internal/engine/session/store.go`, new `internal/engine/session/atomic.go`, `internal/engine/session/session_test.go`, new focused session transaction tests; affected CLI session tests/calls only as required to compile
   CHANGE:   First reproduce malformed-list suppression, torn-write fault points, two-process lost update, stale-object save, directory-sync uncertainty, and concurrent rename/dismiss. Add per-record advisory `flock`, fresh-read transaction/update API, internal revision/CAS, same-directory 0600 `O_EXCL` temp → full write → file sync/close → rename → parent-directory sync, no-replace create, and locked removal. Retire unrestricted last-writer-wins `Save`; migrate every Store lifecycle method to one locked mutation. `Get`/`List` return typed value-free corruption and no partial list. Legacy records without revision remain readable and gain revision only on a successful mutation. Keep public `sessionData` and wire fixtures unchanged.
   VERIFY:   `go test ./internal/engine/session ./internal/cli -run 'Session|Store|Atomic|Concurrent|Corrupt|Revision|Rename|Dismiss' -count=1 -v && go test -race ./internal/engine/session ./internal/cli -run 'Session|Store|Concurrent|Rename|Dismiss' -count=1`
