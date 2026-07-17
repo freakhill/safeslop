@@ -516,7 +516,7 @@ func TestMaterializeRunAlwaysWritesSessionGrants(t *testing.T) {
 	if _, err := materializeRun(composeParams{RuntimeDir: empty, StageDir: empty, Workspace: t.TempDir()}, false); err != nil {
 		t.Fatal(err)
 	}
-	b, err := readAssetFile(empty, "session-grants.conf")
+	b, err := readAssetFile(filepath.Join(empty, "proxy-overlay"), "session-grants.conf")
 	if err != nil {
 		t.Fatalf("session-grants.conf must always be written (empty case): %v", err)
 	}
@@ -528,12 +528,16 @@ func TestMaterializeRunAlwaysWritesSessionGrants(t *testing.T) {
 	if _, err := materializeRun(composeParams{RuntimeDir: with, StageDir: with, Workspace: t.TempDir(), SessionGrants: []SessionGrant{{Host: "example.com", Port: 443}}}, false); err != nil {
 		t.Fatal(err)
 	}
-	b2, err := readAssetFile(with, "session-grants.conf")
+	b2, err := readAssetFile(filepath.Join(with, "proxy-overlay"), "session-grants.conf")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(b2), "grant_0_host dstdom_regex -n ^example\\.com$") {
 		t.Errorf("session-grants.conf must render the threaded grant:\n%s", b2)
+	}
+	generation, _, err := BuildEgressGeneration([]SessionGrant{{Host: "example.com", Port: 443}}, 0)
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	// compose.yml mounts session-grants.conf into the proxy.
@@ -541,8 +545,11 @@ func TestMaterializeRunAlwaysWritesSessionGrants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(yml), `target: "/etc/squid/session-grants.conf"`) {
+	if !strings.Contains(string(yml), `target: "/etc/squid/safeslop.d"`) {
 		t.Errorf("compose must bind-mount session-grants.conf into the proxy:\n%s", yml)
+	}
+	if !strings.Contains(string(yml), generation.Hash) || !strings.Contains(string(yml), `safeslop.egress-revision: "0"`) {
+		t.Errorf("initial proxy lacks inspectable generation labels:\n%s", yml)
 	}
 }
 

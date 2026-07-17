@@ -118,6 +118,11 @@ safeslop session egress grant --session-id ID --host chatgpt.com --port 443 --ou
 safeslop session egress revoke --session-id ID --grant-id G --output json
 ```
 
+Grant/revoke replaces the proxy and succeeds only after an exact revision+hash
+ACK. If network authority cannot be proven, safeslop attempts full teardown and
+records `network_authority_uncertain`. If teardown is not proven, egress mutations
+remain blocked until explicit stop/reap; start a fresh session afterward.
+
 Stop, reconcile, remove, and prune recursively delete host-stage and tmpfs copies.
 That is local wipe, not issuer revocation; start a new session after expiry or host
 refresh. Emacs has no Pi OAuth mutation action in this MVP: edit CUE, review, and

@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/freakhill/safeslop/internal/engine/egress"
 	workspaceboundary "github.com/freakhill/safeslop/internal/engine/workspace"
 )
 
@@ -29,13 +30,20 @@ func NewStore(dir string) Store { return Store{Dir: dir} }
 
 type diskRecord struct {
 	Session
-	RecordRevision uint64 `json:"record_revision,omitempty"`
-	RuntimeID      string `json:"runtime_id,omitempty"`
-	StageLayout    int    `json:"stage_layout,omitempty"`
+	RecordRevision        uint64            `json:"record_revision,omitempty"`
+	RuntimeID             string            `json:"runtime_id,omitempty"`
+	StageLayout           int               `json:"stage_layout,omitempty"`
+	AppliedEgressRevision int               `json:"applied_egress_revision,omitempty"`
+	AppliedEgressHash     string            `json:"applied_egress_hash,omitempty"`
+	EgressTransition      *EgressTransition `json:"egress_transition,omitempty"`
 }
 
 func encodeRecord(sess Session) ([]byte, error) {
-	record := diskRecord{Session: sess, RecordRevision: sess.recordRevision, RuntimeID: sess.runtimeID, StageLayout: sess.stageLayout}
+	record := diskRecord{
+		Session: sess, RecordRevision: sess.recordRevision, RuntimeID: sess.runtimeID, StageLayout: sess.stageLayout,
+		AppliedEgressRevision: sess.appliedEgressRevision, AppliedEgressHash: sess.appliedEgressHash,
+		EgressTransition: sess.egressTransition,
+	}
 	b, err := json.MarshalIndent(record, "", "  ")
 	if err != nil {
 		return nil, err
@@ -50,6 +58,7 @@ func decodeRecord(id string, b []byte) (Session, error) {
 	}
 	sess := record.Session
 	sess.recordRevision, sess.runtimeID, sess.stageLayout = record.RecordRevision, record.RuntimeID, record.StageLayout
+	sess.appliedEgressRevision, sess.appliedEgressHash, sess.egressTransition = record.AppliedEgressRevision, record.AppliedEgressHash, record.EgressTransition
 	if sess.ID != id || !validID(sess.ID) {
 		return Session{}, ErrCorruptRecord
 	}
@@ -58,7 +67,7 @@ func decodeRecord(id string, b []byte) (Session, error) {
 	default:
 		return Session{}, ErrCorruptRecord
 	}
-	if !validRuntimeIdentity(sess) {
+	if !validRuntimeIdentity(sess) || !validEgressAuthority(sess) || !validEgressRuntimeState(sess) {
 		return Session{}, ErrCorruptRecord
 	}
 	// A legacy on-disk "backend":"system" predates the ambient
@@ -70,7 +79,7 @@ func decodeRecord(id string, b []byte) (Session, error) {
 }
 
 func validateRecord(sess Session) error {
-	if sess.ID == "" || !validID(sess.ID) || !validRuntimeIdentity(sess) {
+	if sess.ID == "" || !validID(sess.ID) || !validRuntimeIdentity(sess) || !validEgressAuthority(sess) || !validEgressRuntimeState(sess) {
 		return ErrCorruptRecord
 	}
 	switch sess.Status {
@@ -90,6 +99,168 @@ func validRuntimeIdentity(sess Session) bool {
 	default:
 		return false
 	}
+}
+
+func validGrantID(id string) bool {
+	if len(id) != 8 || id[:2] != "g-" {
+		return false
+	}
+	for _, r := range id[2:] {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+func sameGrant(a, b EgressGrant) bool {
+	return a.ID == b.ID && a.Host == b.Host && a.Port == b.Port && a.Source == b.Source && a.CreatedAt.Equal(b.CreatedAt)
+}
+
+func validGrantList(grants []EgressGrant) bool {
+	ids, destinations := map[string]bool{}, map[string]bool{}
+	for _, grant := range grants {
+		host, port, err := ValidateEgressGrant(grant.Host, grant.Port)
+		destination := fmt.Sprintf("%s:%d", grant.Host, grant.Port)
+		if err != nil || host != grant.Host || port != grant.Port || !validGrantID(grant.ID) || grant.Source != "operator" || grant.CreatedAt.IsZero() || ids[grant.ID] || destinations[destination] {
+			return false
+		}
+		ids[grant.ID], destinations[destination] = true, true
+	}
+	return true
+}
+
+func validEgressAuthority(sess Session) bool {
+	if sess.GrantRevision < 0 || len(sess.EgressGrants) > sess.GrantRevision || !validGrantList(sess.EgressGrants) {
+		return false
+	}
+	if (sess.GrantRevision != 0 || len(sess.PersistentEgress) != 0 || len(sess.EgressAcknowledgements) != 0) && !CanGrant(sess) {
+		return false
+	}
+	destinations := map[string]bool{}
+	for _, rule := range sess.PersistentEgress {
+		host, port, err := ValidateEgressGrant(rule.FQDN, rule.Port)
+		key := fmt.Sprintf("%s:%d", rule.FQDN, rule.Port)
+		if err != nil || host != rule.FQDN || port != rule.Port || destinations[key] {
+			return false
+		}
+		destinations[key] = true
+	}
+	for _, acknowledgement := range sess.EgressAcknowledgements {
+		host, port, err := ValidateEgressGrant(acknowledgement.Host, acknowledgement.Port)
+		key := fmt.Sprintf("%s:%d", acknowledgement.Host, acknowledgement.Port)
+		if err != nil || host != acknowledgement.Host || port != acknowledgement.Port || acknowledgement.AcknowledgedAt.IsZero() || destinations["ack:"+key] {
+			return false
+		}
+		destinations["ack:"+key] = true
+	}
+	return true
+}
+
+func sameGrantList(a, b []EgressGrant) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !sameGrant(a[i], b[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func isOneGrantNarrower(active, candidate []EgressGrant) bool {
+	if len(candidate)+1 != len(active) {
+		return false
+	}
+	candidateAt := 0
+	removed := false
+	for _, grant := range active {
+		if candidateAt < len(candidate) && sameGrant(grant, candidate[candidateAt]) {
+			candidateAt++
+			continue
+		}
+		if removed {
+			return false
+		}
+		removed = true
+	}
+	return removed && candidateAt == len(candidate)
+}
+
+func canonicalEgressGeneration(sess Session, grants []EgressGrant, revision int) (egress.Generation, bool) {
+	destinations := make([]egress.Destination, 0, len(sess.PersistentEgress)+len(grants))
+	seen := make(map[struct {
+		host string
+		port int
+	}]struct{}, cap(destinations))
+	add := func(host string, port int) {
+		key := struct {
+			host string
+			port int
+		}{host: host, port: port}
+		if _, duplicate := seen[key]; duplicate {
+			return
+		}
+		seen[key] = struct{}{}
+		destinations = append(destinations, egress.Destination{Host: host, Port: port})
+	}
+	for _, rule := range sess.PersistentEgress {
+		add(rule.FQDN, rule.Port)
+	}
+	for _, grant := range grants {
+		add(grant.Host, grant.Port)
+	}
+	generation, _, err := egress.Build(destinations, revision)
+	return generation, err == nil
+}
+
+func validEgressRuntimeState(sess Session) bool {
+	if sess.appliedEgressRevision < 0 || (sess.appliedEgressHash != "" && !validSHA256(sess.appliedEgressHash)) {
+		return false
+	}
+	if sess.appliedEgressHash == "" && sess.appliedEgressRevision != 0 {
+		return false
+	}
+	durableGeneration, valid := canonicalEgressGeneration(sess, sess.EgressGrants, sess.GrantRevision)
+	if !valid {
+		return false
+	}
+	transition := sess.egressTransition
+	if transition == nil {
+		return sess.appliedEgressHash == "" || (sess.appliedEgressRevision == sess.GrantRevision && sess.appliedEgressHash == durableGeneration.Hash)
+	}
+	if sess.appliedEgressHash == "" || transition.CandidateRevision < 0 || !validSHA256(transition.CandidateHash) || !validGrantList(transition.CandidateGrants) {
+		return false
+	}
+	candidateGeneration, valid := canonicalEgressGeneration(sess, transition.CandidateGrants, transition.CandidateRevision)
+	if !valid || transition.CandidateHash != candidateGeneration.Hash {
+		return false
+	}
+	switch transition.Direction {
+	case EgressDirectionWiden:
+		if transition.CandidateRevision != sess.GrantRevision || sess.appliedEgressRevision+1 != sess.GrantRevision || !sameGrantList(transition.CandidateGrants, sess.EgressGrants) || len(sess.EgressGrants) == 0 {
+			return false
+		}
+		oldGeneration, valid := canonicalEgressGeneration(sess, sess.EgressGrants[:len(sess.EgressGrants)-1], sess.appliedEgressRevision)
+		return valid && candidateGeneration == durableGeneration && sess.appliedEgressHash == oldGeneration.Hash
+	case EgressDirectionNarrow:
+		return sess.appliedEgressRevision == sess.GrantRevision && transition.CandidateRevision == sess.GrantRevision+1 && isOneGrantNarrower(sess.EgressGrants, transition.CandidateGrants) && sess.appliedEgressHash == durableGeneration.Hash
+	default:
+		return false
+	}
+}
+
+func validSHA256(value string) bool {
+	if len(value) != 64 {
+		return false
+	}
+	for _, r := range value {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func (s Store) ensureDir() error {

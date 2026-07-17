@@ -47,7 +47,9 @@ type composeParams struct {
 	// SessionGrants are the operator-invoked session egress grants (specs/0097) rendered into the
 	// squid session-grants.conf overlay include. Empty => a comment-only file (the include + bind
 	// mount are unconditional, so the file must always exist at compose-up).
-	SessionGrants []SessionGrant
+	SessionGrants  []SessionGrant
+	EgressRevision int
+	EgressHash     string
 
 	ProxyMounts []composeMount
 	AgentMounts []composeMount
@@ -107,6 +109,10 @@ func yamlScalar(value string) (string, error) {
 var composeProjectPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
 func composeProjectArgs(composeFile string, args ...string) ([]string, error) {
+	return composeProjectArgsWithOverrides(composeFile, nil, args...)
+}
+
+func composeProjectArgsWithOverrides(composeFile string, overrides []string, args ...string) ([]string, error) {
 	file, err := filepath.Abs(composeFile)
 	if err != nil {
 		return nil, fmt.Errorf("resolve compose file: %w", err)
@@ -117,6 +123,13 @@ func composeProjectArgs(composeFile string, args ...string) ([]string, error) {
 		return nil, fmt.Errorf("runtime identity is not a valid Compose project name")
 	}
 	base := []string{"compose", "-p", project, "--project-directory", projectDir, "-f", file}
+	for _, override := range overrides {
+		override, err = filepath.Abs(override)
+		if err != nil || filepath.Dir(override) != projectDir {
+			return nil, fmt.Errorf("compose override is outside the runtime project")
+		}
+		base = append(base, "-f", override)
+	}
 	return append(base, args...), nil
 }
 

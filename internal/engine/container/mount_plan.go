@@ -47,7 +47,7 @@ func buildComposeMountPlan(p composeParams, requireSources bool) (composeMountPl
 		Proxy: []composeMount{
 			{Source: filepath.Join(runtimePath, "squid.conf"), Target: "/etc/squid/squid.conf", ReadOnly: true},
 			{Source: filepath.Join(runtimePath, "allowlist.domains"), Target: "/etc/squid/allowlist.domains", ReadOnly: true},
-			{Source: filepath.Join(runtimePath, "session-grants.conf"), Target: "/etc/squid/session-grants.conf", ReadOnly: true},
+			{Source: filepath.Join(runtimePath, "proxy-overlay"), Target: "/etc/squid/safeslop.d", ReadOnly: true},
 		},
 		Agent: []composeMount{
 			{Source: workspacePath, Target: "/workspace", ReadOnly: false},

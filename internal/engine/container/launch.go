@@ -45,10 +45,21 @@ func materializeRun(p composeParams, open bool) (string, error) {
 	if err := writeEntrypoint(dir); err != nil {
 		return "", err
 	}
+	generation, overlay, err := BuildEgressGeneration(p.SessionGrants, p.EgressRevision)
+	if err != nil {
+		return "", err
+	}
+	p.EgressHash = generation.Hash
+	overlayDir := filepath.Join(dir, "proxy-overlay")
+	if err := os.MkdirAll(overlayDir, 0o700); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(filepath.Join(overlayDir, "session-grants.conf"), overlay, 0o600); err != nil {
+		return "", err
+	}
 	files := map[string][]byte{
-		"squid.conf":          []byte(squid),
-		"allowlist.domains":   composeAllowlist(allow, p.Egress),
-		"session-grants.conf": []byte(RenderSessionGrants(p.SessionGrants)),
+		"squid.conf":        []byte(squid),
+		"allowlist.domains": composeAllowlist(allow, p.Egress),
 	}
 	for name, content := range files {
 		if werr := os.WriteFile(filepath.Join(dir, name), content, 0o600); werr != nil {

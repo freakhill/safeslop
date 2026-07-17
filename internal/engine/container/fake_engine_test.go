@@ -22,7 +22,12 @@ type fakeEngine struct {
 
 func composeCommandKey(t testing.TB, composeFile string, args ...string) string {
 	t.Helper()
-	argv, err := composeProjectArgs(composeFile, args...)
+	return composeCommandKeyWithOverrides(t, composeFile, nil, args...)
+}
+
+func composeCommandKeyWithOverrides(t testing.TB, composeFile string, overrides []string, args ...string) string {
+	t.Helper()
+	argv, err := composeProjectArgsWithOverrides(composeFile, overrides, args...)
 	if err != nil {
 		t.Fatalf("composeProjectArgs: %v", err)
 	}

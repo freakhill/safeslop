@@ -163,6 +163,9 @@ func TestStoreRejectsWrongIdentityStatusAndSymlinkAsCorruption(t *testing.T) {
 		"sess-wrong-id":   `{"session_id":"sess-other","status":"created"}`,
 		"sess-bad-status": `{"session_id":"sess-bad-status","status":"mystery"}`,
 		"sess-bad-layout": `{"session_id":"sess-bad-layout","status":"created","runtime_id":"sess-other","stage_layout":2}`,
+		"sess-bad-egress": `{"session_id":"sess-bad-egress","status":"created","applied_egress_revision":1,"applied_egress_hash":"not-a-hash"}`,
+		"sess-bad-hash":   `{"session_id":"sess-bad-hash","status":"created","applied_egress_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`,
+		"sess-bad-grants": `{"session_id":"sess-bad-grants","environment":"container","network":"deny","status":"created","egress_grants":[{"id":"g-abcdef","host":"example.com","port":443,"source":"operator","created_at":"2026-06-26T00:00:00Z"}],"egress_grant_revision":1,"applied_egress_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","egress_transition":{"direction":"widen","candidate_revision":1,"candidate_hash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}`,
 	}
 	for id, body := range cases {
 		if err := os.WriteFile(filepath.Join(store.Dir, id+".json"), []byte(body+"\n"), 0o600); err != nil {
@@ -211,6 +214,54 @@ func TestStoreCreateUsesInternalSessionIDStageLayout(t *testing.T) {
 	}
 }
 
+func TestStoreEgressRuntimeStateRoundTripsButStaysOutOfSessionJSON(t *testing.T) {
+	store := NewStore(t.TempDir())
+	created, err := store.Create("fish", "container", t.TempDir(), testNow())
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, _, err = AppendGrant(created, "example.com", 443, testNow())
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldGeneration, oldOK := canonicalEgressGeneration(created, nil, 0)
+	candidateGeneration, candidateOK := canonicalEgressGeneration(created, created.EgressGrants, created.GrantRevision)
+	if !oldOK || !candidateOK {
+		t.Fatal("canonical egress fixture generation failed")
+	}
+	hash := oldGeneration.Hash
+	created.SetEgressRuntimeState(EgressRuntimeState{AppliedRevision: 0, AppliedHash: hash, Transition: &EgressTransition{
+		Direction: EgressDirectionWiden, CandidateRevision: 1, CandidateHash: candidateGeneration.Hash, CandidateGrants: append([]EgressGrant(nil), created.EgressGrants...),
+	}})
+	if err := store.Save(created); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.Get(created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := got.EgressRuntimeState()
+	if state.AppliedRevision != 0 || state.AppliedHash != hash || state.Transition == nil || state.Transition.Direction != EgressDirectionWiden || len(state.Transition.CandidateGrants) != 1 {
+		t.Fatalf("egress runtime state = %+v", state)
+	}
+	onDisk, err := os.ReadFile(filepath.Join(store.Dir, created.ID+".json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(onDisk), "applied_egress_hash") || !strings.Contains(string(onDisk), "egress_transition") {
+		t.Fatalf("disk record omitted recovery state: %s", onDisk)
+	}
+	public, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, internal := range []string{"applied_egress", "egress_transition", "candidate_hash"} {
+		if strings.Contains(string(public), internal) {
+			t.Fatalf("Session JSON leaked %q: %s", internal, public)
+		}
+	}
+}
+
 func TestStoreLegacyRecordGainsRevisionOnlyOnMutation(t *testing.T) {
 	store := NewStore(t.TempDir())
 	legacy := `{"session_id":"sess-legacy","agent":"fish","workspace":"/tmp","environment":"host","network":"deny","backend":"","status":"created","created_at":"2026-06-26T00:00:00Z","updated_at":"2026-06-26T00:00:00Z","credentials_revoked":false}`
@@ -249,7 +300,7 @@ func TestStoreLegacyRecordGainsRevisionOnlyOnMutation(t *testing.T) {
 
 func TestStoreConcurrentProcessesPreserveIndependentUpdates(t *testing.T) {
 	store := NewStore(t.TempDir())
-	created, err := store.Create("fish", "host", t.TempDir(), testNow())
+	created, err := store.Create("fish", "container", t.TempDir(), testNow())
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}

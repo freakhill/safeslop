@@ -32,6 +32,47 @@ type EgressAcknowledgement struct {
 	AcknowledgedAt time.Time `json:"acknowledged_at"`
 }
 
+const (
+	EgressDirectionWiden  = "widen"
+	EgressDirectionNarrow = "narrow"
+)
+
+// EgressTransition is internal durable recovery state. CandidateGrants contains
+// only the exact value-free session grant rows needed to identify/restore an
+// interrupted narrowing; Session keeps it out of public JSON and v1 envelopes.
+type EgressTransition struct {
+	Direction         string        `json:"direction"`
+	CandidateRevision int           `json:"candidate_revision"`
+	CandidateHash     string        `json:"candidate_hash"`
+	CandidateGrants   []EgressGrant `json:"candidate_grants,omitempty"`
+}
+
+type EgressRuntimeState struct {
+	AppliedRevision int
+	AppliedHash     string
+	Transition      *EgressTransition
+}
+
+func (s Session) EgressRuntimeState() EgressRuntimeState {
+	state := EgressRuntimeState{AppliedRevision: s.appliedEgressRevision, AppliedHash: s.appliedEgressHash}
+	if s.egressTransition != nil {
+		transition := *s.egressTransition
+		transition.CandidateGrants = append([]EgressGrant(nil), transition.CandidateGrants...)
+		state.Transition = &transition
+	}
+	return state
+}
+
+func (s *Session) SetEgressRuntimeState(state EgressRuntimeState) {
+	s.appliedEgressRevision, s.appliedEgressHash = state.AppliedRevision, state.AppliedHash
+	s.egressTransition = nil
+	if state.Transition != nil {
+		transition := *state.Transition
+		transition.CandidateGrants = append([]EgressGrant(nil), transition.CandidateGrants...)
+		s.egressTransition = &transition
+	}
+}
+
 // ErrSessionNotGrantable is returned when a grant is requested for a session that cannot enforce
 // one. Grants are only meaningful for environment:"container" + network:"deny" sessions: host
 // sessions have no isolation boundary to scope, and network:"allow" sessions already have open

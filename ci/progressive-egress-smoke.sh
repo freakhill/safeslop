@@ -16,6 +16,23 @@ json_field() {
   python3 -c 'import json,sys; d=json.load(sys.stdin)["data"]; print(d[sys.argv[1]])' "$1"
 }
 
+proxy_id() {
+  "$DOCKER" ps --filter 'label=safeslop.managed=true' --format '{{.ID}} {{.Label "safeslop.session"}} {{.Label "com.docker.compose.service"}}' | awk -v id="$SID" '($2 == id || index($2, id "-") == 1) && $3 == "proxy" {print $1; exit}'
+}
+
+assert_proxy_generation() {
+  local expected_revision="$1" cid revision expected_hash actual_hash
+  cid="$(proxy_id)"
+  [[ -n "$cid" ]] || { echo "proxy container is not running" >&2; return 1; }
+  revision="$("$DOCKER" inspect --format '{{ index .Config.Labels "safeslop.egress-revision" }}' "$cid")"
+  expected_hash="$("$DOCKER" inspect --format '{{ index .Config.Labels "safeslop.egress-hash" }}' "$cid")"
+  actual_hash="$("$DOCKER" exec "$cid" sha256sum /etc/squid/safeslop.d/session-grants.conf | awk '{print $1}')"
+  [[ "$revision" == "$expected_revision" && -n "$expected_hash" && "$expected_hash" == "$actual_hash" ]] || {
+    echo "proxy generation ACK mismatch: revision=$revision expected_revision=$expected_revision label=$expected_hash file=$actual_hash" >&2
+    return 1
+  }
+}
+
 cleanup() {
   local rc=$?
   set +e
@@ -24,7 +41,7 @@ cleanup() {
     "$BIN" session rm --session-id "$SID" --output json >/dev/null 2>&1
     while read -r cid; do
       [[ -n "$cid" ]] && "$DOCKER" rm -f "$cid" >/dev/null 2>&1
-    done < <("$DOCKER" ps -a --filter 'label=safeslop.managed=true' --format '{{.ID}} {{.Label "safeslop.session"}}' | awk -v id="$SID" '$2 ~ ("^" id "-") {print $1}')
+    done < <("$DOCKER" ps -a --filter 'label=safeslop.managed=true' --format '{{.ID}} {{.Label "safeslop.session"}}' | awk -v id="$SID" '$2 == id || index($2, id "-") == 1 {print $1}')
   fi
   rm -rf "$TMP"
   exit "$rc"
@@ -39,7 +56,7 @@ SID="$(printf '%s' "$create" | json_field session_id)"
 
 CID=""
 for _ in $(seq 1 180); do
-  CID="$("$DOCKER" ps --filter 'label=safeslop.managed=true' --format '{{.ID}} {{.Label "safeslop.session"}} {{.Label "com.docker.compose.service"}}' | awk -v id="$SID" '$2 ~ ("^" id "-") && $3 == "agent" {print $1; exit}')"
+  CID="$("$DOCKER" ps --filter 'label=safeslop.managed=true' --format '{{.ID}} {{.Label "safeslop.session"}} {{.Label "com.docker.compose.service"}}' | awk -v id="$SID" '($2 == id || index($2, id "-") == 1) && $3 == "agent" {print $1; exit}')"
   [[ -n "$CID" ]] && break
   status="$("$BIN" session status --session-id "$SID" --output json | json_field status)"
   [[ "$status" != stopped ]] || { echo "smoke session stopped before agent readiness" >&2; exit 1; }
@@ -63,12 +80,20 @@ for _ in $(seq 1 40); do
   sleep 0.25
 done
 [[ "$observed" == 1 ]] || { echo "denied destination was not observed" >&2; exit 1; }
+assert_proxy_generation 0
 
+proxy_before_grant="$(proxy_id)"
 grant="$("$BIN" session egress grant --session-id "$SID" --host example.com --port 443 --output json)"
 GRANT_ID="$(printf '%s' "$grant" | python3 -c 'import json,sys; rows=json.load(sys.stdin)["data"]["egress_grants"]; print(next(r["id"] for r in rows if r["host"]=="example.com" and r["port"]==443))')"
+proxy_after_grant="$(proxy_id)"
+[[ -n "$proxy_after_grant" && "$proxy_after_grant" != "$proxy_before_grant" ]] || { echo "grant did not replace the proxy boundary" >&2; exit 1; }
+assert_proxy_generation 1
 "${probe[@]}"
 
 "$BIN" session egress revoke --session-id "$SID" --grant-id "$GRANT_ID" --output json >/dev/null
+proxy_after_revoke="$(proxy_id)"
+[[ -n "$proxy_after_revoke" && "$proxy_after_revoke" != "$proxy_after_grant" ]] || { echo "revoke did not replace the proxy boundary" >&2; exit 1; }
+assert_proxy_generation 2
 if "${probe[@]}"; then
   echo "revoked probe unexpectedly succeeded" >&2
   exit 1

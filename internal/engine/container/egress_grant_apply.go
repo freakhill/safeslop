@@ -1,121 +1,284 @@
 package container
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/freakhill/safeslop/internal/engine/container/runtime"
 )
 
-const (
-	proxyReconfigureAttempts = 10
-	proxyReconfigureDelay    = 50 * time.Millisecond
-)
+var ErrEgressGenerationUncertain = errors.New("proxy egress generation is uncertain")
 
 type overlayOptions struct {
-	testHook func(string) error
+	beforeInstall func(string) error
 }
 
-// OverlayOption customizes ApplySessionGrants. It exists for hermetic tests only; production uses
-// the default atomic temp+rename path.
+// OverlayOption remains a hermetic filesystem-fault seam. Production passes no
+// options; runtime/network behavior is exercised through runtime.Engine.
 type OverlayOption func(*overlayOptions)
 
-// WithOverlayTestHook injects an error after rendering the candidate overlay to a temp path and
-// before rename/reload. It lets tests prove write/update failure leaves the previous overlay and does
-// not reconfigure the proxy, without chmod tricks that vary by platform/user.
-func WithOverlayTestHook(fn func(string) error) OverlayOption {
-	return func(o *overlayOptions) { o.testHook = fn }
+func WithOverlayTestHook(hook func(path string) error) OverlayOption {
+	return func(options *overlayOptions) { options.beforeInstall = hook }
 }
 
-// ApplySessionGrants materializes the desired session grant overlay for an already-running compose
-// stack, reloads the proxy, and restores the previous overlay if reload fails. The session record
-// caller must save only after this returns nil: any write/reload failure preserves the previous
-// on-disk overlay and therefore the previous effective deny posture. The current compose asset bind-
-// mounts session-grants.conf as a file, so the update path writes the validated candidate back through
-// the existing path (O_TRUNC) rather than swapping the inode out from under the bind mount.
+// ApplySessionGrants is the compatibility front for existing callers. New
+// transactional callers use ApplyEgressGeneration with the durable revision.
 func ApplySessionGrants(ctx context.Context, eng runtime.Engine, composeFile, runtimeDir string, grants []SessionGrant, opts ...OverlayOption) error {
-	var cfg overlayOptions
-	for _, opt := range opts {
-		opt(&cfg)
-	}
-	path := filepath.Join(runtimeDir, "session-grants.conf")
-	old, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("read existing session grants overlay: %w", err)
-	}
-	if os.IsNotExist(err) {
-		old = []byte(RenderSessionGrants(nil))
-	}
-	next := []byte(RenderSessionGrants(grants))
-	if err := writeOverlayCandidate(path, next, cfg.testHook); err != nil {
-		return fmt.Errorf("write session grants overlay: %w", err)
-	}
-	if err := reconfigureProxy(ctx, eng, composeFile); err != nil {
-		_ = os.WriteFile(path, old, 0o600)
-		if restoreErr := reconfigureProxy(ctx, eng, composeFile); restoreErr != nil {
-			return fmt.Errorf("reconfigure proxy failed after overlay update (%v); restore reconfigure also failed: %w", err, restoreErr)
-		}
-		return fmt.Errorf("reconfigure proxy: %w", err)
-	}
-	return nil
+	_, err := ApplyEgressGeneration(ctx, eng, composeFile, runtimeDir, grants, 0, opts...)
+	return err
 }
 
-func writeOverlayCandidate(path string, content []byte, hook func(string) error) error {
-	tmp := path + ".next"
-	if err := os.WriteFile(tmp, content, 0o600); err != nil {
-		return err
+// ApplyEgressGeneration atomically installs candidate bytes inside a directory
+// bind, force-replaces the sole proxy, and returns only after an inspectable
+// generation/hash ACK. It never treats a signal/reconfigure exit as an ACK.
+func ApplyEgressGeneration(ctx context.Context, eng runtime.Engine, composeFile, runtimeDir string, grants []SessionGrant, revision int, opts ...OverlayOption) (EgressGeneration, error) {
+	generation, body, err := BuildEgressGeneration(grants, revision)
+	if err != nil {
+		return EgressGeneration{}, err
 	}
-	if hook != nil {
-		if err := hook(tmp); err != nil {
-			_ = os.Remove(tmp)
-			return err
+	options := overlayOptions{}
+	for _, option := range opts {
+		option(&options)
+	}
+	overrideFile, err := installEgressGeneration(runtimeDir, generation, body, options)
+	if err != nil {
+		return EgressGeneration{}, err
+	}
+	files := []string{overrideFile}
+	upArgs, err := composeProjectArgsWithOverrides(composeFile, files, "up", "-d", "--no-deps", "--force-recreate", "proxy")
+	if err != nil {
+		return EgressGeneration{}, ErrEgressGenerationUncertain
+	}
+	if err := runEngine(ctx, eng, upArgs...); err != nil {
+		return EgressGeneration{}, ErrEgressGenerationUncertain
+	}
+	if err := waitForProxyGeneration(ctx, eng, composeFile, files, generation); err != nil {
+		return EgressGeneration{}, ErrEgressGenerationUncertain
+	}
+	return generation, nil
+}
+
+// EnsureEgressGeneration avoids a connection-dropping replacement when the
+// running proxy already positively acknowledges the desired bytes.
+func EnsureEgressGeneration(ctx context.Context, eng runtime.Engine, composeFile, runtimeDir string, grants []SessionGrant, revision int, opts ...OverlayOption) (EgressGeneration, error) {
+	wanted, _, err := BuildEgressGeneration(grants, revision)
+	if err != nil {
+		return EgressGeneration{}, err
+	}
+	if current, err := InspectEgressGeneration(ctx, eng, composeFile); err == nil && current == wanted {
+		return current, nil
+	}
+	return ApplyEgressGeneration(ctx, eng, composeFile, runtimeDir, grants, revision, opts...)
+}
+
+func InspectEgressGeneration(ctx context.Context, eng runtime.Engine, composeFile string) (EgressGeneration, error) {
+	if err := waitForProxyFiles(ctx, eng, composeFile, nil); err != nil {
+		return EgressGeneration{}, ErrEgressGenerationUncertain
+	}
+	generation, err := inspectProxyGeneration(ctx, eng, composeFile, nil)
+	if err != nil {
+		return EgressGeneration{}, ErrEgressGenerationUncertain
+	}
+	return generation, nil
+}
+
+func installEgressGeneration(runtimeDir string, generation EgressGeneration, body []byte, options overlayOptions) (string, error) {
+	overlayDir := filepath.Join(runtimeDir, "proxy-overlay")
+	if err := os.MkdirAll(overlayDir, 0o700); err != nil {
+		return "", err
+	}
+	overlayPath := filepath.Join(overlayDir, "session-grants.conf")
+	if options.beforeInstall != nil {
+		if err := options.beforeInstall(overlayPath); err != nil {
+			return "", fmt.Errorf("write session grants overlay: %w", err)
 		}
 	}
-	candidate, err := os.ReadFile(tmp)
-	_ = os.Remove(tmp)
+	if err := replaceSyncedFile(overlayPath, body, 0o600); err != nil {
+		return "", fmt.Errorf("write session grants overlay: %w", err)
+	}
+	if err := installOverlaySquidInclude(runtimeDir); err != nil {
+		return "", err
+	}
+	override, err := renderEgressOverride(overlayDir, generation)
+	if err != nil {
+		return "", err
+	}
+	overridePath := filepath.Join(runtimeDir, "egress.override.yml")
+	if err := replaceSyncedFile(overridePath, []byte(override), 0o600); err != nil {
+		return "", err
+	}
+	return overridePath, nil
+}
+
+func installOverlaySquidInclude(runtimeDir string) error {
+	path := filepath.Join(runtimeDir, "squid.conf")
+	body, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, candidate, 0o600); err != nil {
-		return err
+	const oldInclude = "include /etc/squid/session-grants.conf"
+	const newInclude = "include /etc/squid/safeslop.d/session-grants.conf"
+	text := string(body)
+	if strings.Contains(text, newInclude) {
+		return nil
 	}
-	// Best-effort file fsync so the proxy reload sees the just-written content where the platform
-	// permits it. Overlay correctness does not depend on fsync success in unit tests.
-	if f, err := os.OpenFile(path, os.O_RDONLY, 0); err == nil {
-		_ = f.Sync()
-		_ = f.Close()
+	if !strings.Contains(text, oldInclude) {
+		return fmt.Errorf("proxy configuration has no reviewed session overlay include")
 	}
-	return nil
+	text = strings.Replace(text, oldInclude, newInclude, 1)
+	return replaceSyncedFile(path, []byte(text), 0o600)
 }
 
-func reconfigureProxy(ctx context.Context, eng runtime.Engine, composeFile string) error {
-	args, err := composeProjectArgs(composeFile, "exec", "-T", "proxy", "squid", "-k", "reconfigure")
+func renderEgressOverride(overlayDir string, generation EgressGeneration) (string, error) {
+	source, err := yamlScalar(overlayDir)
+	if err != nil {
+		return "", err
+	}
+	hash, err := yamlScalar(generation.Hash)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf(`services:
+  proxy:
+    labels:
+      safeslop.egress-revision: %q
+      safeslop.egress-hash: %s
+    volumes:
+      - type: bind
+        source: %s
+        target: /etc/squid/safeslop.d
+        read_only: true
+        bind:
+          create_host_path: false
+`, strconv.Itoa(generation.Revision), hash, source), nil
+}
+
+func replaceSyncedFile(path string, body []byte, mode os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".egress-tmp-*")
 	if err != nil {
 		return err
 	}
-	var lastErr error
-	for attempt := 0; attempt < proxyReconfigureAttempts; attempt++ {
-		cmd := eng.Command(ctx, args...)
-		if err := cmd.Run(); err == nil {
-			return nil
-		} else {
-			lastErr = err
-		}
-		if attempt+1 == proxyReconfigureAttempts {
-			break
-		}
-		timer := time.NewTimer(proxyReconfigureDelay)
-		select {
-		case <-ctx.Done():
-			if !timer.Stop() {
-				<-timer.C
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if err := tmp.Chmod(mode); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := io.Copy(tmp, bytes.NewReader(body)); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return err
+	}
+	directory, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer directory.Close()
+	return directory.Sync()
+}
+
+func waitForProxyGeneration(ctx context.Context, eng runtime.Engine, composeFile string, overrides []string, wanted EgressGeneration) error {
+	readyCtx, cancel := context.WithTimeout(ctx, proxyReadyTimeout)
+	defer cancel()
+	for {
+		if err := waitForProxyFiles(readyCtx, eng, composeFile, overrides); err == nil {
+			if current, err := inspectProxyGeneration(readyCtx, eng, composeFile, overrides); err == nil && current == wanted {
+				return nil
 			}
-			return ctx.Err()
-		case <-timer.C:
+		}
+		select {
+		case <-readyCtx.Done():
+			return readyCtx.Err()
+		case <-time.After(proxyReadyInterval):
 		}
 	}
-	return lastErr
+}
+
+func waitForProxyFiles(ctx context.Context, eng runtime.Engine, composeFile string, overrides []string) error {
+	args, err := composeProjectArgsWithOverrides(composeFile, overrides, "exec", "-T", "proxy", "bash", "-ec", proxyReadyCommand)
+	if err != nil {
+		return err
+	}
+	return eng.Command(ctx, args...).Run()
+}
+
+func sameRuntimeObjectID(a, b string) bool {
+	// `docker ps -q` emits the daemon's unique short ID while Compose may emit
+	// the full ID. The project-wide count above still proves sole ownership.
+	return a == b || strings.HasPrefix(a, b) || strings.HasPrefix(b, a)
+}
+
+func inspectProxyGeneration(ctx context.Context, eng runtime.Engine, composeFile string, overrides []string) (EgressGeneration, error) {
+	psArgs, err := composeProjectArgsWithOverrides(composeFile, overrides, "ps", "--status", "running", "-q", "proxy")
+	if err != nil {
+		return EgressGeneration{}, err
+	}
+	ids, err := eng.Command(ctx, psArgs...).Output()
+	if err != nil {
+		return EgressGeneration{}, err
+	}
+	lines := strings.Fields(string(ids))
+	if len(lines) != 1 {
+		return EgressGeneration{}, fmt.Errorf("proxy instance count is not one")
+	}
+	file, err := filepath.Abs(composeFile)
+	if err != nil {
+		return EgressGeneration{}, err
+	}
+	project := filepath.Base(filepath.Dir(file))
+	if !composeProjectPattern.MatchString(project) {
+		return EgressGeneration{}, fmt.Errorf("runtime identity is not a valid Compose project name")
+	}
+	projectIDs, err := eng.Command(ctx, "ps", "-q", "--filter", "label=com.docker.compose.project="+project, "--filter", "label=com.docker.compose.service=proxy").Output()
+	if err != nil {
+		return EgressGeneration{}, err
+	}
+	allProxies := strings.Fields(string(projectIDs))
+	if len(allProxies) != 1 || !sameRuntimeObjectID(allProxies[0], lines[0]) {
+		return EgressGeneration{}, fmt.Errorf("proxy instance count is not one")
+	}
+	format := `{{ index .Config.Labels "safeslop.egress-revision" }} {{ index .Config.Labels "safeslop.egress-hash" }}`
+	labels, err := eng.Command(ctx, "inspect", "-f", format, lines[0]).Output()
+	if err != nil {
+		return EgressGeneration{}, err
+	}
+	fields := strings.Fields(string(labels))
+	if len(fields) != 2 {
+		return EgressGeneration{}, fmt.Errorf("proxy generation labels are missing")
+	}
+	revision, err := strconv.Atoi(fields[0])
+	if err != nil || revision < 0 || len(fields[1]) != 64 {
+		return EgressGeneration{}, fmt.Errorf("proxy generation labels are invalid")
+	}
+	hashArgs, err := composeProjectArgsWithOverrides(composeFile, overrides, "exec", "-T", "proxy", "sha256sum", "/etc/squid/safeslop.d/session-grants.conf")
+	if err != nil {
+		return EgressGeneration{}, err
+	}
+	hashOutput, err := eng.Command(ctx, hashArgs...).Output()
+	if err != nil {
+		return EgressGeneration{}, err
+	}
+	hashFields := strings.Fields(string(hashOutput))
+	if len(hashFields) < 1 || hashFields[0] != fields[1] {
+		return EgressGeneration{}, fmt.Errorf("proxy overlay hash does not match its label")
+	}
+	return EgressGeneration{Revision: revision, Hash: fields[1]}, nil
 }

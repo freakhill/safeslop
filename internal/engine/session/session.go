@@ -164,9 +164,12 @@ type Session struct {
 	// These fields are persisted only by diskRecord. Keeping them unexported
 	// ensures direct Session JSON and the v1 client envelope never gain internal
 	// concurrency or runtime-routing state.
-	recordRevision uint64
-	runtimeID      string
-	stageLayout    int
+	recordRevision        uint64
+	runtimeID             string
+	stageLayout           int
+	appliedEgressRevision int
+	appliedEgressHash     string
+	egressTransition      *EgressTransition
 }
 
 // RuntimeIdentity returns the internal exact ownership id and stage layout.
@@ -208,6 +211,7 @@ func (s Store) Finish(id string, exitCode int, lastErr string, now time.Time, fa
 		sess.Status = StatusStopped
 		sess.PID = 0
 		sess.ProcessToken = ""
+		sess.SetEgressRuntimeState(EgressRuntimeState{})
 		sess.ExitCode = &exitCode
 		sess.LastFailure = nil
 		if len(failure) > 0 {
@@ -319,6 +323,7 @@ func reconcile(sess Session, now time.Time, isAlive func(Session) bool) (Session
 	sess.Status = StatusStopped
 	sess.PID = 0
 	sess.ProcessToken = ""
+	sess.SetEgressRuntimeState(EgressRuntimeState{})
 	sess.LastError = "run process exited without recording status"
 	sess.StoppedAt = now.UTC()
 	sess.UpdatedAt = now.UTC()
@@ -411,6 +416,7 @@ func (s Store) Stop(id string, revoke bool, now time.Time, revokeCredentials fun
 		sess.Status = StatusStopped
 		sess.PID = 0
 		sess.ProcessToken = ""
+		sess.SetEgressRuntimeState(EgressRuntimeState{})
 		sess.StoppedAt = now.UTC()
 		sess.UpdatedAt = now.UTC()
 		return tx.Commit(sess)

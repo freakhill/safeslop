@@ -5,7 +5,9 @@ services:
 {{if .SessionID}}      safeslop.session: {{yaml .SessionID}}
 {{end}}{{if .InvocationID}}      safeslop.invocation: {{yaml .InvocationID}}
 {{end}}      safeslop.managed: "true"
-    volumes:
+{{if .EgressHash}}      safeslop.egress-revision: "{{.EgressRevision}}"
+      safeslop.egress-hash: {{yaml .EgressHash}}
+{{end}}    volumes:
 {{range .ProxyMounts}}      - type: bind
         source: {{yaml .Source}}
         target: {{yaml .Target}}

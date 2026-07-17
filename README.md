@@ -173,11 +173,18 @@ rows; it never grants traffic. `grant`/`revoke` control a session-scoped overlay
 only, so a grant is removed with the session and never mutates `profile.egress`
 or `safeslop.cue`. `dismiss` records a value-free **Keep denied** acknowledgement
 for the observed destination: it grants nothing, suppresses only observations at
-or before that acknowledgement, and a later denial is visible again. Proxy
-overlay/reload failure keeps the prior, more-restrictive deny state. Before the
-agent starts, safeslop requires both a valid Squid configuration and a live proxy
-listener. Failure tears down the partial stack and records the value-free structured
-code `network_proxy_unavailable`; raw runtime output is never persisted. Operators
+or before that acknowledgement, and a later denial is visible again. Every grant
+or revoke force-replaces the proxy and succeeds only after the running proxy
+acknowledges the exact grant revision and overlay hash. Widening persists its
+upper bound before activation; narrowing activates and acknowledges the smaller
+set before committing it. If runtime authority or a commit outcome cannot be
+proven, safeslop attempts full boundary teardown and records the fixed value-free
+code `network_authority_uncertain` rather than guessing. If teardown itself cannot
+be proven, further egress operations stay blocked until explicit stop/reap. Before
+agent start, safeslop requires both a valid Squid configuration and a live proxy
+listener.
+Failure tears down the partial stack and records the value-free structured code
+`network_proxy_unavailable`; raw runtime output is never persisted. Operators
 can run the opt-in real Docker gate with `make test-progressive-egress-smoke`.
 
 For a deliberately reviewed future-session rule, use the separate typed policy

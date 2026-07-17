@@ -899,6 +899,17 @@ func egressSession(store engsession.Store, id string) (engsession.Session, error
 	if !engsession.CanGrant(sess) {
 		return engsession.Session{}, emitContractError(jsoncontract.CodeInvalidArgument, engsession.ErrSessionNotGrantable.Error(), map[string]any{"session_id": id, "environment": sess.Environment, "network": sess.Network})
 	}
+	if sess.Status == engsession.StatusRunning {
+		sess, err = store.WithLocked(id, func(tx *engsession.RecordTx) error {
+			if !engsession.CanGrant(tx.Session()) {
+				return engsession.ErrSessionNotGrantable
+			}
+			return recoverRunningSessionEgress(context.Background(), tx)
+		})
+		if err != nil {
+			return engsession.Session{}, emitContractError(jsoncontract.CodeIOError, "reconcile session egress authority", map[string]any{"session_id": id})
+		}
+	}
 	return sess, nil
 }
 
@@ -1915,6 +1926,181 @@ func sessionStore() engsession.Store {
 	return engsession.NewStore(filepath.Join(root, "sessions"))
 }
 
+var ErrEgressAuthorityUncertain = errors.New("session network authority is uncertain")
+
+func sessionGeneration(sess engsession.Session) (container.EgressGeneration, error) {
+	generation, _, err := container.BuildEgressGeneration(sessionEgressViews(sess), sess.GrantRevision)
+	return generation, err
+}
+
+func withAppliedGeneration(sess engsession.Session, generation container.EgressGeneration) engsession.Session {
+	state := sess.EgressRuntimeState()
+	state.AppliedRevision, state.AppliedHash, state.Transition = generation.Revision, generation.Hash, nil
+	sess.SetEgressRuntimeState(state)
+	return sess
+}
+
+func withTransition(sess engsession.Session, direction string, candidate engsession.Session, generation container.EgressGeneration) engsession.Session {
+	state := sess.EgressRuntimeState()
+	state.Transition = &engsession.EgressTransition{
+		Direction: direction, CandidateRevision: generation.Revision, CandidateHash: generation.Hash,
+		CandidateGrants: append([]engsession.EgressGrant(nil), candidate.EgressGrants...),
+	}
+	sess.SetEgressRuntimeState(state)
+	return sess
+}
+
+func copySessionAuthority(target, source engsession.Session) engsession.Session {
+	target.EgressGrants = append([]engsession.EgressGrant(nil), source.EgressGrants...)
+	target.GrantRevision = source.GrantRevision
+	return target
+}
+
+func withEgressUncertaintyFailure(sess engsession.Session) engsession.Session {
+	sess.UpdatedAt = time.Now().UTC()
+	sess.SetFailure(engsession.Failure{
+		Version: 1, Phase: "network", Code: "network_authority_uncertain", Required: true,
+		Summary: "The session network boundary could not be proven.",
+		Action:  "Stop the session, then create a fresh run before granting network access.",
+	})
+	return sess
+}
+
+func hasEgressUncertaintyFailure(sess engsession.Session) bool {
+	return sess.LastFailure != nil && sess.LastFailure.Phase == "network" && sess.LastFailure.Code == "network_authority_uncertain"
+}
+
+func stopForEgressUncertainty(sess engsession.Session) engsession.Session {
+	now := time.Now().UTC()
+	sess.Status = engsession.StatusStopped
+	sess.PID, sess.ProcessToken = 0, ""
+	sess.StoppedAt, sess.UpdatedAt = now, now
+	sess.SetEgressRuntimeState(engsession.EgressRuntimeState{})
+	return withEgressUncertaintyFailure(sess)
+}
+
+type egressRecordTransaction interface {
+	Session() engsession.Session
+	Commit(engsession.Session) error
+}
+
+const egressFailureCommitAttempts = 2
+
+func commitEgressFailureState(tx egressRecordTransaction, candidate engsession.Session) error {
+	var err error
+	for range egressFailureCommitAttempts {
+		if err = tx.Commit(candidate); err == nil {
+			return nil
+		}
+	}
+	return err
+}
+
+// failClosedEgress tears down before narrowing durable authority. restore is
+// used only after teardown is proven; otherwise the current durable upper bound
+// remains so an unreachable runtime can never be broader than its record.
+func failClosedEgress(tx egressRecordTransaction, restore *engsession.Session) error {
+	current := tx.Session()
+	if err := egressAuthorityTeardown(current); err != nil {
+		// Do not claim stopped when teardown itself is unproven. The fixed marker
+		// is best-effort under simultaneous runtime and record-store failure; a
+		// bounded retry covers transient and directory-commit uncertainty.
+		if err := commitEgressFailureState(tx, withEgressUncertaintyFailure(tx.Session())); err != nil {
+			return ErrEgressAuthorityUncertain
+		}
+		return ErrEgressAuthorityUncertain
+	}
+	stopped := tx.Session()
+	if restore != nil {
+		stopped = copySessionAuthority(stopped, *restore)
+	}
+	stopped = stopForEgressUncertainty(stopped)
+	if err := commitEgressFailureState(tx, stopped); err != nil {
+		return ErrEgressAuthorityUncertain
+	}
+	return ErrEgressAuthorityUncertain
+}
+
+func commitRecoveredGeneration(tx *engsession.RecordTx, sess engsession.Session, generation container.EgressGeneration) error {
+	if err := tx.Commit(withAppliedGeneration(sess, generation)); err != nil {
+		return failClosedEgress(tx, nil)
+	}
+	return nil
+}
+
+// recoverRunningSessionEgress resolves every persisted transition without
+// guessing. Widen re-applies the already-durable upper bound. Narrow commits an
+// exactly acknowledged candidate, cancels an untouched transition, or restores
+// the still-durable old bound when runtime identity is unknown.
+func recoverRunningSessionEgress(ctx context.Context, tx *engsession.RecordTx) error {
+	sess := tx.Session()
+	if sess.Status != engsession.StatusRunning {
+		return nil
+	}
+	if hasEgressUncertaintyFailure(sess) {
+		return failClosedEgress(tx, nil)
+	}
+	state := sess.EgressRuntimeState()
+	durableGeneration, err := sessionGeneration(sess)
+	if err != nil {
+		return failClosedEgress(tx, nil)
+	}
+	if state.Transition == nil {
+		if state.AppliedRevision == durableGeneration.Revision && state.AppliedHash == durableGeneration.Hash {
+			if current, inspectErr := inspectSessionEgressGeneration(ctx, sess); inspectErr == nil && current == durableGeneration {
+				return nil
+			}
+		}
+		if err := applySessionGrantOverlay(ctx, sess, sessionEgressViews(sess)); err != nil {
+			return failClosedEgress(tx, nil)
+		}
+		return commitRecoveredGeneration(tx, tx.Session(), durableGeneration)
+	}
+
+	transition := state.Transition
+	switch transition.Direction {
+	case engsession.EgressDirectionWiden:
+		if transition.CandidateRevision != durableGeneration.Revision || transition.CandidateHash != durableGeneration.Hash {
+			return failClosedEgress(tx, nil)
+		}
+		if current, inspectErr := inspectSessionEgressGeneration(ctx, sess); inspectErr != nil || current != durableGeneration {
+			if err := applySessionGrantOverlay(ctx, sess, sessionEgressViews(sess)); err != nil {
+				return failClosedEgress(tx, nil)
+			}
+		}
+		return commitRecoveredGeneration(tx, tx.Session(), durableGeneration)
+	case engsession.EgressDirectionNarrow:
+		candidate := sess
+		candidate.EgressGrants = append([]engsession.EgressGrant(nil), transition.CandidateGrants...)
+		candidate.GrantRevision = transition.CandidateRevision
+		candidateGeneration, err := sessionGeneration(candidate)
+		if err != nil || candidateGeneration.Hash != transition.CandidateHash {
+			return failClosedEgress(tx, nil)
+		}
+		current, inspectErr := inspectSessionEgressGeneration(ctx, sess)
+		if inspectErr == nil {
+			switch current {
+			case candidateGeneration:
+				final := copySessionAuthority(tx.Session(), candidate)
+				if err := tx.Commit(withAppliedGeneration(final, candidateGeneration)); err != nil {
+					return failClosedEgress(tx, nil)
+				}
+				return nil
+			case durableGeneration:
+				return commitRecoveredGeneration(tx, tx.Session(), durableGeneration)
+			}
+		}
+		// Unknown runtime identity is restored to the old durable bound; that
+		// may cancel the interrupted revoke but never exceeds durable authority.
+		if err := applySessionGrantOverlay(ctx, sess, sessionEgressViews(sess)); err != nil {
+			return failClosedEgress(tx, nil)
+		}
+		return commitRecoveredGeneration(tx, tx.Session(), durableGeneration)
+	default:
+		return failClosedEgress(tx, nil)
+	}
+}
+
 func grantSessionEgress(ctx context.Context, store engsession.Store, id, host string, port int, now time.Time) (engsession.Session, engsession.EgressGrant, error) {
 	var grant engsession.EgressGrant
 	committed, err := store.WithLocked(id, func(tx *engsession.RecordTx) error {
@@ -1922,19 +2108,40 @@ func grantSessionEgress(ctx context.Context, store engsession.Store, id, host st
 		if sess.Status == engsession.StatusStopped {
 			return fmt.Errorf("session stopped")
 		}
+		if err := recoverRunningSessionEgress(ctx, tx); err != nil {
+			return err
+		}
+		sess = tx.Session()
 		next, nextGrant, err := engsession.AppendGrant(sess, host, port, now)
 		if err != nil {
 			return err
 		}
-		if sess.Status == engsession.StatusRunning {
-			if err := applySessionGrantOverlay(ctx, sess, sessionEgressViews(next)); err != nil {
-				return err
-			}
+		grant = nextGrant
+		if next.GrantRevision == sess.GrantRevision {
+			return nil // duplicate destination: no authority or generation change
 		}
-		if err := tx.Commit(next); err != nil {
+		if sess.Status != engsession.StatusRunning {
+			return tx.Commit(next)
+		}
+		generation, err := sessionGeneration(next)
+		if err != nil {
 			return err
 		}
-		grant = nextGrant
+		oldAuthority := sess
+		pending := withTransition(next, engsession.EgressDirectionWiden, next, generation)
+		if err := tx.Commit(pending); err != nil {
+			if errors.Is(err, engsession.ErrCommitUncertain) {
+				return failClosedEgress(tx, &oldAuthority)
+			}
+			return err
+		}
+		if err := applySessionGrantOverlay(ctx, next, sessionEgressViews(next)); err != nil {
+			return failClosedEgress(tx, &oldAuthority)
+		}
+		final := withAppliedGeneration(tx.Session(), generation)
+		if err := tx.Commit(final); err != nil {
+			return failClosedEgress(tx, &oldAuthority)
+		}
 		return nil
 	})
 	if err != nil {
@@ -1945,21 +2152,31 @@ func grantSessionEgress(ctx context.Context, store engsession.Store, id, host st
 
 func dismissSessionEgress(store engsession.Store, id, host string, port int, now time.Time) (engsession.Session, engsession.EgressAcknowledgement, error) {
 	var acknowledgement engsession.EgressAcknowledgement
-	committed, err := store.Update(id, func(sess engsession.Session) (engsession.Session, error) {
+	committed, err := store.WithLocked(id, func(tx *engsession.RecordTx) error {
+		sess := tx.Session()
 		if sess.Status == engsession.StatusStopped {
-			return engsession.Session{}, fmt.Errorf("session stopped")
+			return fmt.Errorf("session stopped")
 		}
-		next, nextAcknowledgement, err := engsession.DismissEgress(sess, host, port, now)
+		if err := recoverRunningSessionEgress(context.Background(), tx); err != nil {
+			return err
+		}
+		next, nextAcknowledgement, err := engsession.DismissEgress(tx.Session(), host, port, now)
 		if err != nil {
-			return engsession.Session{}, err
+			return err
 		}
 		acknowledgement = nextAcknowledgement
-		return next, nil
+		return tx.Commit(next)
 	})
 	if err != nil {
 		return engsession.Session{}, engsession.EgressAcknowledgement{}, err
 	}
 	return committed, acknowledgement, nil
+}
+
+func clearNarrowTransition(tx *engsession.RecordTx, durable engsession.Session, generation container.EgressGeneration) error {
+	current := copySessionAuthority(tx.Session(), durable)
+	current = withAppliedGeneration(current, generation)
+	return tx.Commit(current)
 }
 
 func revokeSessionEgress(ctx context.Context, store engsession.Store, id, grantID string, now time.Time) (engsession.Session, error) {
@@ -1968,16 +2185,56 @@ func revokeSessionEgress(ctx context.Context, store engsession.Store, id, grantI
 		if sess.Status == engsession.StatusStopped {
 			return fmt.Errorf("session stopped")
 		}
+		if err := recoverRunningSessionEgress(ctx, tx); err != nil {
+			return err
+		}
+		sess = tx.Session()
 		next, err := engsession.RevokeGrant(sess, grantID, now)
 		if err != nil {
 			return err
 		}
-		if sess.Status == engsession.StatusRunning {
-			if err := applySessionGrantOverlay(ctx, sess, sessionEgressViews(next)); err != nil {
-				return err
-			}
+		if sess.Status != engsession.StatusRunning {
+			return tx.Commit(next)
 		}
-		return tx.Commit(next)
+		candidateGeneration, err := sessionGeneration(next)
+		if err != nil {
+			return err
+		}
+		oldGeneration, err := sessionGeneration(sess)
+		if err != nil {
+			return err
+		}
+		pending := withTransition(sess, engsession.EgressDirectionNarrow, next, candidateGeneration)
+		if err := tx.Commit(pending); err != nil {
+			if errors.Is(err, engsession.ErrCommitUncertain) {
+				return failClosedEgress(tx, &sess)
+			}
+			return err
+		}
+		if err := applySessionGrantOverlay(ctx, next, sessionEgressViews(next)); err != nil {
+			if restoreErr := applySessionGrantOverlay(ctx, sess, sessionEgressViews(sess)); restoreErr != nil {
+				return failClosedEgress(tx, &sess)
+			}
+			if clearErr := clearNarrowTransition(tx, sess, oldGeneration); clearErr != nil && errors.Is(clearErr, engsession.ErrCommitUncertain) {
+				return failClosedEgress(tx, &sess)
+			}
+			return err
+		}
+		final := copySessionAuthority(tx.Session(), next)
+		final = withAppliedGeneration(final, candidateGeneration)
+		if err := tx.Commit(final); err != nil {
+			if errors.Is(err, engsession.ErrCommitUncertain) {
+				// The narrower record may already be durable. Never restore the
+				// broader old runtime across that uncertainty.
+				return failClosedEgress(tx, nil)
+			}
+			if restoreErr := applySessionGrantOverlay(ctx, sess, sessionEgressViews(sess)); restoreErr != nil {
+				return failClosedEgress(tx, &sess)
+			}
+			_ = clearNarrowTransition(tx, sess, oldGeneration)
+			return err
+		}
+		return nil
 	})
 }
 
@@ -3320,7 +3577,37 @@ var applySessionGrantOverlay = func(ctx context.Context, sess engsession.Session
 	if err != nil {
 		return err
 	}
-	return container.ApplySessionGrants(ctx, engineForSession(sess), filepath.Join(stageDir, "compose.yml"), stageDir, desired)
+	_, err = container.EnsureEgressGeneration(ctx, engineForSession(sess), filepath.Join(stageDir, "compose.yml"), stageDir, desired, sess.GrantRevision)
+	return err
+}
+
+var inspectSessionEgressGeneration = func(ctx context.Context, sess engsession.Session) (container.EgressGeneration, error) {
+	stageDir, err := sessionStageDir(sess)
+	if err != nil {
+		return container.EgressGeneration{}, err
+	}
+	return container.InspectEgressGeneration(ctx, engineForSession(sess), filepath.Join(stageDir, "compose.yml"))
+}
+
+var egressAuthorityTeardown = func(sess engsession.Session) error {
+	var firstErr error
+	if sess.PID != 0 && sess.PID != os.Getpid() && sessionProcessAlive(sess) {
+		target := sess.PID
+		if sess.Detached {
+			target = -target
+		}
+		if err := sessionKillProcess(target); err != nil {
+			firstErr = err
+		}
+	}
+	if err := sessionReapBoundary(sess); err != nil && firstErr == nil {
+		firstErr = err
+	}
+	if err := sessionWipeStageDir(sess); err != nil && firstErr == nil {
+		firstErr = err
+	}
+	_ = os.Remove(sessionStore().SocketPath(sess.ID))
+	return firstErr
 }
 
 // observeSessionEgress is a seam so CLI tests never need a live container runtime.

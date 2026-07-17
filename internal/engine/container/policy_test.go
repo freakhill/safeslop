@@ -156,10 +156,11 @@ func TestSquidConfIncludesSessionGrantsBeforeDenyAll(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(strict, "include /etc/squid/session-grants.conf") {
-		t.Fatalf("squid.conf must include session-grants.conf:\n%s", strict)
+	const include = "include /etc/squid/safeslop.d/session-grants.conf"
+	if !strings.Contains(strict, include) {
+		t.Fatalf("squid.conf must include the directory-bound session grants:\n%s", strict)
 	}
-	inc := strings.Index(strict, "include /etc/squid/session-grants.conf")
+	inc := strings.Index(strict, include)
 	deny := strings.Index(strict, "http_access deny all")
 	allow := strings.Index(strict, "http_access allow allowed_domains")
 	ipDeny := strings.Index(strict, "http_access deny ip_literal_dst")

@@ -333,10 +333,16 @@ Observations never grant traffic. For Pi OAuth Luna, `chatgpt.com:443` follows
 this same explicit flow and is not statically allowed. A grant is `session-grant / this session`;
 `dismiss` is **Keep denied** acknowledgement state, not authority, and later
 traffic reappears for review. Neither mutates `profile.egress` or `safeslop.cue`.
-Proxy update failure preserves the previous deny posture. Launch also requires the
-proxy configuration check and local listener to become ready before the agent starts.
-Failure removes the partial stack and persists only the structured
-`network_proxy_unavailable` summary/action/code, never raw Squid/Compose output.
+Each mutation force-replaces the proxy and returns success only after the running
+proxy ACKs the exact grant revision and overlay hash. Widening persists its upper
+bound before activation; narrowing ACKs the smaller runtime set before committing
+it. An unprovable runtime or commit outcome triggers full boundary teardown and
+persists only `network_authority_uncertain`; it never guesses which authority is
+live. If teardown is not proven, egress mutations remain blocked until explicit
+stop/reap. Launch also requires the proxy configuration check and local listener to
+become ready before the agent starts. Failure removes the partial stack and persists
+only the structured `network_proxy_unavailable` summary/action/code, never raw
+Squid/Compose output.
 
 For a typed durable rule for **future sessions**, use `persistentEgress`, never
 legacy `egress`:
