@@ -46,7 +46,8 @@ func reapByOwnership(ctx context.Context, eng ReapEngine, label, id string) erro
 		return nil
 	}
 	filter := "label=" + label + "=" + id
-	containers, err := engineLines(ctx, eng, "ps", "-aq", "--filter", filter)
+	managedFilter := "label=" + managedLabel
+	containers, err := engineLines(ctx, eng, "ps", "-aq", "--filter", managedFilter, "--filter", filter)
 	if err != nil {
 		return fmt.Errorf("list owned containers: %w", err)
 	}
@@ -55,20 +56,20 @@ func reapByOwnership(ctx context.Context, eng ReapEngine, label, id string) erro
 		if err := eng.Command(ctx, args...).Run(); err != nil {
 			// Compose `run --rm` may win the race after the list. Re-list the
 			// exact random/session owner: absence is already the desired result.
-			remaining, verifyErr := engineLines(ctx, eng, "ps", "-aq", "--filter", filter)
+			remaining, verifyErr := engineLines(ctx, eng, "ps", "-aq", "--filter", managedFilter, "--filter", filter)
 			if verifyErr != nil || len(remaining) != 0 {
 				return fmt.Errorf("remove owned containers: %w", err)
 			}
 		}
 	}
-	networks, err := engineLines(ctx, eng, "network", "ls", "-q", "--filter", filter)
+	networks, err := engineLines(ctx, eng, "network", "ls", "-q", "--filter", managedFilter, "--filter", filter)
 	if err != nil {
 		return fmt.Errorf("list owned networks: %w", err)
 	}
 	if len(networks) > 0 {
 		args := append([]string{"network", "rm"}, networks...)
 		if err := eng.Command(ctx, args...).Run(); err != nil {
-			remaining, verifyErr := engineLines(ctx, eng, "network", "ls", "-q", "--filter", filter)
+			remaining, verifyErr := engineLines(ctx, eng, "network", "ls", "-q", "--filter", managedFilter, "--filter", filter)
 			if verifyErr != nil || len(remaining) != 0 {
 				return fmt.Errorf("remove owned networks: %w", err)
 			}
@@ -87,7 +88,10 @@ func ReapManaged(ctx context.Context, eng ReapEngine) error {
 	if len(containers) > 0 {
 		args := append([]string{"rm", "-f"}, containers...)
 		if err := eng.Command(ctx, args...).Run(); err != nil {
-			return fmt.Errorf("remove managed containers: %w", err)
+			remaining, verifyErr := engineLines(ctx, eng, "ps", "-aq", "--filter", "label="+managedLabel)
+			if verifyErr != nil || len(remaining) != 0 {
+				return fmt.Errorf("remove managed containers: %w", err)
+			}
 		}
 	}
 	networks, err := engineLines(ctx, eng, "network", "ls", "-q", "--filter", "label="+managedLabel)
@@ -97,7 +101,10 @@ func ReapManaged(ctx context.Context, eng ReapEngine) error {
 	if len(networks) > 0 {
 		args := append([]string{"network", "rm"}, networks...)
 		if err := eng.Command(ctx, args...).Run(); err != nil {
-			return fmt.Errorf("remove managed networks: %w", err)
+			remaining, verifyErr := engineLines(ctx, eng, "network", "ls", "-q", "--filter", "label="+managedLabel)
+			if verifyErr != nil || len(remaining) != 0 {
+				return fmt.Errorf("remove managed networks: %w", err)
+			}
 		}
 	}
 	return nil

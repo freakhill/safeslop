@@ -10,7 +10,47 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestStoreWithLockedSerializesGoroutinesInOneProcess(t *testing.T) {
+	store := NewStore(t.TempDir())
+	sess, err := store.Create("fish", "container", t.TempDir(), testNow())
+	if err != nil {
+		t.Fatal(err)
+	}
+	entered := make(chan string, 2)
+	release := make(chan struct{})
+	results := make(chan error, 2)
+	run := func(name string) {
+		_, err := store.WithLocked(sess.ID, func(*RecordTx) error {
+			entered <- name
+			<-release
+			return nil
+		})
+		results <- err
+	}
+	go run("first")
+	if got := <-entered; got != "first" {
+		t.Fatalf("first entrant = %q", got)
+	}
+	go run("second")
+	secondEnteredEarly := false
+	select {
+	case <-entered:
+		secondEnteredEarly = true
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	for range 2 {
+		if err := <-results; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if secondEnteredEarly {
+		t.Fatal("same-process record transactions entered concurrently despite advisory flock")
+	}
+}
 
 func TestStoreListRejectsCorruptRecordWithoutPartialResults(t *testing.T) {
 	store := NewStore(t.TempDir())

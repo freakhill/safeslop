@@ -12,6 +12,8 @@ import (
 
 func testNow() time.Time { return time.Date(2026, 6, 26, 0, 0, 0, 0, time.UTC) }
 
+func stopProcessAliveForTest(Session) bool { return true }
+
 func TestSessionFailureJSONIsStructuredAndValueFree(t *testing.T) {
 	var sess Session
 	sess.SetFailure(Failure{
@@ -83,7 +85,7 @@ func TestStopSignalsSupervisorGroupAndRemovesSocket(t *testing.T) {
 
 	var killedWith int
 	killer := func(target int) error { killedWith = target; return nil }
-	if _, err := store.Stop(sess.ID, false, testNow(), func(Session) error { return nil }, killer, nil); err != nil {
+	if _, err := store.Stop(sess.ID, false, testNow(), func(Session) error { return nil }, killer, stopProcessAliveForTest, nil); err != nil {
 		t.Fatalf("stop: %v", err)
 	}
 	if killedWith != -4242 {
@@ -105,7 +107,7 @@ func TestStopCoupledSignalsBarePID(t *testing.T) {
 	}
 	var killedWith int
 	if _, err := store.Stop(sess.ID, false, testNow(), func(Session) error { return nil },
-		func(target int) error { killedWith = target; return nil }, nil); err != nil {
+		func(target int) error { killedWith = target; return nil }, stopProcessAliveForTest, nil); err != nil {
 		t.Fatalf("stop: %v", err)
 	}
 	if killedWith != 4242 {
@@ -154,7 +156,7 @@ func TestStoreStopRevokesBeforeKillAndIsIdempotent(t *testing.T) {
 	revoke := func(Session) error { order = append(order, "revoke"); return nil }
 	kill := func(int) error { order = append(order, "kill"); return nil }
 	reap := func(Session) error { order = append(order, "reap"); return nil }
-	stopped, err := store.Stop(sess.ID, true, testNow(), revoke, kill, reap)
+	stopped, err := store.Stop(sess.ID, true, testNow(), revoke, kill, stopProcessAliveForTest, reap)
 	if err != nil {
 		t.Fatalf("stop: %v", err)
 	}
@@ -166,7 +168,7 @@ func TestStoreStopRevokesBeforeKillAndIsIdempotent(t *testing.T) {
 	}
 
 	order = nil
-	if _, err := store.Stop(sess.ID, true, testNow(), revoke, kill, reap); err != nil {
+	if _, err := store.Stop(sess.ID, true, testNow(), revoke, kill, stopProcessAliveForTest, reap); err != nil {
 		t.Fatalf("second stop: %v", err)
 	}
 	if len(order) != 0 {
@@ -388,7 +390,7 @@ func TestStoreStopCanRevokeAlreadyStoppedUnrevokedSession(t *testing.T) {
 	}, func(int) error {
 		order = append(order, "kill")
 		return nil
-	}, nil)
+	}, stopProcessAliveForTest, nil)
 	if err != nil {
 		t.Fatalf("stop: %v", err)
 	}
@@ -446,7 +448,7 @@ func TestRemoveSkipsRevokeWhenAlreadyRevoked(t *testing.T) {
 	}
 	// Simulate a session already stopped with credentials revoked.
 	if _, err := store.Stop(sess.ID, true, testNow(),
-		func(Session) error { return nil }, func(int) error { return nil }, nil); err != nil {
+		func(Session) error { return nil }, func(int) error { return nil }, stopProcessAliveForTest, nil); err != nil {
 		t.Fatalf("stop: %v", err)
 	}
 
@@ -728,6 +730,7 @@ func TestNameSurvivesLifecycleTransitions(t *testing.T) {
 		if _, err := store.Stop(sess.ID, true, testNow(),
 			func(Session) error { return nil },
 			func(int) error { return nil },
+			stopProcessAliveForTest,
 			func(Session) error { return nil }); err != nil {
 			t.Fatalf("stop: %v", err)
 		}

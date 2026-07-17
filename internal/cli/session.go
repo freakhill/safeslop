@@ -923,12 +923,35 @@ func cmdSessionStopWithDeps(d *dependencies) *cobra.Command {
 				}
 				return emitContractError(jsoncontract.CodeIOError, "reconcile session", map[string]any{"error": err.Error()})
 			}
-			sess, err := store.Stop(id, revoke, d.now(), d.revokeCredentials, d.killProcess, func(sess engsession.Session) error { return sessionReapBoundaryWithDeps(d, sess) }, d.wipeStageDir)
+			signaledTarget := 0
+			signalProcess := func(target int) error {
+				if err := d.killProcess(target); err != nil {
+					return err
+				}
+				signaledTarget = target
+				return nil
+			}
+			sess, err := store.Stop(id, revoke, d.now(), d.revokeCredentials, signalProcess, d.processAlive, func(sess engsession.Session) error { return sessionReapBoundaryWithDeps(d, sess) }, d.wipeStageDir)
 			if err != nil {
 				if errors.Is(err, engsession.ErrNotFound) {
 					return emitContractError(jsoncontract.CodeSessionNotFound, "session not found", map[string]any{"session_id": id})
 				}
 				return emitContractError(jsoncontract.CodeCredentialRevokeFailed, "stop session", map[string]any{"error": err.Error()})
+			}
+			// Wait only after Store.Stop releases its record lock. A detached
+			// supervisor persists Finish while exiting; waiting under the lock would
+			// deadlock until the grace timeout and force SIGKILL.
+			if signaledTarget < 0 {
+				if err := d.waitProcess(signaledTarget); err != nil {
+					return emitContractError(jsoncontract.CodeIOError, "wait for session process", map[string]any{"error": err.Error()})
+				}
+				// The supervisor may have committed its terminal exit details while
+				// we waited. Emit that fresh record rather than the pre-wait snapshot.
+				current, err := store.Get(id)
+				if err != nil {
+					return emitContractError(jsoncontract.CodeIOError, "reload session after process exit", map[string]any{"error": err.Error()})
+				}
+				sess = current
 			}
 			// Store.Stop intentionally does not run reap callbacks for an already-stopped
 			// record; still wipe the deterministic local stage dir here so repeated/operator
@@ -1108,21 +1131,29 @@ func cmdSessionRunWithDeps(d *dependencies) *cobra.Command {
 	return c
 }
 
+// launchedSupervisor captures the process identity while the newly-started
+// child handle is still owned. A bare PID returned after Release would not be
+// sufficient authority to signal a readiness-timeout process safely.
+type launchedSupervisor struct {
+	PID          int
+	ProcessToken string
+}
+
 // defaultLaunchSupervisor re-execs this binary as a detached per-session supervisor (the
-// hidden `session supervise`) and returns the supervisor's PID. This is the
-// canonical Go daemonization: a new session via Setsid (no controlling tty), which
+// hidden `session supervise`) and returns its verified process identity. This is
+// the canonical Go daemonization: a new session via Setsid (no controlling tty), which
 // also makes the child its own process-group leader so a later `session stop` can
 // signal the whole tree via kill(-pgid) (specs/0051 D4), plus fully detached stdio.
 // Overridable in tests so no real setsid or second binary is needed (the specs/0051
 // D1 test seam).
-func defaultLaunchSupervisor(id string) (int, error) {
+func defaultLaunchSupervisor(id string) (launchedSupervisor, error) {
 	exe, err := os.Executable()
 	if err != nil {
-		return 0, err
+		return launchedSupervisor{}, err
 	}
 	null, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
 	if err != nil {
-		return 0, err
+		return launchedSupervisor{}, err
 	}
 	defer null.Close()
 	cmd := osexec.Command(exe, "session", "supervise", "--session-id", id)
@@ -1132,11 +1163,17 @@ func defaultLaunchSupervisor(id string) (int, error) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = null, null, null
 	if err := cmd.Start(); err != nil {
-		return 0, err
+		return launchedSupervisor{}, err
 	}
 	pid := cmd.Process.Pid
+	processToken, ok := engsession.ProcessStartToken(pid)
+	if !ok {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return launchedSupervisor{}, errors.New("capture session supervisor process identity")
+	}
 	_ = cmd.Process.Release() // detach: the daemon is never Wait()ed on
-	return pid, nil
+	return launchedSupervisor{PID: pid, ProcessToken: processToken}, nil
 }
 
 // runDetach launches the supervisor, waits (bounded) for its socket so a reported
@@ -1170,17 +1207,33 @@ func runDetachWithDeps(d *dependencies, store engsession.Store, id string) error
 			return err
 		}
 	}
-	pid, err := d.launchSupervisor(id)
+	launched, err := d.launchSupervisor(id)
 	if err != nil {
 		return emitContractError(jsoncontract.CodeIOError, "launch session supervisor", map[string]any{"error": err.Error()})
 	}
+	pid := launched.PID
 	sockPath := store.SocketPath(id)
-	if !waitForFile(sockPath, d.detachReadyTimeout) {
-		_ = d.killProcess(pid) // best-effort; the supervisor never became ready
+	if !waitForSupervisorReady(store, id, launched, sockPath, d.detachReadyTimeout, d.processAlive) {
+		identity := engsession.Session{PID: pid, ProcessToken: launched.ProcessToken, Detached: true}
+		if d.processAlive(identity) {
+			target := -pid // defaultLaunchSupervisor made the child its own group leader
+			if err := d.killProcess(target); err != nil {
+				return emitContractError(jsoncontract.CodeIOError, "stop unready session supervisor", map[string]any{"error": err.Error()})
+			}
+			if err := d.waitProcess(target); err != nil {
+				return emitContractError(jsoncontract.CodeIOError, "wait for unready session supervisor", map[string]any{"error": err.Error()})
+			}
+		}
+		if err := os.Remove(sockPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return emitContractError(jsoncontract.CodeIOError, "remove unready session socket", map[string]any{"error": err.Error()})
+		}
+		// The supervisor may have committed running after publishing the socket
+		// but before failing its permission/readiness path. Never leave that
+		// half-published identity as a live session.
+		if _, err := store.Finish(id, 1, "session supervisor did not become ready", d.now()); err != nil {
+			return emitContractError(jsoncontract.CodeIOError, "record unready session supervisor", map[string]any{"error": err.Error()})
+		}
 		return emitContractError(jsoncontract.CodeIOError, "session supervisor did not become ready", map[string]any{"session_id": id})
-	}
-	if _, err := store.MarkRunningDetached(id, pid, d.now()); err != nil {
-		return err
 	}
 	sess, err := store.Get(id)
 	if err != nil {
@@ -1188,6 +1241,25 @@ func runDetachWithDeps(d *dependencies, store engsession.Store, id string) error
 	}
 	emitContract(jsoncontract.OK(sessionDataWithDeps(d, sess)))
 	return nil
+}
+
+// waitForSupervisorReady requires both sides of the detached readiness
+// handshake: an owner-only Unix socket and the supervisor's own live running
+// record with the exact process-start token captured before Process.Release.
+// Socket existence alone races Listen against chmod/MarkRunningDetached.
+func waitForSupervisorReady(store engsession.Store, id string, launched launchedSupervisor, path string, timeout time.Duration, processAlive func(engsession.Session) bool) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		sess, getErr := store.Get(id)
+		info, statErr := os.Lstat(path)
+		if getErr == nil && statErr == nil && sess.Status == engsession.StatusRunning && sess.Detached && sess.PID == launched.PID && sess.ProcessToken != "" && sess.ProcessToken == launched.ProcessToken && info.Mode()&os.ModeSocket != 0 && info.Mode().Perm() == 0o600 && processAlive != nil && processAlive(sess) {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 // waitForFile polls until path exists or the timeout elapses.

@@ -710,6 +710,120 @@ func TestSessionStopSkipsKillForStaleDetachedProcess(t *testing.T) {
 	assertStageDirRemovedForTest(t, stageDir)
 }
 
+func TestSessionStopRechecksIdentityAfterReconcileBeforeSignal(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+	d := defaultDependencies()
+	checks := 0
+	d.processAlive = func(engsession.Session) bool {
+		checks++
+		return checks == 1 // alive during reconcile, stale/reused before Stop acquires its lock
+	}
+	killed := false
+	d.killProcess = func(int) error { killed = true; return nil }
+
+	out, err := runRootForTestWithDeps(t, ws, d, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	id := parseEnvelopeForTest(t, out).Data["session_id"].(string)
+	if _, err := sessionStore().MarkRunningDetached(id, 4242, nowForTest(t)); err != nil {
+		t.Fatalf("mark detached: %v", err)
+	}
+
+	out, err = runRootForTestWithDeps(t, ws, d, "session", "stop", "--session-id", id, "--output", "json")
+	if err != nil {
+		t.Fatalf("stop: %v\nout=%s", err, out)
+	}
+	if checks < 2 {
+		t.Fatalf("process identity checks = %d, want reconcile plus locked pre-signal check", checks)
+	}
+	if killed {
+		t.Fatal("stop signalled a PID whose process identity changed after reconcile")
+	}
+	if env := parseEnvelopeForTest(t, out); !env.OK || env.Data["status"] != "stopped" {
+		t.Fatalf("stop envelope = %+v, want stopped", env)
+	}
+}
+
+func TestSessionStopWaitsForDetachedExitAfterRecordLockReleased(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+	d := defaultDependencies()
+	d.processAlive = func(engsession.Session) bool { return true }
+	d.killProcess = func(target int) error {
+		if target != -4242 {
+			t.Fatalf("signal target = %d, want detached group -4242", target)
+		}
+		return nil
+	}
+
+	out, err := runRootForTestWithDeps(t, ws, d, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := parseEnvelopeForTest(t, out).Data["session_id"].(string)
+	if _, err := sessionStore().MarkRunningDetached(id, 4242, nowForTest(t)); err != nil {
+		t.Fatal(err)
+	}
+	d.waitProcess = func(target int) error {
+		if target != -4242 {
+			t.Fatalf("wait target = %d, want detached group -4242", target)
+		}
+		done := make(chan error, 1)
+		go func() {
+			_, renameErr := sessionStore().Rename(id, "wait-observed-unlocked", d.now())
+			done <- renameErr
+		}()
+		select {
+		case renameErr := <-done:
+			return renameErr
+		case <-time.After(time.Second):
+			return errors.New("session record lock remained held while waiting for process exit")
+		}
+	}
+
+	out, err = runRootForTestWithDeps(t, ws, d, "session", "stop", "--session-id", id, "--output", "json")
+	if err != nil {
+		t.Fatalf("stop: %v\nout=%s", err, out)
+	}
+	got, err := sessionStore().Get(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "wait-observed-unlocked" || got.Status != engsession.StatusStopped {
+		t.Fatalf("post-wait session = %+v", got)
+	}
+}
+
+func TestSessionStopFailsLoudlyWhenPostWaitRecordReloadFails(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+	d := defaultDependencies()
+	d.processAlive = func(engsession.Session) bool { return true }
+	d.killProcess = func(int) error { return nil }
+
+	out, err := runRootForTestWithDeps(t, ws, d, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := parseEnvelopeForTest(t, out).Data["session_id"].(string)
+	if _, err := sessionStore().MarkRunningDetached(id, 4242, nowForTest(t)); err != nil {
+		t.Fatal(err)
+	}
+	d.waitProcess = func(int) error {
+		return os.WriteFile(filepath.Join(sessionStore().Dir, id+".json"), []byte("{broken\n"), 0o600)
+	}
+
+	out, err = runRootForTestWithDeps(t, ws, d, "session", "stop", "--session-id", id, "--output", "json")
+	if !errors.Is(err, errOutputEmitted) {
+		t.Fatalf("post-wait corruption = %v, want emitted error; out=%s", err, out)
+	}
+	if env := parseEnvelopeForTest(t, out); env.OK {
+		t.Fatalf("post-wait corrupt record emitted stale success: %+v", env)
+	}
+}
+
 func TestSessionStatusReportsReconciledState(t *testing.T) {
 	ws := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())

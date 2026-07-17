@@ -371,7 +371,7 @@ func (s Store) ListReconciled(now time.Time, isAlive func(Session) bool, reap ..
 	return sessions, nil
 }
 
-func (s Store) Stop(id string, revoke bool, now time.Time, revokeCredentials func(Session) error, killProcess func(int) error, reap ...func(Session) error) (Session, error) {
+func (s Store) Stop(id string, revoke bool, now time.Time, revokeCredentials func(Session) error, killProcess func(int) error, processAlive func(Session) bool, reap ...func(Session) error) (Session, error) {
 	return s.WithLocked(id, func(tx *RecordTx) error {
 		sess := tx.Session()
 		if sess.Status == StatusStopped {
@@ -393,7 +393,12 @@ func (s Store) Stop(id string, revoke bool, now time.Time, revokeCredentials fun
 			sess.CredentialsRevoked = true
 			sess.RevokedAt = now.UTC()
 		}
-		if sess.PID != 0 {
+		if sess.PID != 0 && processAlive != nil && processAlive(sess) {
+			// Recheck the PID/process-start token while the record lock is held,
+			// immediately before signalling. The command's earlier reconcile check
+			// cannot authorize a PID that exited and was reused before Stop acquired
+			// this lock. A nil verifier fails closed and never signals.
+			//
 			// A detached supervisor leads its own process group (specs/0051 D4): signal
 			// the group (negative PID) so the boundary process tree is reached, not just
 			// the supervisor. A coupled run keeps the bare-PID signal.

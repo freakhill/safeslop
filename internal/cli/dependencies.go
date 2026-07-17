@@ -48,11 +48,13 @@ type dependencies struct {
 	observeEgress           func(context.Context, engsession.Session) ([]container.EgressObservation, error)
 	processAlive            func(engsession.Session) bool
 	killProcess             func(int) error
+	waitProcess             func(int) error
 	revokeCredentials       func(engsession.Session) error
 	wipeStageDir            func(engsession.Session) error
 	sessionSocket           func(engsession.Session) (string, bool)
+	chmodSocket             func(string, os.FileMode) error
 	hasInteractivePTY       func() bool
-	launchSupervisor        func(string) (int, error)
+	launchSupervisor        func(string) (launchedSupervisor, error)
 	detachReadyTimeout      time.Duration
 	hostLaunchConsent       func(string, policy.Profile, io.Reader, io.Writer) error
 	doctorHostExec          func() *hostexec.Resolver
@@ -84,6 +86,7 @@ func defaultDependencies() *dependencies {
 		},
 		launchContainer:       container.LaunchWithEngine,
 		processAlive:          engsession.ProcessAliveSession,
+		chmodSocket:           os.Chmod,
 		hasInteractivePTY:     defaultSessionHasInteractivePTY,
 		launchSupervisor:      defaultLaunchSupervisor,
 		detachReadyTimeout:    2 * time.Second,
@@ -102,6 +105,7 @@ func defaultDependencies() *dependencies {
 		return inspectProfileEvaluationRuntime(d.detectRuntime, network)
 	}
 	d.killProcess = defaultSessionKillProcess
+	d.waitProcess = defaultSessionWaitProcess
 	d.revokeCredentials = defaultSessionRevokeCredentials
 	d.wipeStageDir = defaultSessionWipeStageDir
 	d.reapDirectInvocation = func(eng runtimepkg.Engine, invocationID string) error {
@@ -197,14 +201,28 @@ func (d *dependencies) defaultEgressTeardown(sess engsession.Session) error {
 
 const stopGraceTimeout = 5 * time.Second
 
+// defaultSessionKillProcess sends only the initial signal. Callers that need
+// bounded group-exit confirmation invoke defaultSessionWaitProcess after
+// releasing any session record lock, so the supervisor can persist Finish.
 func defaultSessionKillProcess(target int) error {
-	switch {
-	case target == 0:
+	if target == 0 {
 		return nil
-	case target > 0:
-		return syscall.Kill(target, syscall.SIGTERM)
 	}
-	_ = syscall.Kill(target, syscall.SIGTERM)
+	if err := syscall.Kill(target, syscall.SIGTERM); err != nil {
+		// A detached group can finish between the token check and signal. It is
+		// already in the desired state; no fallback PID/group may be selected.
+		if target < 0 && errors.Is(err, syscall.ESRCH) {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+func defaultSessionWaitProcess(target int) error {
+	if target >= 0 {
+		return nil
+	}
 	deadline := time.Now().Add(stopGraceTimeout)
 	for time.Now().Before(deadline) {
 		if syscall.Kill(target, 0) != nil {
@@ -212,5 +230,15 @@ func defaultSessionKillProcess(target int) error {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	return syscall.Kill(target, syscall.SIGKILL)
+	if err := syscall.Kill(target, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+		return err
+	}
+	killDeadline := time.Now().Add(time.Second)
+	for time.Now().Before(killDeadline) {
+		if syscall.Kill(target, 0) != nil {
+			return nil
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return errors.New("session process group did not exit")
 }

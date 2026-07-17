@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -214,6 +215,29 @@ func TestSuperviseSessionProjectionFailurePersists(t *testing.T) {
 	}
 	if stored.LastFailure.Code != container.ProjectionTargetExcluded {
 		t.Fatalf("last_failure = %+v", stored.LastFailure)
+	}
+}
+
+func TestSuperviseFailsClosedWhenSocketPermissionsCannotBeSecured(t *testing.T) {
+	store, id, _ := newSupervisedStubSession(t, "#!/bin/sh\nexit 0\n")
+	d := defaultDependencies()
+	d.store = store
+	permissionErr := errors.New("injected chmod failure")
+	d.chmodSocket = func(string, os.FileMode) error { return permissionErr }
+
+	code, err := superviseWithDeps(d, context.Background(), store, id, time.Now)
+	if code != 1 || !errors.Is(err, permissionErr) {
+		t.Fatalf("supervise = (%d, %v), want fail-closed chmod error", code, err)
+	}
+	if _, statErr := os.Lstat(store.SocketPath(id)); !os.IsNotExist(statErr) {
+		t.Fatalf("insecure attach socket remains after chmod failure: %v", statErr)
+	}
+	sess, getErr := store.Get(id)
+	if getErr != nil {
+		t.Fatal(getErr)
+	}
+	if sess.Status != engsession.StatusCreated {
+		t.Fatalf("session status = %q, want created before supervisor publication", sess.Status)
 	}
 }
 

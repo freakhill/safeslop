@@ -106,7 +106,15 @@ func superviseWithDeps(d *dependencies, ctx context.Context, store engsession.St
 		_ = pts.Close()
 		return 1, err
 	}
-	_ = os.Chmod(sockPath, 0o600) // owner-only: protects a socket relocated under a shared runtime dir
+	// Owner-only permissions are part of the attach capability boundary,
+	// especially when SocketPath relocates beneath a shared runtime directory.
+	if err := d.chmodSocket(sockPath, 0o600); err != nil {
+		_ = ln.Close()
+		_ = os.Remove(sockPath)
+		_ = ptmx.Close()
+		_ = pts.Close()
+		return 1, err
+	}
 
 	if _, err := store.MarkRunningDetached(id, os.Getpid(), now()); err != nil {
 		_ = ln.Close()

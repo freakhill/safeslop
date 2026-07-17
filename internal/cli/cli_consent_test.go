@@ -128,9 +128,9 @@ func TestSessionRunHostDetachInvokesConsentBeforeSupervisor(t *testing.T) {
 	}
 
 	supervisorCalls := 0
-	d.launchSupervisor = func(id string) (int, error) {
+	d.launchSupervisor = func(id string) (launchedSupervisor, error) {
 		supervisorCalls++
-		return 0, errors.New("supervisor must not launch before consent passes")
+		return launchedSupervisor{}, errors.New("supervisor must not launch before consent passes")
 	}
 
 	_, err = runRootForTestWithDeps(t, ws, d, "session", "run", "--session-id", sess.ID, "--detach")
