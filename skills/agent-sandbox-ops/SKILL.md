@@ -1,7 +1,7 @@
 ---
 name: agent-sandbox-ops
 description: >
-  Operate safeslop isolation profiles safely: host, container, and VM.
+  Operate safeslop isolation profiles safely: host and container.
 ---
 
 # Agent Sandbox Ops Skill
@@ -42,7 +42,7 @@ file transfer between host and sandboxed runtimes.
 - `safeslop run <profile>` — launch a trusted profile; host-tier profiles require a per-launch yes/no comprehension gate before the agent starts.
 - `safeslop session create --profile <name> [--name <label>] --output json` — create an Emacs-visible session from an existing profile; create/list/status JSON includes value-free `credential_scopes` (credential kind, non-secret target, and access/scope only), the record includes resolved recipe/image metadata for the portal, and the Emacs client streams slow first-use image-build output into `*safeslop session progress*` with the final exit status. `--name` sets an optional display name and is combinable with `--profile`.
 - `safeslop session create --agent <claude|pi|fish|zsh> --environment <host|container> --workspace <dir> [--name <label>] [--trust-host] --output json` — create an ad-hoc Emacs-visible session record (`--environment` is required). A host ad-hoc session runs the agent unconfined with your host credentials, so it requires an explicit `--trust-host` acknowledgement (specs/0072); container ad-hoc sessions do not. The interactive Emacs new-session flow prompts for that host acknowledgement before appending `--trust-host`, and if a host ad-hoc create returns `TRUST_REQUIRED` without a policy path, it offers one retry with the flag. `--name` sets an optional display name. `claude-code` remains accepted as a compatibility alias for `claude` but is not advertised in new UI/docs.
-- `safeslop session run --session-id <id> [--detach]` — run the session agent under safeslop isolation. Host-tier sessions require the per-launch yes/no comprehension gate first; for `--detach`, the gate runs before the supervisor is spawned. Coupled (default) needs a controlling terminal (Emacs supplies one via `make-term`); with no usable TTY it emits the `PTY_UNAVAILABLE` contract error and the caller switches to the `--output jsonl` status monitor. `--detach` launches a per-session supervisor that owns the agent + its PTY, serves it over a per-session unix socket, and returns immediately (the buffer is freed).
+- `safeslop session run --session-id <id> [--detach]` — atomically claim and run a one-shot session agent under safeslop isolation. A second launch is refused with `SESSION_ALREADY_RUNNING`; a stopped record is refused with `SESSION_STOPPED` and requires creating a new session. Host-tier sessions require the per-launch yes/no comprehension gate first; for `--detach`, the gate runs before the supervisor is spawned. Coupled (default) needs a controlling terminal (Emacs supplies one via `make-term`); with no usable TTY it emits the `PTY_UNAVAILABLE` contract error and the caller switches to the `--output jsonl` status monitor. `--detach` launches a per-session supervisor that owns the agent + its PTY, serves it over a per-session unix socket, and returns immediately (the buffer is freed).
 - `safeslop session attach --session-id <id>` — rejoin a detached session's agent over its socket under a controlling terminal, exiting with the agent's code; one active attach at a time. No usable TTY emits `PTY_UNAVAILABLE`.
 - `safeslop session status --session-id <id> --output <json|jsonl>` — inspect or monitor session state; JSON/JSONL carries value-free credential scope for profile-backed sessions, and a running detached session also reports its `socket`.
 - `safeslop session stop --session-id <id> --revoke-credentials --output json` — stop idempotently, reconciling liveness/process identity before signalling, revoking revocable ephemeral credentials before termination when requested, terminating the process (a detached supervisor's whole process group), removing the socket, and wiping the host stage dir. Pi OAuth cleanup is local wipe, not issuer revocation.
@@ -82,13 +82,20 @@ never gated.
 
 ## Default policy
 
-- `environment` is required (`host` | `container` | `vm`) — there is no default
-  tier (specs/0053 removed the macOS Seatbelt `sandbox` tier).
+- `environment` is required (`host` | `container`) — there is no default tier
+  (specs/0053 removed the macOS Seatbelt `sandbox` tier; later cleanup removed
+  active VM operator paths).
 - Prefer `environment: "container"` with `network: "deny"` for everyday agent work:
   network-bound agents (claude, pi) need their runtime + egress inside the boundary.
-- Use `environment: "vm"` for untrusted code or maximum isolation.
 - Use `environment: "host"` only when you accept no isolation and can pass the per-launch consent gate.
 - Do not mount or expose host credential directories to agents.
+- A profile's non-empty relative `workspace` is policy-relative; an empty ad-hoc
+  workspace is invocation-relative. Launch must resolve one canonical existing
+  workspace and keep it disjoint from the private runtime stage.
+- Valid hostile spelling (spaces, quotes, colons, Unicode, literal `$`,
+  Compose-looking text) is allowed because Compose is rendered as typed long-form
+  binds. Controls/format characters, invalid UTF-8, missing paths,
+  non-directories, unsupported bind source types, and workspace-stage overlap fail closed.
 
 ## Profile safety evaluation
 
@@ -239,6 +246,13 @@ The catalog source of truth is `internal/engine/policy/catalog.cue` (rendered to
 `catalog.json`; `make check` fails on drift). `bump`/`add` and `bundle add`/`remove`
 re-emit **both** files in lockstep and print a reviewable plan sheet. Run from the repo
 root (or pass `--catalog-dir`); add `--output json` for the machine contract.
+Buildable npm catalog packages (`claude-code`, `pi`, `pnpm`) also require a
+per-package `package.json` + `package-lock.json` with transitive SRI. The
+package→binary→script policy registry is closed: arbitrary npm package names,
+foreign sources, missing integrity, extra lock projects, wrong binaries, or
+unreviewed lifecycle scripts fail `make check-npm-locks`. Only selected lock
+projects are copied into the Docker build context, and credential staging is never
+sent to the builder.
 
 ```bash
 safeslop catalog propose-version ripgrep          # survey candidates first (read-only)
@@ -316,6 +330,32 @@ external DNS forwarding is pinned to the container loopback (local service names
 such as `proxy` still resolve). Agent launches are hard-set to uid/gid 1000 in
 Compose, matching the image user and writable tmpfs home.
 
+Runtime ownership is single-owner. Direct `safeslop run` creates a random
+`run-<32 lowercase hex>` identity from 128 bits of OS randomness after approval;
+that id labels the stage, Compose project, marker, cleanup, and dead-run reap.
+New session records use the random session id as layout-2 runtime identity. Legacy
+records without runtime-layout fields reconstruct the old stage from
+`session-<id>` plus the canonical-workspace hash; historical backend `system`
+normalizes to Docker. Before the first live egress mutation, a running legacy
+session installs and ACKs its unchanged durable generation; bootstrap uncertainty
+tears the boundary down. Existing deployed sessions therefore remain stoppable and
+are not rewritten on read.
+
+Compose has exactly one read-write host bind: the canonical workspace at
+`/workspace`. The runtime stage, projected builtin snapshots, Squid config,
+allowlist, and proxy overlay are read-only binds with `create_host_path:false`.
+Every dynamic scalar is quoted/escaped, including literal `$`, so valid hostile
+paths do not gain YAML structure or Compose interpolation.
+
+The proxy image is the reviewed `ubuntu/squid` OCI index digest plus locked
+linux/amd64 and linux/arm64 manifests, checked by `make check-proxy-image-lock`.
+Compose uses the digest reference and runs Squid as a hardened non-root service
+with `cap_drop: ALL`, no-new-privileges, read-only root, PID limit, and only
+live-required nosuid/nodev tmpfs paths. Container image builds are integrity-pinned
+but not hermetic or bit-reproducible: production builds still contact selected
+registries/upstreams to fetch URL/SHA256 binary artifacts, Debian snapshot apt
+packages, and npm package-lock/SRI tarballs.
+
 ### Progressive session egress
 
 For a running or created `container` + `network: deny` session, inspect denied,
@@ -333,8 +373,18 @@ Observations never grant traffic. For Pi OAuth Luna, `chatgpt.com:443` follows
 this same explicit flow and is not statically allowed. A grant is `session-grant / this session`;
 `dismiss` is **Keep denied** acknowledgement state, not authority, and later
 traffic reappears for review. Neither mutates `profile.egress` or `safeslop.cue`.
-Proxy update failure preserves the previous deny posture. Launch also requires the
-proxy configuration check and local listener to become ready before the agent starts.
+On a running session, a grant that adds a new session-grant row or a revoke that
+removes one force-replaces the proxy and returns success only after it ACKs the
+exact grant generation/revision
+and overlay hash by label and mounted file digest. Created sessions persist changes
+for launch without a live replacement; dismiss remains record-only. Proxy
+replacement revokes old tunnels. Widening persists its upper bound before
+activation; narrowing ACKs the smaller runtime set
+before committing it. An unprovable runtime or commit outcome triggers full
+boundary teardown and persists only `network_authority_uncertain`; it never
+guesses which authority is live. If teardown is not proven, egress mutations
+remain blocked until explicit stop/reap. Launch also requires the proxy
+configuration check and local listener to become ready before the agent starts.
 Failure removes the partial stack and persists only the structured
 `network_proxy_unavailable` summary/action/code, never raw Squid/Compose output.
 
@@ -361,19 +411,6 @@ allows now, `k` keeps denied, and `A` previews a hash/CUE delta before a separat
 explicit add. Agent traffic never triggers a modal, focuses a buffer, edits CUE,
 or changes authority.
 
-### VM profile
-
-```cue
-profiles: vm_review: {
-	agent:       "pi"
-	environment: "vm"
-	network:     "deny"
-}
-```
-
-The VM tier is disposable. Use explicit staged state and copy boundaries; do not
-rely on broad host mounts.
-
 ## Safety checklist
 
 - Keep network allowlists narrow and documented.
@@ -386,8 +423,14 @@ rely on broad host mounts.
 ## Verification
 
 ```bash
-go test ./internal/engine/container/ ./internal/engine/vm/ -v
+go test ./internal/engine/container/ -v
+make check-assets check-npm-locks check-proxy-image-lock
+make check-active-surface-drift
 make check
+make build
+# Opt-in host-Docker gates:
+make test-container-images
+make test-progressive-egress-smoke
 ```
 
 For Emacs surface, Doom, or Evil binding changes, also run the local UI matrix:

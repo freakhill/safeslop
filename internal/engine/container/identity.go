@@ -79,6 +79,10 @@ func argPrefix(name string) string {
 // resolvable-but-unbuildable profile fails fast rather than silently dropping a tool.
 func toolsBuildArgs(baseImg string, enabled []string) (map[string]string, error) {
 	cat := policy.DefaultCatalog()
+	npmLocks, err := validatedNPMToolLocks()
+	if err != nil {
+		return nil, err
+	}
 	if pending := cat.BuildReadyFor(enabled); len(pending) > 0 {
 		return nil, fmt.Errorf("cannot build: packages %v have no resolved sha256 digest yet (IW2 sentinel)", pending)
 	}
@@ -94,6 +98,15 @@ func toolsBuildArgs(baseImg string, enabled []string) (map[string]string, error)
 		prefix := argPrefix(name)
 		args[enableArg(name)] = "true"
 		args[prefix+"_VERSION"] = p.Version
+		if p.Kind == policy.KindNpm {
+			lock, ok := npmLocks[name]
+			if !ok {
+				return nil, fmt.Errorf("cannot build: npm package %q has no reviewed lock", name)
+			}
+			args[prefix+"_NPM_LOCK_SHA256"] = lock.SHA256
+			args[prefix+"_NPM_BINARY"] = lock.Contract.PrimaryBinary
+			args[prefix+"_NPM_SCRIPT_POLICY"] = lock.Contract.ScriptPolicy
+		}
 		if p.Kind == policy.KindBinary {
 			if p.Upstream == nil {
 				return nil, fmt.Errorf("cannot build: binary package %q has no upstream artifact metadata", name)

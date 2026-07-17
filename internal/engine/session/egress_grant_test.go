@@ -1,10 +1,23 @@
 package session
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
 )
+
+type failingGrantIDReader struct{}
+
+func (failingGrantIDReader) Read([]byte) (int, error) {
+	return 0, errors.New("injected entropy failure")
+}
+
+func TestNewGrantIDFailsClosedWhenEntropyIsUnavailable(t *testing.T) {
+	if _, err := newGrantID(failingGrantIDReader{}); err == nil {
+		t.Fatal("grant ID generation fell back to a collision-prone value")
+	}
+}
 
 func grantSession() Session {
 	return Session{
@@ -165,6 +178,23 @@ func TestRevokeGrantRemovesAndBumpsRevision(t *testing.T) {
 	}
 	if sess.GrantRevision != 3 {
 		t.Errorf("rev = %d, want 3 after revoke", sess.GrantRevision)
+	}
+}
+
+func TestRevokeGrantDoesNotMutateInputAuthority(t *testing.T) {
+	now := time.Now()
+	original, first, _ := AppendGrant(grantSession(), "a.example.com", 443, now)
+	original, second, _ := AppendGrant(original, "b.example.com", 443, now)
+
+	revoked, err := RevokeGrant(original, first.ID, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(original.EgressGrants) != 2 || original.EgressGrants[0].ID != first.ID || original.EgressGrants[1].ID != second.ID {
+		t.Fatalf("RevokeGrant mutated its input authority: %+v", original.EgressGrants)
+	}
+	if len(revoked.EgressGrants) != 1 || revoked.EgressGrants[0].ID != second.ID {
+		t.Fatalf("revoked authority = %+v, want only second grant", revoked.EgressGrants)
 	}
 }
 

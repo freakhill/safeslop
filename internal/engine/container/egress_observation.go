@@ -136,7 +136,11 @@ func observationGrantability(host string, port int) (bool, string) {
 // backend. A command/read failure returns no observations; this read-only path
 // never updates a grant overlay or session record.
 func ReadDeniedEgressObservations(ctx context.Context, eng runtime.Engine, composeFile string) ([]EgressObservation, error) {
-	cmd := eng.Command(ctx, "compose", "-f", composeFile, "logs", "--no-log-prefix", "proxy")
+	args, err := composeProjectArgs(composeFile, "logs", "--no-log-prefix", "proxy")
+	if err != nil {
+		return nil, err
+	}
+	cmd := eng.Command(ctx, args...)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("read proxy denied-request logs: %w", err)

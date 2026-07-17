@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,6 +38,32 @@ func TestAttachBridgesIOAndPropagatesExitCode(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "MARKER") {
 		t.Fatalf("attach did not bridge the agent's output: %q", out.String())
+	}
+}
+
+func TestAttachRejectsUnsafeLegacyOverflowSocket(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", "")
+	store := engsession.NewStore(filepath.Join(t.TempDir(), strings.Repeat("x", 90), "sessions"))
+	paths := store.SocketPaths("sess-legacy-overflow")
+	if len(paths) != 2 {
+		t.Fatalf("socket candidates = %v", paths)
+	}
+	legacy := paths[1]
+	listener, err := net.Listen("unix", legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = listener.Close()
+		_ = os.Remove(legacy)
+	}()
+	if err := os.Chmod(legacy, 0o666); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = attachSession(store, "sess-legacy-overflow", strings.NewReader(""), &bytes.Buffer{}, nil)
+	if !errors.Is(err, errSupervisorUnreachable) {
+		t.Fatalf("unsafe shared-dir legacy socket attach = %v, want unreachable", err)
 	}
 }
 

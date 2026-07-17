@@ -28,10 +28,25 @@ func TestAvailableFalseWithoutDocker(t *testing.T) {
 	}
 }
 
+func TestUpRejectsBackendWithoutSafeComposeBindSupport(t *testing.T) {
+	eng := newFakeEngine(t, nil)
+	composeFile := "/runtime/compose.yml"
+	config := composeCommandKey(t, composeFile, "config")
+	eng.fail(config, 1)
+
+	err := Up(t.Context(), eng, t.TempDir(), composeFile, nil)
+	if !errors.Is(err, ErrComposeSafetyUnsupported) {
+		t.Fatalf("Up error = %v, want ErrComposeSafetyUnsupported", err)
+	}
+	eng.assertRan(t, config)
+	eng.assertNotRan(t, "image inspect")
+	eng.assertNotRan(t, composeCommandKey(t, composeFile, "up", "-d", "proxy"))
+}
+
 func TestUpRequiresReadyProxy(t *testing.T) {
 	eng := newFakeEngine(t, nil)
 	composeFile := "/runtime/compose.yml"
-	check := "compose -f " + composeFile + " exec -T proxy bash -ec squid -k check >/dev/null 2>&1 && exec 3<>/dev/tcp/127.0.0.1/3128"
+	check := composeCommandKey(t, composeFile, "exec", "-T", "proxy", "bash", "-ec", proxyReadyCommand)
 	eng.fail(check, 1)
 
 	ctx, cancel := context.WithCancel(t.Context())
@@ -45,9 +60,9 @@ func TestUpRequiresReadyProxy(t *testing.T) {
 	if !ok || structured.Failure().Code != "network_proxy_unavailable" {
 		t.Fatalf("Up error = %T %v, want structured network_proxy_unavailable", err, err)
 	}
-	eng.assertRan(t, "compose -f "+composeFile+" up -d proxy")
+	eng.assertRan(t, composeCommandKey(t, composeFile, "up", "-d", "proxy"))
 	eng.assertRan(t, check)
-	eng.assertRan(t, "compose -f "+composeFile+" down --remove-orphans")
+	eng.assertRan(t, composeCommandKey(t, composeFile, "down", "--remove-orphans"))
 }
 
 func TestUpChecksReadyProxyBeforeSuccess(t *testing.T) {
@@ -57,5 +72,5 @@ func TestUpChecksReadyProxyBeforeSuccess(t *testing.T) {
 	if err := Up(t.Context(), eng, t.TempDir(), composeFile, nil); err != nil {
 		t.Fatalf("Up: %v", err)
 	}
-	eng.assertRan(t, "compose -f "+composeFile+" exec -T proxy bash -ec squid -k check >/dev/null 2>&1 && exec 3<>/dev/tcp/127.0.0.1/3128")
+	eng.assertRan(t, composeCommandKey(t, composeFile, "exec", "-T", "proxy", "bash", "-ec", proxyReadyCommand))
 }

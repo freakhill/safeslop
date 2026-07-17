@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1@sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
 # safeslop agent image: the golden base plus the profile's resolved package set.
 # identity.go emits every ENABLE/version/artifact URL/digest argument from the reviewed
 # catalog; changing any coordinate rotates the content-addressed recipe ID.
@@ -27,25 +27,84 @@ RUN if [ "$ENABLE_NODE" = "true" ]; then set -eux; \
       node --version; npm --version; \
     fi
 
-# Exact npm coordinates are fetched through npm's package-integrity verification.
-# --- claude-code
+# Exact npm projects are selected into the otherwise private build context at
+# npm-locks/claude-code, npm-locks/pi, or npm-locks/pnpm. npm ci verifies every
+# transitive SRI. Package names, binary paths, and lifecycle policy are closed
+# below; build arguments can only attest the Go-validated contract, not widen it.
+# --- claude-code / pi / pnpm locked projects
 ARG ENABLE_CLAUDE_CODE=false
-ARG CLAUDE_CODE_NPM_PACKAGE=@anthropic-ai/claude-code
 ARG CLAUDE_CODE_VERSION=
-RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-    if [ "$ENABLE_CLAUDE_CODE" = "true" ]; then set -eux; npm install -g "${CLAUDE_CODE_NPM_PACKAGE}@${CLAUDE_CODE_VERSION}"; fi
+ARG CLAUDE_CODE_NPM_LOCK_SHA256=
+ARG CLAUDE_CODE_NPM_BINARY=
+ARG CLAUDE_CODE_NPM_SCRIPT_POLICY=
 
 ARG ENABLE_PI=false
-ARG PI_NPM_PACKAGE=@earendil-works/pi-coding-agent
 ARG PI_VERSION=
-RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-    if [ "$ENABLE_PI" = "true" ]; then set -eux; npm install -g --ignore-scripts "${PI_NPM_PACKAGE}@${PI_VERSION}"; fi
+ARG PI_NPM_LOCK_SHA256=
+ARG PI_NPM_BINARY=
+ARG PI_NPM_SCRIPT_POLICY=
 
 ARG ENABLE_PNPM=false
-ARG PNPM_NPM_PACKAGE=pnpm
 ARG PNPM_VERSION=
+ARG PNPM_NPM_LOCK_SHA256=
+ARG PNPM_NPM_BINARY=
+ARG PNPM_NPM_SCRIPT_POLICY=
+
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-    if [ "$ENABLE_PNPM" = "true" ]; then set -eux; npm install -g "${PNPM_NPM_PACKAGE}@${PNPM_VERSION}"; fi
+    --mount=type=bind,source=npm-locks,target=/run/safeslop-npm-locks,readonly <<'EOF'
+set -eu
+lock_hash() {
+  { cat "$1/package.json"; printf '\0'; cat "$1/package-lock.json"; } | sha256sum | awk '{print $1}'
+}
+install_locked_npm() {
+  name=$1
+  expected_hash=$2
+  package_name=$3
+  version=$4
+  package_path=$5
+  binary=$6
+  binary_path=$7
+  script_policy=$8
+  source="/run/safeslop-npm-locks/$name"
+  destination="/opt/safeslop/npm/$name"
+  test -f "$source/package.json" -a -f "$source/package-lock.json"
+  test "$(lock_hash "$source")" = "$expected_hash"
+  test "$(node -e 'const p=require(process.argv[1]); process.stdout.write(p.dependencies[process.argv[2]] || "")' "$source/package.json" "$package_name")" = "$version"
+  install -d -m 0755 "$destination"
+  cp "$source/package.json" "$source/package-lock.json" "$destination/"
+  cd "$destination"
+  case "$script_policy" in
+    ignore-scripts)
+      npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+      ;;
+    reviewed-root-postinstall)
+      npm ci --omit=dev --no-audit --no-fund
+      ;;
+    *)
+      echo "$name: unreviewed npm lifecycle policy" >&2
+      exit 1
+      ;;
+  esac
+  test -x "$destination/node_modules/$package_path/$binary_path"
+  ln -sfn "$destination/node_modules/$package_path/$binary_path" "/usr/local/bin/$binary"
+}
+if [ "$ENABLE_CLAUDE_CODE" = true ]; then
+  test "$CLAUDE_CODE_NPM_BINARY" = claude
+  test "$CLAUDE_CODE_NPM_SCRIPT_POLICY" = reviewed-root-postinstall
+  install_locked_npm claude-code "$CLAUDE_CODE_NPM_LOCK_SHA256" @anthropic-ai/claude-code "$CLAUDE_CODE_VERSION" @anthropic-ai/claude-code claude bin/claude.exe "$CLAUDE_CODE_NPM_SCRIPT_POLICY"
+fi
+if [ "$ENABLE_PI" = true ]; then
+  test "$PI_NPM_BINARY" = pi
+  test "$PI_NPM_SCRIPT_POLICY" = ignore-scripts
+  install_locked_npm pi "$PI_NPM_LOCK_SHA256" @earendil-works/pi-coding-agent "$PI_VERSION" @earendil-works/pi-coding-agent pi dist/cli.js "$PI_NPM_SCRIPT_POLICY"
+fi
+if [ "$ENABLE_PNPM" = true ]; then
+  test "$PNPM_NPM_BINARY" = pnpm
+  test "$PNPM_NPM_SCRIPT_POLICY" = ignore-scripts
+  install_locked_npm pnpm "$PNPM_NPM_LOCK_SHA256" pnpm "$PNPM_VERSION" pnpm pnpm bin/pnpm.cjs "$PNPM_NPM_SCRIPT_POLICY"
+  ln -sfn /opt/safeslop/npm/pnpm/node_modules/pnpm/bin/pnpx.cjs /usr/local/bin/pnpx
+fi
+EOF
 
 # python3 is an exact leaf from the immutable, signed Debian snapshot inherited from
 # Dockerfile.agent; the snapshot also freezes all transitive selection.

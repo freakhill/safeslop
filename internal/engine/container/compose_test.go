@@ -21,7 +21,7 @@ func TestComposeIsNetworkEnforcedAndLeakFree(t *testing.T) {
 	if !strings.Contains(yml, `entrypoint: ["/bin/sh", "/safeslop/runtime/entrypoint.sh"]`) {
 		t.Fatal("entrypoint (secret loader) missing")
 	}
-	if !strings.Contains(yml, "/ws:/workspace:rw") || !strings.Contains(yml, "/st:/safeslop/runtime:ro") {
+	if !strings.Contains(yml, `source: "/ws"`) || !strings.Contains(yml, `target: "/workspace"`) || !strings.Contains(yml, `source: "/st"`) || !strings.Contains(yml, `target: "/safeslop/runtime"`) {
 		t.Fatalf("mounts missing:\n%s", yml)
 	}
 	// a secret VALUE must never be written into the compose file.
@@ -52,15 +52,6 @@ func TestComposeHardSetsAgentUser(t *testing.T) {
 	}
 	if n := strings.Count(yml, "    user: \"1000:1000\"\n"); n != 1 {
 		t.Fatalf("generated compose must hard-set exactly one agent user, got %d:\n%s", n, yml)
-	}
-
-	legacyPath := filepath.Join("..", "..", "..", "library", "layer", "container", "docker-compose.yml")
-	legacy, err := os.ReadFile(legacyPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n := strings.Count(string(legacy), "    user: \"1000:1000\"\n"); n != 2 {
-		t.Fatalf("legacy compose must hard-set agent and agent-tools users, got %d:\n%s", n, legacy)
 	}
 }
 
@@ -202,13 +193,16 @@ func TestWriteSecretsEnvEscapesAndIs0600(t *testing.T) {
 }
 
 func TestComposeRunArgvHasNoDashE(t *testing.T) {
-	got := composeRunArgv(runtime.HostDockerEngine{}, "/rt/compose.yml", []string{"fish"})
+	got, err := composeRunArgv(runtime.HostDockerEngine{}, "/rt/compose.yml", []string{"fish"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, a := range got {
 		if a == "-e" {
 			t.Fatal("composeRunArgv must not use -e (secrets leak to ps/inspect)")
 		}
 	}
-	want := []string{"docker", "compose", "-f", "/rt/compose.yml", "run", "--rm", "agent", "fish"}
+	want := []string{"docker", "compose", "-p", "rt", "--project-directory", "/rt", "-f", "/rt/compose.yml", "run", "--rm", "agent", "fish"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("got %v want %v", got, want)
 	}
@@ -234,7 +228,7 @@ func TestComposeNetworksByBackend(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(lima, "external: true") || !strings.Contains(lima, "name: safeslop-internal") {
+	if !strings.Contains(lima, "external: true") || !strings.Contains(lima, `name: "safeslop-internal"`) {
 		t.Errorf("lima backend must reference the external --internal network, got:\n%s", lima)
 	}
 	if strings.Contains(lima, "internal: true") {
@@ -246,8 +240,12 @@ func TestComposeNetworksByBackend(t *testing.T) {
 // `lima nerdctl …` against the user's own default instance — the tier code is unchanged, only the engine
 // differs (specs/0066).
 func TestComposeRunArgvLimaWrapsInGuest(t *testing.T) {
-	got := strings.Join(composeRunArgv(runtime.LimaEngine{}, "/rt/compose.yml", []string{"fish"}), " ")
-	want := "lima nerdctl compose -f /rt/compose.yml run --rm agent fish"
+	argv, err := composeRunArgv(runtime.LimaEngine{}, "/rt/compose.yml", []string{"fish"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(argv, " ")
+	want := "lima nerdctl compose -p rt --project-directory /rt -f /rt/compose.yml run --rm agent fish"
 	if got != want {
 		t.Fatalf("lima compose argv = %q, want %q", got, want)
 	}
@@ -372,7 +370,7 @@ func TestComposeNoAgentSocketAndGitConfig(t *testing.T) {
 	if strings.Contains(with, "SSH_AUTH_SOCK") || strings.Contains(with, "ssh-agent.sock") {
 		t.Fatalf("agent socket must be gone from compose:\n%s", with)
 	}
-	if !strings.Contains(with, "GIT_CONFIG_GLOBAL: /safeslop/runtime/.gitconfig") {
+	if !strings.Contains(with, `GIT_CONFIG_GLOBAL: "/safeslop/runtime/.gitconfig"`) {
 		t.Fatalf("compose missing GIT_CONFIG_GLOBAL:\n%s", with)
 	}
 	if !strings.Contains(with, "GIT_SSH_COMMAND: ssh -F /safeslop/runtime/.ssh/config.container") {
@@ -395,7 +393,7 @@ func TestComposeUsesAgentImage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(yml, "image: local/safeslop-tools:deadbeef1234") {
+	if !strings.Contains(yml, `image: "local/safeslop-tools:deadbeef1234"`) {
 		t.Fatalf("agent image not threaded from composeParams.AgentImage:\n%s", yml)
 	}
 	if strings.Contains(yml, "agent-sandbox-tools:latest") {
@@ -413,6 +411,20 @@ func TestComposeLabelsServicesForRecordIndependentReap(t *testing.T) {
 	}
 	if n := strings.Count(yml, `safeslop.managed: "true"`); n != 4 {
 		t.Fatalf("services and host-created networks must carry the managed label, got %d labels:\n%s", n, yml)
+	}
+}
+
+func TestComposeLabelsDirectRunsByInvocationNotProfileOrSession(t *testing.T) {
+	const id = "run-0123456789abcdef0123456789abcdef"
+	yml, err := renderCompose(composeParams{RuntimeDir: "/r", Workspace: "/w", StageDir: "/r", InvocationID: id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(yml, `safeslop.invocation: "`+id+`"`); n != 4 {
+		t.Fatalf("direct services/networks invocation label count = %d, want 4:\n%s", n, yml)
+	}
+	if strings.Contains(yml, "safeslop.session:") {
+		t.Fatalf("direct invocation gained a session/profile ownership label:\n%s", yml)
 	}
 }
 
@@ -444,11 +456,13 @@ func TestComposeProjectionRendersReadOnlyMounts(t *testing.T) {
 		t.Fatalf("want 2 projection mounts (present only), got %d:\n%s", n, yml)
 	}
 	for _, want := range []string{
-		"/stage/projection-snapshots/000000:/safeslop/projected/0:ro",
-		"/stage/projection-snapshots/000001:/safeslop/projected/1:ro",
+		`source: "/stage/projection-snapshots/000000"`,
+		`target: "/safeslop/projected/0"`,
+		`source: "/stage/projection-snapshots/000001"`,
+		`target: "/safeslop/projected/1"`,
 	} {
 		if !strings.Contains(yml, want) {
-			t.Errorf("missing projection mount %q:\n%s", want, yml)
+			t.Errorf("missing projection mount field %q:\n%s", want, yml)
 		}
 	}
 	if strings.Contains(yml, "config.fish:/safeslop/projected") {
@@ -490,10 +504,10 @@ func TestComposeNoProjectionIsUnchanged(t *testing.T) {
 // squid include always resolve at compose-up; rendered grants are threaded from composeParams.
 func TestMaterializeRunAlwaysWritesSessionGrants(t *testing.T) {
 	empty := t.TempDir()
-	if _, err := materializeRun(composeParams{RuntimeDir: empty, StageDir: empty, Workspace: "/"}, false); err != nil {
+	if _, err := materializeRun(composeParams{RuntimeDir: empty, StageDir: empty, Workspace: t.TempDir()}, false); err != nil {
 		t.Fatal(err)
 	}
-	b, err := readAssetFile(empty, "session-grants.conf")
+	b, err := readAssetFile(filepath.Join(empty, "proxy-overlay"), "session-grants.conf")
 	if err != nil {
 		t.Fatalf("session-grants.conf must always be written (empty case): %v", err)
 	}
@@ -502,15 +516,19 @@ func TestMaterializeRunAlwaysWritesSessionGrants(t *testing.T) {
 	}
 
 	with := t.TempDir()
-	if _, err := materializeRun(composeParams{RuntimeDir: with, StageDir: with, Workspace: "/", SessionGrants: []SessionGrant{{Host: "example.com", Port: 443}}}, false); err != nil {
+	if _, err := materializeRun(composeParams{RuntimeDir: with, StageDir: with, Workspace: t.TempDir(), SessionGrants: []SessionGrant{{Host: "example.com", Port: 443}}}, false); err != nil {
 		t.Fatal(err)
 	}
-	b2, err := readAssetFile(with, "session-grants.conf")
+	b2, err := readAssetFile(filepath.Join(with, "proxy-overlay"), "session-grants.conf")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(b2), "grant_0_host dstdom_regex -n ^example\\.com$") {
 		t.Errorf("session-grants.conf must render the threaded grant:\n%s", b2)
+	}
+	generation, _, err := BuildEgressGeneration([]SessionGrant{{Host: "example.com", Port: 443}}, 0)
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	// compose.yml mounts session-grants.conf into the proxy.
@@ -518,8 +536,11 @@ func TestMaterializeRunAlwaysWritesSessionGrants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(yml), "session-grants.conf:/etc/squid/session-grants.conf:ro") {
+	if !strings.Contains(string(yml), `target: "/etc/squid/safeslop.d"`) {
 		t.Errorf("compose must bind-mount session-grants.conf into the proxy:\n%s", yml)
+	}
+	if !strings.Contains(string(yml), generation.Hash) || !strings.Contains(string(yml), `safeslop.egress-revision: "0"`) {
+		t.Errorf("initial proxy lacks inspectable generation labels:\n%s", yml)
 	}
 }
 
@@ -533,7 +554,13 @@ func readAssetFile(dir, name string) ([]byte, error) {
 func TestMaterializeRunWritesProjectionManifest(t *testing.T) {
 	dir := t.TempDir()
 	snapshotHost := filepath.Join(dir, "projection-snapshots", "000000")
-	_, err := materializeRun(composeParams{RuntimeDir: dir, Workspace: "/w", StageDir: dir, Projection: &ProjectionManifest{
+	if err := os.MkdirAll(filepath.Dir(snapshotHost), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(snapshotHost, []byte("snapshot"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := materializeRun(composeParams{RuntimeDir: dir, Workspace: t.TempDir(), StageDir: dir, Projection: &ProjectionManifest{
 		Items: []ProjectionMount{
 			{Host: snapshotHost, Container: "/safeslop/projected/0", Target: ".zshrc", Status: projPresent, Label: "zsh"},
 			{Host: "~/.config/fish/config.fish", Target: ".config/fish/config.fish", Status: projSkippedAbsent},
@@ -562,7 +589,7 @@ func TestMaterializeRunWritesProjectionManifest(t *testing.T) {
 
 	// No projection => neither file is written.
 	dir2 := t.TempDir()
-	if _, err := materializeRun(composeParams{RuntimeDir: dir2, Workspace: "/w", StageDir: dir2}, false); err != nil {
+	if _, err := materializeRun(composeParams{RuntimeDir: dir2, Workspace: t.TempDir(), StageDir: dir2}, false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(dir2 + "/projection.json"); !os.IsNotExist(err) {

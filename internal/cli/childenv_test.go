@@ -7,9 +7,8 @@ import (
 
 func TestChildEnvScrubsAmbientAuthority(t *testing.T) {
 	// Keep this test hermetic: no real shell reconstruction, so the os.Environ scrub is what's exercised.
-	restore := hostDiscoveryEnv
-	hostDiscoveryEnv = func() map[string]string { return nil }
-	defer func() { hostDiscoveryEnv = restore }()
+	d := defaultDependencies()
+	d.hostDiscoveryEnv = func() map[string]string { return nil }
 
 	// host ambient credentials that must NOT cross into the host tier
 	t.Setenv("AWS_ACCESS_KEY_ID", "AKIA-HOST")
@@ -23,7 +22,7 @@ func TestChildEnvScrubsAmbientAuthority(t *testing.T) {
 	t.Setenv("HOME", "/Users/test")
 	t.Setenv("LC_CTYPE", "UTF-8")
 
-	env := childEnv(
+	env := childEnvWithDeps(d,
 		[]string{"AWS_ACCESS_KEY_ID=AKIA-EPHEMERAL"},    // a staged (ephemeral) cred
 		[]string{"NPM_CONFIG_USERCONFIG=/stage/.npmrc"}, // a staged path env
 	)
@@ -69,8 +68,8 @@ func TestChildEnvScrubsAmbientAuthority(t *testing.T) {
 // sandbox ONLY as its allowlisted, non-credential members (PATH/SHELL): the reconstructed PATH crosses
 // (it is location, not authority), but AWS_*/tokens/SSH_AUTH_SOCK from the same capture must not.
 func TestChildEnvFirewallDropsRichHostDiscoveryEnv(t *testing.T) {
-	restore := hostDiscoveryEnv
-	hostDiscoveryEnv = func() map[string]string {
+	d := defaultDependencies()
+	d.hostDiscoveryEnv = func() map[string]string {
 		return map[string]string{
 			"PATH":                  "/opt/homebrew/bin:/usr/bin:/bin", // allowlisted → must cross
 			"SHELL":                 "/opt/homebrew/bin/fish",          // allowlisted → must cross
@@ -81,12 +80,11 @@ func TestChildEnvFirewallDropsRichHostDiscoveryEnv(t *testing.T) {
 			"OP_SESSION_x":          "op-rich",
 		}
 	}
-	defer func() { hostDiscoveryEnv = restore }()
 
 	// The process env is the Finder-stripped one; the reconstructed PATH must win over it.
 	t.Setenv("PATH", "/usr/bin:/bin")
 
-	env := childEnv(nil, nil)
+	env := childEnvWithDeps(d, nil, nil)
 	get := func(name string) (string, bool) {
 		for _, e := range env {
 			if v, found := strings.CutPrefix(e, name+"="); found {
@@ -112,13 +110,12 @@ func TestChildEnvFirewallDropsRichHostDiscoveryEnv(t *testing.T) {
 // W2: the host-tier child must always get a truecolor terminal, even under a Finder/launchd launch
 // where the process env has no TERM. childEnv forces TERM/COLORTERM regardless of the host env.
 func TestChildEnvForcesTruecolorTerm(t *testing.T) {
-	restore := hostDiscoveryEnv
-	hostDiscoveryEnv = func() map[string]string { return nil }
-	defer func() { hostDiscoveryEnv = restore }()
+	d := defaultDependencies()
+	d.hostDiscoveryEnv = func() map[string]string { return nil }
 	t.Setenv("TERM", "")      // simulate the Finder/launchd strip
 	t.Setenv("COLORTERM", "") // ditto
 
-	env := childEnv(nil, nil)
+	env := childEnvWithDeps(d, nil, nil)
 	has := func(s string) bool {
 		for _, e := range env {
 			if e == s {

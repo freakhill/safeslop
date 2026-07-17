@@ -112,12 +112,12 @@ func TestCatalogBumpOutputJSONWritesCatalogArtifacts(t *testing.T) {
 	target := "22.23.2"
 	amd64SHA := cliDigest("node-amd64-22.23.2")
 	arm64SHA := cliDigest("node-arm64-22.23.2")
-	withCatalogFetcher(t, fixtureFetcher{
+	d := withCatalogFetcher(t, fixtureFetcher{
 		nodeManifestURLForTest(t, target): nodeManifestForTest(t, target, amd64SHA, arm64SHA),
 	})
 
 	beforeCue := mustReadFileForTest(t, filepath.Join(dir, "catalog.cue"))
-	out, err := runRootForTest(t, dir, "catalog", "bump", "node", "--to", target, "--catalog-dir", dir, "--output", "json")
+	out, err := runRootForTestWithDeps(t, dir, d, "catalog", "bump", "node", "--to", target, "--catalog-dir", dir, "--output", "json")
 	if err != nil {
 		t.Fatalf("catalog bump --output json: %v\nout=%s", err, out)
 	}
@@ -156,13 +156,13 @@ func TestCatalogBumpOutputJSONWritesCatalogArtifacts(t *testing.T) {
 func TestCatalogBumpOlderVersionReturnsErrorEnvelopeAndDoesNotWrite(t *testing.T) {
 	dir := tempCatalogDirForTest(t)
 	target := "22.23.0"
-	withCatalogFetcher(t, fixtureFetcher{
+	d := withCatalogFetcher(t, fixtureFetcher{
 		nodeManifestURLForTest(t, target): nodeManifestForTest(t, target, cliDigest("old-amd64"), cliDigest("old-arm64")),
 	})
 	jsonPath := filepath.Join(dir, "catalog.json")
 	before := mustReadFileForTest(t, jsonPath)
 
-	out, err := runRootForTest(t, dir, "catalog", "bump", "node", "--to", target, "--catalog-dir", dir, "--output", "json")
+	out, err := runRootForTestWithDeps(t, dir, d, "catalog", "bump", "node", "--to", target, "--catalog-dir", dir, "--output", "json")
 	if err == nil {
 		t.Fatalf("catalog bump to older version unexpectedly succeeded: %s", out)
 	}
@@ -182,10 +182,10 @@ func TestCatalogProposeVersionOutputJSON(t *testing.T) {
 	fixtures := defaultCatalogFetchFixtures(t)
 	fixtures[nodeUpstreamURLForTest(t)] = []byte(`[{"version":"v22.23.1"},{"version":"v22.23.2"}]`)
 	fixtures[nodeManifestURLForTest(t, target)] = nodeManifestForTest(t, target, cliDigest("propose-amd64"), cliDigest("propose-arm64"))
-	withCatalogFetcher(t, fixtures)
+	d := withCatalogFetcher(t, fixtures)
 
 	before := mustReadFileForTest(t, filepath.Join(dir, "catalog.json"))
-	out, err := runRootForTest(t, dir, "catalog", "propose-version", "node", "--catalog-dir", dir, "--output", "json")
+	out, err := runRootForTestWithDeps(t, dir, d, "catalog", "propose-version", "node", "--catalog-dir", dir, "--output", "json")
 	if err != nil {
 		t.Fatalf("catalog propose-version --output json: %v\nout=%s", err, out)
 	}
@@ -204,10 +204,10 @@ func TestCatalogProposeVersionOutputJSON(t *testing.T) {
 
 func TestCatalogAuditOutputJSON(t *testing.T) {
 	dir := tempCatalogDirForTest(t)
-	withCatalogFetcher(t, defaultCatalogFetchFixtures(t))
+	d := withCatalogFetcher(t, defaultCatalogFetchFixtures(t))
 
 	before := mustReadFileForTest(t, filepath.Join(dir, "catalog.json"))
-	out, err := runRootForTest(t, dir, "catalog", "audit", "--catalog-dir", dir, "--output", "json")
+	out, err := runRootForTestWithDeps(t, dir, d, "catalog", "audit", "--catalog-dir", dir, "--output", "json")
 	if err != nil {
 		t.Fatalf("catalog audit --output json: %v\nout=%s", err, out)
 	}
@@ -263,11 +263,11 @@ func tempCatalogDirForTest(t *testing.T) string {
 	return dir
 }
 
-func withCatalogFetcher(t *testing.T, fetcher policy.Fetcher) {
+func withCatalogFetcher(t *testing.T, fetcher policy.Fetcher) *dependencies {
 	t.Helper()
-	old := catalogFetcher
-	catalogFetcher = fetcher
-	t.Cleanup(func() { catalogFetcher = old })
+	d := defaultDependencies()
+	d.catalogFetcher = fetcher
+	return d
 }
 
 func defaultCatalogFetchFixtures(t *testing.T) fixtureFetcher {

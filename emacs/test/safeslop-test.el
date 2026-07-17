@@ -5,6 +5,20 @@
 (require 'safeslop)
 (require 'safeslop-doom)
 
+(ert-deftest safeslop-test-decomposed-features-load-through-fronts ()
+  "Focused implementations load through the unchanged profile/session fronts."
+  (dolist (feature '(safeslop-profile-evaluation
+                     safeslop-profile-compose
+                     safeslop-session-terminal
+                     safeslop-egress))
+    (should (featurep feature)))
+  (dolist (entry '((safeslop-profiles--evaluation-text . "safeslop-profile-evaluation.el")
+                   (safeslop-profiles-compose-toggle . "safeslop-profile-compose.el")
+                   (safeslop-session--launch-term . "safeslop-session-terminal.el")
+                   (safeslop-session--profile-egress-review . "safeslop-egress.el")))
+    (should (equal (file-name-nondirectory (symbol-file (car entry) 'defun))
+                   (cdr entry)))))
+
 (ert-deftest safeslop-test-loads-core-commands ()
   (dolist (fn '(safeslop-doctor
                 safeslop-policy-check-file
@@ -405,7 +419,35 @@ mysterious bare table."
 (ert-deftest safeslop-test-output-safe-rerun-predicate ()
   (should (safeslop--safe-rerun-p '("validate" "safeslop.cue" "--json")))
   (should (safeslop--safe-rerun-p '("session" "status" "--session-id" "sess-x" "--output" "json")))
+  (should (safeslop--safe-rerun-p '("session" "egress" "observations" "--session-id" "sess-x" "--output" "json")))
+  (should (safeslop--safe-rerun-p '("session" "egress" "grants" "--session-id" "sess-x" "--output" "json")))
+  (should (safeslop--safe-rerun-p '("profile" "egress" "preview" "app" "--output" "json")))
+  (should-not (safeslop--safe-rerun-p '("session" "egress" "grant" "--session-id" "sess-x" "--host" "example.com" "--port" "443" "--output" "json")))
   (should-not (safeslop--safe-rerun-p '("profile" "create" "--output" "json"))))
+
+(ert-deftest safeslop-test-output-render-preserves-rerun-state-after-mode-init ()
+  (let* ((name "*safeslop-rerun-lifecycle-test*")
+         (args '("session" "egress" "grants" "--session-id" "sess-x" "--output" "json"))
+         (envelope '((schema_version . 1) (ok . t) (data . nil)
+                     (warnings . nil) (errors . nil))))
+    (unwind-protect
+        (save-window-excursion
+          (safeslop--show-envelope-buffer name args envelope)
+          (with-current-buffer name
+            (should (derived-mode-p 'safeslop-output-mode))
+            (should (equal safeslop-output--args args))
+            (should (equal safeslop-output--buffer-name name))))
+      (when (get-buffer name)
+        (kill-buffer name)))))
+
+(ert-deftest safeslop-test-session-run-output-detection-is-bounded-and-incremental ()
+  (let* ((first (concat (make-string (+ safeslop-session--run-output-limit 100) ?x)
+                        "\"PTY_UN"))
+         (captured (safeslop-session--capture-run-output nil first)))
+    (should (<= (length captured) safeslop-session--run-output-limit))
+    (setq captured (safeslop-session--capture-run-output captured "AVAILABLE\""))
+    (should (<= (length captured) safeslop-session--run-output-limit))
+    (should (safeslop-session--pty-unavailable-p captured))))
 
 (ert-deftest safeslop-test-surface-order-has-three ()
   (should (= (length safeslop-surface--order) 3))

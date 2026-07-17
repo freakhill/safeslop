@@ -1,0 +1,8 @@
+{
+  "name": "safeslop-lock-pnpm",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "pnpm": "9.15.0"
+  }
+}

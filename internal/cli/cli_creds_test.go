@@ -38,10 +38,10 @@ func writeCredsCue(t *testing.T, dir string) {
 
 // withFakeProber swaps the CLI's credential prober for a hermetic one (no `op`, controlled env),
 // so `creds` tests never shell out and are deterministic regardless of the host's 1Password state.
-func withFakeProber(t *testing.T, env map[string]string) {
+func withFakeProber(t *testing.T, env map[string]string) *dependencies {
 	t.Helper()
-	prev := credsProber
-	credsProber = func() creds.Prober {
+	d := defaultDependencies()
+	d.credsProber = func() creds.Prober {
 		return creds.Prober{
 			OpAvailable: func() bool { return false },
 			OpSignedIn:  func(context.Context) bool { return false },
@@ -49,7 +49,7 @@ func withFakeProber(t *testing.T, env map[string]string) {
 			ResolveOp:   func(context.Context, string) error { return nil },
 		}
 	}
-	t.Cleanup(func() { credsProber = prev })
+	return d
 }
 
 func credRows(t *testing.T, data map[string]any) []map[string]any {
@@ -77,8 +77,8 @@ func findRow(rows []map[string]any, kind, name string) map[string]any {
 func TestCredsListEmitsContractEnvelope(t *testing.T) {
 	ws := t.TempDir()
 	writeCredsCue(t, ws)
-	withFakeProber(t, map[string]string{"APP_TOKEN": "x", "OTHER_K": "y"})
-	out, err := runRootForTest(t, ws, "creds", "list", "--output", "json")
+	d := withFakeProber(t, map[string]string{"APP_TOKEN": "x", "OTHER_K": "y"})
+	out, err := runRootForTestWithDeps(t, ws, d, "creds", "list", "--output", "json")
 	if err != nil {
 		t.Fatalf("creds list: %v\nout=%s", err, out)
 	}
@@ -104,8 +104,8 @@ func TestCredsListEmitsContractEnvelope(t *testing.T) {
 func TestCredsShowScopesToProfile(t *testing.T) {
 	ws := t.TempDir()
 	writeCredsCue(t, ws)
-	withFakeProber(t, map[string]string{"APP_TOKEN": "x", "OTHER_K": "y"})
-	out, err := runRootForTest(t, ws, "creds", "show", "other", "--output", "json")
+	d := withFakeProber(t, map[string]string{"APP_TOKEN": "x", "OTHER_K": "y"})
+	out, err := runRootForTestWithDeps(t, ws, d, "creds", "show", "other", "--output", "json")
 	if err != nil {
 		t.Fatalf("creds show: %v\nout=%s", err, out)
 	}
@@ -127,8 +127,8 @@ func TestCredsShowScopesToProfile(t *testing.T) {
 func TestCredsShowUnknownProfileErrors(t *testing.T) {
 	ws := t.TempDir()
 	writeCredsCue(t, ws)
-	withFakeProber(t, nil)
-	out, _ := runRootForTest(t, ws, "creds", "show", "nope", "--output", "json")
+	d := withFakeProber(t, nil)
+	out, _ := runRootForTestWithDeps(t, ws, d, "creds", "show", "nope", "--output", "json")
 	env := parseEnvelopeForTest(t, out)
 	if env.OK {
 		t.Fatalf("expected error envelope for unknown profile, got %#v", env.Data)

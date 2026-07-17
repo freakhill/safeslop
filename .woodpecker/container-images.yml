@@ -1,0 +1,10 @@
+# Opt-in host-Docker mirror of .github/workflows/container-images.yml.
+when:
+  - event: manual
+labels:
+  platform: darwin/arm64
+steps:
+  - name: locked-images
+    commands:
+      - make check-assets check-npm-locks check-proxy-image-lock
+      - make test-container-images

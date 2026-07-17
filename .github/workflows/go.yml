@@ -8,7 +8,6 @@ on:
 
 jobs:
   go:
-    # macOS so the sandbox-exec launch tests actually run.
     runs-on: macos-latest
     steps:
       - name: Checkout

@@ -95,7 +95,10 @@ func TestLeaseRenewsAtTwoThirdsAndStopsWithoutLeak(t *testing.T) {
 		t.Fatal(err)
 	}
 	clock.Fire(40 * time.Minute)
-	waitLease(t, func() bool { return calls.Load() == 1 })
+	waitLease(t, func() bool {
+		got := lease.Snapshot()
+		return calls.Load() == 1 && got.State == LeaseHealthy && got.CurrentExpiresAt.Equal(clock.Now().Add(time.Hour))
+	})
 	if got := lease.Snapshot(); got.State != LeaseHealthy || got.Attempts != 0 || !got.CurrentExpiresAt.Equal(clock.Now().Add(time.Hour)) {
 		t.Fatalf("renewal snapshot = %+v", got)
 	}

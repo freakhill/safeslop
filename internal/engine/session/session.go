@@ -6,7 +6,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -24,15 +23,20 @@ const (
 	StatusCreated = "created"
 	StatusRunning = "running"
 	StatusStopped = "stopped"
+
+	StageLayoutLegacy    = 0
+	StageLayoutSessionID = 2
 )
 
 var ErrNotFound = errors.New("session not found")
 
-// ErrSessionRunning is returned by Remove when the target session is still
-// running. A running session must be stopped first (which tears down the
-// boundary and can revoke credentials); removing its record out from under a
-// live boundary would orphan the process and its staged credentials.
+// ErrSessionRunning rejects any operation that would replace or remove a live
+// session owner. The existing boundary must be stopped first.
 var ErrSessionRunning = errors.New("session is running")
+
+// ErrSessionStopped rejects reuse of a terminal one-shot session record. A new
+// run needs a new random session identity rather than reviving old ownership.
+var ErrSessionStopped = errors.New("session is stopped")
 
 // ResolvedMetadata snapshots the non-secret package resolution that selected a
 // profile-backed session's image. It is stored with the session so status/list can
@@ -158,101 +162,22 @@ type Session struct {
 	// leads its own process group, so `stop` signals the group, not a bare PID
 	// (specs/0051 D4). Internal routing state; not surfaced in the JSON envelope.
 	Detached bool `json:"detached,omitempty"`
+
+	// These fields are persisted only by diskRecord. Keeping them unexported
+	// ensures direct Session JSON and the v1 client envelope never gain internal
+	// concurrency or runtime-routing state.
+	recordRevision        uint64
+	runtimeID             string
+	stageLayout           int
+	appliedEgressRevision int
+	appliedEgressHash     string
+	egressTransition      *EgressTransition
 }
 
-type Store struct{ Dir string }
-
-func NewStore(dir string) Store { return Store{Dir: dir} }
-
-// Create records a new session. environment is required (specs/0053 removed the
-// default sandbox tier) and must be host or container; the CLI validates it
-// before calling. network defaults to deny (honored by container).
-func (s Store) Create(agent, environment, workspace string, now time.Time) (Session, error) {
-	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
-		return Session{}, err
-	}
-	abs, err := filepath.Abs(workspace)
-	if err != nil {
-		return Session{}, err
-	}
-	id, err := newID()
-	if err != nil {
-		return Session{}, err
-	}
-	sess := Session{
-		ID:          id,
-		Agent:       agent,
-		Workspace:   abs,
-		Environment: environment,
-		Network:     "deny",
-		// Backend is unknown-until-provisioned: session.Create runs BEFORE the container runtime is
-		// detected, so recordSessionBackend fills it from the detected engine's Name() at run time
-		// (specs/0066 D7). Empty rather than a fabricated default.
-		Backend:   "",
-		Status:    StatusCreated,
-		CreatedAt: now.UTC(),
-		UpdatedAt: now.UTC(),
-	}
-	return sess, s.Save(sess)
-}
-
-func (s Store) Get(id string) (Session, error) {
-	if id == "" || !validID(id) {
-		return Session{}, ErrNotFound
-	}
-	b, err := os.ReadFile(s.path(id))
-	if os.IsNotExist(err) {
-		return Session{}, ErrNotFound
-	}
-	if err != nil {
-		return Session{}, err
-	}
-	var sess Session
-	if err := json.Unmarshal(b, &sess); err != nil {
-		return Session{}, err
-	}
-	// A legacy on-disk `"backend":"system"` predates the ambient multi-runtime pivot (specs/0066 D7
-	// repurposed Backend from "system"|"lima" to the detected engine name). "system" only ever meant the
-	// ambient host docker, so normalize it to "docker" on read.
-	if sess.Backend == "system" {
-		sess.Backend = "docker"
-	}
-	return sess, nil
-}
-
-func (s Store) List() ([]Session, error) {
-	entries, err := os.ReadDir(s.Dir)
-	if os.IsNotExist(err) {
-		return []Session{}, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	out := make([]Session, 0, len(entries))
-	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
-			continue
-		}
-		id := e.Name()[:len(e.Name())-len(".json")]
-		sess, err := s.Get(id)
-		if err != nil {
-			continue
-		}
-		out = append(out, sess)
-	}
-	return out, nil
-}
-
-func (s Store) Save(sess Session) error {
-	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
-		return err
-	}
-	b, err := json.MarshalIndent(sess, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(s.path(sess.ID), append(b, '\n'), 0o600)
-}
+// RuntimeIdentity returns the internal exact ownership id and stage layout.
+// Legacy records return ("", StageLayoutLegacy) and keep their historical
+// workspace-hashed reconstruction.
+func (s Session) RuntimeIdentity() (string, int) { return s.runtimeID, s.stageLayout }
 
 func (s Store) MarkRunning(id string, pid int, now time.Time) (Session, error) {
 	return s.markRunning(id, pid, false, now)
@@ -266,43 +191,85 @@ func (s Store) MarkRunningDetached(id string, pid int, now time.Time) (Session, 
 }
 
 func (s Store) markRunning(id string, pid int, detached bool, now time.Time) (Session, error) {
-	sess, err := s.Get(id)
-	if err != nil {
-		return Session{}, err
+	if pid <= 0 {
+		return Session{}, errors.New("session process identity is invalid")
 	}
-	if sess.Status == StatusStopped {
-		return Session{}, fmt.Errorf("session stopped")
+	return s.Update(id, func(sess Session) (Session, error) {
+		switch sess.Status {
+		case StatusCreated:
+		case StatusRunning:
+			return Session{}, ErrSessionRunning
+		default:
+			return Session{}, ErrSessionStopped
+		}
+		sess.Status = StatusRunning
+		sess.PID = pid
+		sess.ProcessToken = ""
+		if token, ok := ProcessStartToken(pid); ok {
+			sess.ProcessToken = token
+		}
+		sess.Detached = detached
+		sess.StartedAt = now.UTC()
+		sess.UpdatedAt = now.UTC()
+		return sess, nil
+	})
+}
+
+// HandoffRunningDetached atomically replaces the issuing wrapper claim with the
+// child supervisor identity. It cannot adopt an unrelated/stale running record.
+func (s Store) HandoffRunningDetached(id string, parentPID, supervisorPID int, now time.Time) (Session, error) {
+	if parentPID <= 0 || supervisorPID <= 0 {
+		return Session{}, errors.New("session process identity is invalid")
 	}
-	sess.Status = StatusRunning
-	sess.PID = pid
-	sess.ProcessToken = ""
-	if token, ok := ProcessStartToken(pid); ok {
-		sess.ProcessToken = token
-	}
-	sess.Detached = detached
-	sess.StartedAt = now.UTC()
-	sess.UpdatedAt = now.UTC()
-	return sess, s.Save(sess)
+	return s.Update(id, func(sess Session) (Session, error) {
+		if sess.Status != StatusRunning || sess.Detached || sess.PID != parentPID || !ProcessAliveSession(sess) {
+			return Session{}, ErrStaleRecord
+		}
+		sess.PID = supervisorPID
+		sess.ProcessToken = ""
+		if token, ok := ProcessStartToken(supervisorPID); ok {
+			sess.ProcessToken = token
+		}
+		sess.Detached = true
+		sess.UpdatedAt = now.UTC()
+		return sess, nil
+	})
+}
+
+// ReleaseRunningClaim returns a failed pre-supervisor claim to created only
+// when it still belongs to this exact live issuing process.
+func (s Store) ReleaseRunningClaim(id string, pid int, now time.Time) (Session, error) {
+	return s.Update(id, func(sess Session) (Session, error) {
+		if sess.Status != StatusRunning || sess.Detached || sess.PID != pid || !ProcessAliveSession(sess) {
+			return Session{}, ErrStaleRecord
+		}
+		sess.Status = StatusCreated
+		sess.PID = 0
+		sess.ProcessToken = ""
+		sess.Detached = false
+		sess.StartedAt = time.Time{}
+		sess.UpdatedAt = now.UTC()
+		return sess, nil
+	})
 }
 
 func (s Store) Finish(id string, exitCode int, lastErr string, now time.Time, failure ...Failure) (Session, error) {
-	sess, err := s.Get(id)
-	if err != nil {
-		return Session{}, err
-	}
-	sess.Status = StatusStopped
-	sess.PID = 0
-	sess.ProcessToken = ""
-	sess.ExitCode = &exitCode
-	sess.LastFailure = nil
-	if len(failure) > 0 {
-		sess.SetFailure(failure[0])
-	} else {
-		sess.LastError = lastErr
-	}
-	sess.StoppedAt = now.UTC()
-	sess.UpdatedAt = now.UTC()
-	return sess, s.Save(sess)
+	return s.Update(id, func(sess Session) (Session, error) {
+		sess.Status = StatusStopped
+		sess.PID = 0
+		sess.ProcessToken = ""
+		sess.SetEgressRuntimeState(EgressRuntimeState{})
+		sess.ExitCode = &exitCode
+		sess.LastFailure = nil
+		if len(failure) > 0 {
+			sess.SetFailure(failure[0])
+		} else {
+			sess.LastError = lastErr
+		}
+		sess.StoppedAt = now.UTC()
+		sess.UpdatedAt = now.UTC()
+		return sess, nil
+	})
 }
 
 // maxNameRunes caps a display name post-trim. 64 runes is ample for a human
@@ -347,17 +314,15 @@ func ValidateName(raw string) (string, error) {
 // status — created, running, or stopped (specs/0065 D5). ErrNotFound from Get is
 // preserved for an unknown id.
 func (s Store) Rename(id, name string, now time.Time) (Session, error) {
-	sess, err := s.Get(id)
+	name, err := ValidateName(name)
 	if err != nil {
 		return Session{}, err
 	}
-	name, err = ValidateName(name)
-	if err != nil {
-		return Session{}, err
-	}
-	sess.Name = name
-	sess.UpdatedAt = now.UTC()
-	return sess, s.Save(sess)
+	return s.Update(id, func(sess Session) (Session, error) {
+		sess.Name = name
+		sess.UpdatedAt = now.UTC()
+		return sess, nil
+	})
 }
 
 // ProcessStartToken returns a non-secret kernel process-start/generation token for pid
@@ -405,6 +370,7 @@ func reconcile(sess Session, now time.Time, isAlive func(Session) bool) (Session
 	sess.Status = StatusStopped
 	sess.PID = 0
 	sess.ProcessToken = ""
+	sess.SetEgressRuntimeState(EgressRuntimeState{})
 	sess.LastError = "run process exited without recording status"
 	sess.StoppedAt = now.UTC()
 	sess.UpdatedAt = now.UTC()
@@ -414,102 +380,100 @@ func reconcile(sess Session, now time.Time, isAlive func(Session) bool) (Session
 // GetReconciled is Get plus a liveness pass: a session marked running whose PID
 // is dead/stale is persisted and returned as stopped, so status never lies.
 func (s Store) GetReconciled(id string, now time.Time, isAlive func(Session) bool, reap ...func(Session) error) (Session, error) {
-	sess, err := s.Get(id)
-	if err != nil {
-		return Session{}, err
-	}
-	if fixed, changed := reconcile(sess, now, isAlive); changed {
+	return s.WithLocked(id, func(tx *RecordTx) error {
+		sess := tx.Session()
+		fixed, changed := reconcile(sess, now, isAlive)
+		if !changed {
+			return nil
+		}
 		for _, fn := range reap {
 			if fn != nil {
 				if err := fn(sess); err != nil {
-					return Session{}, err
+					return err
 				}
 			}
 		}
-		if err := s.Save(fixed); err != nil {
-			return Session{}, err
+		if err := s.removeSocketFiles(id); err != nil {
+			return err
 		}
-		_ = os.Remove(s.SocketPath(id)) // sweep the orphaned socket of a dead supervisor (specs/0051 D7)
-		return fixed, nil
-	}
-	return sess, nil
+		return tx.Commit(fixed)
+	})
 }
 
 // ListReconciled is List with the same per-session liveness pass as GetReconciled.
 func (s Store) ListReconciled(now time.Time, isAlive func(Session) bool, reap ...func(Session) error) ([]Session, error) {
-	sessions, err := s.List()
+	snapshot, err := s.List()
 	if err != nil {
 		return nil, err
 	}
-	for i, sess := range sessions {
-		if fixed, changed := reconcile(sess, now, isAlive); changed {
-			for _, fn := range reap {
-				if fn != nil {
-					if err := fn(sess); err != nil {
-						return nil, err
-					}
-				}
-			}
-			if err := s.Save(fixed); err != nil {
-				return nil, err
-			}
-			_ = os.Remove(s.SocketPath(sess.ID)) // sweep the orphaned socket (specs/0051 D7)
-			sessions[i] = fixed
+	sessions := make([]Session, 0, len(snapshot))
+	for _, sess := range snapshot {
+		current, err := s.GetReconciled(sess.ID, now, isAlive, reap...)
+		if err != nil {
+			return nil, err
 		}
+		sessions = append(sessions, current)
 	}
 	return sessions, nil
 }
 
-func (s Store) Stop(id string, revoke bool, now time.Time, revokeCredentials func(Session) error, killProcess func(int) error, reap ...func(Session) error) (Session, error) {
-	sess, err := s.Get(id)
-	if err != nil {
-		return Session{}, err
-	}
-	if sess.Status == StatusStopped {
+func (s Store) Stop(id string, revoke bool, now time.Time, revokeCredentials func(Session) error, killProcess func(int) error, processAlive func(Session) bool, reap ...func(Session) error) (Session, error) {
+	return s.WithLocked(id, func(tx *RecordTx) error {
+		sess := tx.Session()
+		if sess.Status == StatusStopped {
+			if revoke && !sess.CredentialsRevoked {
+				if err := revokeCredentials(sess); err != nil {
+					return err
+				}
+				sess.CredentialsRevoked = true
+				sess.RevokedAt = now.UTC()
+				sess.UpdatedAt = now.UTC()
+				return tx.Commit(sess)
+			}
+			return nil
+		}
 		if revoke && !sess.CredentialsRevoked {
 			if err := revokeCredentials(sess); err != nil {
-				return Session{}, err
+				return err
 			}
 			sess.CredentialsRevoked = true
 			sess.RevokedAt = now.UTC()
-			sess.UpdatedAt = now.UTC()
-			return sess, s.Save(sess)
 		}
-		return sess, nil
-	}
-	if revoke && !sess.CredentialsRevoked {
-		if err := revokeCredentials(sess); err != nil {
-			return Session{}, err
-		}
-		sess.CredentialsRevoked = true
-		sess.RevokedAt = now.UTC()
-	}
-	if sess.PID != 0 {
-		// A detached supervisor leads its own process group (specs/0051 D4): signal
-		// the group (negative PID) so the boundary process tree is reached, not just
-		// the supervisor. A coupled run keeps the bare-PID signal.
-		target := sess.PID
-		if sess.Detached {
-			target = -sess.PID
-		}
-		if err := killProcess(target); err != nil {
-			return Session{}, err
-		}
-	}
-	_ = os.Remove(s.SocketPath(id)) // remove the per-session socket regardless (D4); no-op when coupled
-	for _, fn := range reap {
-		if fn != nil {
-			if err := fn(sess); err != nil {
-				return Session{}, err
+		if sess.PID != 0 && processAlive != nil && processAlive(sess) {
+			// Recheck the PID/process-start token while the record lock is held,
+			// immediately before signalling. The command's earlier reconcile check
+			// cannot authorize a PID that exited and was reused before Stop acquired
+			// this lock. A nil verifier fails closed and never signals.
+			//
+			// A detached supervisor leads its own process group (specs/0051 D4): signal
+			// the group (negative PID) so the boundary process tree is reached, not just
+			// the supervisor. A coupled run keeps the bare-PID signal.
+			target := sess.PID
+			if sess.Detached {
+				target = -sess.PID
+			}
+			if err := killProcess(target); err != nil {
+				return err
 			}
 		}
-	}
-	sess.Status = StatusStopped
-	sess.PID = 0
-	sess.ProcessToken = ""
-	sess.StoppedAt = now.UTC()
-	sess.UpdatedAt = now.UTC()
-	return sess, s.Save(sess)
+		if err := s.removeSocketFiles(id); err != nil {
+			return err
+		}
+		for _, fn := range reap {
+			if fn != nil {
+				if err := fn(sess); err != nil {
+					return err
+				}
+			}
+		}
+		sess.Status = StatusStopped
+		sess.PID = 0
+		sess.ProcessToken = ""
+		sess.SetEgressRuntimeState(EgressRuntimeState{})
+		sess.StoppedAt = now.UTC()
+		sess.UpdatedAt = now.UTC()
+		return tx.Commit(sess)
+	})
 }
 
 // Remove permanently deletes a non-running session record so the operator can
@@ -522,30 +486,37 @@ func (s Store) Stop(id string, revoke bool, now time.Time, revokeCredentials fun
 // boundary (idempotent for an already-stopped session). The per-session socket
 // is swept too. Returns the removed session so callers can report what went.
 func (s Store) Remove(id string, revokeCredentials func(Session) error, reap ...func(Session) error) (Session, error) {
-	sess, err := s.Get(id)
-	if err != nil {
-		return Session{}, err
-	}
-	if sess.Status == StatusRunning {
-		return Session{}, ErrSessionRunning
-	}
-	if !sess.CredentialsRevoked && revokeCredentials != nil {
-		if err := revokeCredentials(sess); err != nil {
-			return Session{}, err
+	var removed Session
+	err := s.withRecordLock(id, func() error {
+		sess, err := s.getUnlocked(id)
+		if err != nil {
+			return err
 		}
-	}
-	for _, fn := range reap {
-		if fn != nil {
-			if err := fn(sess); err != nil {
-				return Session{}, err
+		if sess.Status == StatusRunning {
+			return ErrSessionRunning
+		}
+		if !sess.CredentialsRevoked && revokeCredentials != nil {
+			if err := revokeCredentials(sess); err != nil {
+				return err
 			}
 		}
-	}
-	_ = os.Remove(s.SocketPath(id)) // sweep any residual per-session socket
-	if err := os.Remove(s.path(id)); err != nil && !os.IsNotExist(err) {
-		return Session{}, err
-	}
-	return sess, nil
+		for _, fn := range reap {
+			if fn != nil {
+				if err := fn(sess); err != nil {
+					return err
+				}
+			}
+		}
+		if err := s.removeSocketFiles(id); err != nil {
+			return err
+		}
+		if err := removeRecordAtomic(s.path(id), s.hooks); err != nil {
+			return err
+		}
+		removed = sess
+		return nil
+	})
+	return removed, err
 }
 
 // PruneStopped removes every stopped session record (the "failed corpses"),
@@ -572,8 +543,6 @@ func (s Store) PruneStopped(revokeCredentials func(Session) error, reap ...func(
 	return removed, nil
 }
 
-func (s Store) path(id string) string { return filepath.Join(s.Dir, id+".json") }
-
 // SocketPath is where a detached session's supervisor binds its per-session unix
 // socket (specs/0051 D5). Derived, never persisted, so it cannot go stale — the
 // supervisor (bind), the attach client (dial), and the reconcile sweep (remove)
@@ -590,8 +559,71 @@ func (s Store) SocketPath(id string) string {
 	if len(natural) <= maxUnixSocketPathLen {
 		return natural
 	}
+	return filepath.Join(socketRuntimeBase(), s.socketFileName(id))
+}
+
+func (s Store) socketFileName(id string) string {
 	sum := sha256.Sum256([]byte(s.Dir + "\x00" + id))
-	return filepath.Join(socketRuntimeBase(), "safeslop-"+hex.EncodeToString(sum[:8])+".sock")
+	return "safeslop-" + hex.EncodeToString(sum[:8]) + ".sock"
+}
+
+// SocketPaths returns the current socket path followed by the pre-0115 overflow
+// location when they differ. Attach and cleanup retain compatibility with an
+// already-running supervisor while new supervisors bind only in the private dir.
+func (s Store) SocketPaths(id string) []string {
+	current := s.SocketPath(id)
+	legacy := filepath.Join(legacySocketRuntimeBase(), s.socketFileName(id))
+	if current == legacy || len(filepath.Join(s.Dir, id+".sock")) <= maxUnixSocketPathLen {
+		return []string{current}
+	}
+	return []string{current, legacy}
+}
+
+// EnsureSocketDir creates and verifies the exact parent used by SocketPath.
+// The ownership/mode checks make the relocation directory a capability boundary
+// rather than a predictable name directly in a shared sticky directory.
+func (s Store) EnsureSocketDir(id string) error {
+	dir := filepath.Dir(s.SocketPath(id))
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return err
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || int(stat.Uid) != os.Getuid() {
+		return errors.New("session socket directory is not private")
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s Store) removeSocketFiles(id string) error {
+	for index, path := range s.SocketPaths(id) {
+		if index > 0 {
+			// The compatibility candidate may live directly in a shared temp
+			// directory. Never let an unrelated/foreign object at that legacy
+			// name block current-session reconcile or become cleanup authority.
+			info, err := os.Lstat(path)
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			stat, ok := info.Sys().(*syscall.Stat_t)
+			if !ok || info.Mode()&os.ModeSocket == 0 || int(stat.Uid) != os.Getuid() {
+				continue
+			}
+		}
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
 }
 
 // maxUnixSocketPathLen is the longest socket path we will bind/dial directly. The
@@ -600,11 +632,21 @@ func (s Store) SocketPath(id string) string {
 // everywhere).
 const maxUnixSocketPathLen = 103
 
-// socketRuntimeBase is a short, per-user, private directory to relocate an
-// otherwise-overflowing socket into: XDG_RUNTIME_DIR when set (Linux, 0700), else
-// the OS temp dir (the per-user 0700 confinement dir on macOS). Both already exist,
-// so binding never has to create them.
+// socketRuntimeBase is a short private per-user directory. XDG_RUNTIME_DIR is
+// already per-user; the fallback adds an owned 0700 child beneath shared /tmp.
 func socketRuntimeBase() string {
+	if d := os.Getenv("XDG_RUNTIME_DIR"); d != "" {
+		candidate := filepath.Join(d, "safeslop")
+		if len(filepath.Join(candidate, "safeslop-0000000000000000.sock")) <= maxUnixSocketPathLen {
+			return candidate
+		}
+	}
+	return filepath.Join("/tmp", fmt.Sprintf("ss-%d", os.Getuid()))
+}
+
+// legacySocketRuntimeBase reproduces the pre-0115 derived location for attach
+// and cleanup of a supervisor already running during upgrade.
+func legacySocketRuntimeBase() string {
 	if d := os.Getenv("XDG_RUNTIME_DIR"); d != "" {
 		return d
 	}

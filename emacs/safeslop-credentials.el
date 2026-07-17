@@ -66,7 +66,8 @@ without re-probing; nil before the first fetch returns.")
   "Last value-free account-link status fetch error, or nil when status is fresh.")
 
 (defvar-local safeslop-credentials--repo-draft nil
-  "Value-free failed repository-scope draft reused as defaults by the next R action.")
+  "Value-free failed repository-scope draft reused as defaults by the next
+R action.")
 
 (defvar-local safeslop-credentials--account-link-draft nil
   "Failed value-free account-link ids/refs reused as defaults by the next A action.")
@@ -135,7 +136,8 @@ REF (op://.../env:NAME) is a reference, never a value, so it is safe to show."
   (format "%s/%s/%s" profile kind name))
 
 (defun safeslop-credentials--rows (data)
-  "Build tabulated rows from `creds list' DATA (engine-sorted by profile/kind/name)."
+  "Build tabulated rows from `creds list' DATA (engine-sorted by
+profile/kind/name)."
   (mapcar
    (lambda (r)
      (let ((profile (or (alist-get 'profile r) ""))
@@ -246,7 +248,8 @@ When OP is nil (before the first fetch) a neutral checking hint is shown."
     ("d" . "doctor") ("E" . "error") ("L" . "debug") ("?" . "help") ("q" . "quit")))
 
 (defun safeslop-credentials--header ()
-  "Return the credentials header block: tab strip, status + op/account legends, shortcuts."
+  "Return the credentials header block: tab strip, status + op/account
+legends, shortcuts."
   (concat (safeslop-surface--tab-strip 'credentials)
           (safeslop-credentials--status-legend)
           (safeslop-credentials--op-legend safeslop-credentials--op)
@@ -322,7 +325,8 @@ the credential posture table.  KEEP-POINT/THEN are the surface engine's."
            (safeslop-credentials--render-list keep-point then)))))))
 
 (defun safeslop-credentials-refresh ()
-  "Re-fetch the credential posture (re-probing readiness), keeping point on its row."
+  "Re-fetch the credential posture (re-probing readiness), keeping point on
+its row."
   (interactive)
   (safeslop-credentials--render t))
 
@@ -472,18 +476,20 @@ any secret value."
 ;;; ---- edit (CUE-canonical, jump to the credentials block) -----------------
 
 (defun safeslop-credentials--goto-credentials-field ()
-  "With point on a profile block opener, move to its `credentials'/`secrets' field.
-Bounded to a conservative window so a match in a later profile is never chosen; if
-the profile declares neither field, point stays on the block opener.  Returns
-non-nil when a field was found."
+  "With point on a profile block opener, move to its
+`credentials'/`secrets' field. Bounded to a conservative window so a
+match in a later profile is never chosen; if the profile declares
+neither field, point stays on the block opener.  Returns non-nil when a
+field was found."
   (let ((limit (min (point-max) (+ (point) 4000))))
     (re-search-forward "^[ \t]*\"?\\(?:credentials\\|secrets\\)\"?[ \t]*:" limit t)))
 
 (defun safeslop-credentials-edit ()
-  "Open the active safeslop.cue for editing, jumping to the profile's creds block.
-CUE bytes are the source of truth (specs/0029), so editing is direct; saves are
-quietly re-validated.  Secrets/tokens are edited as op://.../env: refs here — the
-value stays in 1Password or the environment, never in the config or this UI."
+  "Open the active safeslop.cue for editing, jumping to the profile's creds
+block. CUE bytes are the source of truth (specs/0029), so editing is
+direct; saves are quietly re-validated.  Secrets/tokens are edited as
+op://.../env: refs here — the value stays in 1Password or the
+environment, never in the config or this UI."
   (interactive)
   (let* ((path safeslop-credentials--config-path)
          (id (tabulated-list-get-id))
@@ -589,7 +595,8 @@ values.  CALLBACK receives a contract-shaped envelope."
 
 (defun safeslop-credentials--run-account-mutation
     (buffer-name args success-message &optional on-success failure-message)
-  "Run account ARGS; refresh on success, otherwise show BUFFER-NAME and retain context."
+  "Run account ARGS; refresh on success, otherwise show BUFFER-NAME and
+retain context."
   (let ((source (current-buffer)))
     (safeslop-credentials--call-raw-async
      args
@@ -730,7 +737,8 @@ values.  CALLBACK receives a contract-shaped envelope."
         #'string<))
 
 (defun safeslop-credentials--with-project-profile (continuation)
-  "Fetch project profiles, prompt for one, then call CONTINUATION with source and name."
+  "Fetch project profiles, prompt for one, then call CONTINUATION with
+source and name."
   (unless safeslop-credentials--config-path
     (user-error "No project policy is loaded; press F to create or clone a project profile"))
   (let* ((source (current-buffer))
@@ -836,7 +844,8 @@ values.  CALLBACK receives a contract-shaped envelope."
           (let ((port (alist-get 'sshPort link))) (and port (number-to-string port))))))
 
 (defun safeslop-credentials--prompt-repository-scope (source profile data)
-  "Prompt for PROFILE scope using current `creds show' DATA, then mutate asynchronously."
+  "Prompt for PROFILE scope using current `creds show' DATA, then mutate
+asynchronously."
   (let* ((existing (safeslop-credentials--scope-state data))
          (draft (and (equal profile (alist-get 'profile safeslop-credentials--repo-draft))
                      safeslop-credentials--repo-draft))
@@ -896,7 +905,8 @@ values.  CALLBACK receives a contract-shaped envelope."
              (safeslop--show-envelope-buffer "*safeslop profile credentials*" args env))))))))
 
 (defun safeslop-credentials--load-profile-scope (source profile)
-  "Fetch value-free current scope rows for PROFILE, then open the repository prompt."
+  "Fetch value-free current scope rows for PROFILE, then open the
+repository prompt."
   (let ((args (append (list "creds" "show" profile)
                       (when safeslop-credentials--config-path
                         (list safeslop-credentials--config-path))
@@ -972,8 +982,9 @@ values.  CALLBACK receives a contract-shaped envelope."
 
 ;;;###autoload
 (defun safeslop-credentials ()
-  "Open the safeslop credentials surface: the credential posture of your safeslop.cue.
-For every profile, shows which secrets/keys it stages, from which source ref,
+  "Open the safeslop credentials surface.
+Show the credential posture of your safeslop.cue.  For every profile, show
+which secrets/keys it stages, from which source ref,
 whether they are ephemeral (minted per session) or ref-backed, and — for the
 ref-backed ones — whether they resolve now.  No secret value is ever shown.
 Keys: RET/i inspect, A/U account links, R/X profile forge scopes, e edit,

@@ -2,120 +2,162 @@ package container
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
-func TestSessionGrantApplyWritesOverlayAndReloadsProxy(t *testing.T) {
+const proxyGenerationInspectFormat = `{{ index .Config.Labels "safeslop.egress-revision" }} {{ index .Config.Labels "safeslop.egress-hash" }}`
+
+func egressGenerationFixture(t *testing.T, revision int, grants []SessionGrant) (string, string, string, EgressGeneration, *fakeEngine) {
+	t.Helper()
 	dir := t.TempDir()
 	composeFile := filepath.Join(dir, "compose.yml")
-	if err := os.WriteFile(composeFile, []byte("services: {}\n"), 0o600); err != nil {
+	if err := os.WriteFile(composeFile, []byte("services: {proxy: {image: fixture}}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "session-grants.conf"), []byte(RenderSessionGrants(nil)), 0o600); err != nil {
+	// Exercise upgrade bootstrap from the deployed individual-file include.
+	if err := os.WriteFile(filepath.Join(dir, "squid.conf"), []byte("include /etc/squid/session-grants.conf\nhttp_access deny all\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	eng := newFakeEngine(t, nil)
-
-	if err := ApplySessionGrants(context.Background(), eng, composeFile, dir, []SessionGrant{{Host: "example.com", Port: 443}}); err != nil {
-		t.Fatalf("ApplySessionGrants: %v", err)
-	}
-	eng.assertRan(t, "compose -f "+composeFile+" exec -T proxy squid -k reconfigure")
-	b, err := os.ReadFile(filepath.Join(dir, "session-grants.conf"))
+	generation, _, err := BuildEgressGeneration(grants, revision)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(b), "grant_0_host dstdom_regex -n ^example\\.com$") || !strings.Contains(string(b), "grant_0_port port 443") {
-		t.Fatalf("overlay did not contain rendered grant:\n%s", b)
+	override := filepath.Join(dir, "egress.override.yml")
+	eng := newFakeEngine(t, map[string]string{})
+	eng.outputs["ps -q --filter label=com.docker.compose.project="+filepath.Base(dir)+" --filter label=com.docker.compose.service=proxy"] = "proxy-id\n"
+	eng.outputs[composeCommandKeyWithOverrides(t, composeFile, []string{override}, "ps", "--status", "running", "-q", "proxy")] = "proxy-id-full\n"
+	eng.outputs["inspect -f "+proxyGenerationInspectFormat+" proxy-id-full"] = string(rune('0'+revision)) + " " + generation.Hash + "\n"
+	eng.outputs[composeCommandKeyWithOverrides(t, composeFile, []string{override}, "exec", "-T", "proxy", "sha256sum", "/etc/squid/safeslop.d/session-grants.conf")] = generation.Hash + "  /etc/squid/safeslop.d/session-grants.conf\n"
+	return dir, composeFile, override, generation, eng
+}
+
+func TestBuildEgressGenerationBindsRevisionAndExactRules(t *testing.T) {
+	grants := []SessionGrant{{Host: "example.com", Port: 443}}
+	first, body, err := BuildEgressGeneration(grants, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, againBody, err := BuildEgressGeneration(grants, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != again || string(body) != string(againBody) || len(first.Hash) != 64 {
+		t.Fatalf("generation is not deterministic: first=%+v again=%+v", first, again)
+	}
+	if !strings.Contains(string(body), "# safeslop-egress-revision: 7") || !strings.Contains(string(body), `^example\.com$`) {
+		t.Fatalf("generation bytes lack revision/exact grant:\n%s", body)
+	}
+	next, _, err := BuildEgressGeneration(grants, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.Hash == first.Hash {
+		t.Fatal("distinct durable revisions produced the same generation hash")
 	}
 }
 
-func TestSessionGrantApplyRetriesTransientReloadBeforeRollback(t *testing.T) {
-	dir := t.TempDir()
-	composeFile := filepath.Join(dir, "compose.yml")
-	if err := os.WriteFile(composeFile, []byte("services: {}\n"), 0o600); err != nil {
+func TestApplyEgressGenerationReplacesAndAcknowledgesProxy(t *testing.T) {
+	grants := []SessionGrant{{Host: "example.com", Port: 443}}
+	dir, composeFile, override, wanted, eng := egressGenerationFixture(t, 1, grants)
+
+	got, err := ApplyEgressGeneration(context.Background(), eng, composeFile, dir, grants, 1)
+	if err != nil {
+		t.Fatalf("ApplyEgressGeneration: %v", err)
+	}
+	if got != wanted {
+		t.Fatalf("generation = %+v, want %+v", got, wanted)
+	}
+	eng.assertRan(t, composeCommandKeyWithOverrides(t, composeFile, []string{override}, "up", "-d", "--no-deps", "--force-recreate", "proxy"))
+	eng.assertRan(t, composeCommandKeyWithOverrides(t, composeFile, []string{override}, "exec", "-T", "proxy", "bash", "-ec", proxyReadyCommand))
+	body, err := os.ReadFile(filepath.Join(dir, "proxy-overlay", "session-grants.conf"))
+	if err != nil {
 		t.Fatal(err)
 	}
-	old := RenderSessionGrants(nil)
-	if err := os.WriteFile(filepath.Join(dir, "session-grants.conf"), []byte(old), 0o600); err != nil {
+	if !strings.Contains(string(body), wanted.Hash[:0]+`^example\.com$`) {
+		t.Fatalf("candidate overlay missing exact grant: %s", body)
+	}
+	squid, err := os.ReadFile(filepath.Join(dir, "squid.conf"))
+	if err != nil {
 		t.Fatal(err)
 	}
-	eng := newFakeEngine(t, nil)
-	key := "compose -f " + composeFile + " exec -T proxy squid -k reconfigure"
-	eng.fail(key, 42)
-	calls := 0
-	eng.runHook(key, func() {
-		calls++
-		if calls == 1 {
-			eng.fail(key, 0)
+	if !strings.Contains(string(squid), "/etc/squid/safeslop.d/session-grants.conf") || strings.Contains(string(squid), "include /etc/squid/session-grants.conf") {
+		t.Fatalf("legacy Squid include was not upgraded atomically: %s", squid)
+	}
+	overrideBody, err := os.ReadFile(override)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"safeslop.egress-revision", wanted.Hash, "create_host_path: false", "/etc/squid/safeslop.d"} {
+		if !strings.Contains(string(overrideBody), want) {
+			t.Fatalf("override missing %q:\n%s", want, overrideBody)
 		}
-	})
-
-	err := ApplySessionGrants(context.Background(), eng, composeFile, dir, []SessionGrant{{Host: "example.com", Port: 443}})
-	if err != nil {
-		t.Fatalf("transient bind-visibility reload must retry: %v", err)
-	}
-	if calls != 2 {
-		t.Fatalf("reconfigure calls = %d, want 2", calls)
-	}
-	body, err := os.ReadFile(filepath.Join(dir, "session-grants.conf"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(body), "^example\\.com$") {
-		t.Fatalf("transient reload restored old overlay: %s", body)
 	}
 }
 
-func TestSessionGrantApplyFailClosedRestoresPreviousOverlay(t *testing.T) {
-	dir := t.TempDir()
-	composeFile := filepath.Join(dir, "compose.yml")
-	if err := os.WriteFile(composeFile, []byte("services: {}\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	old := RenderSessionGrants([]SessionGrant{{Host: "old.example.com", Port: 443}})
-	if err := os.WriteFile(filepath.Join(dir, "session-grants.conf"), []byte(old), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	eng := newFakeEngine(t, nil)
-	eng.fail("compose -f "+composeFile+" exec -T proxy squid -k reconfigure", 42)
+func TestEnsureEgressGenerationSkipsReplacementOnPositiveAck(t *testing.T) {
+	grants := []SessionGrant{{Host: "example.com", Port: 443}}
+	dir, composeFile, _, wanted, eng := egressGenerationFixture(t, 2, grants)
+	// Inspection without an override is how a later command observes the running proxy.
+	eng.outputs[composeCommandKey(t, composeFile, "ps", "--status", "running", "-q", "proxy")] = "proxy-id-full\n"
+	eng.outputs[composeCommandKey(t, composeFile, "exec", "-T", "proxy", "sha256sum", "/etc/squid/safeslop.d/session-grants.conf")] = wanted.Hash + "  file\n"
 
-	err := ApplySessionGrants(context.Background(), eng, composeFile, dir, []SessionGrant{{Host: "new.example.com", Port: 443}})
-	if err == nil || !strings.Contains(err.Error(), "reconfigure proxy") {
-		t.Fatalf("ApplySessionGrants error = %v, want proxy reconfigure failure", err)
-	}
-	b, err := os.ReadFile(filepath.Join(dir, "session-grants.conf"))
+	got, err := EnsureEgressGeneration(context.Background(), eng, composeFile, dir, grants, 2)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("EnsureEgressGeneration: %v", err)
 	}
-	if string(b) != old {
-		t.Fatalf("failed reload must restore previous overlay\n--- got ---\n%s\n--- want ---\n%s", b, old)
+	if got != wanted {
+		t.Fatalf("generation = %+v, want %+v", got, wanted)
+	}
+	eng.assertNotRan(t, "compose -p "+filepath.Base(dir)+" --project-directory "+dir+" -f "+composeFile+" -f ")
+}
+
+func TestInspectEgressGenerationRejectsAnOrphanedSecondProxy(t *testing.T) {
+	dir, composeFile, _, wanted, eng := egressGenerationFixture(t, 2, []SessionGrant{{Host: "example.com", Port: 443}})
+	eng.outputs[composeCommandKey(t, composeFile, "ps", "--status", "running", "-q", "proxy")] = "proxy-id-full\n"
+	eng.outputs[composeCommandKey(t, composeFile, "exec", "-T", "proxy", "sha256sum", "/etc/squid/safeslop.d/session-grants.conf")] = wanted.Hash + "  file\n"
+	eng.outputs["ps -q --filter label=com.docker.compose.project="+filepath.Base(dir)+" --filter label=com.docker.compose.service=proxy"] = "proxy-id\norphan-id\n"
+
+	if _, err := InspectEgressGeneration(context.Background(), eng, composeFile); !errors.Is(err, ErrEgressGenerationUncertain) {
+		t.Fatalf("InspectEgressGeneration error = %v, want uncertainty for two proxies", err)
 	}
 }
 
-func TestSessionGrantApplyWriteFailureDoesNotReloadOrReplace(t *testing.T) {
-	dir := t.TempDir()
-	composeFile := filepath.Join(dir, "compose.yml")
-	old := RenderSessionGrants(nil)
-	if err := os.WriteFile(filepath.Join(dir, "session-grants.conf"), []byte(old), 0o600); err != nil {
+func TestApplyEgressGenerationHashMismatchIsUncertain(t *testing.T) {
+	grants := []SessionGrant{{Host: "example.com", Port: 443}}
+	dir, composeFile, override, _, eng := egressGenerationFixture(t, 3, grants)
+	eng.outputs[composeCommandKeyWithOverrides(t, composeFile, []string{override}, "exec", "-T", "proxy", "sha256sum", "/etc/squid/safeslop.d/session-grants.conf")] = strings.Repeat("0", 64) + "  file\n"
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	if _, err := ApplyEgressGeneration(ctx, eng, composeFile, dir, grants, 3); !errors.Is(err, ErrEgressGenerationUncertain) {
+		t.Fatalf("ApplyEgressGeneration error = %v, want ErrEgressGenerationUncertain", err)
+	}
+}
+
+func TestApplyEgressGenerationWriteFailureDoesNotReplaceProxy(t *testing.T) {
+	grants := []SessionGrant{{Host: "example.com", Port: 443}}
+	dir, composeFile, override, _, eng := egressGenerationFixture(t, 4, grants)
+	old := []byte("old-complete-overlay\n")
+	if err := os.MkdirAll(filepath.Join(dir, "proxy-overlay"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	eng := newFakeEngine(t, nil)
-
-	err := ApplySessionGrants(context.Background(), eng, composeFile, dir, []SessionGrant{{Host: "example.com", Port: 443}}, WithOverlayTestHook(func(string) error {
+	path := filepath.Join(dir, "proxy-overlay", "session-grants.conf")
+	if err := os.WriteFile(path, old, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := ApplyEgressGeneration(context.Background(), eng, composeFile, dir, grants, 4, WithOverlayTestHook(func(string) error {
 		return os.ErrPermission
 	}))
 	if err == nil || !strings.Contains(err.Error(), "write session grants overlay") {
-		t.Fatalf("ApplySessionGrants error = %v, want write failure", err)
+		t.Fatalf("ApplyEgressGeneration error = %v, want write failure", err)
 	}
-	eng.assertNotRan(t, "compose -f "+composeFile+" exec -T proxy squid -k reconfigure")
-	b, err := os.ReadFile(filepath.Join(dir, "session-grants.conf"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(b) != old {
-		t.Fatalf("write failure must leave previous overlay untouched\n--- got ---\n%s\n--- want ---\n%s", b, old)
+	eng.assertNotRan(t, composeCommandKeyWithOverrides(t, composeFile, []string{override}, "up", "-d", "--no-deps", "--force-recreate", "proxy"))
+	after, readErr := os.ReadFile(path)
+	if readErr != nil || string(after) != string(old) {
+		t.Fatalf("write failure changed prior overlay: %q err=%v", after, readErr)
 	}
 }

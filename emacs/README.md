@@ -21,11 +21,22 @@ scroll/cursor preservation from specs/0061 lives in exactly one place:
 | `safeslop-client.el` | CLI subprocess substrate + redacted debug log |
 | `safeslop-surface.el` | shared dashboard chrome, tier/net cells, render engine |
 | `safeslop-output.el` | read-only envelope output buffers (`safeslop-output-mode`) |
-| `safeslop-session.el` | session commands, terminal attach, detail view |
+| `safeslop-session-terminal.el` | session shard: PTY launch, JSONL monitor, failure/safety chrome |
+| `safeslop-egress.el` | session shard: progressive egress command construction + passive review UI |
+| `safeslop-session.el` | session front: commands, terminal attach, detail view (owns the `safeslop-session--*` internals split across the two shards above) |
 | `safeslop-portal.el` | Sessions dashboard |
-| `safeslop-profiles.el` | Profiles dashboard + CUE-backed CRUD |
+| `safeslop-profile-evaluation.el` | profile shard: versioned safety-evaluation validate/render |
+| `safeslop-profile-compose.el` | profile shard: interactive profile composition UI |
+| `safeslop-profiles.el` | profile front: Profiles dashboard + CUE-backed CRUD |
+| `safeslop-credentials.el` | Credentials surface: value-free posture + account-link status |
 | `safeslop.el` | entry point: top-level commands + `C-c s` command map |
 | `safeslop-doom.el` | optional Doom/Evil shim (data-driven binding tables) |
+
+The session and profile fronts are decomposed into private feature shards: each
+shard keeps the unchanged `safeslop-session--*` / `safeslop-profiles--*` internal
+symbols and is required only by its front, which is the single public entry.  The
+require graph stays one-directional, so no shard reaches upward into a layer that
+requires it.
 
 ## Operator UI navigation
 
@@ -93,30 +104,43 @@ session pickers — never in its own column.
 A session that has exited stays listed as `stopped`.  Failed rows include a
 bounded, visible engine-owned reason in the Status column; `i` shows the full
 structured summary, action, and stable code, with legacy `last_error` only as a
-fallback.  If a coupled terminal exits during startup, Emacs fetches status once,
-opens that durable detail view, refreshes a live portal, and emits one deduplicated
-summary/action message.  Raw resolver paths, command output, and secret values are
-not rendered.  `x` clears one stopped record and `X` clears them all, so the portal
-never fills up with dead-session corpses.  `x`/`X` refuse a running session (stop
-it first with `s`); the CLI (`session rm` / `session prune`) revokes any still-live
-staged credentials before deleting a record, and `prune` also reconciles a crashed
-session (marked running but whose process is gone) to `stopped` and sweeps it in
-the same pass.
+fallback.  Corrupt/stale/commit-uncertain session-store outcomes are surfaced as
+typed value-free errors or durable failure state; Emacs does not treat corruption
+as absence or show private paths/raw output.  If a coupled terminal exits during
+startup, Emacs fetches status once, opens that durable detail view, refreshes a
+live portal, and emits one deduplicated summary/action message.  Raw resolver
+paths, command output, and secret values are not rendered.  `x` clears one stopped
+record and `X` clears them all, so the portal never fills up with dead-session
+corpses.  `x`/`X` refuse a running session (stop it first with `s`); the CLI
+(`session rm` / `session prune`) revokes any still-live staged credentials before
+deleting a record, and `prune` also reconciles a crashed session (marked running
+but whose process is gone) to `stopped` and sweeps it in the same pass.
 
 Detached sessions are explicit because they survive the Emacs buffer and keep
-staged credentials until stop/revoke.  Coupled run remains the default.
+staged credentials until stop/revoke.  Coupled run remains the default.  Closing a
+coupled terminal sends `SIGHUP` to its coupled CLI and triggers deferred boundary
+reap and stage wipe. Closing an attach buffer only disconnects from a detached
+supervisor; the session continues until explicit `session stop`, whose bounded
+`SIGTERM`→token-revalidated `SIGKILL` path then reaps labels, socket, and stage.
+A tokenless legacy record gets the grace period but no unverified escalation.
+`Ctrl-C` remains agent input rather than teardown.
 
 For a `container` + `deny` session, the details buffer performs an asynchronous,
 passive denied-destination count; it never focuses a buffer or changes authority
 when proxy traffic arrives. Press `v` to open the operator review: it renders
 only value-free FQDN:port/count/time/grantability rows. At a row, `a` explicitly
 **Allows now** for this session, `k` **Keeps denied** without authority, and `A`
-opens a separate hash-checked persistent-rule/CUE-delta review. Its `a` key is a
-second, explicit write for future sessions only; after it succeeds, review and
-re-trust the changed policy before creating a new session. The profile composer
-labels container deny **Deny (progressive review)** as a workflow cue, never as
-an authorization. No proxy event opens a prompt, focuses a review buffer, edits
-CUE, or grants access.
+opens a separate hash-checked persistent-rule/CUE-delta review. On a running
+session, a grant that adds a session-grant row or a revoke that removes one
+replaces the proxy and succeeds only after the exact grant generation and overlay
+hash are acknowledged; created
+sessions persist changes for launch. If authority cannot be proven, Emacs shows the
+engine's `network_authority_uncertain` failure and further egress changes remain
+blocked until stop/reap. Its `a` key is a second, explicit write for future
+sessions only; after it succeeds, review and re-trust the changed policy before
+creating a new session. The profile composer labels container deny **Deny
+(progressive review)** as a workflow cue, never as an authorization. No proxy
+event opens a prompt, focuses a review buffer, edits CUE, or grants access.
 
 Creating a new ad-hoc host session (`c` / `safeslop-session-new` with
 environment `host`) asks an explicit yes/no host acknowledgement before passing
@@ -169,15 +193,20 @@ longer dead ends: `r`, `e`, and `C` act from the detail view too; `g` (Evil:
 `gr`) re-fetches and re-renders the faced view, and `RET` returns to the list.
 The compose buffer uses `RET` to edit its Name, Agent, Environment, Network, and
 Workspace rows, and to toggle unlocked bundle/package rows; `?` shows row help,
-`g` (Evil: `gr`) refreshes, `C-c C-c` previews/saves, and `q` cancels. `L` marks a
-row that is included by its displayed source and cannot be partly toggled. Agent
-changes recompute inherited default packages; compose remains creation-only, so it
-cannot partially overwrite fields outside its UI. Toggle and refresh preserve the
-logical row and scroll position in every showing window. When an agent has a catalog default, the `Automatic agent
-bundle` row deliberately toggles the all-or-nothing automatic inclusion: disabling
-it sends `--no-default-bundle`, keeps explicit selections, and can leave the agent
-without its runtime so launch may fail. It does not change the isolation, network,
-or workspace-only file boundary.
+`g` (Evil: `gr`) refreshes, `C-c C-c` previews/saves, and `q` cancels. A non-empty
+relative workspace is policy-relative when saved; an empty ad-hoc workspace uses
+the invocation directory. The engine must resolve one canonical existing
+workspace and rejects missing/non-directory/control-character or workspace-stage
+overlap cases, while valid spaces, quotes, colons, literal `$`, and Unicode are
+kept safe by typed Compose quoting. `L` marks a row that is included by its
+displayed source and cannot be partly toggled. Agent changes recompute inherited
+default packages; compose remains creation-only, so it cannot partially overwrite
+fields outside its UI. Toggle and refresh preserve the logical row and scroll
+position in every showing window. When an agent has a catalog default, the
+`Automatic agent bundle` row deliberately toggles the all-or-nothing automatic
+inclusion: disabling it sends `--no-default-bundle`, keeps explicit selections,
+and can leave the agent without its runtime so launch may fail. It does not change
+the isolation, network, or workspace-only file boundary.
 
 ## Credentials
 
@@ -273,8 +302,9 @@ Default key prefix: `C-c s` (global), and `safeslop-doom-bind-leader` puts the
 same command map under `SPC o s` on Doom's leader.  That deliberately overrides
 Doom's `:os macos` "send to application" prefix on `SPC o s` (slopmaxx sits at
 `SPC o m`); rebind `safeslop-doom-bind-leader` if you want the macOS prefix back.
-Session creation offers `claude`, `claude-code`, and `pi`; `claude-code` is an
-alias for the canonical `claude` engine agent.
+Emacs session creation offers `claude`, `pi`, `fish`, and `zsh`. The CLI also
+accepts `claude-code` as a compatibility alias for the canonical `claude` agent;
+the Emacs picker shows only the canonical choice.
 
 Under Evil, dashboard keys follow evil-collection convention (specs/0063):
 `j`/`k`, `gg`/`G`, `/`+`n`, `f`, and `a` stay pure motions/searches; refresh is

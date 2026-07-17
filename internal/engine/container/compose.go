@@ -2,10 +2,15 @@ package container
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"text/template"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/freakhill/safeslop/internal/engine/container/runtime"
 )
@@ -16,8 +21,10 @@ type composeParams struct {
 	RuntimeDir    string
 	Workspace     string
 	StageDir      string
-	SessionID     string // stable label value for record-independent reap (session id, or profile name for direct run)
+	SessionID     string // exact session ownership label; empty for direct invocations
+	InvocationID  string // exact random direct-run ownership label; empty for sessions
 	AgentImage    string // content-addressed agent image tag (local/safeslop-tools:<id>) -> compose image:
+	ProxyImage    string // validated OCI-index digest reference loaded from proxy-image.lock.json
 	GitConfig     bool   // true when staged .gitconfig exists (GIT_CONFIG_GLOBAL -> bind-mount path)
 	GitConfigPath string // path to the in-boundary gitconfig, usually /safeslop/runtime/.gitconfig
 	GitSSHConfig  bool   // true when staged .ssh/config.container exists (GIT_SSH_COMMAND -> bind-mount path)
@@ -41,18 +48,35 @@ type composeParams struct {
 	// SessionGrants are the operator-invoked session egress grants (specs/0097) rendered into the
 	// squid session-grants.conf overlay include. Empty => a comment-only file (the include + bind
 	// mount are unconditional, so the file must always exist at compose-up).
-	SessionGrants []SessionGrant
+	SessionGrants  []SessionGrant
+	EgressRevision int
+	EgressHash     string
+
+	ProxyMounts []composeMount
+	AgentMounts []composeMount
 }
 
 func renderCompose(p composeParams) (string, error) {
-	if err := validateProjectionSnapshotMounts(p.StageDir, p.Projection); err != nil {
+	return renderComposeWithSourceCheck(p, false)
+}
+
+func renderComposeWithSourceCheck(p composeParams, requireSources bool) (string, error) {
+	proxyImage, err := proxyImageReference()
+	if err != nil {
 		return "", err
 	}
+	p.ProxyImage = proxyImage
+	plan, err := buildComposeMountPlan(p, requireSources)
+	if err != nil {
+		return "", err
+	}
+	p.ProxyMounts, p.AgentMounts = plan.Proxy, plan.Agent
 	raw, err := readAsset("compose.yml.tmpl")
 	if err != nil {
 		return "", err
 	}
 	t, err := template.New("compose").Funcs(template.FuncMap{
+		"yaml": yamlScalar,
 		// present yields only the bind-mounted projection entries (skipped-absent/unreadable
 		// entries stay in projection.json for legibility but get no volume).
 		"present": func(m *ProjectionManifest) []ProjectionMount {
@@ -70,6 +94,49 @@ func renderCompose(p composeParams) (string, error) {
 		return "", err
 	}
 	return b.String(), nil
+}
+
+func yamlScalar(value string) (string, error) {
+	if !utf8.ValidString(value) {
+		return "", fmt.Errorf("compose scalar is not valid UTF-8")
+	}
+	for _, r := range value {
+		if r == 0 || unicode.In(r, unicode.Cc, unicode.Cf, unicode.Zl, unicode.Zp) {
+			return "", fmt.Errorf("compose scalar contains a control or format character")
+		}
+	}
+	encoded, err := json.Marshal(strings.ReplaceAll(value, "$", "$$"))
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
+}
+
+var composeProjectPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
+
+func composeProjectArgs(composeFile string, args ...string) ([]string, error) {
+	return composeProjectArgsWithOverrides(composeFile, nil, args...)
+}
+
+func composeProjectArgsWithOverrides(composeFile string, overrides []string, args ...string) ([]string, error) {
+	file, err := filepath.Abs(composeFile)
+	if err != nil {
+		return nil, fmt.Errorf("resolve compose file: %w", err)
+	}
+	projectDir := filepath.Dir(file)
+	project := filepath.Base(projectDir)
+	if !composeProjectPattern.MatchString(project) {
+		return nil, fmt.Errorf("runtime identity is not a valid Compose project name")
+	}
+	base := []string{"compose", "-p", project, "--project-directory", projectDir, "-f", file}
+	for _, override := range overrides {
+		override, err = filepath.Abs(override)
+		if err != nil || filepath.Dir(override) != projectDir {
+			return nil, fmt.Errorf("compose override is outside the runtime project")
+		}
+		base = append(base, "-f", override)
+	}
+	return append(base, args...), nil
 }
 
 func validateProjectionSnapshotMounts(stageDir string, manifest *ProjectionManifest) error {
@@ -115,8 +182,12 @@ func writeSecretsEnv(stageDir string, secretEnv []string) (string, error) {
 // the host, or `limactl shell <inst> … nerdctl …` for lima). There is NO -e: secrets ride secrets.env
 // (sourced by the entrypoint), non-secret env lives in the compose file. The result is driven through a
 // PTY (RunInPTY) — the interactive terminal passes through limactl shell (validated 2026-06-22).
-func composeRunArgv(eng runtime.Engine, composeFile string, argv []string) []string {
-	return eng.Argv(append([]string{"compose", "-f", composeFile, "run", "--rm", "agent"}, argv...)...)
+func composeRunArgv(eng runtime.Engine, composeFile string, argv []string) ([]string, error) {
+	args, err := composeProjectArgs(composeFile, append([]string{"run", "--rm", "agent"}, argv...)...)
+	if err != nil {
+		return nil, err
+	}
+	return eng.Argv(args...), nil
 }
 
 // writeEntrypoint copies the embedded entrypoint.sh into dir (mode 0755).

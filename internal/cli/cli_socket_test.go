@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -20,8 +21,13 @@ func TestSessionDataSocketPresentWhenRunningDetached(t *testing.T) {
 	}
 	id := "sess-aaaa0000"
 	sock := store.SocketPath(id)
-	if err := os.WriteFile(sock, nil, 0o600); err != nil {
+	listener, err := net.Listen("unix", sock)
+	if err != nil {
 		t.Fatalf("seed socket: %v", err)
+	}
+	defer listener.Close()
+	if err := os.Chmod(sock, 0o600); err != nil {
+		t.Fatalf("secure socket: %v", err)
 	}
 	sess := engsession.Session{ID: id, Status: engsession.StatusRunning, PID: 4242, Detached: true}
 	if got := sessionData(sess)["socket"]; got != sock {
@@ -55,11 +61,10 @@ func TestSessionDataSocketAbsentWhenCoupled(t *testing.T) {
 // same fixture (specs/0051 D5). sessionSocket is stubbed to a fixed path so the
 // golden is machine-independent.
 func TestDetachedGoldenMatchesEmittedEnvelope(t *testing.T) {
-	old := sessionSocket
-	sessionSocket = func(sess engsession.Session) (string, bool) {
+	d := defaultDependencies()
+	d.sessionSocket = func(sess engsession.Session) (string, bool) {
 		return "/state/sessions/" + sess.ID + ".sock", true
 	}
-	defer func() { sessionSocket = old }()
 
 	sess := engsession.Session{
 		ID:          "sess-0123456789abcdef01234567",
@@ -74,7 +79,7 @@ func TestDetachedGoldenMatchesEmittedEnvelope(t *testing.T) {
 		PID:         4242,
 		Detached:    true,
 	}
-	got, err := jsoncontract.Marshal(jsoncontract.OK(sessionData(sess)))
+	got, err := jsoncontract.Marshal(jsoncontract.OK(sessionDataWithDeps(d, sess)))
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}

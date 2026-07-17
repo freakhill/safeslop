@@ -6,9 +6,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,28 +27,52 @@ const managedLabel = "safeslop.managed=true"
 // It is intentionally record-independent: a SIGKILL'd wrapper may have lost its session JSON,
 // but the boundary still carries safeslop.session=<id> labels (specs/0055 W3 Bug A).
 func ReapBySession(ctx context.Context, eng ReapEngine, sessionID string) error {
-	if strings.TrimSpace(sessionID) == "" {
+	return reapByOwnership(ctx, eng, "safeslop.session", sessionID)
+}
+
+var invocationIDPattern = regexp.MustCompile(`^run-[0-9a-f]{32}$`)
+
+// ReapByInvocation targets one random direct-run ownership label. It never
+// accepts a profile name or partial id, so cleanup authority cannot collide.
+func ReapByInvocation(ctx context.Context, eng ReapEngine, invocationID string) error {
+	if !invocationIDPattern.MatchString(invocationID) {
+		return fmt.Errorf("direct invocation identity is invalid")
+	}
+	return reapByOwnership(ctx, eng, "safeslop.invocation", invocationID)
+}
+
+func reapByOwnership(ctx context.Context, eng ReapEngine, label, id string) error {
+	if strings.TrimSpace(id) == "" {
 		return nil
 	}
-	filter := "label=safeslop.session=" + sessionID
-	containers, err := engineLines(ctx, eng, "ps", "-aq", "--filter", filter)
+	filter := "label=" + label + "=" + id
+	managedFilter := "label=" + managedLabel
+	containers, err := engineLines(ctx, eng, "ps", "-aq", "--filter", managedFilter, "--filter", filter)
 	if err != nil {
-		return fmt.Errorf("list containers for %s: %w", sessionID, err)
+		return fmt.Errorf("list owned containers: %w", err)
 	}
 	if len(containers) > 0 {
 		args := append([]string{"rm", "-f"}, containers...)
 		if err := eng.Command(ctx, args...).Run(); err != nil {
-			return fmt.Errorf("remove containers for %s: %w", sessionID, err)
+			// Compose `run --rm` may win the race after the list. Re-list the
+			// exact random/session owner: absence is already the desired result.
+			remaining, verifyErr := engineLines(ctx, eng, "ps", "-aq", "--filter", managedFilter, "--filter", filter)
+			if verifyErr != nil || len(remaining) != 0 {
+				return fmt.Errorf("remove owned containers: %w", err)
+			}
 		}
 	}
-	networks, err := engineLines(ctx, eng, "network", "ls", "-q", "--filter", filter)
+	networks, err := engineLines(ctx, eng, "network", "ls", "-q", "--filter", managedFilter, "--filter", filter)
 	if err != nil {
-		return fmt.Errorf("list networks for %s: %w", sessionID, err)
+		return fmt.Errorf("list owned networks: %w", err)
 	}
 	if len(networks) > 0 {
 		args := append([]string{"network", "rm"}, networks...)
 		if err := eng.Command(ctx, args...).Run(); err != nil {
-			return fmt.Errorf("remove networks for %s: %w", sessionID, err)
+			remaining, verifyErr := engineLines(ctx, eng, "network", "ls", "-q", "--filter", managedFilter, "--filter", filter)
+			if verifyErr != nil || len(remaining) != 0 {
+				return fmt.Errorf("remove owned networks: %w", err)
+			}
 		}
 	}
 	return nil
@@ -61,7 +88,10 @@ func ReapManaged(ctx context.Context, eng ReapEngine) error {
 	if len(containers) > 0 {
 		args := append([]string{"rm", "-f"}, containers...)
 		if err := eng.Command(ctx, args...).Run(); err != nil {
-			return fmt.Errorf("remove managed containers: %w", err)
+			remaining, verifyErr := engineLines(ctx, eng, "ps", "-aq", "--filter", "label="+managedLabel)
+			if verifyErr != nil || len(remaining) != 0 {
+				return fmt.Errorf("remove managed containers: %w", err)
+			}
 		}
 	}
 	networks, err := engineLines(ctx, eng, "network", "ls", "-q", "--filter", "label="+managedLabel)
@@ -71,7 +101,142 @@ func ReapManaged(ctx context.Context, eng ReapEngine) error {
 	if len(networks) > 0 {
 		args := append([]string{"network", "rm"}, networks...)
 		if err := eng.Command(ctx, args...).Run(); err != nil {
-			return fmt.Errorf("remove managed networks: %w", err)
+			remaining, verifyErr := engineLines(ctx, eng, "network", "ls", "-q", "--filter", "label="+managedLabel)
+			if verifyErr != nil || len(remaining) != 0 {
+				return fmt.Errorf("remove managed networks: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
+const invocationMarkerVersion = 1
+
+type invocationMarker struct {
+	Version      int    `json:"version"`
+	InvocationID string `json:"invocation_id"`
+	PID          int    `json:"pid"`
+	ProcessToken string `json:"process_token"`
+}
+
+// WriteInvocationMarker records only non-secret process identity needed to
+// distinguish a live direct wrapper from a dead/reused PID after a crash.
+func WriteInvocationMarker(stageDir, invocationID string, pid int, processToken string) error {
+	if !invocationIDPattern.MatchString(invocationID) || filepath.Base(stageDir) != invocationID || pid <= 0 {
+		return fmt.Errorf("direct invocation marker is invalid")
+	}
+	if err := os.MkdirAll(stageDir, 0o700); err != nil {
+		return err
+	}
+	body, err := json.Marshal(invocationMarker{Version: invocationMarkerVersion, InvocationID: invocationID, PID: pid, ProcessToken: processToken})
+	if err != nil {
+		return err
+	}
+	body = append(body, '\n')
+	tmp, err := os.CreateTemp(stageDir, ".invocation-marker-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if n, err := tmp.Write(body); err != nil {
+		_ = tmp.Close()
+		return err
+	} else if n != len(body) {
+		_ = tmp.Close()
+		return io.ErrShortWrite
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, filepath.Join(stageDir, ".safeslop-stage")); err != nil {
+		return err
+	}
+	dir, err := os.Open(stageDir)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
+}
+
+// RetainInvocationMarker wipes staged bearer/config files while preserving the
+// exact cleanup handle after a normal-run reap could not be proven.
+func RetainInvocationMarker(stageDir string) error {
+	markerPath := filepath.Join(stageDir, ".safeslop-stage")
+	body, err := os.ReadFile(markerPath)
+	if err != nil {
+		return err
+	}
+	var marker invocationMarker
+	if json.Unmarshal(body, &marker) != nil || marker.Version != invocationMarkerVersion || marker.InvocationID != filepath.Base(stageDir) || marker.PID <= 0 {
+		return fmt.Errorf("direct invocation marker is invalid")
+	}
+	entries, err := os.ReadDir(stageDir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.Name() == ".safeslop-stage" {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(stageDir, entry.Name())); err != nil {
+			return err
+		}
+	}
+	dir, err := os.Open(stageDir)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
+}
+
+// SweepDeadInvocations reaps only exact random invocation labels whose private
+// marker proves the wrapper PID is dead or reused. It never signals a host PID.
+func SweepDeadInvocations(ctx context.Context, eng ReapEngine, stageRoot string) error {
+	entries, err := os.ReadDir(stageRoot)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		id := entry.Name()
+		if !entry.IsDir() || !invocationIDPattern.MatchString(id) {
+			continue
+		}
+		markerPath := filepath.Join(stageRoot, id, ".safeslop-stage")
+		info, err := os.Lstat(markerPath)
+		if err != nil || !info.Mode().IsRegular() || info.Size() > 4096 {
+			continue
+		}
+		body, err := os.ReadFile(markerPath)
+		if err != nil {
+			continue
+		}
+		var marker invocationMarker
+		if json.Unmarshal(body, &marker) != nil || marker.Version != invocationMarkerVersion || marker.InvocationID != id || marker.PID <= 0 {
+			continue
+		}
+		process := engsession.Session{PID: marker.PID, ProcessToken: marker.ProcessToken}
+		if engsession.ProcessAliveSession(process) {
+			continue
+		}
+		if err := ReapByInvocation(ctx, eng, id); err != nil {
+			return err
+		}
+		if err := os.RemoveAll(filepath.Join(stageRoot, id)); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -80,6 +245,19 @@ func ReapManaged(ctx context.Context, eng ReapEngine) error {
 // SweepManagedOrphans reaps labelled boundaries whose safeslop.session label no longer has a live
 // session record. It is safe to run at startup: live session ids are supplied by the session store;
 // unlabelled legacy containers are ignored because safeslop cannot prove ownership by session.
+func listedRuntimeObject(ctx context.Context, eng ReapEngine, id string, args ...string) (bool, error) {
+	ids, err := engineLines(ctx, eng, args...)
+	if err != nil {
+		return false, err
+	}
+	for _, candidate := range ids {
+		if sameRuntimeObjectID(candidate, id) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func SweepManagedOrphans(ctx context.Context, eng ReapEngine, live map[string]bool) error {
 	seen := map[string]bool{}
 	reapIfOrphan := func(sessID string) error {
@@ -98,6 +276,10 @@ func SweepManagedOrphans(ctx context.Context, eng ReapEngine, live map[string]bo
 	for _, id := range ids {
 		sessID, err := engineOutput(ctx, eng, "inspect", "-f", `{{ index .Config.Labels "safeslop.session" }}`, id)
 		if err != nil {
+			stillPresent, verifyErr := listedRuntimeObject(ctx, eng, id, "ps", "-aq", "--filter", "label="+managedLabel)
+			if verifyErr == nil && !stillPresent {
+				continue
+			}
 			return fmt.Errorf("inspect managed container %s: %w", id, err)
 		}
 		if err := reapIfOrphan(sessID); err != nil {
@@ -112,6 +294,10 @@ func SweepManagedOrphans(ctx context.Context, eng ReapEngine, live map[string]bo
 	for _, id := range networks {
 		sessID, err := engineOutput(ctx, eng, "network", "inspect", "-f", `{{ index .Labels "safeslop.session" }}`, id)
 		if err != nil {
+			stillPresent, verifyErr := listedRuntimeObject(ctx, eng, id, "network", "ls", "-q", "--filter", "label="+managedLabel)
+			if verifyErr == nil && !stillPresent {
+				continue
+			}
 			return fmt.Errorf("inspect managed network %s: %w", id, err)
 		}
 		if err := reapIfOrphan(sessID); err != nil {
@@ -344,6 +530,14 @@ func DefaultProtection(policyPath, sessionDir string) GCProtection {
 
 type LiveSessionIDs map[string]bool
 
+// LegacySessionReapLabel reproduces the deployed layout-1 compose label without
+// touching its stage directory. It exists only for upgrade-safe live sweeping.
+func LegacySessionReapLabel(id, workspace string) string {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(workspace))
+	return fmt.Sprintf("%s-%08x", id, h.Sum32())
+}
+
 func LiveSessions(dir string) (LiveSessionIDs, error) {
 	store := engsession.NewStore(dir)
 	sessions, err := store.List()
@@ -352,8 +546,20 @@ func LiveSessions(dir string) (LiveSessionIDs, error) {
 	}
 	live := LiveSessionIDs{}
 	for _, sess := range sessions {
-		if sess.Status == engsession.StatusRunning {
-			live[sess.ID] = true
+		if sess.Status != engsession.StatusRunning {
+			continue
+		}
+		// Keep the historical bare label plus the exact deployed layout label.
+		// The former preserves compatibility with intermediate records/tests;
+		// the latter prevents upgrade-time orphan sweep from reaping a live
+		// hash-suffixed session.
+		live[sess.ID] = true
+		runtimeID, layout := sess.RuntimeIdentity()
+		switch layout {
+		case engsession.StageLayoutLegacy:
+			live[LegacySessionReapLabel(sess.ID, sess.Workspace)] = true
+		case engsession.StageLayoutSessionID:
+			live[runtimeID] = true
 		}
 	}
 	return live, nil

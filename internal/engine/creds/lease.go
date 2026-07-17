@@ -298,5 +298,14 @@ func (l *Lease) Stop() {
 			_ = timer.Stop()
 		}
 		<-l.done
+		// Cancellation can race renewal between a fired timer and arming the
+		// next one. The loop has now exited, so stop the final published timer
+		// as well; otherwise that late timer survives teardown until its deadline.
+		l.mu.RLock()
+		timer = l.timer
+		l.mu.RUnlock()
+		if timer != nil {
+			_ = timer.Stop()
+		}
 	})
 }

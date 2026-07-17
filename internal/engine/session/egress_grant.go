@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/freakhill/safeslop/internal/engine/policy"
@@ -30,6 +31,47 @@ type EgressAcknowledgement struct {
 	Host           string    `json:"host"`
 	Port           int       `json:"port"`
 	AcknowledgedAt time.Time `json:"acknowledged_at"`
+}
+
+const (
+	EgressDirectionWiden  = "widen"
+	EgressDirectionNarrow = "narrow"
+)
+
+// EgressTransition is internal durable recovery state. CandidateGrants contains
+// only the exact value-free session grant rows needed to identify/restore an
+// interrupted narrowing; Session keeps it out of public JSON and v1 envelopes.
+type EgressTransition struct {
+	Direction         string        `json:"direction"`
+	CandidateRevision int           `json:"candidate_revision"`
+	CandidateHash     string        `json:"candidate_hash"`
+	CandidateGrants   []EgressGrant `json:"candidate_grants,omitempty"`
+}
+
+type EgressRuntimeState struct {
+	AppliedRevision int
+	AppliedHash     string
+	Transition      *EgressTransition
+}
+
+func (s Session) EgressRuntimeState() EgressRuntimeState {
+	state := EgressRuntimeState{AppliedRevision: s.appliedEgressRevision, AppliedHash: s.appliedEgressHash}
+	if s.egressTransition != nil {
+		transition := *s.egressTransition
+		transition.CandidateGrants = append([]EgressGrant(nil), transition.CandidateGrants...)
+		state.Transition = &transition
+	}
+	return state
+}
+
+func (s *Session) SetEgressRuntimeState(state EgressRuntimeState) {
+	s.appliedEgressRevision, s.appliedEgressHash = state.AppliedRevision, state.AppliedHash
+	s.egressTransition = nil
+	if state.Transition != nil {
+		transition := *state.Transition
+		transition.CandidateGrants = append([]EgressGrant(nil), transition.CandidateGrants...)
+		s.egressTransition = &transition
+	}
 }
 
 // ErrSessionNotGrantable is returned when a grant is requested for a session that cannot enforce
@@ -78,14 +120,18 @@ func AppendGrant(sess Session, host string, port int, now time.Time) (Session, E
 			return sess, g, nil // idempotent: same destination already granted
 		}
 	}
+	grantID, err := newGrantID(rand.Reader)
+	if err != nil {
+		return sess, EgressGrant{}, errors.New("egress grant id generation failed")
+	}
 	g := EgressGrant{
-		ID:        newGrantID(),
+		ID:        grantID,
 		Host:      h,
 		Port:      p,
 		Source:    "operator",
 		CreatedAt: now.UTC(),
 	}
-	sess.EgressGrants = append(sess.EgressGrants, g)
+	sess.EgressGrants = append(append([]EgressGrant(nil), sess.EgressGrants...), g)
 	sess.GrantRevision++
 	sess.UpdatedAt = now.UTC()
 	return sess, g, nil
@@ -109,12 +155,13 @@ func DismissEgress(sess Session, host string, port int, now time.Time) (Session,
 	ack := EgressAcknowledgement{Host: h, Port: p, AcknowledgedAt: now.UTC()}
 	for i, existing := range sess.EgressAcknowledgements {
 		if existing.Host == h && existing.Port == p {
+			sess.EgressAcknowledgements = append([]EgressAcknowledgement(nil), sess.EgressAcknowledgements...)
 			sess.EgressAcknowledgements[i] = ack
 			sess.UpdatedAt = now.UTC()
 			return sess, ack, nil
 		}
 	}
-	sess.EgressAcknowledgements = append(sess.EgressAcknowledgements, ack)
+	sess.EgressAcknowledgements = append(append([]EgressAcknowledgement(nil), sess.EgressAcknowledgements...), ack)
 	sess.UpdatedAt = now.UTC()
 	return sess, ack, nil
 }
@@ -125,7 +172,10 @@ func RevokeGrant(sess Session, id string, now time.Time) (Session, error) {
 	}
 	for i, g := range sess.EgressGrants {
 		if g.ID == id {
-			sess.EgressGrants = append(sess.EgressGrants[:i], sess.EgressGrants[i+1:]...)
+			grants := make([]EgressGrant, 0, len(sess.EgressGrants)-1)
+			grants = append(grants, sess.EgressGrants[:i]...)
+			grants = append(grants, sess.EgressGrants[i+1:]...)
+			sess.EgressGrants = grants
 			sess.GrantRevision++
 			sess.UpdatedAt = now.UTC()
 			return sess, nil
@@ -135,13 +185,12 @@ func RevokeGrant(sess Session, id string, now time.Time) (Session, error) {
 }
 
 // newGrantID returns a short, non-secret, random grant id ("g-<6 hex>"). It is opaque and carries
-// no host/port information; the (host,port) pair is stored on the grant itself.
-func newGrantID() string {
+// no host/port information; the (host,port) pair is stored on the grant itself. Entropy failure
+// blocks the grant rather than risking a collision that could revoke the wrong authority row.
+func newGrantID(reader io.Reader) (string, error) {
 	var b [3]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		// rand.Read failing is catastrophic for the process; fall back to a time-derived id so the
-		// grant still lands rather than blocking an operator action.
-		return fmt.Sprintf("g-%x", time.Now().UnixNano()&0xffffff)
+	if _, err := io.ReadFull(reader, b[:]); err != nil {
+		return "", err
 	}
-	return "g-" + hex.EncodeToString(b[:])
+	return "g-" + hex.EncodeToString(b[:]), nil
 }

@@ -17,7 +17,23 @@ import (
 	"github.com/freakhill/safeslop/internal/jsoncontract"
 )
 
+func TestRootJSONFlagsAreInstanceOwned(t *testing.T) {
+	first := newRoot()
+	second := newRoot()
+	if err := first.PersistentFlags().Set("json", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if got := second.PersistentFlags().Lookup("json").Value.String(); got != "false" {
+		t.Fatalf("second root inherited first root --json=%s", got)
+	}
+}
+
 func runRootForTest(t *testing.T, dir string, args ...string) (string, error) {
+	t.Helper()
+	return runRootForTestWithDeps(t, dir, nil, args...)
+}
+
+func runRootForTestWithDeps(t *testing.T, dir string, d *dependencies, args ...string) (string, error) {
 	t.Helper()
 	oldwd, err := os.Getwd()
 	if err != nil {
@@ -36,8 +52,10 @@ func runRootForTest(t *testing.T, dir string, args ...string) (string, error) {
 	os.Stdout = w
 	defer func() { os.Stdout = oldStdout }()
 
-	jsonOut = false
-	cmd := newRoot()
+	if d == nil {
+		d = defaultDependencies()
+	}
+	cmd := newRootWithDeps(d)
 	cmd.SetArgs(args)
 	err = cmd.Execute()
 	_ = w.Close()
@@ -154,8 +172,12 @@ func TestSessionCreateEmitsContractAndPersistsSafeDefaults(t *testing.T) {
 	if got := env.Data["agent"]; got != "claude" {
 		t.Fatalf("agent = %#v", got)
 	}
-	if got := env.Data["workspace"]; got != ws {
-		t.Fatalf("workspace = %#v, want %q", got, ws)
+	canonicalWS, err := filepath.EvalSymlinks(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := env.Data["workspace"]; got != canonicalWS {
+		t.Fatalf("workspace = %#v, want %q", got, canonicalWS)
 	}
 	if got := env.Data["network"]; got != "deny" {
 		t.Fatalf("network default = %#v, want deny", got)
@@ -585,19 +607,24 @@ func TestSessionStatusJSONLEmitsSingleLineContract(t *testing.T) {
 	}
 }
 
+func TestWaitProcessAllowsGracefulLegacyGroupExitWithoutToken(t *testing.T) {
+	const absentPID = 2147483000
+	identity := engsession.Session{PID: absentPID, Detached: true}
+	if err := defaultSessionWaitProcess(-absentPID, identity); err != nil {
+		t.Fatalf("already-exited legacy process group: %v", err)
+	}
+}
+
 func TestSessionStopRevokesBeforeKillAndIsIdempotent(t *testing.T) {
 	ws := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
 	var order []string
-	oldRevoke, oldKill, oldAlive := sessionRevokeCredentials, sessionKillProcess, sessionProcessAlive
-	sessionRevokeCredentials = func(_ engsession.Session) error { order = append(order, "revoke"); return nil }
-	sessionKillProcess = func(_ int) error { order = append(order, "kill"); return nil }
-	sessionProcessAlive = func(engsession.Session) bool { return true }
-	defer func() {
-		sessionRevokeCredentials, sessionKillProcess, sessionProcessAlive = oldRevoke, oldKill, oldAlive
-	}()
+	d := defaultDependencies()
+	d.revokeCredentials = func(_ engsession.Session) error { order = append(order, "revoke"); return nil }
+	d.killProcess = func(_ int) error { order = append(order, "kill"); return nil }
+	d.processAlive = func(engsession.Session) bool { return true }
 
-	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
+	out, err := runRootForTestWithDeps(t, ws, d, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -606,7 +633,7 @@ func TestSessionStopRevokesBeforeKillAndIsIdempotent(t *testing.T) {
 		t.Fatalf("mark running: %v", err)
 	}
 
-	out, err = runRootForTest(t, ws, "session", "stop", "--session-id", id, "--revoke-credentials", "--output", "json")
+	out, err = runRootForTestWithDeps(t, ws, d, "session", "stop", "--session-id", id, "--revoke-credentials", "--output", "json")
 	if err != nil {
 		t.Fatalf("stop: %v\nout=%s", err, out)
 	}
@@ -619,7 +646,7 @@ func TestSessionStopRevokesBeforeKillAndIsIdempotent(t *testing.T) {
 	}
 
 	order = nil
-	out, err = runRootForTest(t, ws, "session", "stop", "--session-id", id, "--revoke-credentials", "--output", "json")
+	out, err = runRootForTestWithDeps(t, ws, d, "session", "stop", "--session-id", id, "--revoke-credentials", "--output", "json")
 	if err != nil {
 		t.Fatalf("second stop should be idempotent: %v\nout=%s", err, out)
 	}
@@ -631,11 +658,10 @@ func TestSessionStopRevokesBeforeKillAndIsIdempotent(t *testing.T) {
 func TestSessionStopWipesStageDirWithoutRevoke(t *testing.T) {
 	ws := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
-	oldKill := sessionKillProcess
-	sessionKillProcess = func(int) error { return nil }
-	defer func() { sessionKillProcess = oldKill }()
+	d := defaultDependencies()
+	d.killProcess = func(int) error { return nil }
 
-	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
+	out, err := runRootForTestWithDeps(t, ws, d, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -649,7 +675,7 @@ func TestSessionStopWipesStageDirWithoutRevoke(t *testing.T) {
 	}
 	stageDir := seedSessionStageDirForTest(t, sess)
 
-	out, err = runRootForTest(t, ws, "session", "stop", "--session-id", id, "--output", "json")
+	out, err = runRootForTestWithDeps(t, ws, d, "session", "stop", "--session-id", id, "--output", "json")
 	if err != nil {
 		t.Fatalf("stop: %v\nout=%s", err, out)
 	}
@@ -659,13 +685,12 @@ func TestSessionStopWipesStageDirWithoutRevoke(t *testing.T) {
 func TestSessionStopSkipsKillForStaleDetachedProcess(t *testing.T) {
 	ws := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
-	oldAlive, oldKill := sessionProcessAlive, sessionKillProcess
-	sessionProcessAlive = func(engsession.Session) bool { return false } // supervisor PID is gone/stale before stop
+	d := defaultDependencies()
+	d.processAlive = func(engsession.Session) bool { return false } // supervisor PID is gone/stale before stop
 	killed := false
-	sessionKillProcess = func(int) error { killed = true; return nil }
-	defer func() { sessionProcessAlive, sessionKillProcess = oldAlive, oldKill }()
+	d.killProcess = func(int) error { killed = true; return nil }
 
-	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
+	out, err := runRootForTestWithDeps(t, ws, d, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -679,7 +704,7 @@ func TestSessionStopSkipsKillForStaleDetachedProcess(t *testing.T) {
 	}
 	stageDir := seedSessionStageDirForTest(t, sess)
 
-	out, err = runRootForTest(t, ws, "session", "stop", "--session-id", id, "--output", "json")
+	out, err = runRootForTestWithDeps(t, ws, d, "session", "stop", "--session-id", id, "--output", "json")
 	if err != nil {
 		t.Fatalf("stop: %v\nout=%s", err, out)
 	}
@@ -693,14 +718,127 @@ func TestSessionStopSkipsKillForStaleDetachedProcess(t *testing.T) {
 	assertStageDirRemovedForTest(t, stageDir)
 }
 
+func TestSessionStopRechecksIdentityAfterReconcileBeforeSignal(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+	d := defaultDependencies()
+	checks := 0
+	d.processAlive = func(engsession.Session) bool {
+		checks++
+		return checks == 1 // alive during reconcile, stale/reused before Stop acquires its lock
+	}
+	killed := false
+	d.killProcess = func(int) error { killed = true; return nil }
+
+	out, err := runRootForTestWithDeps(t, ws, d, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	id := parseEnvelopeForTest(t, out).Data["session_id"].(string)
+	if _, err := sessionStore().MarkRunningDetached(id, 4242, nowForTest(t)); err != nil {
+		t.Fatalf("mark detached: %v", err)
+	}
+
+	out, err = runRootForTestWithDeps(t, ws, d, "session", "stop", "--session-id", id, "--output", "json")
+	if err != nil {
+		t.Fatalf("stop: %v\nout=%s", err, out)
+	}
+	if checks < 2 {
+		t.Fatalf("process identity checks = %d, want reconcile plus locked pre-signal check", checks)
+	}
+	if killed {
+		t.Fatal("stop signalled a PID whose process identity changed after reconcile")
+	}
+	if env := parseEnvelopeForTest(t, out); !env.OK || env.Data["status"] != "stopped" {
+		t.Fatalf("stop envelope = %+v, want stopped", env)
+	}
+}
+
+func TestSessionStopWaitsForDetachedExitAfterRecordLockReleased(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+	d := defaultDependencies()
+	d.processAlive = func(engsession.Session) bool { return true }
+	d.killProcess = func(target int) error {
+		if target != -4242 {
+			t.Fatalf("signal target = %d, want detached group -4242", target)
+		}
+		return nil
+	}
+
+	out, err := runRootForTestWithDeps(t, ws, d, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := parseEnvelopeForTest(t, out).Data["session_id"].(string)
+	if _, err := sessionStore().MarkRunningDetached(id, 4242, nowForTest(t)); err != nil {
+		t.Fatal(err)
+	}
+	d.waitProcess = func(target int, _ engsession.Session) error {
+		if target != -4242 {
+			t.Fatalf("wait target = %d, want detached group -4242", target)
+		}
+		done := make(chan error, 1)
+		go func() {
+			_, renameErr := sessionStore().Rename(id, "wait-observed-unlocked", d.now())
+			done <- renameErr
+		}()
+		select {
+		case renameErr := <-done:
+			return renameErr
+		case <-time.After(time.Second):
+			return errors.New("session record lock remained held while waiting for process exit")
+		}
+	}
+
+	out, err = runRootForTestWithDeps(t, ws, d, "session", "stop", "--session-id", id, "--output", "json")
+	if err != nil {
+		t.Fatalf("stop: %v\nout=%s", err, out)
+	}
+	got, err := sessionStore().Get(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "wait-observed-unlocked" || got.Status != engsession.StatusStopped {
+		t.Fatalf("post-wait session = %+v", got)
+	}
+}
+
+func TestSessionStopFailsLoudlyWhenPostWaitRecordReloadFails(t *testing.T) {
+	ws := t.TempDir()
+	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
+	d := defaultDependencies()
+	d.processAlive = func(engsession.Session) bool { return true }
+	d.killProcess = func(int) error { return nil }
+
+	out, err := runRootForTestWithDeps(t, ws, d, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := parseEnvelopeForTest(t, out).Data["session_id"].(string)
+	if _, err := sessionStore().MarkRunningDetached(id, 4242, nowForTest(t)); err != nil {
+		t.Fatal(err)
+	}
+	d.waitProcess = func(int, engsession.Session) error {
+		return os.WriteFile(filepath.Join(sessionStore().Dir, id+".json"), []byte("{broken\n"), 0o600)
+	}
+
+	out, err = runRootForTestWithDeps(t, ws, d, "session", "stop", "--session-id", id, "--output", "json")
+	if !errors.Is(err, errOutputEmitted) {
+		t.Fatalf("post-wait corruption = %v, want emitted error; out=%s", err, out)
+	}
+	if env := parseEnvelopeForTest(t, out); env.OK {
+		t.Fatalf("post-wait corrupt record emitted stale success: %+v", env)
+	}
+}
+
 func TestSessionStatusReportsReconciledState(t *testing.T) {
 	ws := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
-	oldAlive := sessionProcessAlive
-	sessionProcessAlive = func(engsession.Session) bool { return false } // run wrapper is gone
-	defer func() { sessionProcessAlive = oldAlive }()
+	d := defaultDependencies()
+	d.processAlive = func(engsession.Session) bool { return false } // run wrapper is gone
 
-	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
+	out, err := runRootForTestWithDeps(t, ws, d, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -709,7 +847,7 @@ func TestSessionStatusReportsReconciledState(t *testing.T) {
 		t.Fatalf("mark running: %v", err)
 	}
 
-	out, err = runRootForTest(t, ws, "session", "status", "--session-id", id, "--output", "json")
+	out, err = runRootForTestWithDeps(t, ws, d, "session", "status", "--session-id", id, "--output", "json")
 	if err != nil {
 		t.Fatalf("status: %v\nout=%s", err, out)
 	}
@@ -725,11 +863,10 @@ func TestSessionStatusReportsReconciledState(t *testing.T) {
 func TestSessionStatusReconcileWipesStageDir(t *testing.T) {
 	ws := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
-	oldAlive := sessionProcessAlive
-	sessionProcessAlive = func(engsession.Session) bool { return false }
-	defer func() { sessionProcessAlive = oldAlive }()
+	d := defaultDependencies()
+	d.processAlive = func(engsession.Session) bool { return false }
 
-	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
+	out, err := runRootForTestWithDeps(t, ws, d, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -743,7 +880,7 @@ func TestSessionStatusReconcileWipesStageDir(t *testing.T) {
 	}
 	stageDir := seedSessionStageDirForTest(t, sess)
 
-	out, err = runRootForTest(t, ws, "session", "status", "--session-id", id, "--output", "json")
+	out, err = runRootForTestWithDeps(t, ws, d, "session", "status", "--session-id", id, "--output", "json")
 	if err != nil {
 		t.Fatalf("status: %v\nout=%s", err, out)
 	}
@@ -753,11 +890,10 @@ func TestSessionStatusReconcileWipesStageDir(t *testing.T) {
 func TestSessionListReconcileWipesStageDir(t *testing.T) {
 	ws := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
-	oldAlive := sessionProcessAlive
-	sessionProcessAlive = func(engsession.Session) bool { return false }
-	defer func() { sessionProcessAlive = oldAlive }()
+	d := defaultDependencies()
+	d.processAlive = func(engsession.Session) bool { return false }
 
-	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
+	out, err := runRootForTestWithDeps(t, ws, d, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -771,7 +907,7 @@ func TestSessionListReconcileWipesStageDir(t *testing.T) {
 	}
 	stageDir := seedSessionStageDirForTest(t, sess)
 
-	out, err = runRootForTest(t, ws, "session", "list", "--output", "json")
+	out, err = runRootForTestWithDeps(t, ws, d, "session", "list", "--output", "json")
 	if err != nil {
 		t.Fatalf("list: %v\nout=%s", err, out)
 	}
@@ -1035,11 +1171,10 @@ func TestSessionRemoveDeletesStoppedRecordAndRevokes(t *testing.T) {
 	ws := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
 	revoked := 0
-	oldRevoke := sessionRevokeCredentials
-	sessionRevokeCredentials = func(_ engsession.Session) error { revoked++; return nil }
-	defer func() { sessionRevokeCredentials = oldRevoke }()
+	d := defaultDependencies()
+	d.revokeCredentials = func(_ engsession.Session) error { revoked++; return nil }
 
-	out, err := runRootForTest(t, ws, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
+	out, err := runRootForTestWithDeps(t, ws, d, "session", "create", "--agent", "claude", "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
 	if err != nil {
 		t.Fatalf("create: %v\n%s", err, out)
 	}
@@ -1048,7 +1183,7 @@ func TestSessionRemoveDeletesStoppedRecordAndRevokes(t *testing.T) {
 		t.Fatalf("finish: %v", err)
 	}
 
-	out, err = runRootForTest(t, ws, "session", "rm", "--session-id", id, "--output", "json")
+	out, err = runRootForTestWithDeps(t, ws, d, "session", "rm", "--session-id", id, "--output", "json")
 	if err != nil {
 		t.Fatalf("rm: %v\n%s", err, out)
 	}
@@ -1138,13 +1273,12 @@ func TestSessionRemoveWipesStageDir(t *testing.T) {
 func TestSessionPruneRemovesStoppedIncludingCrashed(t *testing.T) {
 	ws := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
-	oldAlive := sessionProcessAlive
+	d := defaultDependencies()
 	// A recorded PID of 4242 is our crashed session; everything else is "alive".
-	sessionProcessAlive = func(sess engsession.Session) bool { return sess.PID != 4242 }
-	defer func() { sessionProcessAlive = oldAlive }()
+	d.processAlive = func(sess engsession.Session) bool { return sess.PID != 4242 }
 
 	mk := func(agent string) string {
-		out, err := runRootForTest(t, ws, "session", "create", "--agent", agent, "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
+		out, err := runRootForTestWithDeps(t, ws, d, "session", "create", "--agent", agent, "--environment", "host", "--trust-host", "--workspace", ws, "--output", "json")
 		if err != nil {
 			t.Fatalf("create %s: %v\n%s", agent, err, out)
 		}
@@ -1160,7 +1294,7 @@ func TestSessionPruneRemovesStoppedIncludingCrashed(t *testing.T) {
 		t.Fatalf("mark running crashed: %v", err)
 	}
 
-	out, err := runRootForTest(t, ws, "session", "prune", "--output", "json")
+	out, err := runRootForTestWithDeps(t, ws, d, "session", "prune", "--output", "json")
 	if err != nil {
 		t.Fatalf("prune: %v\n%s", err, out)
 	}
@@ -1919,13 +2053,13 @@ func TestSessionEgressObservationsAreValueFreeAndFailureDoesNotMutateGrants(t *t
 		t.Fatal(err)
 	}
 
-	oldObserve := observeSessionEgress
-	observeSessionEgress = func(context.Context, engsession.Session) ([]container.EgressObservation, error) {
+	d := defaultDependencies()
+	d.store = store
+	d.observeEgress = func(context.Context, engsession.Session) ([]container.EgressObservation, error) {
 		return []container.EgressObservation{{Host: "api.example.com", Port: 443, LastSeen: nowForTest(t), Count: 2, Grantable: true}}, nil
 	}
-	t.Cleanup(func() { observeSessionEgress = oldObserve })
 
-	out, err := runRootForTest(t, ws, "session", "egress", "observations", "--session-id", sess.ID, "--output", "json")
+	out, err := runRootForTestWithDeps(t, ws, d, "session", "egress", "observations", "--session-id", sess.ID, "--output", "json")
 	if err != nil {
 		t.Fatalf("session egress observations: %v\nout=%s", err, out)
 	}
@@ -1944,10 +2078,10 @@ func TestSessionEgressObservationsAreValueFreeAndFailureDoesNotMutateGrants(t *t
 		t.Fatalf("observation output leaked request material: %s", out)
 	}
 
-	observeSessionEgress = func(context.Context, engsession.Session) ([]container.EgressObservation, error) {
+	d.observeEgress = func(context.Context, engsession.Session) ([]container.EgressObservation, error) {
 		return nil, errors.New("proxy logs unavailable")
 	}
-	out, err = runRootForTest(t, ws, "session", "egress", "observations", "--session-id", sess.ID, "--output", "json")
+	out, err = runRootForTestWithDeps(t, ws, d, "session", "egress", "observations", "--session-id", sess.ID, "--output", "json")
 	if err != nil {
 		t.Fatalf("observation failure must return an envelope, not command error: %v\nout=%s", err, out)
 	}
@@ -1974,13 +2108,13 @@ func TestSessionEgressDismissFiltersOnlyAcknowledgedObservationsWithoutAuthority
 		t.Fatal(err)
 	}
 	seen := time.Now().UTC().Add(-time.Minute)
-	oldObserve := observeSessionEgress
-	observeSessionEgress = func(context.Context, engsession.Session) ([]container.EgressObservation, error) {
+	d := defaultDependencies()
+	d.store = store
+	d.observeEgress = func(context.Context, engsession.Session) ([]container.EgressObservation, error) {
 		return []container.EgressObservation{{Host: "api.example.com", Port: 443, LastSeen: seen, Count: 2, Grantable: true}}, nil
 	}
-	t.Cleanup(func() { observeSessionEgress = oldObserve })
 
-	out, err := runRootForTest(t, ws, "session", "egress", "dismiss", "--session-id", sess.ID, "--host", "API.Example.com", "--port", "443", "--output", "json")
+	out, err := runRootForTestWithDeps(t, ws, d, "session", "egress", "dismiss", "--session-id", sess.ID, "--host", "API.Example.com", "--port", "443", "--output", "json")
 	if err != nil {
 		t.Fatalf("dismiss: %v\\nout=%s", err, out)
 	}
@@ -1992,7 +2126,7 @@ func TestSessionEgressDismissFiltersOnlyAcknowledgedObservationsWithoutAuthority
 		t.Fatalf("dismiss acknowledgement response = %#v", env.Data["egress_acknowledgements"])
 	}
 
-	out, err = runRootForTest(t, ws, "session", "egress", "observations", "--session-id", sess.ID, "--output", "json")
+	out, err = runRootForTestWithDeps(t, ws, d, "session", "egress", "observations", "--session-id", sess.ID, "--output", "json")
 	if err != nil {
 		t.Fatalf("observations after dismiss: %v\\nout=%s", err, out)
 	}
@@ -2002,7 +2136,7 @@ func TestSessionEgressDismissFiltersOnlyAcknowledgedObservationsWithoutAuthority
 	}
 
 	seen = time.Now().UTC().Add(time.Minute)
-	out, err = runRootForTest(t, ws, "session", "egress", "observations", "--session-id", sess.ID, "--output", "json")
+	out, err = runRootForTestWithDeps(t, ws, d, "session", "egress", "observations", "--session-id", sess.ID, "--output", "json")
 	if err != nil {
 		t.Fatalf("later observations: %v\\nout=%s", err, out)
 	}

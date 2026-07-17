@@ -2,6 +2,7 @@ package container
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -41,17 +42,64 @@ func imageExists(ctx context.Context, eng runtime.Engine, tag string) bool {
 	return eng.Command(ctx, "image", "inspect", tag).Run() == nil
 }
 
-func ensureDockerfiles(dir string) error {
+// materializeBuildContext creates a private, disposable context containing only
+// the two reviewed Dockerfiles and lock projects selected by this recipe. The
+// credential-bearing runtime stage is never sent to the image builder.
+func materializeBuildContext(enabled []string) (string, func(), error) {
+	locks, err := validatedNPMToolLocks()
+	if err != nil {
+		return "", nil, err
+	}
+	dir, err := os.MkdirTemp("", "safeslop-build-context-*")
+	if err != nil {
+		return "", nil, err
+	}
+	cleanup := func() { _ = os.RemoveAll(dir) }
+	if err := os.Chmod(dir, 0o700); err != nil {
+		cleanup()
+		return "", nil, err
+	}
 	for _, name := range []string{"Dockerfile.agent", "Dockerfile.agent.tools"} {
-		b, err := readAsset(name)
+		body, err := readAsset(name)
 		if err != nil {
-			return err
+			cleanup()
+			return "", nil, err
 		}
-		if err := os.WriteFile(filepath.Join(dir, name), b, 0o600); err != nil {
-			return err
+		if err := os.WriteFile(filepath.Join(dir, name), body, 0o600); err != nil {
+			cleanup()
+			return "", nil, err
 		}
 	}
-	return nil
+	locksDir := filepath.Join(dir, "npm-locks")
+	if err := os.Mkdir(locksDir, 0o700); err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	selected := make(map[string]bool)
+	for _, name := range enabled {
+		lock, isNPM := locks[name]
+		if !isNPM || selected[name] {
+			continue
+		}
+		selected[name] = true
+		projectDir := filepath.Join(locksDir, name)
+		if err := os.Mkdir(projectDir, 0o700); err != nil {
+			cleanup()
+			return "", nil, err
+		}
+		for file, body := range map[string][]byte{"package.json": lock.PackageJSON, "package-lock.json": lock.PackageLock} {
+			if err := os.WriteFile(filepath.Join(projectDir, file), body, 0o600); err != nil {
+				cleanup()
+				return "", nil, err
+			}
+		}
+	}
+	const dockerignore = "*\n!Dockerfile.agent\n!Dockerfile.agent.tools\n!npm-locks/\n!npm-locks/**\n"
+	if err := os.WriteFile(filepath.Join(dir, ".dockerignore"), []byte(dockerignore), 0o600); err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	return dir, cleanup, nil
 }
 
 // runEngine runs a container subcommand through the selected engine, streaming to the host stdio
@@ -76,16 +124,18 @@ func runBuild(ctx context.Context, eng runtime.Engine, args ...string) error {
 
 // buildImages builds the base then the tools image, each tagged by its content-hash recipe id
 // (local/safeslop-{base,tools}:<id>) so imageExists(<id-tag>) is a CORRECT skip — an unchanged
-// recipe is reused, a changed Dockerfile/build-arg yields a new tag and rebuilds (specs/0055 W1,
-// killing the stale-":latest" Bug B). dir is the build context.
-func buildImages(ctx context.Context, eng runtime.Engine, dir string, enabled []string) error {
-	if err := ensureDockerfiles(dir); err != nil {
-		return err
-	}
+// recipe is reused, a changed Dockerfile/build-arg or selected npm lock yields a
+// new tag and rebuilds (specs/0055 W1, killing the stale-":latest" Bug B).
+func buildImages(ctx context.Context, eng runtime.Engine, enabled []string) error {
 	baseImg, toolsImg, toolsArgs, err := agentImageTags(enabled)
 	if err != nil {
 		return err
 	}
+	dir, cleanup, err := materializeBuildContext(enabled)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
 	if err := ensureImage(baseImg,
 		func() bool { return imageExists(ctx, eng, baseImg) },
 		func() error {
@@ -122,6 +172,8 @@ func ensureImage(id string, exists func() bool, build func() error) error {
 	})
 }
 
+var ErrComposeSafetyUnsupported = errors.New("container runtime does not support required safe bind mounts")
+
 const (
 	proxyReadyTimeout   = 10 * time.Second
 	proxyReadyInterval  = 100 * time.Millisecond
@@ -135,8 +187,12 @@ const (
 func waitForProxy(ctx context.Context, eng runtime.Engine, composeFile string) error {
 	readyCtx, cancel := context.WithTimeout(ctx, proxyReadyTimeout)
 	defer cancel()
+	args, err := composeProjectArgs(composeFile, "exec", "-T", "proxy", "bash", "-ec", proxyReadyCommand)
+	if err != nil {
+		return err
+	}
 	for {
-		if err := eng.Command(readyCtx, "compose", "-f", composeFile, "exec", "-T", "proxy", "bash", "-ec", proxyReadyCommand).Run(); err == nil {
+		if err := eng.Command(readyCtx, args...).Run(); err == nil {
 			return nil
 		}
 		select {
@@ -150,17 +206,32 @@ func waitForProxy(ctx context.Context, eng runtime.Engine, composeFile string) e
 func cleanupUnreadyProxy(eng runtime.Engine, composeFile string) {
 	ctx, cancel := context.WithTimeout(context.Background(), proxyCleanupTimeout)
 	defer cancel()
-	_ = runEngine(ctx, eng, "compose", "-f", composeFile, "down", "--remove-orphans")
+	args, err := composeProjectArgs(composeFile, "down", "--remove-orphans")
+	if err != nil {
+		return
+	}
+	_ = runEngine(ctx, eng, args...)
 }
 
 // Up ensures images are built (for the profile's resolved package set, enabled) and the
 // squid proxy is running and ready for the given compose file. A proxy startup failure
 // tears the partial stack down and returns only an engine-owned, value-free failure.
 func Up(ctx context.Context, eng runtime.Engine, dir, composeFile string, enabled []string) error {
-	if err := buildImages(ctx, eng, dir, enabled); err != nil {
+	configArgs, err := composeProjectArgs(composeFile, "config")
+	if err != nil {
+		return ErrComposeSafetyUnsupported
+	}
+	if err := eng.Command(ctx, configArgs...).Run(); err != nil {
+		return ErrComposeSafetyUnsupported
+	}
+	if err := buildImages(ctx, eng, enabled); err != nil {
 		return err
 	}
-	if err := runEngine(ctx, eng, "compose", "-f", composeFile, "up", "-d", "proxy"); err != nil {
+	args, err := composeProjectArgs(composeFile, "up", "-d", "proxy")
+	if err != nil {
+		return err
+	}
+	if err := runEngine(ctx, eng, args...); err != nil {
 		cleanupUnreadyProxy(eng, composeFile)
 		return newRuntimeFailure(NetworkProxyUnavailable)
 	}

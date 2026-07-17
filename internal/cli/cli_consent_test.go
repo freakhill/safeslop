@@ -12,11 +12,9 @@ import (
 	"github.com/freakhill/safeslop/internal/engine/policy"
 )
 
-func acceptHostConsentForTest(t *testing.T) {
+func acceptHostConsentForTest(t *testing.T, d *dependencies) {
 	t.Helper()
-	oldGate := hostLaunchConsent
-	hostLaunchConsent = func(string, policy.Profile, io.Reader, io.Writer) error { return nil }
-	t.Cleanup(func() { hostLaunchConsent = oldGate })
+	d.hostLaunchConsent = func(string, policy.Profile, io.Reader, io.Writer) error { return nil }
 }
 
 func TestHostLaunchConsentAcceptsMatchedAnswers(t *testing.T) {
@@ -60,17 +58,16 @@ func TestCmdRunHostInvokesConsentGate(t *testing.T) {
 
 	consentErr := errors.New("consent sentinel")
 	calls := 0
-	oldGate := hostLaunchConsent
-	hostLaunchConsent = func(name string, prof policy.Profile, in io.Reader, out io.Writer) error {
+	d := defaultDependencies()
+	d.hostLaunchConsent = func(name string, prof policy.Profile, in io.Reader, out io.Writer) error {
 		calls++
 		if name != "dev" || prof.Environment != "host" {
 			t.Fatalf("gate called with name=%q environment=%q, want dev/host", name, prof.Environment)
 		}
 		return consentErr
 	}
-	t.Cleanup(func() { hostLaunchConsent = oldGate })
 
-	_, err := runRootForTest(t, ws, "run", "--trust", "dev")
+	_, err := runRootForTestWithDeps(t, ws, d, "run", "--trust", "dev")
 	if !errors.Is(err, consentErr) {
 		t.Fatalf("run error = %v, want consent sentinel", err)
 	}
@@ -89,23 +86,20 @@ func TestSessionRunHostInvokesConsentGate(t *testing.T) {
 		t.Fatalf("create session: %v", err)
 	}
 
-	oldPTY := sessionHasInteractivePTY
-	sessionHasInteractivePTY = func() bool { return true }
-	t.Cleanup(func() { sessionHasInteractivePTY = oldPTY })
-
+	d := defaultDependencies()
+	d.store = store
+	d.hasInteractivePTY = func() bool { return true }
 	consentErr := errors.New("consent sentinel")
 	calls := 0
-	oldGate := hostLaunchConsent
-	hostLaunchConsent = func(name string, prof policy.Profile, in io.Reader, out io.Writer) error {
+	d.hostLaunchConsent = func(name string, prof policy.Profile, in io.Reader, out io.Writer) error {
 		calls++
 		if name != "session-"+sess.ID || prof.Environment != "host" {
 			t.Fatalf("gate called with name=%q environment=%q, want session id/host", name, prof.Environment)
 		}
 		return consentErr
 	}
-	t.Cleanup(func() { hostLaunchConsent = oldGate })
 
-	_, err = runRootForTest(t, ws, "session", "run", "--session-id", sess.ID)
+	_, err = runRootForTestWithDeps(t, ws, d, "session", "run", "--session-id", sess.ID)
 	if !errors.Is(err, consentErr) {
 		t.Fatalf("session run error = %v, want consent sentinel", err)
 	}
@@ -124,24 +118,22 @@ func TestSessionRunHostDetachInvokesConsentBeforeSupervisor(t *testing.T) {
 		t.Fatalf("create session: %v", err)
 	}
 
+	d := defaultDependencies()
+	d.store = store
 	consentErr := errors.New("consent sentinel")
 	calls := 0
-	oldGate := hostLaunchConsent
-	hostLaunchConsent = func(name string, prof policy.Profile, in io.Reader, out io.Writer) error {
+	d.hostLaunchConsent = func(name string, prof policy.Profile, in io.Reader, out io.Writer) error {
 		calls++
 		return consentErr
 	}
-	t.Cleanup(func() { hostLaunchConsent = oldGate })
 
 	supervisorCalls := 0
-	oldSupervisor := launchSupervisor
-	launchSupervisor = func(id string) (int, error) {
+	d.launchSupervisor = func(id string) (launchedSupervisor, error) {
 		supervisorCalls++
-		return 0, errors.New("supervisor must not launch before consent passes")
+		return launchedSupervisor{}, errors.New("supervisor must not launch before consent passes")
 	}
-	t.Cleanup(func() { launchSupervisor = oldSupervisor })
 
-	_, err = runRootForTest(t, ws, "session", "run", "--session-id", sess.ID, "--detach")
+	_, err = runRootForTestWithDeps(t, ws, d, "session", "run", "--session-id", sess.ID, "--detach")
 	if !errors.Is(err, consentErr) {
 		t.Fatalf("session run --detach error = %v, want consent sentinel", err)
 	}

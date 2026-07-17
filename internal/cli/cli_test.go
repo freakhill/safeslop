@@ -1,11 +1,14 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/freakhill/safeslop/internal/engine/container/runtime"
+	"github.com/freakhill/safeslop/internal/engine/creds"
 	"github.com/freakhill/safeslop/internal/engine/hostexec"
 	"github.com/freakhill/safeslop/internal/engine/policy"
 )
@@ -53,6 +56,29 @@ func TestRunProfileStagesSecretsAndNpmrcThenWipes(t *testing.T) {
 	}
 }
 
+func TestDoctorUsesOwnedRuntimeAndCredentialProbes(t *testing.T) {
+	d := defaultDependencies()
+	opProbed, runtimeProbed := false, false
+	d.credsProber = func() creds.Prober {
+		return creds.Prober{OpSignedIn: func(context.Context) bool {
+			opProbed = true
+			return true
+		}}
+	}
+	d.detectRuntime = func(runtime.NetworkPolicy) (runtime.Engine, error) {
+		runtimeProbed = true
+		return runtime.PodmanEngine{}, nil
+	}
+
+	report := doctorReportWithDeps(d)
+	if !opProbed || !runtimeProbed {
+		t.Fatalf("doctor bypassed owned probes: op=%t runtime=%t", opProbed, runtimeProbed)
+	}
+	if report["1password-signedin"].(map[string]any)["present"] != true || report["container-runtime"].(map[string]any)["present"] != true {
+		t.Fatalf("doctor report did not use probe results: %+v", report)
+	}
+}
+
 func TestDoctorReportsGkeAuthPlugin(t *testing.T) {
 	report := doctorReport()
 	if _, ok := report["gke-gcloud-auth-plugin"]; !ok {
@@ -71,8 +97,8 @@ func TestDoctorReportsPresentWithSameInodeAliases(t *testing.T) {
 		first = "/Applications/OrbStack.app/Contents/MacOS/docker"
 		alias = "/usr/local/bin/docker"
 	)
-	old := doctorHostExecResolver
-	doctorHostExecResolver = func() *hostexec.Resolver {
+	d := defaultDependencies()
+	d.doctorHostExec = func() *hostexec.Resolver {
 		return hostexec.New(cliFakeHostEnv{
 			all: map[string][]string{"docker": {first, alias}},
 			sameFile: func(a, b string) (bool, error) {
@@ -80,9 +106,8 @@ func TestDoctorReportsPresentWithSameInodeAliases(t *testing.T) {
 			},
 		})
 	}
-	t.Cleanup(func() { doctorHostExecResolver = old })
 
-	row := doctorReport()["docker"].(map[string]any)
+	row := doctorReportWithDeps(d)["docker"].(map[string]any)
 	if row["present"] != true || row["path"] != first {
 		t.Fatalf("alias-only docker should be present at the first path: %+v", row)
 	}
@@ -100,8 +125,8 @@ func TestDoctorReportsAliasesPlusDistinctShadow(t *testing.T) {
 		alias  = "/usr/local/bin/docker"
 		shadow = "/opt/homebrew/bin/docker"
 	)
-	old := doctorHostExecResolver
-	doctorHostExecResolver = func() *hostexec.Resolver {
+	d := defaultDependencies()
+	d.doctorHostExec = func() *hostexec.Resolver {
 		return hostexec.New(cliFakeHostEnv{
 			all: map[string][]string{"docker": {first, alias, shadow}},
 			sameFile: func(a, b string) (bool, error) {
@@ -109,9 +134,8 @@ func TestDoctorReportsAliasesPlusDistinctShadow(t *testing.T) {
 			},
 		})
 	}
-	t.Cleanup(func() { doctorHostExecResolver = old })
 
-	row := doctorReport()["docker"].(map[string]any)
+	row := doctorReportWithDeps(d)["docker"].(map[string]any)
 	if row["present"] != false {
 		t.Fatalf("mixed docker paths must not be present: %+v", row)
 	}
@@ -124,8 +148,8 @@ func TestDoctorReportsAliasesPlusDistinctShadow(t *testing.T) {
 }
 
 func TestDoctorReportsUnverifiedIdentity(t *testing.T) {
-	old := doctorHostExecResolver
-	doctorHostExecResolver = func() *hostexec.Resolver {
+	d := defaultDependencies()
+	d.doctorHostExec = func() *hostexec.Resolver {
 		return hostexec.New(cliFakeHostEnv{
 			all: map[string][]string{"docker": {"/safe/bin/docker", "/usr/local/bin/docker"}},
 			sameFile: func(string, string) (bool, error) {
@@ -133,9 +157,8 @@ func TestDoctorReportsUnverifiedIdentity(t *testing.T) {
 			},
 		})
 	}
-	t.Cleanup(func() { doctorHostExecResolver = old })
 
-	row := doctorReport()["docker"].(map[string]any)
+	row := doctorReportWithDeps(d)["docker"].(map[string]any)
 	if row["present"] != false || row["identity_unverified"] != true {
 		t.Fatalf("identity failure must be unavailable and explicitly unverified: %+v", row)
 	}
@@ -145,15 +168,14 @@ func TestDoctorReportsUnverifiedIdentity(t *testing.T) {
 }
 
 func TestDoctorReportsShadowedHelperWithoutMarkingPresent(t *testing.T) {
-	old := doctorHostExecResolver
-	doctorHostExecResolver = func() *hostexec.Resolver {
+	d := defaultDependencies()
+	d.doctorHostExec = func() *hostexec.Resolver {
 		return hostexec.New(cliFakeHostEnv{path: "/safe/bin:/other/bin", all: map[string][]string{
 			"git": {"/safe/bin/git", "/other/bin/git"},
 		}})
 	}
-	t.Cleanup(func() { doctorHostExecResolver = old })
 
-	row, ok := doctorReport()["git"].(map[string]any)
+	row, ok := doctorReportWithDeps(d)["git"].(map[string]any)
 	if !ok {
 		t.Fatalf("doctor git row has unexpected shape")
 	}

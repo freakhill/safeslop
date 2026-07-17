@@ -15,15 +15,14 @@ import (
 func TestProfileEvaluationUnsavedCollectsOneLocalSnapshot(t *testing.T) {
 	fixed := time.Date(2026, 7, 14, 12, 34, 56, 0, time.FixedZone("test", 2*60*60))
 	calls := 0
-	oldNow := profileEvaluationNow
-	profileEvaluationNow = func() time.Time {
+	d := defaultDependencies()
+	d.now = func() time.Time {
 		calls++
 		return fixed
 	}
-	t.Cleanup(func() { profileEvaluationNow = oldNow })
 
 	dir := t.TempDir()
-	evaluation := evaluateProfile(profileEvaluationInput{
+	evaluation := evaluateProfileWithDeps(d, profileEvaluationInput{
 		Source:     profileEvaluationSourceUnsaved,
 		Name:       "preview",
 		PolicyPath: filepath.Join(dir, "safeslop.cue"),
@@ -62,9 +61,8 @@ func TestProfileEvaluationUnsavedCollectsOneLocalSnapshot(t *testing.T) {
 func TestProfileEvaluationProjectUsesExactBytesForTrust(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	fixed := time.Date(2026, 7, 14, 15, 0, 0, 0, time.UTC)
-	oldNow := profileEvaluationNow
-	profileEvaluationNow = func() time.Time { return fixed }
-	t.Cleanup(func() { profileEvaluationNow = oldNow })
+	d := defaultDependencies()
+	d.now = func() time.Time { return fixed }
 
 	path := canonicalPolicyPath(filepath.Join(t.TempDir(), "safeslop.cue"))
 	approved := []byte("exact approved bytes")
@@ -73,7 +71,7 @@ func TestProfileEvaluationProjectUsesExactBytesForTrust(t *testing.T) {
 	}
 	prof := policy.Profile{Agent: "shell", Environment: "host", Network: "deny", Workspace: t.TempDir()}
 
-	trusted := evaluateProfile(profileEvaluationInput{
+	trusted := evaluateProfileWithDeps(d, profileEvaluationInput{
 		Source: profileEvaluationSourceProject, Name: "review", PolicyPath: path,
 		PolicyHash: "not-a-trust-input", PolicyBytes: approved, Profile: prof,
 	})
@@ -84,7 +82,7 @@ func TestProfileEvaluationProjectUsesExactBytesForTrust(t *testing.T) {
 		t.Fatalf("trusted checked_at = %v, want %s", trusted.Trust.CheckedAt, fixed)
 	}
 
-	changed := evaluateProfile(profileEvaluationInput{
+	changed := evaluateProfileWithDeps(d, profileEvaluationInput{
 		Source: profileEvaluationSourceProject, Name: "review", PolicyPath: path,
 		PolicyBytes: []byte("changed bytes"), Profile: prof,
 	})
@@ -98,17 +96,16 @@ func TestProfileEvaluationProjectUsesExactBytesForTrust(t *testing.T) {
 }
 
 func TestProfileEvaluationBuiltinUsesEmbeddedProvenance(t *testing.T) {
-	oldRuntime := profileEvaluationRuntime
-	profileEvaluationRuntime = func(string) profilePrerequisiteCheck {
+	d := defaultDependencies()
+	d.profileRuntime = func(string) profilePrerequisiteCheck {
 		return profilePrerequisiteCheck{State: profilePrerequisitePass}
 	}
-	t.Cleanup(func() { profileEvaluationRuntime = oldRuntime })
 
 	builtin, ok := policy.BuiltinProfileByName("pi")
 	if !ok {
 		t.Fatal("pi builtin missing")
 	}
-	evaluation := evaluateProfile(profileEvaluationInput{
+	evaluation := evaluateProfileWithDeps(d, profileEvaluationInput{
 		Source: profileEvaluationSourceBuiltin, Name: builtin.Name,
 		PolicyPath: "builtin:" + builtin.Name, PolicyHash: builtin.Hash, Profile: builtin.Profile,
 	})
@@ -159,27 +156,22 @@ func TestProfileEvaluationBlockedReadinessDoesNotChangeAuthority(t *testing.T) {
 	}
 }
 
-func withProfileEvaluationLocalPass(t *testing.T) time.Time {
+func withProfileEvaluationLocalPass(t *testing.T) (*dependencies, time.Time) {
 	t.Helper()
 	fixed := time.Date(2026, 7, 14, 18, 30, 0, 0, time.UTC)
-	oldNow, oldWorkspace := profileEvaluationNow, profileEvaluationWorkspace
-	oldHelper, oldRuntime, oldAccounts := profileEvaluationHelper, profileEvaluationRuntime, profileEvaluationAccountLinks
-	profileEvaluationNow = func() time.Time { return fixed }
-	profileEvaluationWorkspace = func(string) profilePrerequisiteCheck {
+	d := defaultDependencies()
+	d.now = func() time.Time { return fixed }
+	d.profileWorkspace = func(string) profilePrerequisiteCheck {
 		return profilePrerequisiteCheck{State: profilePrerequisitePass}
 	}
-	profileEvaluationHelper = func(string) profilePrerequisiteCheck {
+	d.profileHelper = func(string) profilePrerequisiteCheck {
 		return profilePrerequisiteCheck{State: profilePrerequisitePass}
 	}
-	profileEvaluationRuntime = func(string) profilePrerequisiteCheck {
+	d.profileRuntime = func(string) profilePrerequisiteCheck {
 		return profilePrerequisiteCheck{State: profilePrerequisitePass}
 	}
-	profileEvaluationAccountLinks = func(policy.Profile) profileAccountLinkChecks { return profileAccountLinkChecks{} }
-	t.Cleanup(func() {
-		profileEvaluationNow, profileEvaluationWorkspace = oldNow, oldWorkspace
-		profileEvaluationHelper, profileEvaluationRuntime, profileEvaluationAccountLinks = oldHelper, oldRuntime, oldAccounts
-	})
-	return fixed
+	d.profileAccountLinks = func(policy.Profile) profileAccountLinkChecks { return profileAccountLinkChecks{} }
+	return d, fixed
 }
 
 func profileFinding(findings []policy.Finding, ruleID string) *policy.Finding {
@@ -192,16 +184,15 @@ func profileFinding(findings []policy.Finding, ruleID string) *policy.Finding {
 }
 
 func TestProfileEvaluationShadowedHelperStaysBlockedAndPathFree(t *testing.T) {
-	oldHelper := profileEvaluationHelper
-	profileEvaluationHelper = func(name string) profilePrerequisiteCheck {
+	d := defaultDependencies()
+	d.profileHelper = func(name string) profilePrerequisiteCheck {
 		if name == "op" {
 			return profilePrerequisiteCheck{State: profilePrerequisiteFail, Problem: profileProblemResolution}
 		}
 		return profilePrerequisiteCheck{State: profilePrerequisitePass}
 	}
-	t.Cleanup(func() { profileEvaluationHelper = oldHelper })
 
-	evaluation := evaluateProfile(profileEvaluationInput{
+	evaluation := evaluateProfileWithDeps(d, profileEvaluationInput{
 		Source: profileEvaluationSourceUnsaved,
 		Profile: policy.Profile{
 			Agent: "fish", Environment: "host", Network: "deny", Workspace: t.TempDir(),
@@ -227,21 +218,18 @@ func TestProfileEvaluationShadowedHelperStaysBlockedAndPathFree(t *testing.T) {
 }
 
 func TestProfileEvaluationRuntimeAndAccountFailuresAreIndependent(t *testing.T) {
-	oldRuntime, oldHelper, oldAccounts := profileEvaluationRuntime, profileEvaluationHelper, profileEvaluationAccountLinks
-	profileEvaluationRuntime = func(string) profilePrerequisiteCheck {
+	d := defaultDependencies()
+	d.profileRuntime = func(string) profilePrerequisiteCheck {
 		return profilePrerequisiteCheck{State: profilePrerequisiteFail, Problem: profileProblemResolution}
 	}
-	profileEvaluationHelper = func(string) profilePrerequisiteCheck {
+	d.profileHelper = func(string) profilePrerequisiteCheck {
 		return profilePrerequisiteCheck{State: profilePrerequisitePass}
 	}
-	profileEvaluationAccountLinks = func(policy.Profile) profileAccountLinkChecks {
+	d.profileAccountLinks = func(policy.Profile) profileAccountLinkChecks {
 		return profileAccountLinkChecks{Github: profileProviderLinkCheck{Required: true, State: profilePrerequisiteFail, Count: 1}}
 	}
-	t.Cleanup(func() {
-		profileEvaluationRuntime, profileEvaluationHelper, profileEvaluationAccountLinks = oldRuntime, oldHelper, oldAccounts
-	})
 
-	evaluation := evaluateProfile(profileEvaluationInput{
+	evaluation := evaluateProfileWithDeps(d, profileEvaluationInput{
 		Source: profileEvaluationSourceUnsaved,
 		Profile: policy.Profile{
 			Agent: "pi", Environment: "container", Network: "deny", Workspace: t.TempDir(),
@@ -262,13 +250,12 @@ func TestProfileEvaluationRuntimeAndAccountFailuresAreIndependent(t *testing.T) 
 }
 
 func TestProfileEvaluationCompatibilityJSONStillDecodesOldFields(t *testing.T) {
-	oldRuntime := profileEvaluationRuntime
-	profileEvaluationRuntime = func(string) profilePrerequisiteCheck {
+	d := defaultDependencies()
+	d.profileRuntime = func(string) profilePrerequisiteCheck {
 		return profilePrerequisiteCheck{State: profilePrerequisitePass}
 	}
-	t.Cleanup(func() { profileEvaluationRuntime = oldRuntime })
 
-	data, err := profileResolvedData("safeslop.cue", "review", policy.Profile{
+	data, err := profileResolvedDataWithDeps(d, "safeslop.cue", "review", policy.Profile{
 		Agent: "fish", Environment: "container", Network: "deny",
 	})
 	if err != nil {

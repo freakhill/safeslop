@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"regexp"
 	"strings"
 
@@ -16,12 +15,20 @@ import (
 var profileCredentialRepoComponentRE = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
 func cmdProfileCredentials() *cobra.Command {
+	return cmdProfileCredentialsWithDeps(defaultDependencies())
+}
+
+func cmdProfileCredentialsWithDeps(d *dependencies) *cobra.Command {
 	c := &cobra.Command{Use: "credentials", Short: "Set or clear forge credentials on a profile"}
-	c.AddCommand(cmdProfileCredentialsSet(), cmdProfileCredentialsClear())
+	c.AddCommand(cmdProfileCredentialsSetWithDeps(d), cmdProfileCredentialsClearWithDeps(d))
 	return c
 }
 
 func cmdProfileCredentialsSet() *cobra.Command {
+	return cmdProfileCredentialsSetWithDeps(defaultDependencies())
+}
+
+func cmdProfileCredentialsSetWithDeps(d *dependencies) *cobra.Command {
 	var provider, url, output string
 	var useOrigin bool
 	var repos, writeRepos []string
@@ -48,7 +55,7 @@ func cmdProfileCredentialsSet() *cobra.Command {
 				return emitContractError(jsoncontract.CodeNotFound, fmt.Sprintf("no profile %q in safeslop.cue", name), map[string]any{"profile": name, "path": path})
 			}
 			prof = applyProfileForgeCredentials(prof, forge)
-			if err := saveProfileCredentialMutation(path, cfg, name, prof); err != nil {
+			if err := saveProfileCredentialMutationWithDeps(d, path, cfg, name, prof); err != nil {
 				return err
 			}
 			data, err := profileCredentialMutationData(path, name, prof)
@@ -70,6 +77,10 @@ func cmdProfileCredentialsSet() *cobra.Command {
 }
 
 func cmdProfileCredentialsClear() *cobra.Command {
+	return cmdProfileCredentialsClearWithDeps(defaultDependencies())
+}
+
+func cmdProfileCredentialsClearWithDeps(d *dependencies) *cobra.Command {
 	var output string
 	c := &cobra.Command{
 		Use:   "clear <profile> [safeslop.cue] --output json",
@@ -89,7 +100,7 @@ func cmdProfileCredentialsClear() *cobra.Command {
 				return emitContractError(jsoncontract.CodeNotFound, fmt.Sprintf("no profile %q in safeslop.cue", name), map[string]any{"profile": name, "path": path})
 			}
 			prof = clearProfileForgeCredentials(prof)
-			if err := saveProfileCredentialMutation(path, cfg, name, prof); err != nil {
+			if err := saveProfileCredentialMutationWithDeps(d, path, cfg, name, prof); err != nil {
 				return err
 			}
 			data, err := profileCredentialMutationData(path, name, prof)
@@ -234,6 +245,10 @@ func profileCredentialsEmpty(c *policy.Credentials) bool {
 }
 
 func saveProfileCredentialMutation(path string, cfg *policy.Config, name string, prof policy.Profile) error {
+	return saveProfileCredentialMutationWithDeps(defaultDependencies(), path, cfg, name, prof)
+}
+
+func saveProfileCredentialMutationWithDeps(d *dependencies, path string, cfg *policy.Config, name string, prof policy.Profile) error {
 	cfg.Profiles[name] = prof
 	rendered, err := renderConfigCUE(cfg)
 	if err != nil {
@@ -242,7 +257,7 @@ func saveProfileCredentialMutation(path string, cfg *policy.Config, name string,
 	if _, err := policy.LoadBytes(rendered); err != nil {
 		return emitContractError(jsoncontract.CodeSchemaViolation, "rendered safeslop.cue did not validate; not writing", map[string]any{"error": err.Error()})
 	}
-	if err := os.WriteFile(path, rendered, 0o644); err != nil {
+	if err := d.writePolicy(path, rendered); err != nil {
 		return emitContractError(jsoncontract.CodeIOError, "write safeslop.cue", map[string]any{"path": path, "error": err.Error()})
 	}
 	return nil

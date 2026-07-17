@@ -20,6 +20,20 @@ type fakeEngine struct {
 	runs     []string
 }
 
+func composeCommandKey(t testing.TB, composeFile string, args ...string) string {
+	t.Helper()
+	return composeCommandKeyWithOverrides(t, composeFile, nil, args...)
+}
+
+func composeCommandKeyWithOverrides(t testing.TB, composeFile string, overrides []string, args ...string) string {
+	t.Helper()
+	argv, err := composeProjectArgsWithOverrides(composeFile, overrides, args...)
+	if err != nil {
+		t.Fatalf("composeProjectArgs: %v", err)
+	}
+	return strings.Join(argv, " ")
+}
+
 func newFakeEngine(t *testing.T, outputs map[string]string) *fakeEngine {
 	t.Helper()
 	return &fakeEngine{t: t, outputs: outputs, failures: map[string]int{}, onRun: map[string]func(){}}

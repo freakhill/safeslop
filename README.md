@@ -94,6 +94,7 @@ safeslop session status --session-id <id> --output <json|jsonl>
 safeslop session egress observations --session-id <id> --output json
 safeslop session egress grants --session-id <id> --output json
 safeslop session egress grant --session-id <id> --host example.com --port 443 --output json
+safeslop session egress dismiss --session-id <id> --host example.com --port 443 --output json
 safeslop session egress revoke --session-id <id> --grant-id G --output json
 safeslop session stop --session-id <id> --revoke-credentials --output json
 safeslop session rm --session-id <id> --output json        remove one stopped session record
@@ -162,7 +163,10 @@ value-free credential scope in the JSON contract as `credential_scopes` for
 profile-backed sessions. Each row names only the credential kind, non-secret
 target, and access/scope; it does not include token values, source references,
 or staged file paths. Ad-hoc sessions and profiles without credentials omit it
-or return an empty array.
+or return an empty array. Session record store failures are likewise typed and
+value-free: corrupt records do not disappear or yield partial lists, stale
+mutations are rejected with retry semantics instead of overwriting newer state,
+and commit uncertainty is reported as uncertainty rather than success.
 
 ### Progressive session egress
 
@@ -173,11 +177,22 @@ rows; it never grants traffic. `grant`/`revoke` control a session-scoped overlay
 only, so a grant is removed with the session and never mutates `profile.egress`
 or `safeslop.cue`. `dismiss` records a value-free **Keep denied** acknowledgement
 for the observed destination: it grants nothing, suppresses only observations at
-or before that acknowledgement, and a later denial is visible again. Proxy
-overlay/reload failure keeps the prior, more-restrictive deny state. Before the
-agent starts, safeslop requires both a valid Squid configuration and a live proxy
-listener. Failure tears down the partial stack and records the value-free structured
-code `network_proxy_unavailable`; raw runtime output is never persisted. Operators
+or before that acknowledgement, and a later denial is visible again. On a running
+session, a grant that adds a new session-grant row or a revoke that removes one
+force-replaces the proxy and succeeds only after the running proxy
+acknowledges the exact grant revision and overlay hash by label plus the mounted
+`session-grants.conf` sha256, so revocation drops old tunnels instead of relying
+on in-place reload. Widening persists its upper bound before activation; narrowing
+activates and acknowledges the smaller set before committing it. Created sessions
+persist the reviewed set for launch without a live replacement; dismiss is
+record-only. If runtime authority or a commit outcome cannot be proven, safeslop
+attempts full boundary teardown and records the fixed value-free code
+`network_authority_uncertain` rather than guessing. If teardown itself cannot be
+proven, further egress operations stay blocked until explicit stop/reap. Before
+agent start, safeslop requires both a valid Squid configuration and a live proxy
+listener.
+Failure tears down the partial stack and records the value-free structured code
+`network_proxy_unavailable`; raw runtime output is never persisted. Operators
 can run the opt-in real Docker gate with `make test-progressive-egress-smoke`.
 
 For a deliberately reviewed future-session rule, use the separate typed policy
@@ -221,21 +236,29 @@ additionally reaped by their `safeslop.session=<id>` labels during
 stop/reconcile, and the reconstructed host stage dir is wiped, so teardown does
 not depend on a still-readable session record.
 
-`session stop` (and a terminal/buffer close) tears the boundary down rather than
-just killing the wrapper: credentials are revoked before process termination when
-`--revoke-credentials` is requested, stop reconciles the recorded PID/process
-identity before signalling (so a stale detached PGID is not targeted), the run
-receives `SIGTERM`/`SIGHUP`, and the labelled container boundary is reaped;
-staged secrets are wiped by run teardown or the stop/reconcile cleanup path.
-Interactive `Ctrl-C` (`SIGINT`) is left for the agent and does not tear the
-session down.
+`session stop` tears the boundary down rather than just killing the wrapper:
+credentials are revoked before process termination when `--revoke-credentials` is
+requested, stop reconciles the recorded PID/process identity before signalling
+(so a stale detached PGID is not targeted), and the labelled container boundary
+is reaped; staged secrets are wiped by run teardown or the stop/reconcile cleanup
+path. Closing a coupled terminal sends `SIGHUP` to its coupled CLI and triggers its
+deferred teardown. Closing an attach buffer only disconnects from a detached
+supervisor: the session keeps running until explicit stop. Explicit detached stop
+first sends `SIGTERM`, then (for a token-verified process identity) `SIGKILL`
+after the bounded grace period if needed, followed by label reap, socket removal,
+and stage wipe. A tokenless legacy record gets the full `SIGTERM` grace but never
+an unverified `SIGKILL` escalation. Interactive `Ctrl-C`
+(`SIGINT`) is left for the agent and does not tear the session down.
 
-`session run` is an interactive attach and needs a controlling terminal — Emacs
-supplies one via `make-term`. Invoked without a usable TTY (a pipe, cron, a
-headless shell), it emits the `PTY_UNAVAILABLE` contract error
-(`details.fallback = "status-jsonl"`) and exits non-zero **without** marking the
-session running, so nothing is left as a phantom. The Emacs client switches to a
-read-only `--output jsonl` status monitor on that code.
+`session run` is a one-shot interactive attach and needs a controlling terminal —
+Emacs supplies one via `make-term`. Each created record has one atomic launch
+claim: a second launch while it runs is rejected with `SESSION_ALREADY_RUNNING`,
+and a terminal record is rejected with `SESSION_STOPPED` (create a new session to
+run again). Invoked without a usable TTY (a pipe, cron, a headless shell), it
+emits the `PTY_UNAVAILABLE` contract error (`details.fallback = "status-jsonl"`)
+and exits non-zero **without** marking the session running, so nothing is left as
+a phantom. The Emacs client switches to a read-only `--output jsonl` status
+monitor on that code.
 
 Before Emacs starts a coupled or detached container session, it performs a
 best-effort runtime preflight with `safeslop doctor --json`. Same-file Docker
@@ -260,8 +283,8 @@ attached at a time. Attaching when no supervisor is serving the socket reports
 `SESSION_NOT_RUNNING` rather than the more specific `SESSION_STOPPED`. `session
 stop` first verifies that the recorded supervisor PID still matches the stored
 process identity, then signals the supervisor's whole process group (graceful
-`SIGTERM`, then `SIGKILL`) so the boundary tree is torn down and the socket
-removed; a supervisor that dies uncleanly has its stale socket and host stage dir
+`SIGTERM`, then token-revalidated `SIGKILL`) so the boundary tree is torn down and
+the socket removed; a supervisor that dies uncleanly has its stale socket and host stage dir
 swept on the next `session status`/`list` reconcile.
 
 Detaching is a deliberate trade-off: a detached agent holds its staged secrets
@@ -429,8 +452,18 @@ default-deny):
 
 Catalog packages and bundles are safeslop-owned, version- and (for `binary` kinds)
 per-arch sha256-pinned; extending the catalog is a code edit + review, which is the
-supply-chain review boundary. The package-version selection and bump policy that
-governs which pin lands is canonized in `specs/research/2026-06-30-version-policy-flo.md`.
+supply-chain review boundary. Buildable npm catalog entries (`claude-code`, `pi`,
+`pnpm`) additionally have one reviewed package-lock project each, with transitive
+SRI required for every registry package, a closed package→binary→script-policy
+registry, and recipe hashes over the selected lock bytes. Image build contexts
+materialize only the selected lock projects plus reviewed Dockerfiles and never
+include credential staging. The proxy image is not a moving tag at runtime: the
+reviewed `ubuntu/squid` OCI index digest and linux/amd64+linux/arm64 manifest
+digests are locked in `proxy-image.lock.json`/`proxy-image.index.json`; Compose
+uses the digest reference and runs Squid with `cap_drop: ALL`, no-new-privileges,
+read-only root, PID bounds, live-required tmpfs paths, and the reviewed non-root
+service user. The package-version selection and bump policy that governs which
+pin lands is canonized in `specs/research/2026-06-30-version-policy-flo.md`.
 
 ### Catalog version tooling
 
@@ -455,7 +488,11 @@ Every bump enforces the four hard LAWs: **A** atomic all-arch real digest (no
 plus the monotonic floor (never roll back) and a SemVer-aware soak window (`--security`
 waives soak, never a LAW). Non-semver kinds (apt, calver) return candidates flagged
 `requires-human-confirm`. Live fetch is hermetic in tests (a fixture seam); production
-uses `net/http`. Add `--output json` for the enveloped machine contract.
+uses `net/http`. Networked image builds are integrity-pinned — URL/SHA256 for
+binary artifacts, Debian snapshot pins for apt, package-lock/SRI for npm, and
+OCI-index/manifests for Squid — but they are not hermetic or bit-reproducible
+because the builder still contacts the selected registries/upstreams. Add
+`--output json` for the enveloped machine contract.
 
 `safeslop session create --profile <name> --output json` creates an Emacs-visible
 session from an existing `safeslop.cue` profile: it uses the profile's agent,
@@ -606,6 +643,37 @@ the command to draw a fresh gate.
 Staged credentials never live under the agent-writable workspace: they are written
 to a host-only stage dir under your user cache dir (`~/Library/Caches/safeslop` on
 macOS, `~/.cache/safeslop` on Linux) and bind-mounted read-only into the container.
+
+### Workspace and runtime ownership
+
+For saved policies, a non-empty relative `workspace` is policy-relative: it is
+resolved from the directory containing the trusted `safeslop.cue`, not from the
+operator's current shell. An empty ad-hoc workspace uses the invocation directory.
+Before launch, safeslop requires exactly one canonical workspace: an absolute,
+existing directory after symlink resolution. The private runtime stage is separate
+from that workspace, and workspace↔stage containment in either direction fails
+closed so the read-only stage cannot be reached through `/workspace`.
+
+Hostile but valid path spelling is supported. Spaces, colons, quotes, Unicode,
+literal `$`, and Compose-looking text are carried through typed long-form binds
+with `create_host_path:false` and escaped YAML/JSON scalars, so they do not create
+extra structure or interpolation. Invalid UTF-8, NUL/control/format separators,
+missing paths, non-directories, unsupported bind source types, and overlapping
+workspace/stage paths are rejected before launch. Public JSON stays value-free:
+failures identify stable codes and engine-owned summaries/actions, not private
+resolver paths or raw runtime output.
+
+Direct `safeslop run <profile>` invocations get a fresh `run-<32 lowercase hex>`
+identity from 128 bits of `crypto/rand` after approval and before staging. That
+single owner labels the stage, Compose project, marker, cleanup, and dead-run reap,
+so concurrent direct runs of the same profile cannot share or remove each other's
+boundary. New session records use the random session id as layout-2 runtime
+identity. Legacy records without runtime-layout fields reconstruct their stage
+from `session-<id>` plus the canonical-workspace hash, normalize the historical
+`system` backend to Docker, and remain untouched on read. Before their first live
+egress mutation, running legacy sessions install and ACK their unchanged durable
+generation; bootstrap uncertainty tears the boundary down. These paths
+keep deployed sessions reconstructably stoppable without an automatic rewrite.
 
 ### Isolation tiers
 
@@ -793,12 +861,16 @@ will also build and install it into `~/.local/bin`.
 
 `make check` performs:
 
-- container asset drift check
-- specs/0049 pivot denylist check
+- container asset drift check (`make check-assets`)
+- npm package-lock/SRI and closed-script-policy check (`make check-npm-locks`)
+- digest-pinned Squid lock check (`make check-proxy-image-lock`)
+- active docs/workflow drift check for removed VM and obsolete image surfaces (`make check-active-surface-drift`)
+- catalog render drift check (`make check-catalog-sync`)
+- specs/0049 pivot denylist, host-helper exec denylist, and hostpath import gates
 - `go vet ./...`
 - `gofmt` verification for `cmd` and `internal`
 - `go test ./...`
-- Emacs package smoke/contract/session tests via `make test-emacs`
+- strict Emacs package smoke/contract/session tests via `make test-emacs`
 
 Useful targeted tests:
 
@@ -809,6 +881,8 @@ go test ./internal/cli/ -v
 go test ./internal/engine/session ./internal/jsoncontract -v
 make test-emacs EMACS=/absolute/path/to/emacs
 make test-emacs-ui-matrix
+make test-container-images          # opt-in Docker image build gate
+make test-progressive-egress-smoke  # opt-in real Docker grant/revoke smoke
 ```
 
 `make test-emacs-ui-matrix` is the local Emacs compatibility gate: raw Emacs and

@@ -12,9 +12,9 @@ EMACS_MIN ?= 32.0
 
 CONTAINER_SRC := library/layer/container
 CONTAINER_DST := internal/engine/container/assets
-SYNCED        := allowlist.domains Dockerfile.agent Dockerfile.agent.tools
+SYNCED        := allowlist.domains Dockerfile.agent Dockerfile.agent.tools proxy-image.lock.json proxy-image.index.json
 
-.PHONY: build test test-emacs test-emacs-ui-matrix test-progressive-egress-smoke vet fmt fmtcheck check check-assets check-catalog-sync check-pivot-denylist check-host-helper-exec check-hostpath-imports sync-container-assets render-catalog install install-emacs install-mcp dist clean
+.PHONY: build test test-emacs test-emacs-ui-matrix test-container-images test-progressive-egress-smoke vet fmt fmtcheck check check-assets check-npm-locks check-proxy-image-lock check-active-surface-drift check-catalog-sync check-pivot-denylist check-host-helper-exec check-hostpath-imports sync-container-assets render-catalog install install-emacs install-mcp dist clean
 
 ## Build the local binary (static — no cgo, immune to the WARP/uv install path).
 build:
@@ -28,16 +28,18 @@ test-emacs:
 	@$(EMACS) --batch --eval '(if (version< emacs-version "$(EMACS_MIN)") (progn (princ (format "emacs %s is older than required $(EMACS_MIN)\n" emacs-version)) (kill-emacs 1)))'
 	$(EMACS) --batch -L emacs -l ert -l emacs/test/safeslop-test.el -l emacs/test/safeslop-contract-test.el -l emacs/test/safeslop-profiles-test.el -l emacs/test/safeslop-credentials-test.el -l emacs/test/safeslop-ui-probe.el -f ert-run-tests-batch-and-exit
 	$(EMACS) --batch -L emacs -l emacs/safeslop.el -l emacs/safeslop-doom.el -l emacs/safeslop-session.el --eval '(message "safeslop emacs ok")'
-	## Byte-compile gate (specs/0063 F10): fails on ERRORS; warnings stay advisory
-	## because warning sets differ across the local floor vs CI-pinned Emacs.
-	## SAFESLOP_ELISP_WERROR=1 escalates warnings locally. .elc goes to a temp dir.
+	## Strict byte-compile gate: every warning is an error on supported Emacs.
+	## .elc output goes to a temporary directory, never the source tree.
 	$(EMACS) --batch -L emacs \
 	  --eval '(let ((d (make-temp-file "safeslop-elc" t))) (setq byte-compile-dest-file-function (lambda (f) (expand-file-name (concat (file-name-nondirectory f) "c") d))))' \
-	  --eval '(setq byte-compile-error-on-warn (not (null (getenv "SAFESLOP_ELISP_WERROR"))))' \
+	  --eval '(setq byte-compile-error-on-warn t)' \
 	  -f batch-byte-compile emacs/*.el
 
 test-emacs-ui-matrix:
 	EMACS="$(EMACS)" ci/emacs-ui-matrix.sh
+
+test-container-images:
+	SAFESLOP_TEST_CONTAINER_IMAGES=1 go test ./internal/engine/container -run '^TestContainerImages$$' -count=1 -v
 
 test-progressive-egress-smoke: build
 	SAFESLOP_BIN="$(CURDIR)/$(BINARY)" ci/progressive-egress-smoke.sh
@@ -56,7 +58,9 @@ fmtcheck:
 sync-container-assets:
 	@for f in $(SYNCED); do cp $(CONTAINER_SRC)/$$f $(CONTAINER_DST)/$$f; done
 	@cp $(CONTAINER_SRC)/agent-tools.env.example $(CONTAINER_DST)/agent-tools.env
-	@echo "synced $(SYNCED) agent-tools.env -> $(CONTAINER_DST)"
+	@rm -rf $(CONTAINER_DST)/npm-locks
+	@cp -R $(CONTAINER_SRC)/npm-locks $(CONTAINER_DST)/npm-locks
+	@echo "synced $(SYNCED) agent-tools.env npm-locks -> $(CONTAINER_DST)"
 
 check-assets:
 	@for f in $(SYNCED); do \
@@ -65,6 +69,17 @@ check-assets:
 	done
 	@diff -q $(CONTAINER_SRC)/agent-tools.env.example $(CONTAINER_DST)/agent-tools.env >/dev/null || { \
 	  echo "drift: agent-tools.env (run 'make sync-container-assets')"; exit 1; }
+	@diff -qr $(CONTAINER_SRC)/npm-locks $(CONTAINER_DST)/npm-locks >/dev/null || { \
+	  echo "drift: npm-locks (run 'make sync-container-assets')"; exit 1; }
+
+check-npm-locks:
+	ci/npm-locks-check.sh
+
+check-proxy-image-lock:
+	ci/proxy-image-lock-check.sh
+
+check-active-surface-drift:
+	ci/active-surface-drift.sh
 
 ## Render the authored catalog.cue into the embedded catalog.json (specs/0059 W2).
 ## In-process cuelang (no external `cue` binary); validates against schema/catalog.cue.
@@ -89,7 +104,7 @@ check-host-helper-exec:
 check-hostpath-imports:
 	ci/hostpath-import-denylist.sh
 
-check: check-assets check-catalog-sync check-pivot-denylist check-host-helper-exec check-hostpath-imports vet fmtcheck test test-emacs
+check: check-assets check-npm-locks check-proxy-image-lock check-active-surface-drift check-catalog-sync check-pivot-denylist check-host-helper-exec check-hostpath-imports vet fmtcheck test test-emacs
 
 install-emacs:
 	mkdir -p "$(HOME)/.local/share/safeslop/emacs"

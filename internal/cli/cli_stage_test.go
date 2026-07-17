@@ -74,10 +74,11 @@ func TestStagePiOAuthProfileAcceptsLinked0755HomeSource(t *testing.T) {
 
 func TestStageProfilePreflightsOpBeforeWritingPnpmrc(t *testing.T) {
 	stage := t.TempDir()
-	withStageHostExecResolver(t, hostexec.New(cliFakeHostEnv{path: "/safe/bin"}))
+	d := defaultDependencies()
+	d.stageHostExec = func() *hostexec.Resolver { return hostexec.New(cliFakeHostEnv{path: "/safe/bin"}) }
 	prof := policy.Profile{Credentials: &policy.Credentials{Pnpm: []policy.PnpmRegistry{{Token: "op://vault/npm/token"}}}}
 
-	_, _, err := stageProfile(context.Background(), prof, stage)
+	_, _, err := stageProfileWithDeps(d, context.Background(), prof, stage)
 	if !errors.Is(err, hostexec.ErrNotFound) {
 		t.Fatalf("stageProfile err=%v, want ErrNotFound", err)
 	}
@@ -136,11 +137,4 @@ func (f cliFakeHostEnv) SameFile(a, b string) (bool, error) {
 		return f.sameFile(a, b)
 	}
 	return a == b, nil
-}
-
-func withStageHostExecResolver(t *testing.T, r *hostexec.Resolver) {
-	t.Helper()
-	old := stageHostExecResolver
-	stageHostExecResolver = func() *hostexec.Resolver { return r }
-	t.Cleanup(func() { stageHostExecResolver = old })
 }

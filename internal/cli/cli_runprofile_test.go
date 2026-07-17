@@ -3,19 +3,215 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/freakhill/safeslop/internal/engine/container"
+	runtimepkg "github.com/freakhill/safeslop/internal/engine/container/runtime"
 	engexec "github.com/freakhill/safeslop/internal/engine/exec"
 	"github.com/freakhill/safeslop/internal/engine/policy"
 )
+
+func TestInvocationIdentityIsRandom128BitKey(t *testing.T) {
+	seen := map[string]bool{}
+	pattern := regexp.MustCompile(`^run-[0-9a-f]{32}$`)
+	for range 128 {
+		id, err := newInvocationID()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !pattern.MatchString(id) {
+			t.Fatalf("invocation id = %q", id)
+		}
+		if seen[id] {
+			t.Fatalf("duplicate invocation id %q", id)
+		}
+		seen[id] = true
+	}
+}
+
+func TestConcurrentDirectRunInvocationStagesAreDistinct(t *testing.T) {
+	ws := t.TempDir()
+	prof := policy.Profile{Agent: "shell", Environment: "container", Network: "deny", Workspace: ws}
+	argv, err := agentArgv(prof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := defaultDependencies()
+	d.detectRuntime = func(runtimepkg.NetworkPolicy) (runtimepkg.Engine, error) { return runtimepkg.HostDockerEngine{}, nil }
+	reaped := make(chan string, 2)
+	d.reapDirectInvocation = func(_ runtimepkg.Engine, id string) error { reaped <- id; return nil }
+	entered := make(chan string, 2)
+	release := make(chan struct{})
+	d.launchContainer = func(_ context.Context, _ runtimepkg.Engine, _ engexec.LaunchSpec, _, _ string, _, _ []string, stageDir string, _ []string, _ *policy.Projection, _ ...container.SessionGrant) (int, error) {
+		entered <- stageDir
+		<-release
+		return 0, nil
+	}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	wg.Add(2)
+	for range 2 {
+		go func() {
+			defer wg.Done()
+			_, err := runDirectProfileWithDeps(d, "direct-concurrent-fixture", prof, argv, ws)
+			errs <- err
+		}()
+	}
+	first, second := <-entered, <-entered
+	close(release)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("direct run: %v", err)
+		}
+	}
+	if first == second {
+		t.Fatalf("concurrent direct runs shared stage %q", first)
+	}
+	close(reaped)
+	wantReaped := map[string]bool{filepath.Base(first): true, filepath.Base(second): true}
+	for id := range reaped {
+		if !wantReaped[id] {
+			t.Fatalf("cleanup used invocation %q outside stages %v", id, wantReaped)
+		}
+		delete(wantReaped, id)
+	}
+	if len(wantReaped) != 0 {
+		t.Fatalf("direct invocation cleanup missing: %v", wantReaped)
+	}
+}
+
+func TestDirectLaunchUsesOneApprovedEngineForLaunchAndReap(t *testing.T) {
+	ws := t.TempDir()
+	prof := policy.Profile{Agent: "shell", Environment: "container", Network: "deny", Workspace: ws}
+	argv, err := agentArgv(prof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := defaultDependencies()
+	probes := 0
+	d.detectRuntime = func(network runtimepkg.NetworkPolicy) (runtimepkg.Engine, error) {
+		probes++
+		if network != runtimepkg.PolicyDeny {
+			t.Fatalf("runtime policy = %v, want deny gate", network)
+		}
+		return runtimepkg.PodmanEngine{}, nil
+	}
+	var launched, reaped runtimepkg.Engine
+	d.launchContainer = func(_ context.Context, eng runtimepkg.Engine, _ engexec.LaunchSpec, _, _ string, _, _ []string, _ string, _ []string, _ *policy.Projection, _ ...container.SessionGrant) (int, error) {
+		launched = eng
+		return 0, nil
+	}
+	d.reapDirectInvocation = func(eng runtimepkg.Engine, _ string) error {
+		reaped = eng
+		return nil
+	}
+
+	if _, err := runDirectProfileWithDeps(d, "direct-engine", prof, argv, ws); err != nil {
+		t.Fatalf("direct launch: %v", err)
+	}
+	if probes != 1 {
+		t.Fatalf("runtime probes = %d, want exactly one", probes)
+	}
+	if launched == nil || reaped == nil || launched != reaped || launched.Name() != "podman" {
+		t.Fatalf("launch/reap engines = %v/%v, want one detected podman engine", launched, reaped)
+	}
+}
+
+func TestDirectInvocationReapFailureRetainsOnlyCleanupMarker(t *testing.T) {
+	ws := t.TempDir()
+	prof := policy.Profile{Agent: "shell", Environment: "container", Network: "deny", Workspace: ws}
+	argv, err := agentArgv(prof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := defaultDependencies()
+	d.detectRuntime = func(runtimepkg.NetworkPolicy) (runtimepkg.Engine, error) { return runtimepkg.HostDockerEngine{}, nil }
+	var stage string
+	d.launchContainer = func(_ context.Context, _ runtimepkg.Engine, _ engexec.LaunchSpec, _, _ string, _, _ []string, stageDir string, _ []string, _ *policy.Projection, _ ...container.SessionGrant) (int, error) {
+		stage = stageDir
+		return 0, nil
+	}
+	d.reapDirectInvocation = func(runtimepkg.Engine, string) error { return errors.New("injected reap failure") }
+	t.Cleanup(func() { _ = os.RemoveAll(stage) })
+
+	if _, err := runDirectProfileWithDeps(d, "direct-reap-failure", prof, argv, ws); err == nil {
+		t.Fatal("direct run succeeded despite unproven boundary cleanup")
+	}
+	entries, err := os.ReadDir(stage)
+	if err != nil {
+		t.Fatalf("read retained stage: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != ".safeslop-stage" {
+		t.Fatalf("reap failure retained bearer/config files: %v", entries)
+	}
+}
+
+func TestDirectInvocationReportsLaunchAndReapFailures(t *testing.T) {
+	ws := t.TempDir()
+	prof := policy.Profile{Agent: "shell", Environment: "container", Network: "deny", Workspace: ws}
+	argv, err := agentArgv(prof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := defaultDependencies()
+	d.detectRuntime = func(runtimepkg.NetworkPolicy) (runtimepkg.Engine, error) { return runtimepkg.HostDockerEngine{}, nil }
+	launchErr := errors.New("injected launch failure")
+	reapErr := errors.New("injected reap failure")
+	var stage string
+	d.launchContainer = func(_ context.Context, _ runtimepkg.Engine, _ engexec.LaunchSpec, _, _ string, _, _ []string, stageDir string, _ []string, _ *policy.Projection, _ ...container.SessionGrant) (int, error) {
+		stage = stageDir
+		return 1, launchErr
+	}
+	d.reapDirectInvocation = func(runtimepkg.Engine, string) error { return reapErr }
+	t.Cleanup(func() { _ = os.RemoveAll(stage) })
+
+	_, err = runDirectProfileWithDeps(d, "direct-launch-reap-failure", prof, argv, ws)
+	if !errors.Is(err, launchErr) || !errors.Is(err, reapErr) {
+		t.Fatalf("combined cleanup error = %v, want launch and reap causes", err)
+	}
+}
+
+func TestRunProfileReportsCredentialStageCleanupFailure(t *testing.T) {
+	ws := t.TempDir()
+	prof := policy.Profile{Agent: "shell", Environment: "container", Network: "deny", Workspace: ws}
+	argv, err := agentArgv(prof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := defaultDependencies()
+	d.detectRuntime = func(runtimepkg.NetworkPolicy) (runtimepkg.Engine, error) { return runtimepkg.HostDockerEngine{}, nil }
+	d.launchContainer = func(context.Context, runtimepkg.Engine, engexec.LaunchSpec, string, string, []string, []string, string, []string, *policy.Projection, ...container.SessionGrant) (int, error) {
+		return 0, nil
+	}
+	d.reapDirectInvocation = func(runtimepkg.Engine, string) error { return nil }
+	cleanupErr := errors.New("injected stage cleanup failure")
+	removeCalls := 0
+	d.removeStageDir = func(path string) error {
+		removeCalls++
+		if removeCalls == 1 {
+			return os.RemoveAll(path)
+		}
+		return cleanupErr
+	}
+
+	code, err := runDirectProfileWithDeps(d, "direct-stage-cleanup-failure", prof, argv, ws)
+	if code != 1 || !errors.Is(err, cleanupErr) {
+		t.Fatalf("run result = (%d, %v), want reported cleanup failure", code, err)
+	}
+}
 
 // TestRunProfileCtxTeardownOnCancel proves that cancelling the run context (what
 // the SIGTERM handler in runProfile does, and what `session stop` triggers)
@@ -112,17 +308,17 @@ func TestRunProfileCtxContainerForwardsSupervisorPTY(t *testing.T) {
 	}
 
 	var gotSpec engexec.LaunchSpec
-	old := containerLaunch
-	containerLaunch = func(_ context.Context, spec engexec.LaunchSpec, _, _ string, _, _ []string, _ string, _ []string, _ *policy.Projection, _ ...container.SessionGrant) (int, error) {
+	d := defaultDependencies()
+	d.detectRuntime = func(runtimepkg.NetworkPolicy) (runtimepkg.Engine, error) { return runtimepkg.HostDockerEngine{}, nil }
+	d.launchContainer = func(_ context.Context, _ runtimepkg.Engine, spec engexec.LaunchSpec, _, _ string, _, _ []string, _ string, _ []string, _ *policy.Projection, _ ...container.SessionGrant) (int, error) {
 		gotSpec = spec
 		return 0, nil
 	}
-	defer func() { containerLaunch = old }()
 
 	stdin := strings.NewReader("")
 	var stdout, stderr bytes.Buffer
 	rio := runIO{Stdin: stdin, Stdout: &stdout, Stderr: &stderr}
-	if _, err := runProfileCtx(context.Background(), "session-ctr", prof, argv, ws, rio); err != nil {
+	if _, err := runProfileCtxWithDeps(d, context.Background(), "session-ctr", prof, argv, ws, "", rio); err != nil {
 		t.Fatalf("runProfileCtx: %v", err)
 	}
 	if gotSpec.Stdin != stdin {
@@ -158,8 +354,9 @@ func TestRunProfilePiOAuthIsFileOnlyAndWiped(t *testing.T) {
 		t.Fatal(err)
 	}
 	var seenStage string
-	old := containerLaunch
-	containerLaunch = func(_ context.Context, spec engexec.LaunchSpec, _, _ string, _ []string, secretEnv []string, stageDir string, _ []string, _ *policy.Projection, _ ...container.SessionGrant) (int, error) {
+	d := defaultDependencies()
+	d.detectRuntime = func(runtimepkg.NetworkPolicy) (runtimepkg.Engine, error) { return runtimepkg.HostDockerEngine{}, nil }
+	d.launchContainer = func(_ context.Context, _ runtimepkg.Engine, spec engexec.LaunchSpec, _, _ string, _ []string, secretEnv []string, stageDir string, _ []string, _ *policy.Projection, _ ...container.SessionGrant) (int, error) {
 		seenStage = stageDir
 		body, err := os.ReadFile(filepath.Join(stageDir, "pi", "openai-codex", "auth.json"))
 		if err != nil {
@@ -174,9 +371,8 @@ func TestRunProfilePiOAuthIsFileOnlyAndWiped(t *testing.T) {
 		}
 		return 0, nil
 	}
-	t.Cleanup(func() { containerLaunch = old })
 
-	if code, err := runProfileCtx(context.Background(), "pi-oauth-file-only", prof, argv, t.TempDir()); err != nil || code != 0 {
+	if code, err := runProfileCtxWithDeps(d, context.Background(), "pi-oauth-file-only", prof, argv, t.TempDir(), ""); err != nil || code != 0 {
 		t.Fatalf("runProfileCtx = %d, %v", code, err)
 	}
 	if seenStage == "" {

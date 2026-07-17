@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -16,6 +15,7 @@ import (
 	"github.com/freakhill/safeslop/internal/engine/toolchain"
 	"github.com/freakhill/safeslop/internal/engine/trust"
 	"github.com/freakhill/safeslop/internal/engine/userconfig"
+	workspaceboundary "github.com/freakhill/safeslop/internal/engine/workspace"
 )
 
 type profileEvaluationSource string
@@ -70,60 +70,40 @@ type profileAccountLinkChecks struct {
 }
 
 // These adapters deliberately return classifications, never paths, account
-// records, helper output, or credential refs. Tests replace them without
-// consulting the real HOME, PATH, runtime, or clock.
-var (
-	profileEvaluationNow = time.Now
+// records, helper output, or credential refs. Each root owns the replaceable
+// functions in its dependency bundle.
+func defaultProfileEvaluationProjectTrust(path string, exactBytes []byte) (trust.Status, error) {
+	_, status, err := policyBytesTrustStatus(canonicalPolicyPath(path), exactBytes)
+	return status, err
+}
 
-	profileEvaluationProjectTrust = func(path string, exactBytes []byte) (trust.Status, error) {
-		_, status, err := policyBytesTrustStatus(canonicalPolicyPath(path), exactBytes)
-		return status, err
+func defaultProfileEvaluationBuiltinIntegrity(name, hash string) (bool, error) {
+	builtin, ok := policy.BuiltinProfileByName(name)
+	return ok && builtin.Hash == hash, nil
+}
+
+func defaultProfileEvaluationWorkspace(path string) profilePrerequisiteCheck {
+	if path == "" {
+		return profilePrerequisiteCheck{State: profilePrerequisiteUnknown, Problem: profileProblemCheck}
 	}
-
-	profileEvaluationBuiltinIntegrity = func(name, hash string) (bool, error) {
-		builtin, ok := policy.BuiltinProfileByName(name)
-		return ok && builtin.Hash == hash, nil
-	}
-
-	profileEvaluationWorkspace = func(path string) profilePrerequisiteCheck {
-		if path == "" {
-			return profilePrerequisiteCheck{State: profilePrerequisiteUnknown, Problem: profileProblemCheck}
-		}
-		info, err := os.Stat(path)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				return profilePrerequisiteCheck{State: profilePrerequisiteFail, Problem: profileProblemMissing}
-			}
-			return profilePrerequisiteCheck{State: profilePrerequisiteUnknown, Problem: profileProblemCheck}
-		}
-		if !info.IsDir() {
+	info, err := os.Stat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
 			return profilePrerequisiteCheck{State: profilePrerequisiteFail, Problem: profileProblemMissing}
 		}
-		return profilePrerequisiteCheck{State: profilePrerequisitePass}
+		return profilePrerequisiteCheck{State: profilePrerequisiteUnknown, Problem: profileProblemCheck}
 	}
-
-	profileEvaluationHelper = inspectProfileEvaluationHelper
-
-	profileEvaluationRuntime = func(network string) profilePrerequisiteCheck {
-		networkPolicy := runtimepkg.PolicyAllow
-		if network == "deny" {
-			networkPolicy = runtimepkg.PolicyDeny
-		}
-		_, err := runtimepkg.Detect(networkPolicy)
-		if err == nil {
-			return profilePrerequisiteCheck{State: profilePrerequisitePass}
-		}
-		if errors.Is(err, hostexec.ErrShadowed) || errors.Is(err, hostexec.ErrIdentity) || errors.Is(err, hostexec.ErrRelativePath) {
-			return profilePrerequisiteCheck{State: profilePrerequisiteFail, Problem: profileProblemResolution}
-		}
+	if !info.IsDir() {
 		return profilePrerequisiteCheck{State: profilePrerequisiteFail, Problem: profileProblemMissing}
 	}
+	if err := validateWorkspaceStageRoot(path); err != nil {
+		return profilePrerequisiteCheck{State: profilePrerequisiteFail, Problem: profileProblemResolution}
+	}
+	return profilePrerequisiteCheck{State: profilePrerequisitePass}
+}
 
-	profileEvaluationAccountLinks = inspectProfileEvaluationAccountLinks
-)
-
-func inspectProfileEvaluationHelper(name string) profilePrerequisiteCheck {
-	inspection := stageHostExecResolver().Inspect(name)
+func inspectProfileEvaluationHelperWithResolver(resolver *hostexec.Resolver, name string) profilePrerequisiteCheck {
+	inspection := resolver.Inspect(name)
 	switch {
 	case inspection.Shadowed:
 		return profilePrerequisiteCheck{State: profilePrerequisiteFail, Problem: profileProblemResolution}
@@ -136,6 +116,21 @@ func inspectProfileEvaluationHelper(name string) profilePrerequisiteCheck {
 	default:
 		return profilePrerequisiteCheck{State: profilePrerequisitePass}
 	}
+}
+
+func inspectProfileEvaluationRuntime(detect func(runtimepkg.NetworkPolicy) (runtimepkg.Engine, error), network string) profilePrerequisiteCheck {
+	networkPolicy := runtimepkg.PolicyAllow
+	if network == "deny" {
+		networkPolicy = runtimepkg.PolicyDeny
+	}
+	_, err := detect(networkPolicy)
+	if err == nil {
+		return profilePrerequisiteCheck{State: profilePrerequisitePass}
+	}
+	if errors.Is(err, hostexec.ErrShadowed) || errors.Is(err, hostexec.ErrIdentity) || errors.Is(err, hostexec.ErrRelativePath) {
+		return profilePrerequisiteCheck{State: profilePrerequisiteFail, Problem: profileProblemResolution}
+	}
+	return profilePrerequisiteCheck{State: profilePrerequisiteFail, Problem: profileProblemMissing}
 }
 
 func inspectProfileEvaluationAccountLinks(prof policy.Profile) profileAccountLinkChecks {
@@ -291,21 +286,25 @@ func validateProfileContextRegistry(rules []profileContextRule) error {
 const profileEvaluationDocs = "specs/0101-profile-safety-evaluation.md"
 
 func evaluateProfile(input profileEvaluationInput) policy.Evaluation {
-	checkedAt := profileEvaluationNow().UTC()
+	return evaluateProfileWithDeps(defaultDependencies(), input)
+}
+
+func evaluateProfileWithDeps(d *dependencies, input profileEvaluationInput) policy.Evaluation {
+	checkedAt := d.now().UTC()
 	authority := policy.EvaluateAuthority(input.Profile)
 	return policy.Evaluation{
 		SchemaVersion: policy.EvaluationSchemaVersion,
 		Authority:     authority,
-		Trust:         evaluateProfileTrust(input, checkedAt),
-		Readiness:     evaluateProfileReadiness(input, authority, checkedAt),
+		Trust:         evaluateProfileTrustWithDeps(d, input, checkedAt),
+		Readiness:     evaluateProfileReadinessWithDeps(d, input, authority, checkedAt),
 	}
 }
 
-func evaluateProfileTrust(input profileEvaluationInput, checkedAt time.Time) policy.TrustEvaluation {
+func evaluateProfileTrustWithDeps(d *dependencies, input profileEvaluationInput, checkedAt time.Time) policy.TrustEvaluation {
 	section := policy.TrustEvaluation{CheckedAt: &checkedAt, Findings: []policy.Finding{}}
 	switch input.Source {
 	case profileEvaluationSourceProject:
-		status, err := profileEvaluationProjectTrust(input.PolicyPath, input.PolicyBytes)
+		status, err := d.profileProjectTrust(input.PolicyPath, input.PolicyBytes)
 		if err != nil || input.PolicyPath == "" || input.PolicyBytes == nil {
 			section.State, section.Basis = policy.TrustStateUnknown, policy.TrustBasisUnknown
 			section.Findings = append(section.Findings, profileContextFinding(
@@ -339,7 +338,7 @@ func evaluateProfileTrust(input profileEvaluationInput, checkedAt time.Time) pol
 			))
 		}
 	case profileEvaluationSourceBuiltin:
-		consistent, err := profileEvaluationBuiltinIntegrity(input.Name, input.PolicyHash)
+		consistent, err := d.profileBuiltinIntegrity(input.Name, input.PolicyHash)
 		section.Basis = policy.TrustBasisEmbeddedBuiltin
 		if err != nil || !consistent {
 			section.State = policy.TrustStateUnknown
@@ -374,18 +373,18 @@ func trustRemediation() *policy.Remediation {
 	)
 }
 
-func evaluateProfileReadiness(input profileEvaluationInput, authority policy.AuthorityEvaluation, checkedAt time.Time) policy.ReadinessEvaluation {
+func evaluateProfileReadinessWithDeps(d *dependencies, input profileEvaluationInput, authority policy.AuthorityEvaluation, checkedAt time.Time) policy.ReadinessEvaluation {
 	findings := make([]policy.Finding, 0, 8)
 
 	workspacePath, workspaceKnown := profileWorkspacePath(input)
 	workspaceCheck := profilePrerequisiteCheck{State: profilePrerequisiteUnknown, Problem: profileProblemCheck}
 	if workspaceKnown {
-		workspaceCheck = profileEvaluationWorkspace(workspacePath)
+		workspaceCheck = d.profileWorkspace(workspacePath)
 	}
 	findings = append(findings, workspaceFinding(workspaceCheck))
 
 	if input.Profile.Environment == "container" {
-		findings = append(findings, runtimeFinding(profileEvaluationRuntime(input.Profile.Network)))
+		findings = append(findings, runtimeFinding(d.profileRuntime(input.Profile.Network)))
 		findings = append(findings, profileContextFinding(
 			"readiness.agent", policy.FindingOutcomeNotApplicable, policy.FindingSeverityInfo,
 			"The agent executable is supplied by the resolved container image rather than a host helper.", nil, nil,
@@ -395,13 +394,13 @@ func evaluateProfileReadiness(input profileEvaluationInput, authority policy.Aut
 			"readiness.container-runtime", policy.FindingOutcomeNotApplicable, policy.FindingSeverityInfo,
 			"A host profile does not require a container runtime.", nil, nil,
 		))
-		findings = append(findings, agentFinding(profileAgentCheck(input.Profile)))
+		findings = append(findings, agentFinding(profileAgentCheckWithDeps(d, input.Profile)))
 	}
 
-	accountChecks := profileEvaluationAccountLinks(input.Profile)
+	accountChecks := d.profileAccountLinks(input.Profile)
 	helperNames := profileRequiredHelperNames(input.Profile, accountChecks)
-	findings = append(findings, helperFinding(helperNames))
-	findings = append(findings, toolchainFinding(input.Profile))
+	findings = append(findings, helperFindingWithDeps(d, helperNames))
+	findings = append(findings, toolchainFindingWithDeps(d, input.Profile))
 	findings = append(findings, accountFindings(input.Profile, accountChecks, authority.CredentialScopes)...)
 
 	sort.SliceStable(findings, func(i, j int) bool {
@@ -421,22 +420,22 @@ func evaluateProfileReadiness(input profileEvaluationInput, authority policy.Aut
 }
 
 func profileWorkspacePath(input profileEvaluationInput) (string, bool) {
-	workspace := input.Profile.Workspace
-	if workspace == "" {
-		cwd, err := os.Getwd()
-		return cwd, err == nil
-	}
-	if filepath.IsAbs(workspace) {
-		return workspace, true
-	}
-	base, err := os.Getwd()
+	invocationDir, err := os.Getwd()
 	if err != nil {
 		return "", false
 	}
-	if input.Source != profileEvaluationSourceBuiltin && input.PolicyPath != "" {
-		base = filepath.Dir(input.PolicyPath)
+	policyPath := ""
+	if input.Source != profileEvaluationSourceBuiltin {
+		policyPath = input.PolicyPath
 	}
-	return filepath.Join(base, workspace), true
+	candidate, err := workspaceboundary.Candidate(input.Profile.Workspace, policyPath, invocationDir)
+	if err != nil {
+		return "", false
+	}
+	if resolved, err := workspaceboundary.Resolve(input.Profile.Workspace, policyPath, invocationDir); err == nil {
+		return resolved, true
+	}
+	return candidate, true
 }
 
 func workspaceFinding(check profilePrerequisiteCheck) policy.Finding {
@@ -492,12 +491,12 @@ func runtimeFinding(check profilePrerequisiteCheck) policy.Finding {
 	}
 }
 
-func profileAgentCheck(prof policy.Profile) profilePrerequisiteCheck {
+func profileAgentCheckWithDeps(d *dependencies, prof policy.Profile) profilePrerequisiteCheck {
 	argv, err := agentArgv(prof)
 	if err != nil || len(argv) == 0 {
 		return profilePrerequisiteCheck{State: profilePrerequisiteUnknown, Problem: profileProblemCheck}
 	}
-	return profileEvaluationHelper(argv[0])
+	return d.profileHelper(argv[0])
 }
 
 func agentFinding(check profilePrerequisiteCheck) policy.Finding {
@@ -547,7 +546,7 @@ func profileRequiredHelperNames(prof policy.Profile, accountChecks profileAccoun
 	return out
 }
 
-func helperFinding(names []string) policy.Finding {
+func helperFindingWithDeps(d *dependencies, names []string) policy.Finding {
 	if len(names) == 0 {
 		return profileContextFinding(
 			"readiness.secret-provider", policy.FindingOutcomeNotApplicable, policy.FindingSeverityInfo,
@@ -557,7 +556,7 @@ func helperFinding(names []string) policy.Finding {
 	state := profilePrerequisitePass
 	problem := profileProblemNone
 	for _, name := range names {
-		check := profileEvaluationHelper(name)
+		check := d.profileHelper(name)
 		if check.State == profilePrerequisiteFail {
 			state = profilePrerequisiteFail
 			if check.Problem == profileProblemResolution {
@@ -604,7 +603,7 @@ func countHelpers(count int) string {
 	return fmt.Sprintf("%d required credential-staging helpers are", count)
 }
 
-func toolchainFinding(prof policy.Profile) policy.Finding {
+func toolchainFindingWithDeps(d *dependencies, prof policy.Profile) policy.Finding {
 	if prof.Toolchain == nil || !toolchain.Wraps(prof.Toolchain.Kind) {
 		return profileContextFinding(
 			"readiness.toolchain.not-applicable", policy.FindingOutcomeNotApplicable, policy.FindingSeverityInfo,
@@ -612,7 +611,7 @@ func toolchainFinding(prof policy.Profile) policy.Finding {
 		)
 	}
 	ruleID := "readiness.toolchain." + prof.Toolchain.Kind
-	check := profileEvaluationHelper(prof.Toolchain.Kind)
+	check := d.profileHelper(prof.Toolchain.Kind)
 	switch check.State {
 	case profilePrerequisitePass:
 		return profileContextFinding(

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/freakhill/safeslop/internal/engine/container"
+	runtimepkg "github.com/freakhill/safeslop/internal/engine/container/runtime"
 	engexec "github.com/freakhill/safeslop/internal/engine/exec"
 	"github.com/freakhill/safeslop/internal/engine/policy"
 	engsession "github.com/freakhill/safeslop/internal/engine/session"
@@ -42,6 +44,11 @@ func newSupervisedStubSessionIn(t *testing.T, script, stateDir, env string) (eng
 	sess, err := store.Create("shell", env, ws, nowForTest(t))
 	if err != nil {
 		t.Fatalf("create session: %v", err)
+	}
+	// Supervise is the child side of a detached launch handoff. Seed the exact
+	// live parent claim that production runDetach creates before spawning it.
+	if _, err := store.MarkRunning(sess.ID, os.Getppid(), nowForTest(t)); err != nil {
+		t.Fatalf("claim session launch: %v", err)
 	}
 	return store, sess.ID, ws
 }
@@ -190,13 +197,14 @@ func TestSuperviseExitRunsTeardownAndRemovesSocket(t *testing.T) {
 func TestSuperviseSessionProjectionFailurePersists(t *testing.T) {
 	store, id, _ := newSupervisedStubSessionIn(t, "#!/bin/sh\nexit 0\n", shortStateDir(t), "container")
 	projectionErr := projectionFailureForTest(t)
-	oldLaunch := containerLaunch
-	containerLaunch = func(context.Context, engexec.LaunchSpec, string, string, []string, []string, string, []string, *policy.Projection, ...container.SessionGrant) (int, error) {
+	d := defaultDependencies()
+	d.store = store
+	d.detectRuntime = func(runtimepkg.NetworkPolicy) (runtimepkg.Engine, error) { return runtimepkg.HostDockerEngine{}, nil }
+	d.launchContainer = func(context.Context, runtimepkg.Engine, engexec.LaunchSpec, string, string, []string, []string, string, []string, *policy.Projection, ...container.SessionGrant) (int, error) {
 		return 1, projectionErr
 	}
-	t.Cleanup(func() { containerLaunch = oldLaunch })
 
-	code, err := Supervise(context.Background(), store, id, time.Now)
+	code, err := superviseWithDeps(d, context.Background(), store, id, time.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,6 +223,96 @@ func TestSuperviseSessionProjectionFailurePersists(t *testing.T) {
 	}
 }
 
+func TestSuperviseWithoutLaunchClaimCannotReplaceSocket(t *testing.T) {
+	stateDir := shortStateDir(t)
+	t.Setenv("SAFESLOP_STATE_DIR", stateDir)
+	ws := t.TempDir()
+	stub := filepath.Join(ws, "agent")
+	if err := os.WriteFile(stub, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SHELL", stub)
+	store := sessionStore()
+	sess, err := store.Create("shell", "host", ws, nowForTest(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("unix", store.SocketPath(sess.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	if err := os.Chmod(store.SocketPath(sess.ID), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	d := defaultDependencies()
+	d.store = store
+	code, err := superviseWithDeps(d, context.Background(), store, sess.ID, time.Now)
+	if code != 1 || !errors.Is(err, engsession.ErrStaleRecord) {
+		t.Fatalf("unclaimed supervise = (%d, %v), want stale-claim refusal", code, err)
+	}
+	if !safeAttachSocket(store.SocketPath(sess.ID)) {
+		t.Fatal("unclaimed supervisor replaced or removed the existing socket")
+	}
+}
+
+func TestSuperviseRejectsOccupiedNonSocketPath(t *testing.T) {
+	store, id, _ := newSupervisedStubSession(t, "#!/bin/sh\nexit 0\n")
+	path := store.SocketPath(id)
+	if err := os.WriteFile(path, []byte("do-not-delete"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	d := defaultDependencies()
+	d.store = store
+
+	code, err := superviseWithDeps(d, context.Background(), store, id, time.Now)
+	if code != 1 || err == nil {
+		t.Fatalf("supervise = (%d, %v), want occupied-path failure", code, err)
+	}
+	body, readErr := os.ReadFile(path)
+	if readErr != nil || string(body) != "do-not-delete" {
+		t.Fatalf("occupied non-socket was removed or changed: body=%q err=%v", body, readErr)
+	}
+}
+
+func TestSuperviseFailsClosedWhenSocketPermissionsCannotBeSecured(t *testing.T) {
+	store, id, _ := newSupervisedStubSession(t, "#!/bin/sh\nexit 0\n")
+	d := defaultDependencies()
+	d.store = store
+	permissionErr := errors.New("injected chmod failure")
+	d.chmodSocket = func(string, os.FileMode) error { return permissionErr }
+
+	code, err := superviseWithDeps(d, context.Background(), store, id, time.Now)
+	if code != 1 || !errors.Is(err, permissionErr) {
+		t.Fatalf("supervise = (%d, %v), want fail-closed chmod error", code, err)
+	}
+	if _, statErr := os.Lstat(store.SocketPath(id)); !os.IsNotExist(statErr) {
+		t.Fatalf("insecure attach socket remains after chmod failure: %v", statErr)
+	}
+	sess, getErr := store.Get(id)
+	if getErr != nil {
+		t.Fatal(getErr)
+	}
+	if sess.Status != engsession.StatusStopped {
+		t.Fatalf("session status = %q, want stopped after failed supervisor setup", sess.Status)
+	}
+}
+
+func TestSuperviseReportsSocketRemovalFailureOnShutdown(t *testing.T) {
+	store, id, _ := newSupervisedStubSession(t, "#!/bin/sh\nexit 0\n")
+	d := defaultDependencies()
+	d.store = store
+	removeErr := errors.New("injected socket removal failure")
+	d.removeSocket = func(string) error { return removeErr }
+	defer os.Remove(store.SocketPath(id))
+
+	code, err := superviseWithDeps(d, context.Background(), store, id, time.Now)
+	if code != 0 || !errors.Is(err, removeErr) {
+		t.Fatalf("supervise shutdown = (%d, %v), want socket removal error", code, err)
+	}
+}
+
 func TestSuperviseRecordsSupervisorPIDAlive(t *testing.T) {
 	store, id, _ := newSupervisedStubSession(t, "#!/bin/sh\nread x\n") // blocks until cancel
 	ctx, cancel := context.WithCancel(context.Background())
@@ -228,7 +326,7 @@ func TestSuperviseRecordsSupervisorPIDAlive(t *testing.T) {
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		s, err := store.Get(id)
-		if err == nil && s.Status == engsession.StatusRunning && s.PID != 0 {
+		if err == nil && s.Status == engsession.StatusRunning && s.Detached && s.PID == os.Getpid() {
 			sess = s
 			break
 		}

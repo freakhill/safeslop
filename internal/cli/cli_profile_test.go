@@ -290,7 +290,7 @@ func TestProfileListInvalidConfigDoesNotFallBackToBuiltins(t *testing.T) {
 }
 
 func TestProfileShowProjectExactByteEvaluation(t *testing.T) {
-	fixed := withProfileEvaluationLocalPass(t)
+	d, fixed := withProfileEvaluationLocalPass(t)
 	t.Setenv("HOME", t.TempDir())
 	dir := t.TempDir()
 	path := filepath.Join(dir, "safeslop.cue")
@@ -307,7 +307,7 @@ safeslop: {
 
 	showTrust := func() map[string]any {
 		t.Helper()
-		out, err := runRootForTest(t, dir, "profile", "show", "review", "--output", "json")
+		out, err := runRootForTestWithDeps(t, dir, d, "profile", "show", "review", "--output", "json")
 		if err != nil {
 			t.Fatalf("profile show: %v\nout=%s", err, out)
 		}
@@ -341,8 +341,8 @@ safeslop: {
 }
 
 func TestProfileShowBuiltinEvaluation(t *testing.T) {
-	fixed := withProfileEvaluationLocalPass(t)
-	out, err := runRootForTest(t, t.TempDir(), "profile", "show", "pi", "--output", "json")
+	d, fixed := withProfileEvaluationLocalPass(t)
+	out, err := runRootForTestWithDeps(t, t.TempDir(), d, "profile", "show", "pi", "--output", "json")
 	if err != nil {
 		t.Fatalf("profile show builtin: %v\nout=%s", err, out)
 	}
@@ -361,7 +361,7 @@ func TestProfileShowBuiltinEvaluation(t *testing.T) {
 }
 
 func TestProfileShowAndCreateDryRunEvaluationAuthorityEqual(t *testing.T) {
-	withProfileEvaluationLocalPass(t)
+	d, _ := withProfileEvaluationLocalPass(t)
 	t.Setenv("HOME", t.TempDir())
 	dir := t.TempDir()
 	cue := `package safeslop
@@ -374,11 +374,11 @@ safeslop: {
 	if err := os.WriteFile(filepath.Join(dir, "safeslop.cue"), []byte(cue), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	showOut, err := runRootForTest(t, dir, "profile", "show", "review", "--output", "json")
+	showOut, err := runRootForTestWithDeps(t, dir, d, "profile", "show", "review", "--output", "json")
 	if err != nil {
 		t.Fatalf("profile show: %v\nout=%s", err, showOut)
 	}
-	dryOut, err := runRootForTest(t, dir,
+	dryOut, err := runRootForTestWithDeps(t, dir, d,
 		"profile", "create", "--dry-run", "--name", "review", "--agent", "fish",
 		"--environment", "host", "--network", "deny", "--workspace", ".", "--output", "json",
 	)

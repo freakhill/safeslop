@@ -65,11 +65,20 @@ For Emacs-driven sessions, `safeslop session stop --session-id <id>
 --revoke-credentials` revokes ephemeral credentials before forcing process
 termination and is idempotent (a second stop neither revokes nor kills again).
 Stop reconciles the recorded PID/process identity before signalling, so a reused
-detached supervisor PGID is not targeted. Revocation stays best-effort; the
-decay-first guarantee remains the local wipe of staged private keys: stop,
-status/list reconcile, remove, and prune all wipe the reconstructed host stage
-dir. For Pi OAuth, `--revoke-credentials` means the same local wipe only; the
-access bearer remains valid until upstream expiry.
+detached supervisor PGID is not targeted. Closing a coupled terminal sends
+`SIGHUP` and triggers its deferred reap/wipe. Closing an attach buffer merely
+disconnects from a detached supervisor; use explicit stop for its bounded
+`SIGTERM`→token-revalidated `SIGKILL`, label reap, socket removal, and stage wipe.
+Tokenless legacy records receive the grace period but never an unverified
+escalation. Revocation stays
+best-effort; the decay-first guarantee remains the local wipe of
+staged private keys: stop, status/list reconcile, remove, and prune all wipe the
+reconstructed host stage dir. For Pi OAuth, `--revoke-credentials` means the same
+local wipe only; the access bearer remains valid until upstream expiry. Legacy
+session records without layout/runtime fields keep workspace-hashed stage
+reconstruction and historical-backend normalization so cleanup remains possible;
+corrupt records, stale mutations, and commit uncertainty are reported as typed
+value-free errors rather than absence or success.
 
 ## Pi OAuth (access-only MVP)
 
@@ -117,6 +126,15 @@ denied observation, then grant/revoke only the current session:
 safeslop session egress grant --session-id ID --host chatgpt.com --port 443 --output json
 safeslop session egress revoke --session-id ID --grant-id G --output json
 ```
+
+On a running session, a grant that adds a session-grant row or a revoke that
+removes one replaces the proxy and succeeds only after an exact generation,
+revision, and overlay-hash ACK;
+replacement is required so revocation closes old tunnels. Created sessions persist
+changes for launch without a live replacement. If network authority cannot be
+proven, safeslop attempts full teardown
+and records `network_authority_uncertain`. If teardown is not proven, egress
+mutations remain blocked until explicit stop/reap; start a fresh session afterward.
 
 Stop, reconcile, remove, and prune recursively delete host-stage and tmpfs copies.
 That is local wipe, not issuer revocation; start a new session after expiry or host
@@ -229,7 +247,7 @@ unrequested repo or a merely similar title.
 
 - Prefer minted App tokens (GitHub) and dedicated bot accounts (Forgejo) over personal PATs.
 - Keep write access rare and profile-specific.
-- Keep credentialed profiles on `network: "deny"` or a constrained container/VM path.
+- Keep credentialed profiles on `network: "deny"` or a constrained container path.
 - Never commit token values; use `env:` or `op://` secret refs, or the literal value-free Pi OAuth opt-in.
 - Treat Pi model/egress selection as workflow constraints, not bearer downscoping.
 - Verify cleanup by checking staged runtime directories are wiped on stop/reconcile/rm/prune and deploy-key revocation ran best-effort when requested.

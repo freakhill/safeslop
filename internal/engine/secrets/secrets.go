@@ -29,10 +29,14 @@ func OpAvailable() bool {
 // 1Password app/daemon), so `safeslop doctor` must never hang on it — a slow/hung op degrades
 // to "not signed in".
 func OpSignedIn(ctx context.Context) bool {
+	return opSignedIn(ctx, 3*time.Second)
+}
+
+func opSignedIn(ctx context.Context, timeout time.Duration) bool {
 	if !OpAvailable() {
 		return false
 	}
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd, err := hostExecResolver().CommandContext(ctx, hostexec.OpSpec("1Password sign-in probe"), "whoami")
 	if err != nil {
