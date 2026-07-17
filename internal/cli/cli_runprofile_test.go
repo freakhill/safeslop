@@ -159,6 +159,60 @@ func TestDirectInvocationReapFailureRetainsOnlyCleanupMarker(t *testing.T) {
 	}
 }
 
+func TestDirectInvocationReportsLaunchAndReapFailures(t *testing.T) {
+	ws := t.TempDir()
+	prof := policy.Profile{Agent: "shell", Environment: "container", Network: "deny", Workspace: ws}
+	argv, err := agentArgv(prof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := defaultDependencies()
+	d.detectRuntime = func(runtimepkg.NetworkPolicy) (runtimepkg.Engine, error) { return runtimepkg.HostDockerEngine{}, nil }
+	launchErr := errors.New("injected launch failure")
+	reapErr := errors.New("injected reap failure")
+	var stage string
+	d.launchContainer = func(_ context.Context, _ runtimepkg.Engine, _ engexec.LaunchSpec, _, _ string, _, _ []string, stageDir string, _ []string, _ *policy.Projection, _ ...container.SessionGrant) (int, error) {
+		stage = stageDir
+		return 1, launchErr
+	}
+	d.reapDirectInvocation = func(runtimepkg.Engine, string) error { return reapErr }
+	t.Cleanup(func() { _ = os.RemoveAll(stage) })
+
+	_, err = runDirectProfileWithDeps(d, "direct-launch-reap-failure", prof, argv, ws)
+	if !errors.Is(err, launchErr) || !errors.Is(err, reapErr) {
+		t.Fatalf("combined cleanup error = %v, want launch and reap causes", err)
+	}
+}
+
+func TestRunProfileReportsCredentialStageCleanupFailure(t *testing.T) {
+	ws := t.TempDir()
+	prof := policy.Profile{Agent: "shell", Environment: "container", Network: "deny", Workspace: ws}
+	argv, err := agentArgv(prof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := defaultDependencies()
+	d.detectRuntime = func(runtimepkg.NetworkPolicy) (runtimepkg.Engine, error) { return runtimepkg.HostDockerEngine{}, nil }
+	d.launchContainer = func(context.Context, runtimepkg.Engine, engexec.LaunchSpec, string, string, []string, []string, string, []string, *policy.Projection, ...container.SessionGrant) (int, error) {
+		return 0, nil
+	}
+	d.reapDirectInvocation = func(runtimepkg.Engine, string) error { return nil }
+	cleanupErr := errors.New("injected stage cleanup failure")
+	removeCalls := 0
+	d.removeStageDir = func(path string) error {
+		removeCalls++
+		if removeCalls == 1 {
+			return os.RemoveAll(path)
+		}
+		return cleanupErr
+	}
+
+	code, err := runDirectProfileWithDeps(d, "direct-stage-cleanup-failure", prof, argv, ws)
+	if code != 1 || !errors.Is(err, cleanupErr) {
+		t.Fatalf("run result = (%d, %v), want reported cleanup failure", code, err)
+	}
+}
+
 // TestRunProfileCtxTeardownOnCancel proves that cancelling the run context (what
 // the SIGTERM handler in runProfile does, and what `session stop` triggers)
 // tears the agent down: the child process is killed and runProfileCtx returns,

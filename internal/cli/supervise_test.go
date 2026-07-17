@@ -218,6 +218,25 @@ func TestSuperviseSessionProjectionFailurePersists(t *testing.T) {
 	}
 }
 
+func TestSuperviseRejectsOccupiedNonSocketPath(t *testing.T) {
+	store, id, _ := newSupervisedStubSession(t, "#!/bin/sh\nexit 0\n")
+	path := store.SocketPath(id)
+	if err := os.WriteFile(path, []byte("do-not-delete"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	d := defaultDependencies()
+	d.store = store
+
+	code, err := superviseWithDeps(d, context.Background(), store, id, time.Now)
+	if code != 1 || err == nil {
+		t.Fatalf("supervise = (%d, %v), want occupied-path failure", code, err)
+	}
+	body, readErr := os.ReadFile(path)
+	if readErr != nil || string(body) != "do-not-delete" {
+		t.Fatalf("occupied non-socket was removed or changed: body=%q err=%v", body, readErr)
+	}
+}
+
 func TestSuperviseFailsClosedWhenSocketPermissionsCannotBeSecured(t *testing.T) {
 	store, id, _ := newSupervisedStubSession(t, "#!/bin/sh\nexit 0\n")
 	d := defaultDependencies()
@@ -238,6 +257,20 @@ func TestSuperviseFailsClosedWhenSocketPermissionsCannotBeSecured(t *testing.T) 
 	}
 	if sess.Status != engsession.StatusCreated {
 		t.Fatalf("session status = %q, want created before supervisor publication", sess.Status)
+	}
+}
+
+func TestSuperviseReportsSocketRemovalFailureOnShutdown(t *testing.T) {
+	store, id, _ := newSupervisedStubSession(t, "#!/bin/sh\nexit 0\n")
+	d := defaultDependencies()
+	d.store = store
+	removeErr := errors.New("injected socket removal failure")
+	d.removeSocket = func(string) error { return removeErr }
+	defer os.Remove(store.SocketPath(id))
+
+	code, err := superviseWithDeps(d, context.Background(), store, id, time.Now)
+	if code != 0 || !errors.Is(err, removeErr) {
+		t.Fatalf("supervise shutdown = (%d, %v), want socket removal error", code, err)
 	}
 }
 

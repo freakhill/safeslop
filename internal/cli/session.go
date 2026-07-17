@@ -924,6 +924,14 @@ func cmdSessionStopWithDeps(d *dependencies) *cobra.Command {
 				return emitContractError(jsoncontract.CodeIOError, "reconcile session", map[string]any{"error": err.Error()})
 			}
 			signaledTarget := 0
+			var signaledIdentity engsession.Session
+			verifyProcess := func(candidate engsession.Session) bool {
+				alive := d.processAlive(candidate)
+				if alive {
+					signaledIdentity = candidate
+				}
+				return alive
+			}
 			signalProcess := func(target int) error {
 				if err := d.killProcess(target); err != nil {
 					return err
@@ -931,7 +939,7 @@ func cmdSessionStopWithDeps(d *dependencies) *cobra.Command {
 				signaledTarget = target
 				return nil
 			}
-			sess, err := store.Stop(id, revoke, d.now(), d.revokeCredentials, signalProcess, d.processAlive, func(sess engsession.Session) error { return sessionReapBoundaryWithDeps(d, sess) }, d.wipeStageDir)
+			sess, err := store.Stop(id, revoke, d.now(), d.revokeCredentials, signalProcess, verifyProcess, func(sess engsession.Session) error { return sessionReapBoundaryWithDeps(d, sess) }, d.wipeStageDir)
 			if err != nil {
 				if errors.Is(err, engsession.ErrNotFound) {
 					return emitContractError(jsoncontract.CodeSessionNotFound, "session not found", map[string]any{"session_id": id})
@@ -942,7 +950,7 @@ func cmdSessionStopWithDeps(d *dependencies) *cobra.Command {
 			// supervisor persists Finish while exiting; waiting under the lock would
 			// deadlock until the grace timeout and force SIGKILL.
 			if signaledTarget < 0 {
-				if err := d.waitProcess(signaledTarget); err != nil {
+				if err := d.waitProcess(signaledTarget, signaledIdentity); err != nil {
 					return emitContractError(jsoncontract.CodeIOError, "wait for session process", map[string]any{"error": err.Error()})
 				}
 				// The supervisor may have committed its terminal exit details while
@@ -1220,11 +1228,11 @@ func runDetachWithDeps(d *dependencies, store engsession.Store, id string) error
 			if err := d.killProcess(target); err != nil {
 				return emitContractError(jsoncontract.CodeIOError, "stop unready session supervisor", map[string]any{"error": err.Error()})
 			}
-			if err := d.waitProcess(target); err != nil {
+			if err := d.waitProcess(target, identity); err != nil {
 				return emitContractError(jsoncontract.CodeIOError, "wait for unready session supervisor", map[string]any{"error": err.Error()})
 			}
 		}
-		if err := os.Remove(sockPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := removeSocketWithDeps(d, sockPath); err != nil {
 			return emitContractError(jsoncontract.CodeIOError, "remove unready session socket", map[string]any{"error": err.Error()})
 		}
 		// The supervisor may have committed running after publishing the socket
@@ -1350,9 +1358,28 @@ var errSupervisorUnreachable = errors.New("no live supervisor socket to attach t
 // returning the agent's exit code from the X frame. Returning (rather than
 // os.Exit-ing) keeps it drivable to completion in tests. A failed dial is wrapped
 // in errSupervisorUnreachable so the caller can report SESSION_NOT_RUNNING.
+func safeAttachSocket(path string) bool {
+	info, err := os.Lstat(path)
+	if err != nil || info.Mode()&os.ModeSocket == 0 || info.Mode().Perm() != 0o600 {
+		return false
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	return ok && int(stat.Uid) == os.Getuid()
+}
+
 func attachSession(store engsession.Store, id string, in io.Reader, out io.Writer, resize <-chan [2]uint16) (int, error) {
-	conn, err := net.Dial("unix", store.SocketPath(id))
-	if err != nil {
+	var conn net.Conn
+	var err error
+	for _, path := range store.SocketPaths(id) {
+		if !safeAttachSocket(path) {
+			continue
+		}
+		conn, err = net.Dial("unix", path)
+		if err == nil {
+			break
+		}
+	}
+	if conn == nil {
 		return 1, fmt.Errorf("%w: %v", errSupervisorUnreachable, err)
 	}
 	defer conn.Close()

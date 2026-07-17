@@ -48,11 +48,12 @@ type dependencies struct {
 	observeEgress           func(context.Context, engsession.Session) ([]container.EgressObservation, error)
 	processAlive            func(engsession.Session) bool
 	killProcess             func(int) error
-	waitProcess             func(int) error
+	waitProcess             func(int, engsession.Session) error
 	revokeCredentials       func(engsession.Session) error
 	wipeStageDir            func(engsession.Session) error
 	sessionSocket           func(engsession.Session) (string, bool)
 	chmodSocket             func(string, os.FileMode) error
+	removeSocket            func(string) error
 	hasInteractivePTY       func() bool
 	launchSupervisor        func(string) (launchedSupervisor, error)
 	detachReadyTimeout      time.Duration
@@ -63,6 +64,8 @@ type dependencies struct {
 	writePolicy             func(string, []byte) error
 	writePolicyAtomically   func(string, []byte) error
 	stageRoot               func() (string, error)
+	removeStageDir          func(string) error
+	retainInvocationMarker  func(string) error
 }
 
 func defaultDependencies() *dependencies {
@@ -84,19 +87,22 @@ func defaultDependencies() *dependencies {
 		gcImages: func(ctx context.Context, eng runtimepkg.Engine, opts container.GCOptions, protect container.GCProtection) ([]string, error) {
 			return container.GCImages(ctx, eng, opts, protect)
 		},
-		launchContainer:       container.LaunchWithEngine,
-		processAlive:          engsession.ProcessAliveSession,
-		chmodSocket:           os.Chmod,
-		hasInteractivePTY:     defaultSessionHasInteractivePTY,
-		launchSupervisor:      defaultLaunchSupervisor,
-		detachReadyTimeout:    2 * time.Second,
-		hostLaunchConsent:     confirmHostLaunchConsent,
-		doctorHostExec:        hostexec.Default,
-		stageHostExec:         hostexec.Default,
-		credsProber:           creds.DefaultProber,
-		writePolicy:           func(path string, content []byte) error { return os.WriteFile(path, content, 0o644) },
-		writePolicyAtomically: writePolicyAtomically,
-		stageRoot:             stageRootPath,
+		launchContainer:        container.LaunchWithEngine,
+		processAlive:           engsession.ProcessAliveSession,
+		chmodSocket:            os.Chmod,
+		removeSocket:           os.Remove,
+		hasInteractivePTY:      defaultSessionHasInteractivePTY,
+		launchSupervisor:       defaultLaunchSupervisor,
+		detachReadyTimeout:     2 * time.Second,
+		hostLaunchConsent:      confirmHostLaunchConsent,
+		doctorHostExec:         hostexec.Default,
+		stageHostExec:          hostexec.Default,
+		credsProber:            creds.DefaultProber,
+		writePolicy:            func(path string, content []byte) error { return os.WriteFile(path, content, 0o644) },
+		writePolicyAtomically:  writePolicyAtomically,
+		stageRoot:              stageRootPath,
+		removeStageDir:         os.RemoveAll,
+		retainInvocationMarker: container.RetainInvocationMarker,
 	}
 	d.profileHelper = func(name string) profilePrerequisiteCheck {
 		return inspectProfileEvaluationHelperWithResolver(d.stageHostExec(), name)
@@ -153,11 +159,12 @@ func defaultDependencies() *dependencies {
 		if sess.Status != engsession.StatusRunning {
 			return "", false
 		}
-		path := d.store.SocketPath(sess.ID)
-		if _, err := os.Stat(path); err != nil {
-			return "", false
+		for _, path := range d.store.SocketPaths(sess.ID) {
+			if safeAttachSocket(path) {
+				return path, true
+			}
 		}
-		return path, true
+		return "", false
 	}
 	return d
 }
@@ -195,7 +202,11 @@ func (d *dependencies) defaultEgressTeardown(sess engsession.Session) error {
 	if err := d.wipeStageDir(sess); err != nil && firstErr == nil {
 		firstErr = err
 	}
-	_ = os.Remove(d.store.SocketPath(sess.ID))
+	for _, path := range d.store.SocketPaths(sess.ID) {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) && firstErr == nil {
+			firstErr = err
+		}
+	}
 	return firstErr
 }
 
@@ -219,9 +230,12 @@ func defaultSessionKillProcess(target int) error {
 	return nil
 }
 
-func defaultSessionWaitProcess(target int) error {
+func defaultSessionWaitProcess(target int, identity engsession.Session) error {
 	if target >= 0 {
 		return nil
+	}
+	if identity.PID <= 0 || target != -identity.PID {
+		return errors.New("session process identity is invalid")
 	}
 	deadline := time.Now().Add(stopGraceTimeout)
 	for time.Now().Before(deadline) {
@@ -229,6 +243,11 @@ func defaultSessionWaitProcess(target int) error {
 			return nil
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+	// The grace period is long enough for PID/group reuse. Revalidate the
+	// captured process-start token immediately before escalating authority.
+	if identity.ProcessToken == "" || !engsession.ProcessAliveSession(identity) {
+		return errors.New("session process identity changed before escalation")
 	}
 	if err := syscall.Kill(target, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
 		return err

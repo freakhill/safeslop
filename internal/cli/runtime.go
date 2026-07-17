@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"net/url"
@@ -600,7 +601,7 @@ func runProfileCtxWithDeps(d *dependencies, ctx context.Context, name string, pr
 
 // runProfileCtxWithEngineAndDeps retains a runtime selection made before session
 // persistence. A nil engine is the direct-run path, which detects exactly once.
-func runProfileCtxWithEngineAndDeps(d *dependencies, ctx context.Context, selectedEngine runtimepkg.Engine, name string, prof policy.Profile, argv []string, ws, stageKey string, stdio ...runIO) (int, error) {
+func runProfileCtxWithEngineAndDeps(d *dependencies, ctx context.Context, selectedEngine runtimepkg.Engine, name string, prof policy.Profile, argv []string, ws, stageKey string, stdio ...runIO) (code int, retErr error) {
 	var rio runIO
 	if len(stdio) > 0 {
 		rio = stdio[0]
@@ -630,16 +631,23 @@ func runProfileCtxWithEngineAndDeps(d *dependencies, ctx context.Context, select
 	}
 	// A crashed wrapper can leave a stage directory for this exact run identity. Never reuse it:
 	// retired tokens and stale canonical files must be removed before any new mint/stage action.
-	if err := os.RemoveAll(stageDir); err != nil {
+	if err := d.removeStageDir(stageDir); err != nil {
 		return 1, fmt.Errorf("remove abandoned credential stage: %w", err)
 	}
 	retainInvocationMarker := false
 	defer func() {
+		var cleanupErr error
 		if retainInvocationMarker {
-			_ = container.RetainInvocationMarker(stageDir)
-			return
+			cleanupErr = d.retainInvocationMarker(stageDir)
+		} else {
+			cleanupErr = d.removeStageDir(stageDir)
 		}
-		_ = os.RemoveAll(stageDir)
+		if cleanupErr != nil {
+			retErr = errors.Join(retErr, fmt.Errorf("clean credential stage: %w", cleanupErr))
+			if code == 0 {
+				code = 1
+			}
+		}
 	}()
 	if strings.HasPrefix(stageKey, "run-") {
 		processToken, _ := engsession.ProcessStartToken(os.Getpid())
@@ -718,9 +726,7 @@ func runProfileCtxWithEngineAndDeps(d *dependencies, ctx context.Context, select
 		if strings.HasPrefix(stageKey, "run-") {
 			if reapErr := d.reapDirectInvocation(containerEngine, stageKey); reapErr != nil {
 				retainInvocationMarker = true
-				if launchErr == nil {
-					return code, reapErr
-				}
+				launchErr = errors.Join(launchErr, reapErr)
 			}
 		}
 		return code, launchErr

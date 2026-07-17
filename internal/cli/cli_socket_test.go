@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -20,8 +21,13 @@ func TestSessionDataSocketPresentWhenRunningDetached(t *testing.T) {
 	}
 	id := "sess-aaaa0000"
 	sock := store.SocketPath(id)
-	if err := os.WriteFile(sock, nil, 0o600); err != nil {
+	listener, err := net.Listen("unix", sock)
+	if err != nil {
 		t.Fatalf("seed socket: %v", err)
+	}
+	defer listener.Close()
+	if err := os.Chmod(sock, 0o600); err != nil {
+		t.Fatalf("secure socket: %v", err)
 	}
 	sess := engsession.Session{ID: id, Status: engsession.StatusRunning, PID: 4242, Detached: true}
 	if got := sessionData(sess)["socket"]; got != sock {

@@ -68,7 +68,9 @@ Stop reconciles the recorded PID/process identity before signalling, so a reused
 detached supervisor PGID is not targeted. Closing a coupled terminal sends
 `SIGHUP` and triggers its deferred reap/wipe. Closing an attach buffer merely
 disconnects from a detached supervisor; use explicit stop for its bounded
-`SIGTERM`→`SIGKILL`, label reap, socket removal, and stage wipe. Revocation stays
+`SIGTERM`→token-revalidated `SIGKILL`, label reap, socket removal, and stage wipe.
+Tokenless legacy records receive the grace period but never an unverified
+escalation. Revocation stays
 best-effort; the decay-first guarantee remains the local wipe of
 staged private keys: stop, status/list reconcile, remove, and prune all wipe the
 reconstructed host stage dir. For Pi OAuth, `--revoke-credentials` means the same

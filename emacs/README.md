@@ -121,8 +121,9 @@ staged credentials until stop/revoke.  Coupled run remains the default.  Closing
 coupled terminal sends `SIGHUP` to its coupled CLI and triggers deferred boundary
 reap and stage wipe. Closing an attach buffer only disconnects from a detached
 supervisor; the session continues until explicit `session stop`, whose bounded
-`SIGTERM`→`SIGKILL` path then reaps labels, socket, and stage. `Ctrl-C` remains
-agent input rather than teardown.
+`SIGTERM`→token-revalidated `SIGKILL` path then reaps labels, socket, and stage.
+A tokenless legacy record gets the grace period but no unverified escalation.
+`Ctrl-C` remains agent input rather than teardown.
 
 For a `container` + `deny` session, the details buffer performs an asynchronous,
 passive denied-destination count; it never focuses a buffer or changes authority

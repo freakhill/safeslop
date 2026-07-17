@@ -425,6 +425,30 @@ mysterious bare table."
   (should-not (safeslop--safe-rerun-p '("session" "egress" "grant" "--session-id" "sess-x" "--host" "example.com" "--port" "443" "--output" "json")))
   (should-not (safeslop--safe-rerun-p '("profile" "create" "--output" "json"))))
 
+(ert-deftest safeslop-test-output-render-preserves-rerun-state-after-mode-init ()
+  (let* ((name "*safeslop-rerun-lifecycle-test*")
+         (args '("session" "egress" "grants" "--session-id" "sess-x" "--output" "json"))
+         (envelope '((schema_version . 1) (ok . t) (data . nil)
+                     (warnings . nil) (errors . nil))))
+    (unwind-protect
+        (save-window-excursion
+          (safeslop--show-envelope-buffer name args envelope)
+          (with-current-buffer name
+            (should (derived-mode-p 'safeslop-output-mode))
+            (should (equal safeslop-output--args args))
+            (should (equal safeslop-output--buffer-name name))))
+      (when (get-buffer name)
+        (kill-buffer name)))))
+
+(ert-deftest safeslop-test-session-run-output-detection-is-bounded-and-incremental ()
+  (let* ((first (concat (make-string (+ safeslop-session--run-output-limit 100) ?x)
+                        "\"PTY_UN"))
+         (captured (safeslop-session--capture-run-output nil first)))
+    (should (<= (length captured) safeslop-session--run-output-limit))
+    (setq captured (safeslop-session--capture-run-output captured "AVAILABLE\""))
+    (should (<= (length captured) safeslop-session--run-output-limit))
+    (should (safeslop-session--pty-unavailable-p captured))))
+
 (ert-deftest safeslop-test-surface-order-has-three ()
   (should (= (length safeslop-surface--order) 3))
   (should (equal (mapcar #'car safeslop-surface--order) '(sessions profiles credentials))))

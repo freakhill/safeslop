@@ -607,6 +607,14 @@ func TestSessionStatusJSONLEmitsSingleLineContract(t *testing.T) {
 	}
 }
 
+func TestWaitProcessAllowsGracefulLegacyGroupExitWithoutToken(t *testing.T) {
+	const absentPID = 2147483000
+	identity := engsession.Session{PID: absentPID, Detached: true}
+	if err := defaultSessionWaitProcess(-absentPID, identity); err != nil {
+		t.Fatalf("already-exited legacy process group: %v", err)
+	}
+}
+
 func TestSessionStopRevokesBeforeKillAndIsIdempotent(t *testing.T) {
 	ws := t.TempDir()
 	t.Setenv("SAFESLOP_STATE_DIR", t.TempDir())
@@ -766,7 +774,7 @@ func TestSessionStopWaitsForDetachedExitAfterRecordLockReleased(t *testing.T) {
 	if _, err := sessionStore().MarkRunningDetached(id, 4242, nowForTest(t)); err != nil {
 		t.Fatal(err)
 	}
-	d.waitProcess = func(target int) error {
+	d.waitProcess = func(target int, _ engsession.Session) error {
 		if target != -4242 {
 			t.Fatalf("wait target = %d, want detached group -4242", target)
 		}
@@ -811,7 +819,7 @@ func TestSessionStopFailsLoudlyWhenPostWaitRecordReloadFails(t *testing.T) {
 	if _, err := sessionStore().MarkRunningDetached(id, 4242, nowForTest(t)); err != nil {
 		t.Fatal(err)
 	}
-	d.waitProcess = func(int) error {
+	d.waitProcess = func(int, engsession.Session) error {
 		return os.WriteFile(filepath.Join(sessionStore().Dir, id+".json"), []byte("{broken\n"), 0o600)
 	}
 

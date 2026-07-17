@@ -68,6 +68,74 @@ func TestSocketPathFitsSunPath(t *testing.T) {
 	}
 }
 
+func TestOverflowSocketPathUsesPrivatePerUserDirectory(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", "")
+	store := NewStore(filepath.Join(t.TempDir(), strings.Repeat("x", 90), "sessions"))
+	path := store.SocketPath("sess-0123456789abcdef01234567")
+	if filepath.Dir(path) == os.TempDir() {
+		t.Fatalf("overflow socket relocated directly into shared temp dir: %q", path)
+	}
+	if !strings.HasPrefix(filepath.Base(filepath.Dir(path)), "ss-") {
+		t.Fatalf("overflow socket parent %q is not the private per-user runtime dir", filepath.Dir(path))
+	}
+}
+
+func TestOverflowSocketPathsRetainPrivateAndLegacyCandidates(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", "")
+	store := NewStore(filepath.Join(t.TempDir(), strings.Repeat("x", 90), "sessions"))
+	paths := store.SocketPaths("sess-0123456789abcdef01234567")
+	if len(paths) != 2 {
+		t.Fatalf("overflow socket candidates = %v, want current plus legacy", paths)
+	}
+	if filepath.Clean(filepath.Dir(paths[0])) == filepath.Clean(os.TempDir()) || filepath.Clean(filepath.Dir(paths[1])) != filepath.Clean(os.TempDir()) {
+		t.Fatalf("socket candidate order/private migration mismatch: %v", paths)
+	}
+	if err := store.EnsureSocketDir("sess-0123456789abcdef01234567"); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Lstat(filepath.Dir(paths[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.IsDir() || info.Mode().Perm() != 0o700 {
+		t.Fatalf("private socket dir mode = %v", info.Mode())
+	}
+}
+
+func TestStopIgnoresUnsafeLegacySocketCandidate(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", "")
+	store := NewStore(filepath.Join(t.TempDir(), strings.Repeat("x", 90), "sessions"))
+	sess, err := store.Create("fish", "host", t.TempDir(), testNow())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.MarkRunningDetached(sess.ID, 4242, testNow()); err != nil {
+		t.Fatal(err)
+	}
+	paths := store.SocketPaths(sess.ID)
+	if len(paths) != 2 {
+		t.Fatalf("socket candidates = %v", paths)
+	}
+	legacy := paths[1]
+	if err := os.WriteFile(legacy, []byte("foreign-non-socket"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(legacy)
+
+	stopped, err := store.Stop(sess.ID, false, testNow(), func(Session) error { return nil },
+		func(int) error { t.Fatal("stale process was signalled"); return nil },
+		func(Session) bool { return false })
+	if err != nil {
+		t.Fatalf("stop blocked by unsafe legacy candidate: %v", err)
+	}
+	if stopped.Status != StatusStopped {
+		t.Fatalf("status = %q", stopped.Status)
+	}
+	if body, err := os.ReadFile(legacy); err != nil || string(body) != "foreign-non-socket" {
+		t.Fatalf("unsafe legacy candidate was modified: body=%q err=%v", body, err)
+	}
+}
+
 func TestStopSignalsSupervisorGroupAndRemovesSocket(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore(dir)
@@ -79,6 +147,9 @@ func TestStopSignalsSupervisorGroupAndRemovesSocket(t *testing.T) {
 		t.Fatalf("mark detached: %v", err)
 	}
 	sock := store.SocketPath(sess.ID)
+	if err := store.EnsureSocketDir(sess.ID); err != nil {
+		t.Fatalf("prepare socket dir: %v", err)
+	}
 	if err := os.WriteFile(sock, nil, 0o600); err != nil {
 		t.Fatalf("seed socket: %v", err)
 	}
@@ -126,6 +197,9 @@ func TestReconcileRemovesStaleSocket(t *testing.T) {
 		t.Fatalf("mark detached: %v", err)
 	}
 	sock := store.SocketPath(sess.ID)
+	if err := store.EnsureSocketDir(sess.ID); err != nil {
+		t.Fatalf("prepare socket dir: %v", err)
+	}
 	if err := os.WriteFile(sock, nil, 0o600); err != nil {
 		t.Fatalf("seed socket: %v", err)
 	}

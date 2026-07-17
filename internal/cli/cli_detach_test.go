@@ -108,7 +108,7 @@ func TestRunDetachRejectsSocketBeforeSupervisorAcknowledgement(t *testing.T) {
 	}
 	killed, waited := 0, 0
 	d.killProcess = func(pid int) error { killed = pid; return nil }
-	d.waitProcess = func(pid int) error { waited = pid; return nil }
+	d.waitProcess = func(pid int, _ engsession.Session) error { waited = pid; return nil }
 
 	out, err := runRootForTestWithDeps(t, ws, d, "session", "run", "--session-id", sess.ID, "--detach")
 	if !errors.Is(err, errOutputEmitted) {
@@ -172,10 +172,10 @@ func TestRunDetachTimeoutUsesVerifiedGroupAndFailsLoudly(t *testing.T) {
 				}
 				return tc.signalErr
 			}
-			d.waitProcess = func(target int) error {
+			d.waitProcess = func(target int, identity engsession.Session) error {
 				waitCalls++
-				if target != -4242 {
-					t.Fatalf("wait target = %d, want verified group -4242", target)
+				if target != -4242 || identity.PID != 4242 || identity.ProcessToken != "original-process-token" {
+					t.Fatalf("wait authority = target %d identity %+v", target, identity)
 				}
 				return tc.waitErr
 			}
@@ -215,7 +215,7 @@ func TestRunDetachTimeoutFailsLoudlyWhenTerminalRecordCommitFails(t *testing.T) 
 	}
 	d.processAlive = func(engsession.Session) bool { return true }
 	d.killProcess = func(int) error { return nil }
-	d.waitProcess = func(int) error {
+	d.waitProcess = func(int, engsession.Session) error {
 		return os.WriteFile(filepath.Join(store.Dir, sess.ID+".json"), []byte("{broken\n"), 0o600)
 	}
 
@@ -254,7 +254,7 @@ func TestRunDetachWaitsForSocketBeforeSuccess(t *testing.T) {
 	}
 	killed, waited := 0, 0
 	d.killProcess = func(pid int) error { killed = pid; return nil }
-	d.waitProcess = func(pid int) error { waited = pid; return nil }
+	d.waitProcess = func(pid int, _ engsession.Session) error { waited = pid; return nil }
 
 	out, err := runRootForTestWithDeps(t, ws, d, "session", "run", "--session-id", id, "--detach")
 	if !errors.Is(err, errOutputEmitted) {

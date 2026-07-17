@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -20,6 +21,13 @@ import (
 // superviseReadBuf sizes the PTY read chunk. Terminal traffic is human-paced, so
 // a modest buffer keeps latency low and stays well under wire's frame cap.
 const superviseReadBuf = 32 * 1024
+
+func removeSocketWithDeps(d *dependencies, path string) error {
+	if err := d.removeSocket(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
 
 // defaultSessionLogMaxBytes bounds the provisional per-session JSONL event log so a
 // chatty detached agent cannot grow <id>.jsonl without limit before teardown wipes
@@ -97,9 +105,28 @@ func superviseWithDeps(d *dependencies, ctx context.Context, store engsession.St
 	// to the client's real winsize on connect (the pty.Setsize in the serve loop).
 	_ = pty.Setsize(ptmx, &pty.Winsize{Rows: 24, Cols: 80})
 
-	sockPath := store.SocketPath(id)               // fits sun_path; relocates to a short runtime dir if the state dir is too long
-	_ = os.MkdirAll(filepath.Dir(sockPath), 0o700) // ensure the bind dir exists (no-op when it already does)
-	_ = os.Remove(sockPath)                        // clear a stale socket from an unclean prior supervisor (D7)
+	sockPath := store.SocketPath(id) // fits sun_path; relocates to a short private runtime dir when needed
+	if err := store.EnsureSocketDir(id); err != nil {
+		_ = ptmx.Close()
+		_ = pts.Close()
+		return 1, err
+	}
+	if info, err := os.Lstat(sockPath); err == nil {
+		if info.Mode()&os.ModeSocket == 0 {
+			_ = ptmx.Close()
+			_ = pts.Close()
+			return 1, errors.New("session attach socket path is occupied")
+		}
+		if err := removeSocketWithDeps(d, sockPath); err != nil {
+			_ = ptmx.Close()
+			_ = pts.Close()
+			return 1, err
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		_ = ptmx.Close()
+		_ = pts.Close()
+		return 1, err
+	}
 	ln, err := net.Listen("unix", sockPath)
 	if err != nil {
 		_ = ptmx.Close()
@@ -109,19 +136,19 @@ func superviseWithDeps(d *dependencies, ctx context.Context, store engsession.St
 	// Owner-only permissions are part of the attach capability boundary,
 	// especially when SocketPath relocates beneath a shared runtime directory.
 	if err := d.chmodSocket(sockPath, 0o600); err != nil {
-		_ = ln.Close()
-		_ = os.Remove(sockPath)
+		closeErr := ln.Close()
+		removeErr := removeSocketWithDeps(d, sockPath)
 		_ = ptmx.Close()
 		_ = pts.Close()
-		return 1, err
+		return 1, errors.Join(err, closeErr, removeErr)
 	}
 
 	if _, err := store.MarkRunningDetached(id, os.Getpid(), now()); err != nil {
-		_ = ln.Close()
-		_ = os.Remove(sockPath)
+		closeErr := ln.Close()
+		removeErr := removeSocketWithDeps(d, sockPath)
 		_ = ptmx.Close()
 		_ = pts.Close()
-		return 1, err
+		return 1, errors.Join(err, closeErr, removeErr)
 	}
 
 	// Best-effort JSONL event log; format is provisional, byte-capped (specs/0051 Q3).
@@ -160,21 +187,19 @@ func superviseWithDeps(d *dependencies, ctx context.Context, store engsession.St
 
 	go h.acceptLoop() // one active attach at a time (D8); reconnect after disconnect
 
-	ax := <-exitCh // agent exited; runProfileCtx defers have already torn down
-	_ = ln.Close() // stop accepting new attaches
-	<-readerDone   // flush all remaining agent output and reach PTY EOF
+	ax := <-exitCh                 // agent exited; runProfileCtx defers have already torn down
+	closeListenerErr := ln.Close() // stop accepting new attaches
+	<-readerDone                   // flush all remaining agent output and reach PTY EOF
 	h.writeExit(ax.code)
 	h.closeConn()
-	_ = os.Remove(sockPath)
+	removeSocketErr := removeSocketWithDeps(d, sockPath)
+	var closeLogErr error
 	if jsonl != nil {
-		_ = jsonl.Close()
+		closeLogErr = jsonl.Close()
 	}
 	finishErr := finishSessionRun(store, id, ax.code, ax.err, now())
-	_ = ptmx.Close()
-	if finishErr != nil {
-		return ax.code, finishErr
-	}
-	return ax.code, nil
+	closePTYErr := ptmx.Close()
+	return ax.code, errors.Join(closeListenerErr, removeSocketErr, closeLogErr, finishErr, closePTYErr)
 }
 
 type agentExit struct {

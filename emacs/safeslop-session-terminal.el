@@ -31,10 +31,20 @@
 (defvar eat-term-name)
 (defvar compilation-mode-map)
 
+(defconst safeslop-session--run-output-limit 4096
+  "Maximum raw session-run suffix retained for PTY_UNAVAILABLE detection.")
+
 (defvar-local safeslop-session--run-output nil
-  "Raw stdout accumulated from the `session run' process for this buffer.
+  "Bounded raw stdout suffix from the `session run' process for this buffer.
 Captured before term-mode renders it, so PTY_UNAVAILABLE detection is immune to
 terminal line wrapping and term's trailing status line.")
+
+(defun safeslop-session--capture-run-output (current chunk)
+  "Append CHUNK to CURRENT and retain only the bounded detection suffix."
+  (let ((combined (concat (or current "") chunk)))
+    (if (> (length combined) safeslop-session--run-output-limit)
+        (substring combined (- safeslop-session--run-output-limit))
+      combined)))
 
 (defvar-local safeslop-session--fallback-done nil
   "Non-nil once this run buffer has switched to the JSONL status fallback.
@@ -458,7 +468,8 @@ fallback (`safeslop-session-status-fallback')."
                         (when (buffer-live-p buf)
                           (with-current-buffer buf
                             (setq safeslop-session--run-output
-                                  (concat (or safeslop-session--run-output "") string))))))
+                                  (safeslop-session--capture-run-output
+                                   safeslop-session--run-output string))))))
         (add-function :after (process-sentinel proc)
                       (lambda (p _event)
                         (unless (process-live-p p)

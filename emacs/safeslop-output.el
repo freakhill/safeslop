@@ -106,6 +106,10 @@ Handles JSON objects (alists), arrays (lists), and scalars."
   "Render ENVELOPE for safeslop ARGS into buffer NAME and return ENVELOPE."
   (let ((buf (get-buffer-create name)))
     (with-current-buffer buf
+      ;; Major-mode initialization clears ordinary buffer-local state. Install
+      ;; the mode before retaining rerun argv/name, or `g' loses its authority
+      ;; classification immediately after rendering.
+      (safeslop-output-mode)
       (setq safeslop-output--args args
             safeslop-output--buffer-name name)
       (let ((inhibit-read-only t))
@@ -124,8 +128,7 @@ Handles JSON objects (alists), arrays (lists), and scalars."
         (let ((data (safeslop-contract-data envelope)))
           (when data
             (insert "\n")
-            (safeslop--insert-data data 0)))
-        (safeslop-output-mode)))
+            (safeslop--insert-data data 0)))))
     (pop-to-buffer buf))
   envelope)
 

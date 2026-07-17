@@ -346,11 +346,10 @@ func (s Store) GetReconciled(id string, now time.Time, isAlive func(Session) boo
 				}
 			}
 		}
-		if err := tx.Commit(fixed); err != nil {
+		if err := s.removeSocketFiles(id); err != nil {
 			return err
 		}
-		_ = os.Remove(s.SocketPath(id)) // sweep the orphaned socket of a dead supervisor (specs/0051 D7)
-		return nil
+		return tx.Commit(fixed)
 	})
 }
 
@@ -410,7 +409,9 @@ func (s Store) Stop(id string, revoke bool, now time.Time, revokeCredentials fun
 				return err
 			}
 		}
-		_ = os.Remove(s.SocketPath(id)) // remove the per-session socket regardless (D4); no-op when coupled
+		if err := s.removeSocketFiles(id); err != nil {
+			return err
+		}
 		for _, fn := range reap {
 			if fn != nil {
 				if err := fn(sess); err != nil {
@@ -459,7 +460,9 @@ func (s Store) Remove(id string, revokeCredentials func(Session) error, reap ...
 				}
 			}
 		}
-		_ = os.Remove(s.SocketPath(id)) // sweep any residual per-session socket
+		if err := s.removeSocketFiles(id); err != nil {
+			return err
+		}
 		if err := removeRecordAtomic(s.path(id), s.hooks); err != nil {
 			return err
 		}
@@ -509,8 +512,71 @@ func (s Store) SocketPath(id string) string {
 	if len(natural) <= maxUnixSocketPathLen {
 		return natural
 	}
+	return filepath.Join(socketRuntimeBase(), s.socketFileName(id))
+}
+
+func (s Store) socketFileName(id string) string {
 	sum := sha256.Sum256([]byte(s.Dir + "\x00" + id))
-	return filepath.Join(socketRuntimeBase(), "safeslop-"+hex.EncodeToString(sum[:8])+".sock")
+	return "safeslop-" + hex.EncodeToString(sum[:8]) + ".sock"
+}
+
+// SocketPaths returns the current socket path followed by the pre-0115 overflow
+// location when they differ. Attach and cleanup retain compatibility with an
+// already-running supervisor while new supervisors bind only in the private dir.
+func (s Store) SocketPaths(id string) []string {
+	current := s.SocketPath(id)
+	legacy := filepath.Join(legacySocketRuntimeBase(), s.socketFileName(id))
+	if current == legacy || len(filepath.Join(s.Dir, id+".sock")) <= maxUnixSocketPathLen {
+		return []string{current}
+	}
+	return []string{current, legacy}
+}
+
+// EnsureSocketDir creates and verifies the exact parent used by SocketPath.
+// The ownership/mode checks make the relocation directory a capability boundary
+// rather than a predictable name directly in a shared sticky directory.
+func (s Store) EnsureSocketDir(id string) error {
+	dir := filepath.Dir(s.SocketPath(id))
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return err
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || int(stat.Uid) != os.Getuid() {
+		return errors.New("session socket directory is not private")
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s Store) removeSocketFiles(id string) error {
+	for index, path := range s.SocketPaths(id) {
+		if index > 0 {
+			// The compatibility candidate may live directly in a shared temp
+			// directory. Never let an unrelated/foreign object at that legacy
+			// name block current-session reconcile or become cleanup authority.
+			info, err := os.Lstat(path)
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			stat, ok := info.Sys().(*syscall.Stat_t)
+			if !ok || info.Mode()&os.ModeSocket == 0 || int(stat.Uid) != os.Getuid() {
+				continue
+			}
+		}
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
 }
 
 // maxUnixSocketPathLen is the longest socket path we will bind/dial directly. The
@@ -519,11 +585,21 @@ func (s Store) SocketPath(id string) string {
 // everywhere).
 const maxUnixSocketPathLen = 103
 
-// socketRuntimeBase is a short, per-user, private directory to relocate an
-// otherwise-overflowing socket into: XDG_RUNTIME_DIR when set (Linux, 0700), else
-// the OS temp dir (the per-user 0700 confinement dir on macOS). Both already exist,
-// so binding never has to create them.
+// socketRuntimeBase is a short private per-user directory. XDG_RUNTIME_DIR is
+// already per-user; the fallback adds an owned 0700 child beneath shared /tmp.
 func socketRuntimeBase() string {
+	if d := os.Getenv("XDG_RUNTIME_DIR"); d != "" {
+		candidate := filepath.Join(d, "safeslop")
+		if len(filepath.Join(candidate, "safeslop-0000000000000000.sock")) <= maxUnixSocketPathLen {
+			return candidate
+		}
+	}
+	return filepath.Join("/tmp", fmt.Sprintf("ss-%d", os.Getuid()))
+}
+
+// legacySocketRuntimeBase reproduces the pre-0115 derived location for attach
+// and cleanup of a supervisor already running during upgrade.
+func legacySocketRuntimeBase() string {
 	if d := os.Getenv("XDG_RUNTIME_DIR"); d != "" {
 		return d
 	}

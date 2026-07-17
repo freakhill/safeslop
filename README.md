@@ -244,8 +244,10 @@ is reaped; staged secrets are wiped by run teardown or the stop/reconcile cleanu
 path. Closing a coupled terminal sends `SIGHUP` to its coupled CLI and triggers its
 deferred teardown. Closing an attach buffer only disconnects from a detached
 supervisor: the session keeps running until explicit stop. Explicit detached stop
-first sends `SIGTERM`, then `SIGKILL` after the bounded grace period if needed,
-followed by label reap, socket removal, and stage wipe. Interactive `Ctrl-C`
+first sends `SIGTERM`, then (for a token-verified process identity) `SIGKILL`
+after the bounded grace period if needed, followed by label reap, socket removal,
+and stage wipe. A tokenless legacy record gets the full `SIGTERM` grace but never
+an unverified `SIGKILL` escalation. Interactive `Ctrl-C`
 (`SIGINT`) is left for the agent and does not tear the session down.
 
 `session run` is an interactive attach and needs a controlling terminal — Emacs
@@ -278,8 +280,8 @@ attached at a time. Attaching when no supervisor is serving the socket reports
 `SESSION_NOT_RUNNING` rather than the more specific `SESSION_STOPPED`. `session
 stop` first verifies that the recorded supervisor PID still matches the stored
 process identity, then signals the supervisor's whole process group (graceful
-`SIGTERM`, then `SIGKILL`) so the boundary tree is torn down and the socket
-removed; a supervisor that dies uncleanly has its stale socket and host stage dir
+`SIGTERM`, then token-revalidated `SIGKILL`) so the boundary tree is torn down and
+the socket removed; a supervisor that dies uncleanly has its stale socket and host stage dir
 swept on the next `session status`/`list` reconcile.
 
 Detaching is a deliberate trade-off: a detached agent holds its staged secrets
