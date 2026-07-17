@@ -104,7 +104,7 @@ Frozen acceptance laws:
 
 ## Wave 10 — independent final review and deployment
 
-- [ ] Pass independent security/spec/code-quality review, merge, and deploy
+- [x] Pass independent security/spec/code-quality review, merge, and deploy
   FILE:     whole branch and completion note in this spec
   CHANGE:   Have isolated reviewers inspect the complete `94a5203..HEAD` diff against every frozen law, verified finding, public contract, migration path, supply-chain lock, failure interleaving, and maintainability claim. Resolve every blocking/high finding with RED→GREEN proof and rerun affected plus authoritative gates. Mark complete, merge to clean `main`, push `origin` and `github`, install matching CLI/Emacs artifacts, verify installed revision, and remove the worktree/branch only after both remotes match. Leave the user's existing session untouched.
   VERIFY:   `git diff --check && make check && make build && git status --short --branch`
