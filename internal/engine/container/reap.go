@@ -53,7 +53,12 @@ func reapByOwnership(ctx context.Context, eng ReapEngine, label, id string) erro
 	if len(containers) > 0 {
 		args := append([]string{"rm", "-f"}, containers...)
 		if err := eng.Command(ctx, args...).Run(); err != nil {
-			return fmt.Errorf("remove owned containers: %w", err)
+			// Compose `run --rm` may win the race after the list. Re-list the
+			// exact random/session owner: absence is already the desired result.
+			remaining, verifyErr := engineLines(ctx, eng, "ps", "-aq", "--filter", filter)
+			if verifyErr != nil || len(remaining) != 0 {
+				return fmt.Errorf("remove owned containers: %w", err)
+			}
 		}
 	}
 	networks, err := engineLines(ctx, eng, "network", "ls", "-q", "--filter", filter)
@@ -63,7 +68,10 @@ func reapByOwnership(ctx context.Context, eng ReapEngine, label, id string) erro
 	if len(networks) > 0 {
 		args := append([]string{"network", "rm"}, networks...)
 		if err := eng.Command(ctx, args...).Run(); err != nil {
-			return fmt.Errorf("remove owned networks: %w", err)
+			remaining, verifyErr := engineLines(ctx, eng, "network", "ls", "-q", "--filter", filter)
+			if verifyErr != nil || len(remaining) != 0 {
+				return fmt.Errorf("remove owned networks: %w", err)
+			}
 		}
 	}
 	return nil
@@ -230,6 +238,19 @@ func SweepDeadInvocations(ctx context.Context, eng ReapEngine, stageRoot string)
 // SweepManagedOrphans reaps labelled boundaries whose safeslop.session label no longer has a live
 // session record. It is safe to run at startup: live session ids are supplied by the session store;
 // unlabelled legacy containers are ignored because safeslop cannot prove ownership by session.
+func listedRuntimeObject(ctx context.Context, eng ReapEngine, id string, args ...string) (bool, error) {
+	ids, err := engineLines(ctx, eng, args...)
+	if err != nil {
+		return false, err
+	}
+	for _, candidate := range ids {
+		if sameRuntimeObjectID(candidate, id) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func SweepManagedOrphans(ctx context.Context, eng ReapEngine, live map[string]bool) error {
 	seen := map[string]bool{}
 	reapIfOrphan := func(sessID string) error {
@@ -248,6 +269,10 @@ func SweepManagedOrphans(ctx context.Context, eng ReapEngine, live map[string]bo
 	for _, id := range ids {
 		sessID, err := engineOutput(ctx, eng, "inspect", "-f", `{{ index .Config.Labels "safeslop.session" }}`, id)
 		if err != nil {
+			stillPresent, verifyErr := listedRuntimeObject(ctx, eng, id, "ps", "-aq", "--filter", "label="+managedLabel)
+			if verifyErr == nil && !stillPresent {
+				continue
+			}
 			return fmt.Errorf("inspect managed container %s: %w", id, err)
 		}
 		if err := reapIfOrphan(sessID); err != nil {
@@ -262,6 +287,10 @@ func SweepManagedOrphans(ctx context.Context, eng ReapEngine, live map[string]bo
 	for _, id := range networks {
 		sessID, err := engineOutput(ctx, eng, "network", "inspect", "-f", `{{ index .Labels "safeslop.session" }}`, id)
 		if err != nil {
+			stillPresent, verifyErr := listedRuntimeObject(ctx, eng, id, "network", "ls", "-q", "--filter", "label="+managedLabel)
+			if verifyErr == nil && !stillPresent {
+				continue
+			}
 			return fmt.Errorf("inspect managed network %s: %w", id, err)
 		}
 		if err := reapIfOrphan(sessID); err != nil {

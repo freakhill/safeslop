@@ -42,6 +42,101 @@ func TestReapByInvocationUsesOnlyExactRandomOwnershipLabel(t *testing.T) {
 	}
 }
 
+func TestReapByInvocationAcceptsConcurrentAutoRemoval(t *testing.T) {
+	id := "run-0123456789abcdef0123456789abcdef"
+	listKey := "ps -aq --filter label=safeslop.invocation=" + id
+	eng := newFakeEngine(t, map[string]string{
+		listKey: "ctr-gone\n",
+		"network ls -q --filter label=safeslop.invocation=" + id: "\n",
+	})
+	eng.fail("rm -f ctr-gone", 1)
+	eng.runHook("rm -f ctr-gone", func() {
+		eng.mu.Lock()
+		eng.outputs[listKey] = "\n"
+		eng.mu.Unlock()
+	})
+	if err := ReapByInvocation(context.Background(), eng, id); err != nil {
+		t.Fatalf("concurrent --rm cleanup must be idempotent: %v", err)
+	}
+}
+
+func TestSweepManagedOrphansAcceptsConcurrentContainerRemoval(t *testing.T) {
+	listKey := "ps -aq --filter label=safeslop.managed=true"
+	inspectKey := `inspect -f {{ index .Config.Labels "safeslop.session" }} ctr-gone`
+	eng := newFakeEngine(t, map[string]string{
+		listKey: "ctr-gone\n",
+		"network ls -q --filter label=safeslop.managed=true": "\n",
+	})
+	eng.fail(inspectKey, 1)
+	eng.runHook(inspectKey, func() {
+		eng.mu.Lock()
+		eng.outputs[listKey] = "\n"
+		eng.mu.Unlock()
+	})
+	if err := SweepManagedOrphans(context.Background(), eng, nil); err != nil {
+		t.Fatalf("container removed after list must not fail sweep: %v", err)
+	}
+}
+
+func TestReapByInvocationAcceptsConcurrentNetworkRemoval(t *testing.T) {
+	id := "run-0123456789abcdef0123456789abcdef"
+	listKey := "network ls -q --filter label=safeslop.invocation=" + id
+	eng := newFakeEngine(t, map[string]string{
+		"ps -aq --filter label=safeslop.invocation=" + id: "\n",
+		listKey: "net-gone\n",
+	})
+	eng.fail("network rm net-gone", 1)
+	eng.runHook("network rm net-gone", func() {
+		eng.mu.Lock()
+		eng.outputs[listKey] = "\n"
+		eng.mu.Unlock()
+	})
+	if err := ReapByInvocation(context.Background(), eng, id); err != nil {
+		t.Fatalf("concurrent network cleanup must be idempotent: %v", err)
+	}
+}
+
+func TestReapByInvocationDoesNotMaskRemovalFailure(t *testing.T) {
+	id := "run-0123456789abcdef0123456789abcdef"
+	listKey := "ps -aq --filter label=safeslop.invocation=" + id
+	for _, tc := range []struct {
+		name       string
+		verifyFail bool
+	}{
+		{name: "object remains"},
+		{name: "verification fails", verifyFail: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			eng := newFakeEngine(t, map[string]string{listKey: "ctr-still\n"})
+			eng.fail("rm -f ctr-still", 1)
+			if tc.verifyFail {
+				eng.runHook("rm -f ctr-still", func() { eng.fail(listKey, 1) })
+			}
+			if err := ReapByInvocation(context.Background(), eng, id); err == nil {
+				t.Fatal("unverified removal failure was masked")
+			}
+		})
+	}
+}
+
+func TestSweepManagedOrphansAcceptsConcurrentNetworkRemoval(t *testing.T) {
+	listKey := "network ls -q --filter label=safeslop.managed=true"
+	inspectKey := `network inspect -f {{ index .Labels "safeslop.session" }} net-gone`
+	eng := newFakeEngine(t, map[string]string{
+		"ps -aq --filter label=safeslop.managed=true": "\n",
+		listKey: "net-gone\n",
+	})
+	eng.fail(inspectKey, 1)
+	eng.runHook(inspectKey, func() {
+		eng.mu.Lock()
+		eng.outputs[listKey] = "\n"
+		eng.mu.Unlock()
+	})
+	if err := SweepManagedOrphans(context.Background(), eng, nil); err != nil {
+		t.Fatalf("network removed after list must not fail sweep: %v", err)
+	}
+}
+
 func TestSweepDeadInvocationsKeepsLiveAndMalformedMarkers(t *testing.T) {
 	root := t.TempDir()
 	const dead = "run-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
